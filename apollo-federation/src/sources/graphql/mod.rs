@@ -132,7 +132,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
     fn add_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: Arc<Vec<FetchDataPathElement>>,
+        _merge_at: Arc<[FetchDataPathElement]>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
         _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
@@ -149,7 +149,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
     fn new_path(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: Arc<Vec<FetchDataPathElement>>,
+        _merge_at: Arc<[FetchDataPathElement]>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError> {
@@ -188,12 +188,12 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
 #[derive(Debug)]
 pub(crate) enum GraphqlFetchDependencyGraphNode {
     OperationRoot {
-        merge_at: Arc<Vec<FetchDataPathElement>>,
+        merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         selection_set: SelectionSet,
     },
     EntitiesField {
-        merge_at: Arc<Vec<FetchDataPathElement>>,
+        merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         key_condition_resolution: Option<ConditionResolutionId>,
         selection_set: SelectionSet,
@@ -202,7 +202,7 @@ pub(crate) enum GraphqlFetchDependencyGraphNode {
 
 #[derive(Debug)]
 pub(crate) struct GraphqlPath {
-    merge_at: Arc<Vec<FetchDataPathElement>>,
+    merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
     source_id: SourceId,
     operation_path: Vec<OperationPathElement>,

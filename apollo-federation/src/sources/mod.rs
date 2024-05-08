@@ -179,7 +179,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
     fn add_node<'path_tree>(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
-        merge_at: Arc<Vec<FetchDataPathElement>>,
+        merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         self_condition_resolution: Option<ConditionResolutionId>,
         path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
@@ -194,7 +194,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
     fn new_path(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
-        merge_at: Arc<Vec<FetchDataPathElement>>,
+        merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError>;
