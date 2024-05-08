@@ -45,7 +45,7 @@ use crate::sources::graphql::GraphqlId;
 use crate::sources::graphql::GraphqlPath;
 use crate::ValidFederationSubgraph;
 
-use self::connect::query_graph::builder::ConnectFederatedQueryGraphBuilder;
+use self::connect::federated_query_graph::builder::ConnectFederatedQueryGraphBuilder;
 
 pub mod connect;
 pub mod graphql;

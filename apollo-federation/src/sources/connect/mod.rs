@@ -1,5 +1,6 @@
+pub(crate) mod federated_query_graph;
+pub(crate) mod fetch_dependency_graph;
 mod models;
-pub(crate) mod query_graph;
 mod selection_parser;
 pub(crate) mod spec;
 mod url_path_template;
