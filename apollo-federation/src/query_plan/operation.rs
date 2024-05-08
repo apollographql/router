@@ -205,17 +205,29 @@ impl Operation {
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
     pub(crate) fn with_normalized_defer(self) -> NormalizedDefer {
-        todo!()
+        if self.has_defer() {
+            todo!("@defer not implemented");
+        } else {
+            NormalizedDefer {
+                operation: self,
+                has_defers: false,
+                assigned_defer_labels: HashSet::new(),
+                defer_conditions: IndexMap::new(),
+            }
+        }
     }
 
-    pub(crate) fn without_defer(self) -> Self {
-        if self.selection_set.has_defer()
+    fn has_defer(&self) -> bool {
+        self.selection_set.has_defer()
             || self
                 .named_fragments
                 .fragments
                 .values()
                 .any(|f| f.has_defer())
-        {
+    }
+
+    pub(crate) fn without_defer(self) -> Self {
+        if self.has_defer() {
             todo!("@defer not implemented");
         }
 
@@ -4394,6 +4406,116 @@ impl NamedFragments {
         }
         Ok(rebased_fragments)
     }
+
+    /// - Expands all nested fragments
+    /// - Applies the provided `mapper` to each selection set of the expanded fragments.
+    /// - Finally, re-fragments the nested fragments.
+    fn map_to_expanded_selection_sets(
+        &self,
+        mut mapper: impl FnMut(&SelectionSet) -> Result<SelectionSet, FederationError>,
+    ) -> Result<NamedFragments, FederationError> {
+        let mut result = NamedFragments::default();
+        // Note: `self.fragments` has insertion order topologically sorted.
+        for fragment in self.fragments.values() {
+            let expanded_selection_set = fragment.selection_set.expand_all_fragments()?.normalize(
+                &fragment.type_condition_position,
+                &Default::default(),
+                &fragment.schema,
+                NormalizeSelectionOption::NormalizeRecursively,
+            )?;
+            let mapped_selection_set = mapper(&expanded_selection_set)?;
+            let optimized_selection_set = mapped_selection_set; // TODO: call SelectionSet::optimize (FED-191)
+            let updated = Fragment {
+                selection_set: optimized_selection_set,
+                schema: fragment.schema.clone(),
+                name: fragment.name.clone(),
+                type_condition_position: fragment.type_condition_position.clone(),
+                directives: fragment.directives.clone(),
+            };
+            result.insert(updated);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn add_typename_field_for_abstract_types_in_named_fragments(
+        &self,
+    ) -> Result<Self, FederationError> {
+        // This method is a bit tricky due to potentially nested fragments. More precisely, suppose that
+        // we have:
+        //   fragment MyFragment on T {
+        //     a {
+        //       b {
+        //         ...InnerB
+        //       }
+        //     }
+        //   }
+        //
+        //   fragment InnerB on B {
+        //     __typename
+        //     x
+        //     y
+        //   }
+        // then if we were to "naively" add `__typename`, the first fragment would end up being:
+        //   fragment MyFragment on T {
+        //     a {
+        //       __typename
+        //       b {
+        //         __typename
+        //         ...InnerX
+        //       }
+        //     }
+        //   }
+        // but that's not ideal because the inner-most `__typename` is already within `InnerX`. And that
+        // gets in the way to re-adding fragments (the `SelectionSet.optimize` method) because if we start
+        // with:
+        //   {
+        //     a {
+        //       __typename
+        //       b {
+        //         __typename
+        //         x
+        //         y
+        //       }
+        //     }
+        //   }
+        // and add `InnerB` first, we get:
+        //   {
+        //     a {
+        //       __typename
+        //       b {
+        //         ...InnerB
+        //       }
+        //     }
+        //   }
+        // and it becomes tricky to recognize the "updated-with-typename" version of `MyFragment` now (we "seem"
+        // to miss a `__typename`).
+        //
+        // Anyway, to avoid this issue, what we do is that for every fragment, we:
+        //  1. expand any nested fragments in its selection.
+        //  2. add `__typename` where we should in that expanded selection.
+        //  3. re-optimize all fragments (using the "updated-with-typename" versions).
+        // which is what `mapToExpandedSelectionSets` gives us.
+
+        if self.is_empty() {
+            // PORT_NOTE: This was an assertion failure in JS version. But, it's actually ok to
+            // return unchanged if empty.
+            return Ok(self.clone());
+        }
+        let updated = self.map_to_expanded_selection_sets(|ss| {
+            ss.add_typename_field_for_abstract_types(
+                /*parent_type_if_abstract*/ None, /*fragments*/ &None,
+            )
+        })?;
+        // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
+        // check the `updated` has the same set of fragments. To avoid performance hit, only the
+        // size is checked here.
+        if updated.size() != self.size() {
+            return Err(FederationError::internal(
+                "Unexpected change in the number of fragments",
+            ));
+        }
+        Ok(updated)
+    }
 }
 
 #[derive(Clone)]
@@ -4717,11 +4839,10 @@ fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
 ///   their parent type matches.
 pub(crate) fn normalize_operation(
     operation: &executable::Operation,
-    fragments: &IndexMap<Name, Node<executable::Fragment>>,
+    named_fragments: NamedFragments,
     schema: &ValidFederationSchema,
     interface_types_with_interface_objects: &IndexSet<InterfaceTypeDefinitionPosition>,
 ) -> Result<Operation, FederationError> {
-    let named_fragments = NamedFragments::new(fragments, schema);
     let mut normalized_selection_set =
         SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)?;
     normalized_selection_set = normalized_selection_set.expand_all_fragments()?;
@@ -4797,6 +4918,7 @@ mod tests {
     use super::normalize_operation;
     use super::Containment;
     use super::ContainmentOptions;
+    use super::NamedFragments;
     use super::Operation;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
@@ -4852,7 +4974,7 @@ type Foo {
         {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -4906,7 +5028,7 @@ type Foo {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -4947,7 +5069,7 @@ type Query {
         {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -4982,7 +5104,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5026,7 +5148,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5072,7 +5194,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5116,7 +5238,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5162,7 +5284,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5213,7 +5335,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5279,7 +5401,7 @@ type V {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5339,7 +5461,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5385,7 +5507,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5435,7 +5557,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5483,7 +5605,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5531,7 +5653,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5583,7 +5705,7 @@ type T {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5652,7 +5774,7 @@ type V {
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5698,7 +5820,7 @@ type Foo {
         if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5737,7 +5859,7 @@ type Foo {
         if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
@@ -5787,7 +5909,7 @@ scalar FieldSet
 
             let normalized_operation = normalize_operation(
                 operation,
-                &executable_document.fragments,
+                NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &interface_objects,
             )
@@ -5815,6 +5937,7 @@ scalar FieldSet
         use crate::query_plan::operation::normalize_operation;
         use crate::query_plan::operation::tests::parse_schema_and_operation;
         use crate::query_plan::operation::tests::parse_subgraph;
+        use crate::query_plan::operation::NamedFragments;
         use crate::schema::position::InterfaceTypeDefinitionPosition;
 
         #[test]
@@ -5868,7 +5991,7 @@ type U {
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
                 let normalized_operation = normalize_operation(
                     operation,
-                    &executable_document.fragments,
+                    NamedFragments::new(&executable_document.fragments, &schema),
                     &schema,
                     &IndexSet::new(),
                 )
@@ -5954,7 +6077,7 @@ type U {
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
                 let normalized_operation = normalize_operation(
                     operation,
-                    &executable_document.fragments,
+                    NamedFragments::new(&executable_document.fragments, &schema),
                     &schema,
                     &IndexSet::new(),
                 )
@@ -6036,7 +6159,7 @@ type T2 implements I {
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
                 let normalized_operation = normalize_operation(
                     operation,
-                    &executable_document.fragments,
+                    NamedFragments::new(&executable_document.fragments, &schema),
                     &schema,
                     &IndexSet::new(),
                 )
@@ -6118,7 +6241,7 @@ type T implements I {
                 });
                 let normalized_operation = normalize_operation(
                     operation,
-                    &executable_document.fragments,
+                    NamedFragments::new(&executable_document.fragments, &schema),
                     &schema,
                     &interface_objects,
                 )
@@ -6212,7 +6335,7 @@ type T {
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
                 let normalized_operation = normalize_operation(
                     operation,
-                    &executable_document.fragments,
+                    NamedFragments::new(&executable_document.fragments, &schema),
                     &schema,
                     &IndexSet::new(),
                 )
@@ -6290,7 +6413,7 @@ type U {
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
                 let normalized_operation = normalize_operation(
                     operation,
-                    &executable_document.fragments,
+                    NamedFragments::new(&executable_document.fragments, &schema),
                     &schema,
                     &IndexSet::new(),
                 )
@@ -6363,7 +6486,7 @@ type T implements I {
             if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
                 let normalized_operation = normalize_operation(
                     operation,
-                    &executable_document.fragments,
+                    NamedFragments::new(&executable_document.fragments, &schema),
                     &schema,
                     &IndexSet::new(),
                 )
