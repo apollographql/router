@@ -1742,7 +1742,7 @@ impl Operation {
 
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
-pub(crate) enum SelectionMapperReturn {
+enum SelectionMapperReturn {
     None,
     Selection(Selection),
     SelectionList(Vec<Selection>),
@@ -2376,7 +2376,7 @@ impl SelectionSet {
     //   version, but its Rust version doesn't use `lazy_map`.
     // PORT_NOTE #2: Taking ownership of `self` in this method was considered. However, calling
     // `Arc::make_mut` on the `Arc` fields of `self` didn't seem better than cloning Arc instances.
-    pub(crate) fn lazy_map(
+    fn lazy_map(
         &self,
         mut mapper: impl FnMut(&Selection) -> Result<SelectionMapperReturn, FederationError>,
     ) -> Result<SelectionSet, FederationError> {
