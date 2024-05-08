@@ -1,5 +1,6 @@
+pub(crate) mod federated_query_graph;
+pub(crate) mod fetch_dependency_graph;
 mod models;
-mod query_graph;
 mod selection_parser;
 pub(crate) mod spec;
 mod url_path_template;
@@ -141,15 +142,6 @@ pub(crate) enum ConnectFederatedSourceEnteringQueryGraphEdge {
     },
 }
 
-/// Connect-aware query graph builder
-///
-/// This builder is in charge of setting up nodes / edges in the query graph
-/// that correspond to REST mappings defined through the @source and @connect
-/// directives.
-///
-/// Refer to [SourceSpecDefinition] and [ConnectSpecDefinition] for more info.
-pub(crate) struct ConnectFederatedQueryGraphBuilder;
-
 #[derive(Debug)]
 pub(crate) struct ConnectFetchDependencyGraph;
 
@@ -230,7 +222,7 @@ pub(crate) struct ConnectFetchDependencyGraphNode {
     selection: Selection,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct ConnectPath {
     merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
@@ -238,14 +230,14 @@ pub(crate) struct ConnectPath {
     field: Option<ConnectPathField>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) struct ConnectPathField {
     response_name: Name,
     arguments: IndexMap<Name, Node<Value>>,
     selections: ConnectPathSelections,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum ConnectPathSelections {
     Selections {
         head_property_path: Vec<Property>,
@@ -257,7 +249,7 @@ pub(crate) enum ConnectPathSelections {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub(crate) enum ConnectPathTailSelection {
     Selection {
         property_path: Vec<Property>,

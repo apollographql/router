@@ -33,13 +33,29 @@ pub(crate) mod path_tree;
 
 #[derive(Debug)]
 pub struct FederatedQueryGraph {
-    graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
+    pub(crate) graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
     supergraph_types_to_root_nodes: IndexMap<ObjectTypeDefinitionPosition, NodeIndex>,
     supergraph_root_kinds_to_types:
         IndexMap<SchemaRootDefinitionKind, ObjectTypeDefinitionPosition>,
     self_conditions: Vec<SelectionSet>,
     non_trivial_followup_edges: IndexMap<EdgeIndex, IndexSet<EdgeIndex>>,
     source_data: SourceFederatedQueryGraphs,
+}
+
+impl FederatedQueryGraph {
+    #[cfg(test)]
+    pub(crate) fn with_graph(
+        graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
+    ) -> Self {
+        Self {
+            graph,
+            supergraph_types_to_root_nodes: IndexMap::new(),
+            supergraph_root_kinds_to_types: IndexMap::new(),
+            self_conditions: Vec::new(),
+            non_trivial_followup_edges: IndexMap::new(),
+            source_data: SourceFederatedQueryGraphs::with_graphs(IndexMap::new()),
+        }
+    }
 }
 
 #[derive(Debug)]

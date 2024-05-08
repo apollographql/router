@@ -5,6 +5,7 @@ use enum_dispatch::enum_dispatch;
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 
+use self::connect::federated_query_graph::builder::ConnectFederatedQueryGraphBuilder;
 use crate::error::FederationError;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
@@ -20,7 +21,6 @@ use crate::sources::connect::ConnectFederatedConcreteFieldQueryGraphEdge;
 use crate::sources::connect::ConnectFederatedConcreteQueryGraphNode;
 use crate::sources::connect::ConnectFederatedEnumQueryGraphNode;
 use crate::sources::connect::ConnectFederatedQueryGraph;
-use crate::sources::connect::ConnectFederatedQueryGraphBuilder;
 use crate::sources::connect::ConnectFederatedScalarQueryGraphNode;
 use crate::sources::connect::ConnectFederatedSourceEnteringQueryGraphEdge;
 use crate::sources::connect::ConnectFederatedTypeConditionQueryGraphEdge;
@@ -75,6 +75,13 @@ pub(crate) enum SourceFederatedQueryGraph {
 #[derive(Debug)]
 pub(crate) struct SourceFederatedQueryGraphs {
     graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>,
+}
+
+#[cfg(test)]
+impl SourceFederatedQueryGraphs {
+    pub(crate) fn with_graphs(graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>) -> Self {
+        Self { graphs }
+    }
 }
 
 #[derive(Debug)]
@@ -233,7 +240,7 @@ pub(crate) enum SourceFetchDependencyGraphNode {
     Connect(ConnectFetchDependencyGraphNode),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 #[enum_dispatch(SourcePathApi)]
 pub(crate) enum SourcePath {
     Graphql(GraphqlPath),
