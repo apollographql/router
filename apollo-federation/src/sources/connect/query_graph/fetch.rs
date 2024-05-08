@@ -112,6 +112,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::ast::Name;
+    use apollo_compiler::name;
     use indexmap::IndexMap;
     use petgraph::graph::DiGraph;
     use petgraph::prelude::EdgeIndex;
@@ -155,11 +156,11 @@ mod tests {
             directive: ObjectOrInterfaceFieldDirectivePosition {
                 field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                     ObjectFieldDefinitionPosition {
-                        type_name: Name::new("TestObject").unwrap(),
-                        field_name: Name::new("testField").unwrap(),
+                        type_name: name!("TestObject"),
+                        field_name: name!("testField"),
                     },
                 ),
-                directive_name: Name::new("connect").unwrap(),
+                directive_name: name!("connect"),
                 directive_index: 0,
             },
         });
@@ -167,7 +168,7 @@ mod tests {
         // Create a root
         let query = graph.add_node(FederatedQueryGraphNode::Concrete {
             supergraph_type: ObjectTypeDefinitionPosition {
-                type_name: Name::new("Query").unwrap(),
+                type_name: name!("Query"),
             },
             field_edges: IndexMap::new(),
             source_exiting_edge: None,
@@ -175,7 +176,7 @@ mod tests {
             source_data: SourceFederatedConcreteQueryGraphNode::Connect(
                 ConnectFederatedConcreteQueryGraphNode::SelectionRoot {
                     subgraph_type: ObjectTypeDefinitionPosition {
-                        type_name: Name::new("Post").unwrap(),
+                        type_name: name!("Post"),
                     },
                     property_path: vec![Property::Field("posts".to_string())],
                 },
@@ -185,9 +186,9 @@ mod tests {
         // Make the nodes with entrypoints
         let mut edges = Vec::new();
         let entrypoints = 2;
-        for (index, name) in ["Post", "User", "View"].into_iter().enumerate() {
+        for (index, type_name) in ["Post", "User", "View"].into_iter().enumerate() {
             let node_type = ObjectTypeDefinitionPosition {
-                type_name: Name::new(name).unwrap(),
+                type_name: name!(type_name),
             };
 
             let node = graph.add_node(FederatedQueryGraphNode::Concrete {
@@ -198,7 +199,7 @@ mod tests {
                 source_data: SourceFederatedConcreteQueryGraphNode::Connect(
                     ConnectFederatedConcreteQueryGraphNode::SelectionRoot {
                         subgraph_type: node_type.clone(),
-                        property_path: vec![Property::Field(name.to_lowercase().to_string())],
+                        property_path: vec![Property::Field(type_name.to_lowercase().to_string())],
                     },
                 ),
             });
@@ -208,8 +209,8 @@ mod tests {
                 node,
                 FederatedQueryGraphEdge::ConcreteField {
                     supergraph_field: ObjectFieldDefinitionPosition {
-                        type_name: Name::new(name).unwrap(),
-                        field_name: Name::new(name.to_lowercase()).unwrap(),
+                        type_name: name!(type_name),
+                        field_name: Name::new(type_name.to_lowercase()).unwrap(), // can't use macro since not &'static str
                     },
                     self_conditions: None,
                     source_id: source_id.clone(),
