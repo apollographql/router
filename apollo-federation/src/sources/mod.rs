@@ -240,7 +240,7 @@ pub(crate) enum SourceFetchDependencyGraphNode {
     Connect(ConnectFetchDependencyGraphNode),
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 #[enum_dispatch(SourcePathApi)]
 pub(crate) enum SourcePath {
     Graphql(GraphqlPath),

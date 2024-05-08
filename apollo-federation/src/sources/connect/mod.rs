@@ -222,7 +222,7 @@ pub(crate) struct ConnectFetchDependencyGraphNode {
     selection: Selection,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct ConnectPath {
     merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
@@ -230,14 +230,14 @@ pub(crate) struct ConnectPath {
     field: Option<ConnectPathField>,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct ConnectPathField {
     response_name: Name,
     arguments: IndexMap<Name, Node<Value>>,
     selections: ConnectPathSelections,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum ConnectPathSelections {
     Selections {
         head_property_path: Vec<Property>,
@@ -249,7 +249,7 @@ pub(crate) enum ConnectPathSelections {
     },
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) enum ConnectPathTailSelection {
     Selection {
         property_path: Vec<Property>,
