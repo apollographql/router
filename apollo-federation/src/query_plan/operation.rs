@@ -6869,7 +6869,7 @@ type T {
             let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
             let normalized_operation = normalize_operation(
                 executable_document.get_operation(None).unwrap(),
-                &Default::default(),
+                Default::default(),
                 &schema,
                 &Default::default(),
             )
@@ -6934,7 +6934,7 @@ type T {
             let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
             let normalized_operation = normalize_operation(
                 executable_document.get_operation(None).unwrap(),
-                &Default::default(),
+                Default::default(),
                 &schema,
                 &Default::default(),
             )
