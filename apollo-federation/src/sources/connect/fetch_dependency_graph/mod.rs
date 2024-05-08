@@ -35,7 +35,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
     fn add_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: Arc<Vec<FetchDataPathElement>>,
+        _merge_at: Arc<[FetchDataPathElement]>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
         _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
@@ -52,7 +52,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
     fn new_path(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
-        merge_at: Arc<Vec<FetchDataPathElement>>,
+        merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError> {
@@ -313,7 +313,7 @@ mod tests {
         "###);
 
         let path = fetch_graph
-            .new_path(query_graph, Arc::new(Vec::new()), last_edge_index, None)
+            .new_path(query_graph, Arc::new([]), last_edge_index, None)
             .unwrap();
 
         assert_debug_snapshot!(
@@ -407,7 +407,7 @@ mod tests {
         "###);
 
         // Make sure that we fail since we do not have an entering edge
-        let path = fetch_graph.new_path(query_graph, Arc::new(Vec::new()), last_edge_index, None);
+        let path = fetch_graph.new_path(query_graph, Arc::new([]), last_edge_index, None);
 
         assert_debug_snapshot!(
             path,
@@ -435,7 +435,7 @@ mod tests {
         let invalid_index = EdgeIndex::end();
 
         // Make sure that we fail since we pass in an invalid edge
-        let path = fetch_graph.new_path(query_graph, Arc::new(Vec::new()), invalid_index, None);
+        let path = fetch_graph.new_path(query_graph, Arc::new([]), invalid_index, None);
 
         assert_debug_snapshot!(
             path,
