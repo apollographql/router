@@ -45,6 +45,7 @@ mod test {
     // this test takes a while, I hope the above test name
     // let users know they should not worry and wait a bit.
     // Hang in there!
+    // Note that we configure nextest to use all threads for this test as invoking rustc will use all available CPU and cause timing tests to fail.
     fn test_scaffold() {
         let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
         let repo_root = manifest_dir.parent().unwrap();

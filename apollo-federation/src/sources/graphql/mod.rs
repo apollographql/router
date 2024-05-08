@@ -10,7 +10,7 @@ use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::schema::position::AbstractFieldDefinitionPosition;
 use crate::schema::position::AbstractTypeDefinitionPosition;
@@ -132,7 +132,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
     fn add_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
+        _merge_at: Arc<Vec<FetchDataPathElement>>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
         _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
@@ -149,7 +149,7 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
     fn new_path(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
+        _merge_at: Arc<Vec<FetchDataPathElement>>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError> {
@@ -188,21 +188,21 @@ impl SourceFetchDependencyGraphApi for GraphqlFetchDependencyGraph {
 #[derive(Debug)]
 pub(crate) enum GraphqlFetchDependencyGraphNode {
     OperationRoot {
-        merge_at: Vec<FetchDataPathElement>,
+        merge_at: Arc<Vec<FetchDataPathElement>>,
         source_entering_edge: EdgeIndex,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
     },
     EntitiesField {
-        merge_at: Vec<FetchDataPathElement>,
+        merge_at: Arc<Vec<FetchDataPathElement>>,
         source_entering_edge: EdgeIndex,
         key_condition_resolution: Option<ConditionResolutionId>,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
     },
 }
 
 #[derive(Debug)]
 pub(crate) struct GraphqlPath {
-    merge_at: Vec<FetchDataPathElement>,
+    merge_at: Arc<Vec<FetchDataPathElement>>,
     source_entering_edge: EdgeIndex,
     source_id: SourceId,
     operation_path: Vec<OperationPathElement>,

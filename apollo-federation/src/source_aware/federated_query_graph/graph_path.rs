@@ -5,8 +5,8 @@ use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
-use crate::query_plan::operation::NormalizedField;
-use crate::query_plan::operation::NormalizedInlineFragment;
+use crate::query_plan::operation::Field;
+use crate::query_plan::operation::InlineFragment;
 use crate::source_aware::federated_query_graph::path_tree::FederatedPathTree;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::federated_query_graph::SelfConditionIndex;
@@ -35,8 +35,8 @@ pub(crate) struct FederatedGraphPathEdge {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
 pub(crate) enum OperationPathElement {
-    Field(NormalizedField),
-    InlineFragment(NormalizedInlineFragment),
+    Field(Field),
+    InlineFragment(InlineFragment),
 }
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]

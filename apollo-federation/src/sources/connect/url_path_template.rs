@@ -856,7 +856,7 @@ mod tests {
 
         assert_eq!(
             template.generate_path(&json!("not an object")),
-            Err("Expected object, got \"not an object\"".to_string()),
+            Err(r#"Expected object, got "not an object""#.to_string()),
         );
 
         assert_eq!(
@@ -887,12 +887,12 @@ mod tests {
 
         assert_eq!(
             template.generate_path(&json!({
-                "user_id": "123",
                 "b": "456",
                 "f.g": "abc",
+                "user_id": "123",
             })),
             Err(
-                r#"Missing required variable d in {"user_id":"123","b":"456","f.g":"abc"}"#
+                r#"Missing required variable d in {"b":"456","f.g":"abc","user_id":"123"}"#
                     .to_string()
             ),
         );
@@ -925,11 +925,11 @@ mod tests {
 
         assert_eq!(
             template_with_nested_required_var.generate_path(&json!({
-                "user.login": "user",
                 "repo.name": "repo",
+                "user.login": "user",
             })),
             Err(
-                r#"Missing required variable a.b.c in {"user.login":"user","repo.name":"repo"}"#
+                r#"Missing required variable a.b.c in {"repo.name":"repo","user.login":"user"}"#
                     .to_string()
             ),
         );
@@ -1368,7 +1368,7 @@ mod tests {
                 "y": 2,
                 "z": 3,
             })),
-            Err("Missing required variable x in {\"y\":2,\"z\":3}".to_string()),
+            Err(r#"Missing required variable x in {"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
@@ -1377,46 +1377,43 @@ mod tests {
                 "y": 2,
                 // "z": 3,
             })),
-            Err("Missing required variable z in {\"x\":1,\"y\":2}".to_string()),
+            Err(r#"Missing required variable z in {"x":1,"y":2}"#.to_string()),
         );
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 "b": 4,
                 "c": 5,
+                "x": 1,
+                "y": 2,
+                "z": 3,
                 // "d": 6,
             })),
-            Err(
-                "Missing required variable d in {\"x\":1,\"y\":2,\"z\":3,\"b\":4,\"c\":5}"
-                    .to_string()
-            ),
+            Err(r#"Missing required variable d in {"b":4,"c":5,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 "b": 4,
                 // "c": 5,
                 "d": 6,
+                "x": 1,
+                "y": 2,
+                "z": 3,
             })),
-            Err("Missing variable c for required parameter {b},{c};{d!} given variables {\"x\":1,\"y\":2,\"z\":3,\"b\":4,\"d\":6}".to_string()),
+            Err(r#"Missing variable c for required parameter {b},{c};{d!} given variables {"b":4,"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 // "b": 4,
                 // "c": 5,
                 "d": 6,
+                "x": 1,
+                "y": 2,
+                "z": 3,
             })),
-            Err("Missing variable b for required parameter {b},{c};{d!} given variables {\"x\":1,\"y\":2,\"z\":3,\"d\":6}".to_string()),
+            Err(r#"Missing variable b for required parameter {b},{c};{d!} given variables {"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
@@ -1550,7 +1547,7 @@ mod tests {
                 "p2.y": 5,
                 // "p2.z": 6,
             })),
-            Err("Missing required variable p2.z in {\"p1.x\":1,\"p1.y\":2,\"p1.z\":3,\"p2.x\":4,\"p2.y\":5}".to_string()),
+            Err(r#"Missing required variable p2.z in {"p1.x":1,"p1.y":2,"p1.z":3,"p2.x":4,"p2.y":5}"#.to_string()),
         );
 
         assert_eq!(
@@ -1562,7 +1559,7 @@ mod tests {
                 "p2.y": 5,
                 "p2.z": 6,
             })),
-            Err("Missing required variable p1.y in {\"p1.x\":1,\"p1.z\":3,\"p2.x\":4,\"p2.y\":5,\"p2.z\":6}".to_string()),
+            Err(r#"Missing required variable p1.y in {"p1.x":1,"p1.z":3,"p2.x":4,"p2.y":5,"p2.z":6}"#.to_string()),
         );
 
         assert_eq!(
