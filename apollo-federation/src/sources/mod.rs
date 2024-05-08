@@ -5,6 +5,7 @@ use enum_dispatch::enum_dispatch;
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 
+use self::connect::federated_query_graph::builder::ConnectFederatedQueryGraphBuilder;
 use crate::error::FederationError;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
@@ -44,8 +45,6 @@ use crate::sources::graphql::GraphqlFetchNode;
 use crate::sources::graphql::GraphqlId;
 use crate::sources::graphql::GraphqlPath;
 use crate::ValidFederationSubgraph;
-
-use self::connect::federated_query_graph::builder::ConnectFederatedQueryGraphBuilder;
 
 pub mod connect;
 pub mod graphql;

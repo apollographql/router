@@ -118,6 +118,7 @@ mod tests {
     use petgraph::graph::DiGraph;
     use petgraph::prelude::EdgeIndex;
 
+    use super::ConnectFetchDependencyGraph;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
@@ -131,8 +132,6 @@ mod tests {
     use crate::sources::SourceFederatedConcreteQueryGraphNode;
     use crate::sources::SourceFetchDependencyGraphApi;
     use crate::sources::SourceId;
-
-    use super::ConnectFetchDependencyGraph;
 
     struct SetupInfo {
         fetch_graph: ConnectFetchDependencyGraph,
@@ -351,7 +350,7 @@ mod tests {
         } = setup();
 
         // Make sure that the first edge is what we expect
-        let last_edge_index = *non_source_entry_edges.last().unwrap().clone();
+        let last_edge_index = *non_source_entry_edges.last().unwrap();
         let (query_root_index, view_index) = query_graph.edge_endpoints(last_edge_index).unwrap();
         assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
         Concrete {
