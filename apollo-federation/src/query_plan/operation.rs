@@ -4815,13 +4815,23 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     type Error = FederationError;
 
     fn try_from(value: Operation) -> Result<Self, Self::Error> {
-        // TODO(@goto-bus-stop): Obviously reparsing is not the way to go here
-        // Just doing it because it's easy for now
-        Ok(executable::ExecutableDocument::parse_and_validate(
-            value.schema.schema(),
-            value.to_string(),
-            "node.graphql",
-        )?)
+        let operation = executable::Operation::try_from(&value)?;
+        let fragments = value
+            .named_fragments
+            .fragments
+            .iter()
+            .map(|(name, fragment)| {
+                Ok((
+                    name.clone(),
+                    Node::new(executable::Fragment::try_from(&**fragment)?),
+                ))
+            })
+            .collect::<Result<IndexMap<_, _>, FederationError>>()?;
+
+        let mut document = executable::ExecutableDocument::new();
+        document.fragments = fragments;
+        document.insert_operation(operation);
+        Ok(document.validate(value.schema.schema())?)
     }
 }
 
