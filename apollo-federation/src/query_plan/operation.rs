@@ -508,6 +508,18 @@ pub(crate) mod normalized_selection_map {
         Vacant(VacantEntry<'a>),
     }
 
+    impl<'a> Entry<'a> {
+        pub fn or_insert(
+            self,
+            produce: impl FnOnce() -> Result<Selection, FederationError>,
+        ) -> Result<SelectionValue<'a>, FederationError> {
+            match self {
+                Self::Occupied(entry) => Ok(entry.into_mut()),
+                Self::Vacant(entry) => entry.insert(produce()?),
+            }
+        }
+    }
+
     pub(crate) struct OccupiedEntry<'a>(indexmap::map::OccupiedEntry<'a, SelectionKey, Selection>);
 
     impl<'a> OccupiedEntry<'a> {
@@ -2575,46 +2587,77 @@ impl SelectionSet {
     /// (since again, `c` is of type `C`).
     pub(crate) fn add_at_path(
         &mut self,
-        path: &OpPath,
+        path: &[Arc<OpPathElement>],
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
         // PORT_NOTE: This method was ported from the JS class `SelectionSetUpdates`. Unlike the
         // JS code, this mutates the selection set map in-place.
         //
         // TODO: Discuss the specific differences.
-        if let Some(ele) = path.0.first() {
-            if path.len() == 1 && selection_set.is_none() {
-                // PORT_NOTE: The original code also check if the element is a 'Field'. This is
-                // taken care of in `is_terminal`.
-                if ele.is_terminal()? {
-                    // This is a somewhat common case (when we deal with @key "conditions", those are often trivial and end up here),
-                    // so we unpack it directly instead of creating unecessary temporary objects (not that we only do it for leaf
-                    // field; for non-leaf ones, we'd have to create an empty sub-selectionSet, and that may have to get merged
-                    // with other entries of this `SelectionSetUpdates`, so we wouldn't really save work).
-                    let element = OpPathElement::clone(ele);
-                    // NOTE: We know that `selection_set` is `None`, so we just pass None here.
-                    let selection = Selection::from_element(element, None)?;
-                    let schema = ele.schema();
-                    let parent_type = &ele.parent_type_position();
-                    return self.add_selection(parent_type, schema, selection);
+        match path.split_first() {
+            // If we have a subpath, recurse
+            Some((ele, path @ &[_, ..])) => {
+                let mut selection = Arc::make_mut(&mut self.selections)
+                    .entry(ele.key())
+                    .or_insert(|| {
+                        Selection::from_element(
+                            OpPathElement::clone(ele),
+                            Some(SelectionSet::empty(
+                                self.schema.clone(),
+                                self.type_position.clone(),
+                            )),
+                        )
+                    })?;
+                match &mut selection {
+                    SelectionValue::Field(field) => match field.get_selection_set_mut() {
+                        Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
+                        None => return Err(FederationError::internal("add_at_path encountered a field without a subselection which should never happen".to_string())),
+                    },
+                    SelectionValue::InlineFragment(fragment) => fragment
+                        .get_selection_set_mut()
+                        .add_at_path(path, selection_set)?,
+                    SelectionValue::FragmentSpread(_fragment) => {
+                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()));
+                    }
+                };
+            }
+            Some((ele, &[])) => {
+                if selection_set.is_none() {
+                    // PORT_NOTE: The original code also check if the element is a 'Field'. This is
+                    // taken care of in `is_terminal`.
+                    if ele.is_terminal()? {
+                        // This is a somewhat common case (when we deal with @key "conditions", those are often trivial and end up here),
+                        // so we unpack it directly instead of creating unecessary temporary objects (not that we only do it for leaf
+                        // field; for non-leaf ones, we'd have to create an empty sub-selectionSet, and that may have to get merged
+                        // with other entries of this `SelectionSetUpdates`, so we wouldn't really save work).
+                        let element = OpPathElement::clone(ele);
+                        // NOTE: We know that `selection_set` is `None`, so we just pass None here.
+                        let selection = Selection::from_element(element, None)?;
+                        let schema = ele.schema();
+                        let parent_type = &ele.parent_type_position();
+                        return self.add_selection(parent_type, schema, selection);
+                    }
+                }
+                // PORT_NOTE: The JS code waited until the final selection was being constructed to
+                // turn the path and selection set into a selection. Because we are mutating things
+                // in-place, we eagerly construct the selection.
+                let element = OpPathElement::clone(ele);
+                let selection = Selection::from_element(
+                    element,
+                    selection_set.map(|set| SelectionSet::clone(set)),
+                )?;
+                self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
+            }
+            None => {
+                if let Some(sel) = selection_set {
+                    let parent_type = &sel.type_position;
+                    let schema = sel.schema.clone();
+                    sel.selections
+                        .values()
+                        .cloned()
+                        .try_for_each(|sel| self.add_selection(parent_type, &schema, sel))?;
                 }
             }
-            // PORT_NOTE: The JS code waited until the final selection was being constructed to
-            // turn the path and selection set into a selection. Because we are mutating things
-            // in-place, we eagerly construct the selection.
-            let element = OpPathElement::clone(ele);
-            let selection = Selection::from_element(
-                element,
-                selection_set.map(|set| SelectionSet::clone(set)),
-            )?;
-            self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
-        } else if let Some(sel) = selection_set {
-            let parent_type = &sel.type_position;
-            let schema = sel.schema.clone();
-            sel.selections
-                .values()
-                .cloned()
-                .try_for_each(|sel| self.add_selection(parent_type, &schema, sel))?;
         }
         Ok(())
     }

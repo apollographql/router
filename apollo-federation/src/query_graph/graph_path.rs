@@ -260,6 +260,13 @@ impl Display for OpGraphPathTrigger {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
+impl Deref for OpPath {
+    type Target = [Arc<OpPathElement>];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl std::fmt::Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
