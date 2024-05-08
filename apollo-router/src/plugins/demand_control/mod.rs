@@ -453,33 +453,6 @@ mod test {
     }
 
     #[tokio::test]
-    async fn test_metrics_on_execution() {
-        async {
-            test_on_execution(include_str!(
-                "fixtures/measure_on_execution_request.router.yaml"
-            ))
-            .await;
-            assert_counter!(
-                "apollo.router.operations.demand_control",
-                1,
-                "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
-            );
-
-            test_on_execution(include_str!(
-                "fixtures/enforce_on_execution_response.router.yaml"
-            ))
-            .await;
-            assert_counter!(
-                "apollo.router.operations.demand_control",
-                2,
-                "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
-            );
-        }
-        .with_metrics()
-        .await
-    }
-
-    #[tokio::test]
     async fn test_measure_on_subgraph_request() {
         let body = test_on_subgraph(include_str!(
             "fixtures/measure_on_subgraph_request.router.yaml"
@@ -513,6 +486,48 @@ mod test {
         ))
         .await;
         insta::assert_yaml_snapshot!(body);
+    }
+
+    #[tokio::test]
+    async fn test_operation_metrics() {
+        async {
+            test_on_execution(include_str!(
+                "fixtures/measure_on_execution_request.router.yaml"
+            ))
+            .await;
+            assert_counter!(
+                "apollo.router.operations.demand_control",
+                1,
+                "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+
+            test_on_execution(include_str!(
+                "fixtures/enforce_on_execution_response.router.yaml"
+            ))
+            .await;
+            assert_counter!(
+                "apollo.router.operations.demand_control",
+                2,
+                "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+
+            // The metric should not be published on subgraph requests
+            test_on_subgraph(include_str!(
+                "fixtures/enforce_on_subgraph_request.router.yaml"
+            ))
+            .await;
+            test_on_subgraph(include_str!(
+                "fixtures/enforce_on_subgraph_response.router.yaml"
+            ))
+            .await;
+            assert_counter!(
+                "apollo.router.operations.demand_control",
+                2,
+                "demand_control.result" = "COST_ESTIMATED_TOO_EXPENSIVE"
+            );
+        }
+        .with_metrics()
+        .await
     }
 
     async fn test_on_execution(config: &'static str) -> Vec<Response> {
