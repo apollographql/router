@@ -2573,6 +2573,13 @@ impl SelectionSet {
 
     /// Adds a path, and optional some selections following that path, to this selection map.
     ///
+    /// Today, it is possible here to add conflicting paths, such as:
+    /// - `add_at_path("field1(arg: 1)")`
+    /// - `add_at_path("field1(arg: 2)")`
+    ///
+    /// Users of this method should guarantee that this doesn't happen. Otherwise, converting this
+    /// SelectionSet back to an ExecutableDocument will return a validation error.
+    ///
     /// The final selections are optional (for instance, if `path` ends on a leaf field,
     /// then no followup selections would make sense),
     /// but when some are provided, uncesssary fragments will be automaticaly removed
@@ -2591,16 +2598,16 @@ impl SelectionSet {
     ) -> Result<(), FederationError> {
         // PORT_NOTE: This method was ported from the JS class `SelectionSetUpdates`. Unlike the
         // JS code, this mutates the selection set map in-place.
-        //
-        // TODO: Discuss the specific differences.
         match path.split_first() {
-            // If we have a subpath, recurse
+            // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
                         Selection::from_element(
                             OpPathElement::clone(ele),
+                            // We immediately add a selection afterward to make this selection set
+                            // valid.
                             Some(SelectionSet::empty(
                                 self.schema.clone(),
                                 self.type_position.clone(),
@@ -2620,6 +2627,7 @@ impl SelectionSet {
                     }
                 };
             }
+            // If we have no sub-path, we can add the selection.
             Some((ele, &[])) => {
                 if selection_set.is_none() {
                     // PORT_NOTE: The original code also check if the element is a 'Field'. This is
@@ -2647,6 +2655,7 @@ impl SelectionSet {
                 )?;
                 self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
             }
+            // If we don't have any path, we merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
                     let parent_type = &sel.type_position;
