@@ -12,6 +12,8 @@ use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
+use crate::apollo_studio_interop::generate_extended_references;
+use crate::configuration::ApolloMetricsReferenceMode;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
@@ -191,6 +193,22 @@ impl QueryAnalysisLayer {
                     .extensions()
                     .lock()
                     .insert::<ParsedDocument>(doc);
+
+                if self
+                    .configuration
+                    .experimental_apollo_metrics_reference_mode
+                    == ApolloMetricsReferenceMode::Enhanced
+                {
+                    let _extended_references = generate_extended_references();
+                    /*
+                    request
+                        .context
+                        .extensions()
+                        .lock()
+                        .insert::<ParsedDocument>(doc);
+                    */
+                }
+
                 Ok(SupergraphRequest {
                     supergraph_request: request.supergraph_request,
                     context: request.context,

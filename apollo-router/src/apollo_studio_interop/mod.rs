@@ -113,6 +113,10 @@ pub(crate) fn generate_usage_reporting(
     generator.generate()
 }
 
+pub(crate) fn generate_extended_references() -> String {
+    "temp".into()
+}
+
 struct UsageReportingGenerator<'a> {
     signature_doc: &'a ExecutableDocument,
     references_doc: &'a ExecutableDocument,
