@@ -1445,33 +1445,33 @@ mod tests {
         [
             Response {
                 connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
-                message: "Response field c not found",
+                message: "Property .c not found in object",
                 path: "c",
             },
             Response {
                 connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
-                message: "Expected an object in response, received number",
-                path: "d",
+                message: "Property .e not found in number",
+                path: "d.e",
             },
             Response {
                 connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
-                message: "Response field c not found",
+                message: "Property .c not found in object",
                 path: "c",
             },
             Response {
                 connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
-                message: "Expected an object in response, received number",
-                path: "d",
+                message: "Property .e not found in number",
+                path: "d.e",
             },
             Response {
                 connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
-                message: "Response field iii not found",
+                message: "Property .iii not found in object",
                 path: "i.ii.iii",
             },
             Response {
                 connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",
-                message: "Expected an object in response, received number",
-                path: "j",
+                message: "Property .jj not found in number",
+                path: "j.jj",
             },
             Response {
                 connector: "[B] Query.field @sourceField(api: API, http: { GET: /path })",

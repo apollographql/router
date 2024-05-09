@@ -359,15 +359,41 @@ impl Key {
             map(parse_string_literal, Self::Quoted),
         ))(input)
     }
+
+    // This method returns the field/property name as a String, and is
+    // appropriate for accessing JSON properties, in contrast to the dotted
+    // method below.
+    pub fn as_string(&self) -> String {
+        match self {
+            Key::Field(name) => name.clone(),
+            Key::Quoted(name) => name.clone(),
+            Key::Index(n) => n.to_string(),
+        }
+    }
+
+    // This method is used to implement the Display trait for Key, and includes
+    // a leading '.' character for string keys, as well as proper quoting for
+    // Key::Quoted values. However, these additions make key.dotted() unsafe to
+    // use for accessing JSON properties.
+    pub fn dotted(&self) -> String {
+        match self {
+            Key::Field(field) => format!(".{field}"),
+            Key::Quoted(field) => {
+                // JSON encoding is a reliable way to ensure a string that may
+                // contain special characters (such as '"' characters) is
+                // properly escaped and double-quoted.
+                let quoted = serde_json_bytes::Value::String(field.clone().into()).to_string();
+                format!(".{quoted}")
+            }
+            Key::Index(index) => format!(".{index}"),
+        }
+    }
 }
 
 impl Display for Key {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Key::Field(field) => write!(f, ".{field}"),
-            Key::Quoted(quote) => write!(f, r#"."{quote}""#),
-            Key::Index(index) => write!(f, "[{index}]"),
-        }
+        let dotted = self.dotted();
+        write!(f, "{dotted}")
     }
 }
 
