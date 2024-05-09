@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
@@ -23,6 +24,25 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
+
+/// The stats for an input object field.
+pub(crate) struct InputObjectFieldStats {
+    /// True if the input object field was referenced.
+    pub(crate) _referenced: bool,
+    /// True if the input object field was referenced but the value was null.
+    pub(crate) _null_reference: bool,
+    /// True if the input object field was missing or undefined.
+    pub(crate) _undefined_reference: bool,
+}
+
+/// The result of the generate_extended_references function which contains input object field and
+/// enum value stats.
+pub(crate) struct ExtendedReferenceStats {
+    /// A map of parent type to a map of field name to stats
+    pub(crate) _referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
+    /// A map of enum name to a set of enum values that were referenced
+    pub(crate) _referenced_enums: HashMap<String, HashSet<String>>,
+}
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
@@ -113,8 +133,16 @@ pub(crate) fn generate_usage_reporting(
     generator.generate()
 }
 
-pub(crate) fn generate_extended_references() -> String {
-    "temp".into()
+#[allow(dead_code)]
+pub(crate) fn generate_extended_references(
+    _doc: Arc<Valid<ExecutableDocument>>,
+    _operation_name: Option<String>,
+    _schema: &Valid<Schema>,
+) -> ExtendedReferenceStats {
+    ExtendedReferenceStats {
+        _referenced_input_fields: HashMap::new(),
+        _referenced_enums: HashMap::new(),
+    }
 }
 
 struct UsageReportingGenerator<'a> {

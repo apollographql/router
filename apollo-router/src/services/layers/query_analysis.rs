@@ -13,6 +13,7 @@ use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
 use crate::apollo_studio_interop::generate_extended_references;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::configuration::ApolloMetricsReferenceMode;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -173,7 +174,7 @@ impl QueryAnalysisLayer {
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {
                                 query,
-                                operation_name: op_name,
+                                operation_name: op_name.clone(),
                             },
                             Ok((context.clone(), doc.clone())),
                         );
@@ -192,21 +193,23 @@ impl QueryAnalysisLayer {
                     .context
                     .extensions()
                     .lock()
-                    .insert::<ParsedDocument>(doc);
+                    .insert::<ParsedDocument>(doc.clone());
 
                 if self
                     .configuration
                     .experimental_apollo_metrics_reference_mode
                     == ApolloMetricsReferenceMode::Enhanced
                 {
-                    let _extended_references = generate_extended_references();
-                    /*
+                    let extended_reference_stats = generate_extended_references(
+                        doc.executable.clone(),
+                        op_name,
+                        self.schema.api_schema(),
+                    );
                     request
                         .context
                         .extensions()
                         .lock()
-                        .insert::<ParsedDocument>(doc);
-                    */
+                        .insert::<ExtendedReferenceStats>(extended_reference_stats);
                 }
 
                 Ok(SupergraphRequest {
