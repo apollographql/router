@@ -88,6 +88,11 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             output_rewrites: option_vec(output_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            source_id: crate::query_planner::fetch::sources::SourceId::Graphql(
+                crate::query_planner::fetch::sources::GraphqlId {
+                    service_name: subgraph_name.clone(),
+                },
+            ),
         })
     }
 }

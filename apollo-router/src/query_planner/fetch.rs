@@ -18,19 +18,15 @@ use super::rewrites;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
 use crate::error::Error;
-use crate::error::FetchError;
 use crate::error::ValidationErrors;
-use crate::graphql;
 use crate::graphql::Request;
-use crate::http_ext;
-use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::services::SubgraphRequest;
+use crate::services::FetchRequest;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Schema;
 
@@ -133,6 +129,37 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+
+    pub(crate) source_id: sources::SourceId,
+}
+
+pub(crate) mod sources {
+    use apollo_compiler::NodeStr;
+    use serde::Deserialize;
+    use serde::Serialize;
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub(crate) enum SourceId {
+        Graphql(GraphqlId),
+        Connect(ConnectoId),
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub(crate) struct GraphqlId {
+        pub(crate) service_name: NodeStr,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub(crate) struct ConnectoId {
+        pub(crate) subgraph_name: NodeStr,
+        pub(crate) directive: DirectivePosition,
+    }
+
+    #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+    pub(crate) struct DirectivePosition {
+        pub(crate) name: NodeStr,
+        pub(crate) index: usize,
+    }
 }
 
 #[derive(Clone)]
@@ -248,7 +275,7 @@ pub(crate) struct Variables {
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub(crate) fn new(
         requires: &[Selection],
         variable_usages: &[NodeStr],
         data: &Value,
@@ -344,122 +371,36 @@ impl FetchNode {
         data: &'a Value,
         current_dir: &'a Path,
     ) -> (Value, Vec<Error>) {
-        let FetchNode {
-            operation,
-            operation_kind,
-            operation_name,
-            service_name,
-            ..
-        } = self;
-
-        let Variables {
-            variables,
-            inverted_paths: paths,
-        } = match Variables::new(
-            &self.requires,
-            &self.variable_usages,
-            data,
-            current_dir,
-            // Needs the original request here
-            parameters.supergraph_request,
-            parameters.schema,
-            &self.input_rewrites,
-        ) {
-            Some(variables) => variables,
-            None => {
-                return (Value::Object(Object::default()), Vec::new());
-            }
+        // TODO clonessssss
+        let fetch_request = FetchRequest {
+            fetch_node: self.clone(),
+            context: parameters.context.clone(),
+            schema: parameters.schema.clone(),
+            supergraph_request: parameters.supergraph_request.clone(),
+            current_dir: current_dir.clone(),
+            data: data.clone(),
         };
 
-        let mut subgraph_request = SubgraphRequest::builder()
-            .supergraph_request(parameters.supergraph_request.clone())
-            .subgraph_request(
-                http_ext::Request::builder()
-                    .method(http::Method::POST)
-                    .uri(
-                        parameters
-                            .schema
-                            .subgraph_url(service_name)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "schema uri for subgraph '{service_name}' should already have been checked"
-                                )
-                            })
-                            .clone(),
-                    )
-                    .body(
-                        Request::builder()
-                            .query(operation.as_serialized())
-                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.clone())
-                            .build(),
-                    )
-                    .build()
-                    .expect("it won't fail because the url is correct and already checked; qed"),
-            )
-            .subgraph_name(self.service_name.to_string())
-            .operation_kind(*operation_kind)
-            .context(parameters.context.clone())
-            .build();
-        subgraph_request.query_hash = self.schema_aware_hash.clone();
-        subgraph_request.authorization = self.authorization.clone();
-
-        let service = parameters
-            .service_factory
-            .create(service_name)
-            .expect("we already checked that the service exists during planning; qed");
-
-        let (_parts, response) = match service
-            .oneshot(subgraph_request)
-            .instrument(tracing::trace_span!("subfetch_stream"))
+        println!("fetch_request for node {:?}", &self);
+        let (value, errors) = match parameters
+            .fetch_service_factory
+            .create()
+            .oneshot(fetch_request)
+            .instrument(tracing::info_span!("fetch_node"))
             .await
-            // TODO this is a problem since it restores details about failed service
-            // when errors have been redacted in the include_subgraph_errors module.
-            // Unfortunately, not easy to fix here, because at this point we don't
-            // know if we should be redacting errors for this subgraph...
-            .map_err(|e| match e.downcast::<FetchError>() {
-                Ok(inner) => match *inner {
-                    FetchError::SubrequestHttpError { .. } => *inner,
-                    _ => FetchError::SubrequestHttpError {
-                        status_code: None,
-                        service: service_name.to_string(),
-                        reason: inner.to_string(),
-                    },
-                },
-                Err(e) => FetchError::SubrequestHttpError {
-                    status_code: None,
-                    service: service_name.to_string(),
-                    reason: e.to_string(),
-                },
-            }) {
-            Err(e) => {
+        {
+            Ok(response) => response,
+            Err(_err) => {
                 return (
-                    Value::default(),
-                    vec![e.to_graphql_error(Some(current_dir.to_owned()))],
-                );
+                    Value::Null,
+                    vec![Error::builder()
+                        .message("TODO".to_string())
+                        .extension_code("TODO".to_string())
+                        .build()],
+                )
             }
-            Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(
-            service_name,
-            operation.as_serialized(),
-            &variables,
-            &response,
-        );
-
-        if !response.is_primary() {
-            return (
-                Value::default(),
-                vec![FetchError::SubrequestUnexpectedPatchResponse {
-                    service: service_name.to_string(),
-                }
-                .to_graphql_error(Some(current_dir.to_owned()))],
-            );
-        }
-
-        let (value, errors) =
-            self.response_at_path(parameters.schema, current_dir, paths, response);
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
@@ -469,133 +410,6 @@ impl FetchNode {
             }
         }
         (value, errors)
-    }
-
-    #[instrument(skip_all, level = "debug", name = "response_insert")]
-    fn response_at_path<'a>(
-        &'a self,
-        schema: &Schema,
-        current_dir: &'a Path,
-        inverted_paths: Vec<Vec<Path>>,
-        response: graphql::Response,
-    ) -> (Value, Vec<Error>) {
-        if !self.requires.is_empty() {
-            let entities_path = Path(vec![json_ext::PathElement::Key(
-                "_entities".to_string(),
-                None,
-            )]);
-
-            let mut errors: Vec<Error> = vec![];
-            for mut error in response.errors {
-                // the locations correspond to the subgraph query and cannot be linked to locations
-                // in the client query, so we remove them
-                error.locations = Vec::new();
-
-                // errors with path should be updated to the path of the entity they target
-                if let Some(ref path) = error.path {
-                    if path.starts_with(&entities_path) {
-                        // the error's path has the format '/_entities/1/other' so we ignore the
-                        // first element and then get the index
-                        match path.0.get(1) {
-                            Some(json_ext::PathElement::Index(i)) => {
-                                for values_path in
-                                    inverted_paths.get(*i).iter().flat_map(|v| v.iter())
-                                {
-                                    errors.push(Error {
-                                        locations: error.locations.clone(),
-                                        // append to the entitiy's path the error's path without
-                                        //`_entities` and the index
-                                        path: Some(Path::from_iter(
-                                            values_path.0.iter().chain(&path.0[2..]).cloned(),
-                                        )),
-                                        message: error.message.clone(),
-                                        extensions: error.extensions.clone(),
-                                    })
-                                }
-                            }
-                            _ => {
-                                error.path = Some(current_dir.clone());
-                                errors.push(error)
-                            }
-                        }
-                    } else {
-                        error.path = Some(current_dir.clone());
-                        errors.push(error);
-                    }
-                } else {
-                    errors.push(error);
-                }
-            }
-
-            // we have to nest conditions and do early returns here
-            // because we need to take ownership of the inner value
-            if let Some(Value::Object(mut map)) = response.data {
-                if let Some(entities) = map.remove("_entities") {
-                    tracing::trace!("received entities: {:?}", &entities);
-
-                    if let Value::Array(array) = entities {
-                        let mut value = Value::default();
-
-                        for (index, mut entity) in array.into_iter().enumerate() {
-                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
-
-                            if let Some(paths) = inverted_paths.get(index) {
-                                if paths.len() > 1 {
-                                    for path in &paths[1..] {
-                                        let _ = value.insert(path, entity.clone());
-                                    }
-                                }
-
-                                if let Some(path) = paths.first() {
-                                    let _ = value.insert(path, entity);
-                                }
-                            }
-                        }
-                        return (value, errors);
-                    }
-                }
-            }
-
-            // if we get here, it means that the response was missing the `_entities` key
-            // This can happen if the subgraph failed during query execution e.g. for permissions checks.
-            // In this case we should add an additional error because the subgraph should have returned an error that will be bubbled up to the client.
-            // However, if they have not then print a warning to the logs.
-            if errors.is_empty() {
-                tracing::warn!(
-                    "Subgraph response from '{}' was missing key `_entities` and had no errors. This is likely a bug in the subgraph.",
-                    self.service_name
-                );
-            }
-
-            (Value::Null, errors)
-        } else {
-            let current_slice =
-                if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
-                    &current_dir.0[..current_dir.0.len() - 1]
-                } else {
-                    &current_dir.0[..]
-                };
-
-            let errors: Vec<Error> = response
-                .errors
-                .into_iter()
-                .map(|error| {
-                    let path = error.path.as_ref().map(|path| {
-                        Path::from_iter(current_slice.iter().chain(path.iter()).cloned())
-                    });
-
-                    Error {
-                        locations: error.locations,
-                        path,
-                        message: error.message,
-                        extensions: error.extensions,
-                    }
-                })
-                .collect();
-            let mut data = response.data.unwrap_or_default();
-            rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
-            (Value::from_path(current_dir, data), errors)
-        }
     }
 
     #[cfg(test)]

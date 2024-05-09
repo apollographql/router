@@ -39,6 +39,7 @@ use crate::plugins::telemetry::config_new::events::SupergraphEventResponseLevel;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::plugins::traffic_shaping::TrafficShaping;
 use crate::plugins::traffic_shaping::APOLLO_TRAFFIC_SHAPING;
 use crate::query_planner::subscription::SubscriptionHandle;
@@ -51,6 +52,7 @@ use crate::query_planner::QueryPlanResult;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::execution::QueryPlan;
+use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
@@ -65,6 +67,7 @@ use crate::services::supergraph;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::ExecutionServiceFactory;
+use crate::services::FetchServiceFactory;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
@@ -536,12 +539,26 @@ async fn subscription_task(
                         },
                     };
 
+                    let subgraph_service_factory = Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone()));
+
+                    let http_service = Arc::new(crate::services::http::HttpClientService::from_config(
+                        "TODO",
+                        &Configuration::default(),
+                        &crate::services::http::HttpClientService::native_roots_store(),
+                        Http2Config::Enable,
+                    ).expect("TODO"));
+
+                    let http_client_service_factory = Arc::new(HttpClientServiceFactory::new(http_service, plugins.clone()));
+
                     execution_service_factory = ExecutionServiceFactory {
                         schema: execution_service_factory.schema.clone(),
                         subgraph_schemas: execution_service_factory.subgraph_schemas.clone(),
                         plugins: plugins.clone(),
-                        subgraph_service_factory: Arc::new(SubgraphServiceFactory::new(subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(), plugins.clone())),
-
+                        subgraph_service_factory: subgraph_service_factory.clone(),
+                        fetch_service_factory: Arc::new(FetchServiceFactory {
+                            subgraph_service_factory: subgraph_service_factory.clone(),
+                            http_client_service_factory: http_client_service_factory.clone()
+                        }),
                     };
                 }
             }
@@ -795,9 +812,30 @@ impl PluggableSupergraphServiceBuilder {
             self.plugins.clone(),
         ));
 
+        let http_service = Arc::new(
+            crate::services::http::HttpClientService::from_config(
+                "TODO",
+                &Configuration::default(),
+                &crate::services::http::HttpClientService::native_roots_store(),
+                Http2Config::Enable,
+            )
+            .expect("TODO"),
+        );
+
+        let http_client_service_factory = Arc::new(HttpClientServiceFactory::new(
+            http_service,
+            self.plugins.clone(),
+        ));
+
+        let fetch_service_factory = Arc::new(FetchServiceFactory {
+            subgraph_service_factory: subgraph_service_factory.clone(),
+            http_client_service_factory: http_client_service_factory.clone(),
+        });
+
         Ok(SupergraphCreator {
             query_planner_service,
             subgraph_service_factory,
+            fetch_service_factory,
             schema,
             plugins: self.plugins,
             config: configuration,
@@ -810,6 +848,7 @@ impl PluggableSupergraphServiceBuilder {
 pub(crate) struct SupergraphCreator {
     query_planner_service: CachingQueryPlanner<BridgeQueryPlannerPool>,
     subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    fetch_service_factory: Arc<FetchServiceFactory>,
     schema: Arc<Schema>,
     config: Arc<Configuration>,
     plugins: Arc<Plugins>,
@@ -868,6 +907,7 @@ impl SupergraphCreator {
                 subgraph_schemas: self.query_planner_service.subgraph_schemas(),
                 plugins: self.plugins.clone(),
                 subgraph_service_factory: self.subgraph_service_factory.clone(),
+                fetch_service_factory: self.fetch_service_factory.clone(),
             })
             .schema(self.schema.clone())
             .notify(self.config.notify.clone())

@@ -22,13 +22,16 @@ use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugin;
 use crate::plugin::test::MockSubgraph;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::request;
+use crate::services::http::HttpClientServiceFactory;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
+use crate::services::FetchServiceFactory;
 use crate::services::SubgraphResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
@@ -110,10 +113,20 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         plugins: Default::default(),
     });
 
+    let fetch_sf = Arc::new(FetchServiceFactory {
+        subgraph_service_factory: sf.clone(),
+        http_client_service_factory: Arc::new(HttpClientServiceFactory::from_config(
+            "testbis",
+            &Configuration::default(),
+            Http2Config::Disable,
+        )),
+    });
+
     let result = query_plan
         .execute(
             &Context::new(),
             &sf,
+            &fetch_sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
@@ -171,10 +184,20 @@ async fn fetch_includes_operation_name() {
         plugins: Default::default(),
     });
 
+    let fetch_sf = Arc::new(FetchServiceFactory {
+        subgraph_service_factory: sf.clone(),
+        http_client_service_factory: Arc::new(HttpClientServiceFactory::from_config(
+            "testbis",
+            &Configuration::default(),
+            Http2Config::Disable,
+        )),
+    });
+
     let _response = query_plan
         .execute(
             &Context::new(),
             &sf,
+            &fetch_sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
@@ -229,10 +252,20 @@ async fn fetch_makes_post_requests() {
         plugins: Default::default(),
     });
 
+    let fetch_sf = Arc::new(FetchServiceFactory {
+        subgraph_service_factory: sf.clone(),
+        http_client_service_factory: Arc::new(HttpClientServiceFactory::from_config(
+            "testbis",
+            &Configuration::default(),
+            Http2Config::Disable,
+        )),
+    });
+
     let _response = query_plan
         .execute(
             &Context::new(),
             &sf,
+            &fetch_sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
             sender,
@@ -268,6 +301,9 @@ async fn defer() {
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
+                        source_id: crate::query_planner::fetch::sources::SourceId::Graphql(
+                            crate::query_planner::fetch::sources::GraphqlId { service_name: "X".into() }
+                        )
                     }))),
                 },
                 deferred: vec![DeferredNode {
@@ -313,6 +349,9 @@ async fn defer() {
                             output_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
+                            source_id: crate::query_planner::fetch::sources::SourceId::Graphql(
+                                crate::query_planner::fetch::sources::GraphqlId { service_name: "X".into() }
+                            )
                         })),
                     }))),
                 }],
@@ -379,10 +418,20 @@ async fn defer() {
         plugins: Default::default(),
     });
 
+    let fetch_sf = Arc::new(FetchServiceFactory {
+        subgraph_service_factory: sf.clone(),
+        http_client_service_factory: Arc::new(HttpClientServiceFactory::from_config(
+            "testbis",
+            &Configuration::default(),
+            Http2Config::Disable,
+        )),
+    });
+
     let response = query_plan
         .execute(
             &Context::new(),
             &sf,
+            &fetch_sf,
             &Default::default(),
             &schema,
             sender,
@@ -479,10 +528,21 @@ async fn defer_if_condition() {
         )])),
         plugins: Default::default(),
     });
+
+    let fetch_sf = Arc::new(FetchServiceFactory {
+        subgraph_service_factory: service_factory.clone(),
+        http_client_service_factory: Arc::new(HttpClientServiceFactory::from_config(
+            "testbis",
+            &Configuration::default(),
+            Http2Config::Disable,
+        )),
+    });
+
     let defer_primary_response = query_plan
         .execute(
             &Context::new(),
             &service_factory,
+            &fetch_sf,
             &Arc::new(
                 http::Request::builder()
                     .body(
@@ -513,6 +573,7 @@ async fn defer_if_condition() {
         .execute(
             &Context::new(),
             &service_factory,
+            &fetch_sf,
             &Default::default(),
             &schema,
             default_sender,
@@ -536,6 +597,7 @@ async fn defer_if_condition() {
         .execute(
             &Context::new(),
             &service_factory,
+            &fetch_sf,
             &Arc::new(
                 http::Request::builder()
                     .body(
@@ -660,11 +722,21 @@ async fn dependent_mutations() {
         plugins: Default::default(),
     });
 
+    let fetch_sf = Arc::new(FetchServiceFactory {
+        subgraph_service_factory: sf.clone(),
+        http_client_service_factory: Arc::new(HttpClientServiceFactory::from_config(
+            "testbis",
+            &Configuration::default(),
+            Http2Config::Disable,
+        )),
+    });
+
     let (sender, _) = tokio::sync::mpsc::channel(10);
     let _response = query_plan
         .execute(
             &Context::new(),
             &sf,
+            &fetch_sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
             sender,
@@ -683,56 +755,56 @@ async fn alias_renaming() {
     {
       query: Query
     }
-    
+
     directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-    
+
     directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-    
+
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    
+
     directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-    
+
     directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    
+
     directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    
+
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    
+
     interface I
       @join__type(graph: S1)
       @join__type(graph: S2)
     {
       id: String!
     }
-    
+
     scalar join__FieldSet
-    
+
     enum join__Graph {
       S1 @join__graph(name: "S1", url: "http://localhost/s1")
       S2 @join__graph(name: "S2", url: "http://localhost/s2")
     }
-    
+
     scalar link__Import
-    
+
     enum link__Purpose {
       """
       `SECURITY` features provide metadata necessary to securely resolve fields.
       """
       SECURITY
-    
+
       """
       `EXECUTION` features provide metadata necessary for operation execution.
       """
       EXECUTION
     }
-    
+
     type Query
       @join__type(graph: S1)
       @join__type(graph: S2)
     {
       testQuery(id: String!): I @join__field(graph: S1)
     }
-    
+
     type T1 implements I
       @join__implements(graph: S1, interface: "I")
       @join__implements(graph: S2, interface: "I")
@@ -742,7 +814,7 @@ async fn alias_renaming() {
       id: String!
       foo: Test @join__field(graph: S2)
     }
-    
+
     type T2 implements I
       @join__implements(graph: S1, interface: "I")
       @join__implements(graph: S2, interface: "I")
@@ -752,7 +824,7 @@ async fn alias_renaming() {
       id: String!
       bar: Test @join__field(graph: S2)
     }
-    
+
     type Test
       @join__type(graph: S2)
     {
@@ -877,56 +949,56 @@ async fn missing_fields_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   type Details
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     enabled: Boolean
   }
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1020,49 +1092,49 @@ async fn missing_typename_and_fragments_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1071,7 +1143,7 @@ async fn missing_typename_and_fragments_in_requires() {
     thing: Thing
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { ... on Thing { text } }")
   }
-  
+
   type Thing
   @join__type(graph: SUB1, key: "id")
   @join__type(graph: SUB2, key: "id") {
@@ -1156,58 +1228,58 @@ async fn missing_typename_and_fragments_in_requires2() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
   {
     id: ID
-    thing: PossibleThing @join__field(graph: SUB1) @join__field(graph: SUB2, external: true) 
+    thing: PossibleThing @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { ... on Thing1 { __typename text1 } ... on Thing2 { __typename text2 } }")
   }
-  
+
   union PossibleThing @join__type(graph: SUB1) @join__type(graph: SUB2)
   @join__unionMember(graph: SUB1, member: "Thing1") @join__unionMember(graph: SUB1, member: "Thing2")
   @join__unionMember(graph: SUB2, member: "Thing1") @join__unionMember(graph: SUB2, member: "Thing2")
@@ -1304,49 +1376,49 @@ async fn null_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1355,7 +1427,7 @@ async fn null_in_requires() {
     thing: Thing
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { a text }")
   }
-  
+
   type Thing
   @join__type(graph: SUB1, key: "id")
   @join__type(graph: SUB2, key: "id") {
@@ -1801,6 +1873,11 @@ fn broken_plan_does_not_panic() {
             output_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            source_id: crate::query_planner::fetch::sources::SourceId::Graphql(
+                crate::query_planner::fetch::sources::GraphqlId {
+                    service_name: "X".into(),
+                },
+            ),
         }),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting {

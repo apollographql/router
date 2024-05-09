@@ -36,6 +36,7 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::FetchServiceFactory;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -48,6 +49,7 @@ impl QueryPlan {
         &self,
         context: &'a Context,
         service_factory: &'a Arc<SubgraphServiceFactory>,
+        fetch_service_factory: &'a Arc<FetchServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
         sender: mpsc::Sender<Response>,
@@ -66,6 +68,7 @@ impl QueryPlan {
                 &ExecutionParameters {
                     context,
                     service_factory,
+                    fetch_service_factory,
                     schema,
                     supergraph_request,
                     deferred_fetches: &deferred_fetches,
@@ -99,6 +102,7 @@ impl QueryPlan {
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
+    pub(crate) fetch_service_factory: &'a Arc<FetchServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
@@ -286,6 +290,7 @@ impl PlanNode {
                                     &ExecutionParameters {
                                         context: parameters.context,
                                         service_factory: parameters.service_factory,
+                                        fetch_service_factory: parameters.fetch_service_factory,
                                         schema: parameters.schema,
                                         supergraph_request: parameters.supergraph_request,
                                         deferred_fetches: &deferred_fetches,
@@ -437,6 +442,7 @@ impl DeferredNode {
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
+        let fetch_sf = parameters.fetch_service_factory.clone();
         let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
         let query = parameters.query.clone();
@@ -474,6 +480,7 @@ impl DeferredNode {
                         &ExecutionParameters {
                             context: &ctx,
                             service_factory: &sf,
+                            fetch_service_factory: &fetch_sf,
                             schema: &sc,
                             supergraph_request: &orig,
                             deferred_fetches: &deferred_fetches,

@@ -25,6 +25,7 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 
 pub mod execution;
 pub(crate) mod external;
+mod fetch;
 pub(crate) mod http;
 pub(crate) mod layers;
 pub(crate) mod new_service;
@@ -35,6 +36,8 @@ pub(crate) mod subgraph_service;
 pub mod supergraph;
 pub mod transport;
 pub(crate) mod trust_dns_connector;
+pub(crate) use fetch::FetchServiceFactory;
+pub(crate) use fetch::Request as FetchRequest;
 
 impl AsRef<Request> for http_ext::Request<Request> {
     fn as_ref(&self) -> &Request {

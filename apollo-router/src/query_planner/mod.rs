@@ -37,7 +37,7 @@ pub(crate) const CONDITION_ELSE_SPAN_NAME: &str = "condition_else";
 // The code resides in a separate submodule to allow writing a log filter activating it
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
-mod log {
+pub(crate) mod log {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Map;
     use serde_json_bytes::Value;

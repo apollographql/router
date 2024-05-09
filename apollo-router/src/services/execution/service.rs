@@ -47,6 +47,7 @@ use crate::services::execution;
 use crate::services::new_service::ServiceFactory;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
+use crate::services::FetchServiceFactory;
 use crate::services::Plugins;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::query::subselections::BooleanValues;
@@ -58,6 +59,7 @@ use crate::spec::Schema;
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
 }
@@ -146,6 +148,7 @@ impl ExecutionService {
             .execute(
                 &context,
                 &self.subgraph_service_factory,
+                &self.fetch_service_factory,
                 &Arc::new(req.supergraph_request),
                 &self.schema,
                 sender,
@@ -598,6 +601,7 @@ pub(crate) struct ExecutionServiceFactory {
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) plugins: Arc<Plugins>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
 }
 
 impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
@@ -617,6 +621,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                     crate::services::execution::service::ExecutionService {
                         schema: self.schema.clone(),
                         subgraph_service_factory: self.subgraph_service_factory.clone(),
+                        fetch_service_factory: self.fetch_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
                     }
                     .boxed(),
