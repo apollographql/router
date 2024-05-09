@@ -16,6 +16,7 @@ use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
+use crate::sources::connect;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::Key;
 use crate::sources::connect::json_selection::PathSelection;
@@ -127,7 +128,11 @@ pub(crate) struct Node {
     selection: JSONSelection,
 }
 
-#[derive(Debug)]
+/// Connect-specific path tracking information.
+///
+/// A [Path] describes tracking information useful when doing introspection
+/// of a connect-specific query.
+#[derive(Debug, Clone)]
 pub(crate) struct Path {
     merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
@@ -135,14 +140,14 @@ pub(crate) struct Path {
     field: Option<PathField>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PathField {
     response_name: Name,
     arguments: IndexMap<Name, NodeElement<Value>>,
     selections: PathSelections,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum PathSelections {
     Selections {
         head_property_path: Vec<Key>,
@@ -154,7 +159,7 @@ pub(crate) enum PathSelections {
     },
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum PathTailSelection {
     Selection {
         property_path: Vec<Key>,
@@ -170,17 +175,232 @@ pub(crate) enum PathTailSelection {
 
 impl PathApi for Path {
     fn source_id(&self) -> &SourceId {
-        todo!()
+        &self.source_id
     }
 
     fn add_operation_element(
         &self,
-        _query_graph: Arc<FederatedQueryGraph>,
-        _operation_element: Arc<OperationPathElement>,
-        _edge: Option<EdgeIndex>,
+        query_graph: Arc<FederatedQueryGraph>,
+        operation_element: Arc<OperationPathElement>,
+        edge: Option<EdgeIndex>,
         _self_condition_resolutions: IndexMap<SelfConditionIndex, ConditionResolutionId>,
     ) -> Result<source::fetch_dependency_graph::Path, FederationError> {
-        todo!()
+        // For this milestone, we only allow `NormalizedField`s for operation elements
+        let OperationPathElement::Field(operation_field) = operation_element.as_ref() else {
+            return Err(FederationError::internal(
+                "operation elements must be called on a field",
+            ));
+        };
+
+        // For milestone 1, we don't consider cases where the edge is not present
+        let Some(edge) = edge else {
+            return Err(FederationError::internal("edge cannot be None"));
+        };
+
+        // Extract the edge information for this operation
+        let federated_query_graph::Edge::ConcreteField { source_data, .. } =
+            query_graph.edge_weight(edge)?
+        else {
+            return Err(FederationError::internal(
+                "operation elements should only be called for concrete fields",
+            ));
+        };
+
+        let source::federated_query_graph::ConcreteFieldEdge::Connect(concrete_field_edge) =
+            source_data
+        else {
+            return Err(FederationError::internal(
+                "operation element's source data must be a connect concrete field",
+            ));
+        };
+
+        // We need to figure out now what path to take based on what needs updating in the original connect path
+        let connect_field = self
+            .field
+            .to_owned()
+            .map(|field| {
+                // Deconstruct the original selection
+                let PathSelections::Selections {
+                    head_property_path,
+                    named_selections,
+                    tail_selection: None,
+                } = field.selections
+                else {
+                    return Err(FederationError::internal(
+                        "expected the existing field to have selections with no tail",
+                    ));
+                };
+
+                // Recreate it with additional info
+                let selections = match concrete_field_edge {
+                    connect::federated_query_graph::ConcreteFieldEdge::Selection {
+                        property_path,
+                        ..
+                    } => {
+                        let (_, operation_target_index) = query_graph.edge_endpoints(edge)?;
+                        let operation_target_node =
+                            query_graph.node_weight(operation_target_index)?;
+
+                        match operation_target_node {
+                            federated_query_graph::Node::Concrete { .. } => {
+                                let concrete_selection = (
+                                    operation_field.data().response_name(),
+                                    property_path.clone(),
+                                );
+
+                                let mut named_selections = named_selections;
+                                named_selections.push(concrete_selection);
+                                PathSelections::Selections {
+                                    head_property_path,
+                                    named_selections,
+                                    tail_selection: None,
+                                }
+                            }
+
+                            federated_query_graph::Node::Enum { .. }
+                            | federated_query_graph::Node::Scalar { .. } => {
+                                let new_tail = PathTailSelection::Selection {
+                                    property_path: property_path.clone(),
+                                };
+
+                                PathSelections::Selections {
+                                    head_property_path,
+                                    named_selections,
+                                    tail_selection: Some((operation_field.data().response_name(), new_tail)),
+                                }
+                            }
+
+                            other => return Err(FederationError::internal(format!("expected the tail edge to contain a concrete, enum, or scalar node, found: {other:?}"))),
+                        }
+                    }
+
+                    connect::federated_query_graph::ConcreteFieldEdge::CustomScalarPathSelection {
+                        path_selection,
+                        ..
+                    } => {
+                        let new_tail = PathTailSelection::CustomScalarPathSelection {
+                            path_selection: path_selection.clone(),
+                        };
+
+                        PathSelections::Selections {
+                            head_property_path,
+                            named_selections,
+                            tail_selection: Some((operation_field.data().response_name(), new_tail)),
+                        }
+                    }
+
+                    connect::federated_query_graph::ConcreteFieldEdge::CustomScalarStarSelection {
+                        star_subselection,
+                        excluded_properties,
+                        ..
+                    } => {
+                        let new_tail = PathTailSelection::CustomScalarStarSelection {
+                            star_subselection: star_subselection.clone(),
+                            excluded_properties: excluded_properties.clone(),
+                        };
+
+                        PathSelections::Selections {
+                            head_property_path,
+                            named_selections,
+                            tail_selection: Some((operation_field.data().response_name(), new_tail)),
+                        }
+                    }
+
+                    _ => {
+                        return Err(FederationError::internal(
+                            "expected the concrete edge to be a selection",
+                        ))
+                    }
+                };
+
+                Ok(PathField { response_name: field.response_name, arguments: field.arguments, selections })
+            })
+            .unwrap_or_else(|| {
+                let connect::federated_query_graph::ConcreteFieldEdge::Connect {
+                    subgraph_field: _subgraph_field,
+                } = concrete_field_edge
+                else {
+                    return Err(FederationError::internal(
+                        "expected the field edge to be connect",
+                    ));
+                };
+
+                let (_, operation_target_index) = query_graph.edge_endpoints(edge)?;
+                let operation_target_node = query_graph.node_weight(operation_target_index)?;
+                let selections = match operation_target_node {
+                    federated_query_graph::Node::Concrete {
+                        source_data:
+                            source::federated_query_graph::ConcreteNode::Connect(
+                                connect::federated_query_graph::ConcreteNode::SelectionRoot {
+                                    property_path,
+                                    ..
+                                },
+                            ),
+                        ..
+                    }
+                    | federated_query_graph::Node::Enum {
+                        source_data:
+                            source::federated_query_graph::EnumNode::Connect(
+                                connect::federated_query_graph::EnumNode::SelectionRoot {
+                                    property_path,
+                                    ..
+                                },
+                            ),
+                        ..
+                    }
+                    | federated_query_graph::Node::Scalar {
+                        source_data:
+                            source::federated_query_graph::ScalarNode::Connect(
+                                connect::federated_query_graph::ScalarNode::SelectionRoot {
+                                    property_path,
+                                    ..
+                                },
+                            ),
+                        ..
+                    } => PathSelections::Selections {
+                        head_property_path: property_path.clone(),
+                        named_selections: Vec::new(),
+                        tail_selection: None,
+                    },
+
+                    federated_query_graph::Node::Scalar {
+                        source_data:
+                            source::federated_query_graph::ScalarNode::Connect(
+                                connect::federated_query_graph::ScalarNode::CustomScalarSelectionRoot {
+                                    selection,
+                                    ..
+                                },
+                            ),
+                        ..
+                    } => PathSelections::CustomScalarRoot {
+                        selection: selection.clone(),
+                    },
+
+                    _ => {
+                        return Err(FederationError::internal(
+                            "expected a concrete type, enum, or scalar",
+                        ))
+                    }
+                };
+
+                Ok(PathField {
+                    response_name: operation_field.data().response_name(),
+                    arguments: operation_field
+                        .data()
+                        .arguments
+                        .iter()
+                        .map(|arg| (arg.name.clone(), arg.value.clone()))
+                        .collect(),
+                    selections,
+                })
+            })?;
+
+        Ok(source::fetch_dependency_graph::Path::Connect(Path {
+            merge_at: self.merge_at.clone(),
+            source_entering_edge: self.source_entering_edge,
+            source_id: self.source_id.clone(),
+            field: Some(connect_field),
+        }))
     }
 }
 
