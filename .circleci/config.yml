@@ -43,6 +43,8 @@ executors:
     environment:
       CARGO_BUILD_JOBS: 8
       RUST_TEST_THREADS: 8
+    docker:
+      - image: cimg/redis:7.2.4
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -50,6 +52,8 @@ executors:
       # We use the major.minor notation to bring in compatible patches.
       xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
+    docker:
+      - image: cimg/redis:7.2.4
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -67,7 +71,8 @@ executors:
       image: "windows-server-2019-vs2019:2024.02.21"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
-
+    docker:
+      - image: cimg/redis:7.2.4
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
   toolchain_version:
@@ -505,10 +510,10 @@ commands:
           condition:
             equal: [ "dev", "<< pipeline.git.branch >>" ]
           steps:
-          - save_cache:
-              key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-              paths:
-                - target
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+                paths:
+                  - target
       - store_test_results:
           # The results from nextest that power the CircleCI Insights.
           path: ./target/nextest/ci/junit.xml
@@ -540,7 +545,7 @@ jobs:
     steps:
       - when:
           condition:
-            equal: [*amd_linux_helm_executor, << parameters.platform >>]
+            equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
           steps:
             - checkout
             - xtask_check_helm
@@ -838,7 +843,7 @@ jobs:
             not:
               equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
           steps:
-             - run:
+            - run:
                 command: >
                   echo "Not publishing any github release."
       - when:
