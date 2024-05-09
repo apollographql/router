@@ -1,4 +1,3 @@
-use crate::integration::IntegrationTest;
 use apollo_router::plugin::test::MockSubgraph;
 use apollo_router::services::execution::QueryPlan;
 use apollo_router::services::router;
@@ -19,6 +18,8 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceExt;
+
+use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner() -> Result<(), BoxError> {

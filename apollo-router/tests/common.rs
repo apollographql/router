@@ -10,9 +10,11 @@ use std::time::Duration;
 
 use buildstructor::buildstructor;
 use fred::clients::RedisClient;
-use fred::interfaces::{ClientLike, KeysInterface};
+use fred::interfaces::ClientLike;
+use fred::interfaces::KeysInterface;
 use fred::prelude::RedisConfig;
-use fred::types::{ScanType, Scanner};
+use fred::types::ScanType;
+use fred::types::Scanner;
 use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
@@ -936,8 +938,10 @@ impl IntegrationTest {
             Ok(s) => s,
             Err(e) => {
                 println!("keys of the same type in Redis server:");
-                let prefix =
-                    key[0..key.find(':').expect(&format!("key {key} has no prefix"))].to_string();
+                let prefix = key[0..key
+                    .find(':')
+                    .unwrap_or_else(|| panic!("key {key} has no prefix"))]
+                    .to_string();
                 let mut scan = client.scan(format!("{prefix}:*"), None, Some(ScanType::String));
                 while let Some(result) = scan.next().await {
                     let keys = result.as_ref().unwrap().results().as_ref().unwrap();
