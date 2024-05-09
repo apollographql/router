@@ -1,0 +1,32 @@
+### Prevent query plan cache collision when planning options change ([PR #5100](https://github.com/apollographql/router/pull/5100))
+
+When query planning takes place there are a number of options such as:
+* `defer_support`
+* `generate_query_fragments`
+* `experimental_reuse_query_fragments`
+* `experimental_type_conditioned_fetching`
+* `experimental_query_planner_mode`
+
+that will affect the generated query plans.
+
+If distributed query plan caching is also enabled, then changing any of these will result in different query plans being generated and entering the cache.
+
+This could cause issue in the following scenarios:
+1. The Router configuration changes and a query plan is loaded from cache which is incompatible with the new configuration.
+2. Routers with differing configuration are sharing the same cache causing them to cache and load incompatible query plans. 
+
+Now a hash for the entire query planner configuration is included in the cache key to prevent this from happening.
+
+If you are running previous versions of the Router and wish to change the query planner options then you must take care to
+change the cache namespace to prevent collisions.
+
+For example:
+```yaml
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        namespace: "my_unique_identifier"
+```
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5100
