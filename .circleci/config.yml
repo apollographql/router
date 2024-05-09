@@ -28,21 +28,18 @@ executors:
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
-      RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
     docker:
       - image: cimg/redis:7.2.4
   macos_build: &macos_build_executor
@@ -52,8 +49,6 @@ executors:
       # We use the major.minor notation to bring in compatible patches.
       xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
-    docker:
-      - image: cimg/redis:7.2.4
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
@@ -61,6 +56,8 @@ executors:
       # We use the major.minor notation to bring in compatible patches.
       xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
+    docker:
+      - image: cimg/redis:7.2.4
   windows_build: &windows_build_executor
     machine:
       image: "windows-server-2019-vs2019:2024.02.21"
@@ -73,6 +70,7 @@ executors:
     shell: bash.exe --login -eo pipefail
     docker:
       - image: cimg/redis:7.2.4
+
 # We don't use {{ arch }} because on windows it is unstable https://discuss.circleci.com/t/value-of-arch-unstable-on-windows/40079
 parameters:
   toolchain_version:

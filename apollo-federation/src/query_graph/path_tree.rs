@@ -506,7 +506,7 @@ mod tests {
         );
 
         let normalized_operation =
-            normalize_operation(operation, &Default::default(), &schema, &Default::default())
+            normalize_operation(operation, Default::default(), &schema, &Default::default())
                 .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
