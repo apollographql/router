@@ -20,16 +20,4 @@ This could cause issue in the following scenarios:
 
 Now a hash for the entire query planner configuration is included in the cache key to prevent this from happening.
 
-If you are running previous versions of the Router and wish to change the query planner options then you must take care to
-change the cache namespace to prevent collisions.
-
-For example:
-```yaml
-supergraph:
-  query_planning:
-    cache:
-      redis:
-        namespace: "my_unique_identifier"
-```
-
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5100
