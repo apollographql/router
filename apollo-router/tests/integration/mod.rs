@@ -8,7 +8,7 @@ mod file_upload;
 mod lifecycle;
 mod operation_limits;
 
-#[cfg(any(not(feature = "ci"), target_arch = "x86_64"))]
+#[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;
 mod rhai;
 mod subscription;
