@@ -1,5 +1,8 @@
 ### Prevent query plan cache collision when planning options change ([Issue #5093](https://github.com/apollographql/router/issues/5093))
 
+> [!IMPORTANT]  
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
 When query planning takes place there are a number of options such as:
 * `defer_support`
 * `generate_query_fragments`
