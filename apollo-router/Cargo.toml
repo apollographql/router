@@ -57,6 +57,9 @@ docs_rs = ["router-bridge/docs_rs"]
 # and not yet ready for production use.
 telemetry_next = []
 
+# is set when ci builds take place. It allows us to disable some tests when CI is running on certain platforms.
+ci = []
+
 [package.metadata.docs.rs]
 features = ["docs_rs"]
 

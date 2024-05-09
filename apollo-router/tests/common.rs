@@ -902,6 +902,7 @@ impl IntegrationTest {
         }
     }
 
+    #[allow(dead_code)]
     pub async fn clear_redis_cache(&self, namespace: &'static str) {
         let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
 
@@ -929,6 +930,7 @@ impl IntegrationTest {
         let _ = connection_task.await;
     }
 
+    #[allow(dead_code)]
     pub async fn assert_redis_cache_contains(&self, key: &str) -> String {
         let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
         let client = RedisClient::new(config, None, None, None);
