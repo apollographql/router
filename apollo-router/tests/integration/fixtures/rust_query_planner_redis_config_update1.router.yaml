@@ -1,0 +1,12 @@
+# This config is used for testing query plans to redis
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        namespace: "test_rust_query_planner_redis_update"
+        required_to_start: true
+        urls:
+          - redis://localhost:6379
+
+experimental_query_planner_mode: new
+experimental_apollo_metrics_generation_mode: new

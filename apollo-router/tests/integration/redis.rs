@@ -899,7 +899,7 @@ async fn connection_failure_blocks_startup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_query_planner_redis_update() {
+async fn query_planner_redis_update() {
     // This test shows that the redis key changes when the query planner config changes.
     // The test starts a router with a specific config, executes a query, and checks the redis cache key.
     // Then it updates the config, executes the query again, and checks the redis cache key.
@@ -926,4 +926,35 @@ async fn test_query_planner_redis_update() {
     router.assert_reloaded().await;
     router.execute_default_query().await;
     router.assert_redis_cache_contains("test_query_planner_redis_update:plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "extraction of subgraphs from supergraph is not yet implemented"]
+async fn rust_query_planner_redis_update() {
+    // This test shows that the redis key changes when the query planner config changes.
+    // The test starts a router with a specific config, executes a query, and checks the redis cache key.
+    // Then it updates the config, executes the query again, and checks the redis cache key.
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/rust_query_planner_redis_config_update1.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router
+        .clear_redis_cache("test_rust_query_planner_redis_update")
+        .await;
+
+    router.execute_default_query().await;
+    router.assert_redis_cache_contains("test_rust_query_planner_redis_update:plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:7a3d4ce3c2479cdb029f061aa64b4335b2de75d89011190643d302140a1c6ae5").await;
+    router
+        .update_config(include_str!(
+            "fixtures/rust_query_planner_redis_config_update2.router.yaml"
+        ))
+        .await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router.assert_redis_cache_contains("test_rust_query_planner_redis_update:plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
 }

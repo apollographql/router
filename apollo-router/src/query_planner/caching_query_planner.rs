@@ -54,8 +54,9 @@ pub(crate) type InMemoryCachePlanner =
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
 pub(crate) enum ConfigMode {
-    //FIXME: add the Rust planner structure once it is hashable and serializable
-    Rust,
+    //FIXME: add the Rust planner structure once it is hashable and serializable,
+    // for now use the JS config as it expected to be identical to the Rust one
+    Rust(Arc<QueryPlannerConfig>),
     Both(Arc<QueryPlannerConfig>),
     Js(Arc<QueryPlannerConfig>),
 }
@@ -103,7 +104,9 @@ where
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
         let config_mode = match configuration.experimental_query_planner_mode {
-            crate::configuration::QueryPlannerMode::New => ConfigMode::Rust,
+            crate::configuration::QueryPlannerMode::New => {
+                ConfigMode::Rust(Arc::new(configuration.js_query_planner_config()))
+            }
             crate::configuration::QueryPlannerMode::Legacy => {
                 ConfigMode::Js(Arc::new(configuration.js_query_planner_config()))
             }
