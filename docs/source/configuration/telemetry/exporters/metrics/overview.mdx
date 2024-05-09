@@ -157,7 +157,7 @@ telemetry:
               static:
                 # Always apply this attribute to all metrics for all subgraphs
                 - name: kind
-                  value: subgraph_request
+                  value: subgraph_request # each subgraph request separately updates a metric
               errors: # Only work if it's a valid GraphQL error (for example if the subgraph returns an http error or if the router can't reach the subgraph)
                 include_messages: true # Will include the error message in a message attribute
                 extensions: # Include extensions data
