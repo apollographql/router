@@ -9,6 +9,11 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use buildstructor::buildstructor;
+use fred::clients::RedisClient;
+use fred::interfaces::{ClientLike, KeysInterface};
+use fred::prelude::RedisConfig;
+use fred::types::{ScanType, Scanner};
+use futures::StreamExt;
 use http::header::ACCEPT;
 use http::header::CONTENT_TYPE;
 use http::HeaderValue;
@@ -893,6 +898,62 @@ impl IntegrationTest {
                 eprintln!("failed to flush client tracer: {e}");
             }
         }
+    }
+
+    pub async fn clear_redis_cache(&self, namespace: &'static str) {
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client
+            .wait_for_connect()
+            .await
+            .expect("could not connect to redis");
+        let mut scan = client.scan(format!("{namespace}:*"), None, Some(ScanType::String));
+        while let Some(result) = scan.next().await {
+            if let Some(page) = result.expect("could not scan redis").take_results() {
+                for key in page {
+                    let key = key.as_str().expect("key should be a string");
+                    client
+                        .del::<usize, _>(key)
+                        .await
+                        .expect("could not delete key");
+                }
+            }
+        }
+
+        client.quit().await.expect("could not quit redis");
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+    }
+
+    pub async fn assert_redis_cache_contains(&self, key: &str) -> String {
+        let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+        let client = RedisClient::new(config, None, None, None);
+        let connection_task = client.connect();
+        client.wait_for_connect().await.unwrap();
+        let s = match client.get(key).await {
+            Ok(s) => s,
+            Err(e) => {
+                println!("keys of the same type in Redis server:");
+                let prefix =
+                    key[0..key.find(':').expect(&format!("key {key} has no prefix"))].to_string();
+                let mut scan = client.scan(format!("{prefix}:*"), None, Some(ScanType::String));
+                while let Some(result) = scan.next().await {
+                    let keys = result.as_ref().unwrap().results().as_ref().unwrap();
+                    for key in keys {
+                        let key = key.as_str().expect("key should be a string");
+                        println!("\t{key}");
+                    }
+                }
+                panic!("key {key} not found: {e}\n This may be caused by a number of things including federation version changes");
+            }
+        };
+
+        client.quit().await.unwrap();
+        // calling quit ends the connection and event listener tasks
+        let _ = connection_task.await;
+        s
     }
 }
 

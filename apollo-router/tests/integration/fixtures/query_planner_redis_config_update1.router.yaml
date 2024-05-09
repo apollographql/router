@@ -1,0 +1,9 @@
+# This config is used for testing query plans to redis
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        namespace: "test_query_planner_redis_update"
+        required_to_start: true
+        urls:
+          - redis://localhost:6379
