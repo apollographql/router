@@ -1,4 +1,4 @@
-### Prevent query plan cache collision when planning options change ([PR #5100](https://github.com/apollographql/router/pull/5100))
+### Prevent query plan cache collision when planning options change ([Issue #5093](https://github.com/apollographql/router/issues/5093))
 
 When query planning takes place there are a number of options such as:
 * `defer_support`
