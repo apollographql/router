@@ -441,6 +441,7 @@ per_type_stat:
           - 0
           - 0
           - 1
+extended_references: ~
 local_per_type_stat: {}
 limits_stats: ~
 operation_count: 0
