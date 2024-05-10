@@ -13,6 +13,10 @@ use crate::Context;
 pub(crate) enum Condition<T> {
     /// A condition to check a selection against a value.
     Eq([SelectorOrValue<T>; 2]),
+    /// The first selection must be greater than the second selection.
+    Gt([SelectorOrValue<T>; 2]),
+    /// The first selection must be less than the second selection.
+    Lt([SelectorOrValue<T>; 2]),
     /// A condition to check a selection against a selector.
     Exists(T),
     /// All sub-conditions must be true.
@@ -74,6 +78,54 @@ where
                     }
                 }
             },
+            Condition::Gt(gt) => {
+                let left_att = gt[0].on_request(request).map(AttributeValue::from);
+                let right_att = gt[1].on_request(request).map(AttributeValue::from);
+                match (left_att, right_att) {
+                    (None, None) => None,
+                    (Some(l), None) => {
+                        gt[0] = SelectorOrValue::Value(l);
+                        None
+                    }
+                    (None, Some(r)) => {
+                        gt[1] = SelectorOrValue::Value(r);
+                        None
+                    }
+                    (Some(l), Some(r)) => {
+                        if l > r {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            *self = Condition::False;
+                            Some(false)
+                        }
+                    }
+                }
+            }
+            Condition::Lt(lt) => {
+                let left_att = lt[0].on_request(request).map(AttributeValue::from);
+                let right_att = lt[1].on_request(request).map(AttributeValue::from);
+                match (left_att, right_att) {
+                    (None, None) => None,
+                    (Some(l), None) => {
+                        lt[0] = SelectorOrValue::Value(l);
+                        None
+                    }
+                    (None, Some(r)) => {
+                        lt[1] = SelectorOrValue::Value(r);
+                        None
+                    }
+                    (Some(l), Some(r)) => {
+                        if l < r {
+                            *self = Condition::True;
+                            Some(true)
+                        } else {
+                            *self = Condition::False;
+                            Some(false)
+                        }
+                    }
+                }
+            }
             Condition::Exists(exist) => {
                 if exist.on_request(request).is_some() {
                     *self = Condition::True;
@@ -152,6 +204,16 @@ where
                 let left = eq[0].on_response(response);
                 let right = eq[1].on_response(response);
                 left == right
+            }
+            Condition::Gt(gt) => {
+                let left_att = gt[0].on_response(response).map(AttributeValue::from);
+                let right_att = gt[1].on_response(response).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+            }
+            Condition::Lt(gt) => {
+                let left_att = gt[0].on_response(response).map(AttributeValue::from);
+                let right_att = gt[1].on_response(response).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_response(response).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_response(response)),
@@ -436,6 +498,114 @@ mod test {
             SelectorOrValue::Selector(TestSelectorReqRes::Req),
         ]);
         assert_eq!(Some(false), condition.evaluate_request(&Some(2i64)));
+
+        assert_eq!(
+            Some(true),
+            Condition::<TestSelectorReqRes>::Eq([
+                SelectorOrValue::Value("a".into()),
+                SelectorOrValue::Value("a".into())
+            ])
+            .evaluate_request(&None)
+        );
+    }
+
+    #[test]
+    fn test_condition_gt() {
+        assert_eq!(
+            Some(true),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value(true.into()),
+                SelectorOrValue::Value(false.into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(false),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value(true.into()),
+                SelectorOrValue::Value(true.into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(true),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value(2f64.into()),
+                SelectorOrValue::Value(1f64.into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(false),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value(1f64.into()),
+                SelectorOrValue::Value(1f64.into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(true),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value(2i64.into()),
+                SelectorOrValue::Value(1i64.into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(false),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(1i64.into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(true),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value("b".into()),
+                SelectorOrValue::Value("a".into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(false),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value("a".into()),
+                SelectorOrValue::Value("a".into())
+            ])
+            .evaluate_request(&None)
+        );
+
+        assert_eq!(
+            Some(true),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Value(2i64.into()),
+                SelectorOrValue::Selector(TestSelector)
+            ])
+            .evaluate_request(&Some(1i64))
+        );
+
+        assert_eq!(
+            Some(false),
+            Condition::<TestSelector>::Gt([
+                SelectorOrValue::Selector(TestSelector),
+                SelectorOrValue::Value(1i64.into())
+            ])
+            .evaluate_request(&Some(1i64))
+        );
+
+        assert!(Condition::<TestSelector>::Gt([
+            SelectorOrValue::Value(2i64.into()),
+            SelectorOrValue::Value(1i64.into())
+        ])
+        .evaluate_response(&None));
     }
 
     #[test]

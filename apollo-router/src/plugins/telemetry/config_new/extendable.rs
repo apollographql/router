@@ -1,4 +1,5 @@
 use std::any::type_name;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -133,16 +134,37 @@ where
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        let mut attributes = gen.subschema_for::<A>();
+        // Extendable json schema is composed of and anyOf of A and additional properties of E
+        // To allow this to happen we need to generate a schema that contains all the properties of A
+        // and a schema ref to A.
+        // We can then add additional properties to the schema of type E.
+
+        let attributes = gen.subschema_for::<A>();
         let custom = gen.subschema_for::<HashMap<String, E>>();
-        if let Schema::Object(schema) = &mut attributes {
-            if let Some(object) = &mut schema.object {
-                object.additional_properties =
-                    custom.into_object().object().additional_properties.clone();
+
+        // Get a list of properties from the attributes schema
+        let attribute_schema = gen
+            .dereference(&attributes)
+            .expect("failed to dereference attributes");
+        let mut properties = BTreeMap::new();
+        if let Schema::Object(schema_object) = attribute_schema {
+            if let Some(object_validation) = &schema_object.object {
+                for key in object_validation.properties.keys() {
+                    properties.insert(key.clone(), Schema::Bool(true));
+                }
             }
         }
-
-        attributes
+        let mut schema = attribute_schema.clone();
+        if let Schema::Object(schema_object) = &mut schema {
+            if let Some(object_validation) = &mut schema_object.object {
+                object_validation.additional_properties = custom
+                    .into_object()
+                    .object
+                    .expect("could not get obejct validation")
+                    .additional_properties;
+            }
+        }
+        schema
     }
 }
 

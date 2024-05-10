@@ -391,6 +391,18 @@ impl From<&'static str> for AttributeValue {
     }
 }
 
+impl From<bool> for AttributeValue {
+    fn from(value: bool) -> Self {
+        AttributeValue::Bool(value)
+    }
+}
+
+impl From<f64> for AttributeValue {
+    fn from(value: f64) -> Self {
+        AttributeValue::F64(value)
+    }
+}
+
 impl From<i64> for AttributeValue {
     fn from(value: i64) -> Self {
         AttributeValue::I64(value)
@@ -405,6 +417,19 @@ impl std::fmt::Display for AttributeValue {
             AttributeValue::F64(val) => write!(f, "{val}"),
             AttributeValue::String(val) => write!(f, "{val}"),
             AttributeValue::Array(val) => write!(f, "{val}"),
+        }
+    }
+}
+
+impl PartialOrd for AttributeValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (AttributeValue::Bool(b1), AttributeValue::Bool(b2)) => b1.partial_cmp(b2),
+            (AttributeValue::F64(f1), AttributeValue::F64(f2)) => f1.partial_cmp(f2),
+            (AttributeValue::I64(i1), AttributeValue::I64(i2)) => i1.partial_cmp(i2),
+            (AttributeValue::String(s1), AttributeValue::String(s2)) => s1.partial_cmp(s2),
+            // Arrays and mismatched types are incomparable
+            _ => None,
         }
     }
 }
