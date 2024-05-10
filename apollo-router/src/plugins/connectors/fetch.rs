@@ -227,10 +227,11 @@ impl FetchNode {
     }
 }
 
+#[allow(dead_code)]
 fn process_source_node<'a>(
-    execution_parameters: &'a ExecutionParameters<'a>,
-    data: &'a Value,
-    current_dir: &'a Path,
+    _execution_parameters: &'a ExecutionParameters<'a>,
+    _data: &'a Value,
+    _current_dir: &'a Path,
 ) -> (Value, Vec<Error>) {
     (Default::default(), Default::default())
 }
@@ -239,12 +240,12 @@ fn process_source_node<'a>(
 mod soure_node_tests {
     use apollo_compiler::NodeStr;
 
+    use super::*;
     use crate::query_planner::fetch::SubgraphOperation;
     use crate::query_planner::PlanNode;
     use crate::services::SubgraphServiceFactory;
-    use crate::spec::{Query, Schema};
-
-    use super::*;
+    use crate::spec::Query;
+    use crate::spec::Schema;
 
     static SCHEMA: &str = r#"
         schema
