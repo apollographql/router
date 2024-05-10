@@ -15,11 +15,15 @@ use crate::sources::source::federated_query_graph::FederatedQueryGraphApi;
 use crate::sources::source::SourceId;
 use crate::ValidFederationSubgraph;
 
+use super::models;
+use super::ConnectId;
+
 pub(crate) mod builder;
 
 #[derive(Debug)]
 pub(crate) struct FederatedQueryGraph {
     subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
+    source_data: IndexMap<ConnectId, models::Connector>,
     // source_directives_by_name: IndexMap<NodeStr, SourceDirectiveArguments>,
     // connect_directives_by_source: IndexMap<ConnectId, ConnectDirectiveArguments>,
 }
