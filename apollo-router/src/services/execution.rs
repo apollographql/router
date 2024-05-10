@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use apollo_federation::sources::connect::ConnectId;
+use indexmap::IndexMap;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tokio::sync::mpsc;
@@ -29,6 +31,9 @@ pub struct Request {
     pub query_plan: Arc<QueryPlan>,
 
     pub context: Context,
+
+    pub(crate) connector_drivers: IndexMap<ConnectId, ()>,
+
     /// Initial data coming from subscription event if it's a subscription
     pub(crate) source_stream_value: Option<Value>,
     /// Channel to send all parameters needed for the subscription
@@ -46,6 +51,7 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
+        connector_drivers: Option<IndexMap<ConnectId, ()>>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -55,6 +61,7 @@ impl Request {
             context,
             source_stream_value,
             subscription_tx,
+            connector_drivers: connector_drivers.unwrap_or_default(),
         }
     }
 
@@ -64,6 +71,7 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
+        connector_drivers: Option<IndexMap<ConnectId, ()>>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -73,6 +81,7 @@ impl Request {
             context,
             source_stream_value,
             subscription_tx,
+            connector_drivers: connector_drivers.unwrap_or_default(),
         }
     }
 
@@ -86,6 +95,7 @@ impl Request {
         supergraph_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
+        connector_drivers: Option<IndexMap<ConnectId, ()>>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -93,6 +103,7 @@ impl Request {
             supergraph_request.unwrap_or_default(),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
+            connector_drivers,
             source_stream_value,
             subscription_tx,
         )

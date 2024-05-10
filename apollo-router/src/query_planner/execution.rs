@@ -2,8 +2,10 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::NodeStr;
+use apollo_federation::sources::connect::ConnectId;
 use futures::future::join_all;
 use futures::prelude::*;
+use indexmap::IndexMap;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -54,6 +56,7 @@ impl QueryPlan {
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
         initial_value: Option<Value>,
+        connector_drivers: &'a IndexMap<ConnectId, ()>,
     ) -> Response {
         let root = Path::empty();
 
@@ -73,6 +76,7 @@ impl QueryPlan {
                     root_node: &self.root,
                     subscription_handle: &subscription_handle,
                     subscription_config,
+                    connector_drivers,
                 },
                 &root,
                 &initial_value.unwrap_or_default(),
@@ -106,6 +110,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
+    pub(crate) connector_drivers: &'a IndexMap<ConnectId, ()>,
 }
 
 impl PlanNode {
@@ -336,6 +341,7 @@ impl PlanNode {
                                         root_node: parameters.root_node,
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
+                                        connector_drivers: parameters.connector_drivers,
                                     },
                                     current_dir,
                                     &value,
@@ -480,6 +486,8 @@ impl DeferredNode {
         let sc = parameters.schema.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
+        let connector_drivers = parameters.connector_drivers.clone();
+
         let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
         let query = parameters.query.clone();
@@ -524,6 +532,7 @@ impl DeferredNode {
                             root_node: &root_node,
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
+                            connector_drivers: &connector_drivers,
                         },
                         &Path::default(),
                         &value,

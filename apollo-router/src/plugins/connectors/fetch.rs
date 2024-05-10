@@ -293,6 +293,8 @@ mod soure_node_tests {
         let subscription_handle = Default::default();
         let subscription_config = Default::default();
 
+        let connector_drivers = Default::default();
+
         let execution_parameters = ExecutionParameters {
             context: &context,
             service_factory: &service_factory,
@@ -303,6 +305,7 @@ mod soure_node_tests {
             root_node: &root_node,
             subscription_handle: &subscription_handle,
             subscription_config: &subscription_config,
+            connector_drivers: &connector_drivers,
         };
         let data = Default::default();
         let current_dir = Default::default();
