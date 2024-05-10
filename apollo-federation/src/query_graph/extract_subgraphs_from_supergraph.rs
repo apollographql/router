@@ -1910,7 +1910,7 @@ fn remove_inactive_applications(
         let mut fields = parse_field_set_without_normalization(
             valid_schema,
             parent_type_pos.type_name().clone(),
-            fields,
+            &fields,
         )?;
         let is_modified = remove_non_external_leaf_fields(schema, &mut fields)?;
         if is_modified {
