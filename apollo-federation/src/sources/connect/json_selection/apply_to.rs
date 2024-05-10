@@ -41,7 +41,7 @@ pub trait ApplyTo {
         &self,
         data: &JSON,
         vars: &IndexMap<String, JSON>,
-        input_path: &mut Vec<Key>,
+        input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON>;
 
@@ -51,13 +51,13 @@ pub trait ApplyTo {
         &self,
         data_array: &[JSON],
         vars: &IndexMap<String, JSON>,
-        input_path: &mut Vec<Key>,
+        input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         let mut output = Vec::with_capacity(data_array.len());
 
         for (i, element) in data_array.iter().enumerate() {
-            input_path.push(Key::Index(i));
+            input_path.push(JSON::Number(i.into()));
             let value = self.apply_to_path(element, vars, input_path, errors);
             input_path.pop();
             // When building an Object, we can simply omit missing properties
@@ -85,14 +85,10 @@ impl Hash for ApplyToError {
 }
 
 impl ApplyToError {
-    fn new(message: &str, path: &[Key]) -> Self {
+    fn new(message: &str, path: &[JSON]) -> Self {
         Self(json!({
             "message": message,
-            "path": path.iter().map(|property| match property {
-                Key::Field(name) => json!(name),
-                Key::Quoted(name) => json!(name),
-                Key::Index(index) => json!(index),
-            }).collect::<Vec<JSON>>(),
+            "path": JSON::Array(path.to_vec()),
         }))
     }
 
@@ -141,7 +137,7 @@ impl ApplyTo for JSONSelection {
         &self,
         data: &JSON,
         vars: &IndexMap<String, JSON>,
-        input_path: &mut Vec<Key>,
+        input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         if let JSON::Array(array) = data {
@@ -170,7 +166,7 @@ impl ApplyTo for NamedSelection {
         &self,
         data: &JSON,
         vars: &IndexMap<String, JSON>,
-        input_path: &mut Vec<Key>,
+        input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         if let JSON::Array(array) = data {
@@ -184,9 +180,9 @@ impl ApplyTo for NamedSelection {
             alias: Option<&Alias>,
             key: Key,
             selection: &Option<SubSelection>,
-            input_path: &mut Vec<Key>,
+            input_path: &mut Vec<JSON>,
         | {
-            input_path.push(key.clone());
+            input_path.push(key.to_json());
             let name = key.as_string();
             if let Some(child) = data.get(name.clone()) {
                 let output_name = alias.map_or(&name, |alias| &alias.name);
@@ -251,7 +247,7 @@ impl ApplyTo for PathSelection {
         &self,
         data: &JSON,
         vars: &IndexMap<String, JSON>,
-        input_path: &mut Vec<Key>,
+        input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         if let JSON::Array(array) = data {
@@ -265,18 +261,18 @@ impl ApplyTo for PathSelection {
                     // input_path instead of creating a new var_path here.
                     tail.apply_to_path(data, vars, input_path, errors)
                 } else if let Some(var_data) = vars.get(var_name) {
-                    let mut var_path = vec![Key::Field(var_name.clone())];
+                    let mut var_path = vec![json!(var_name)];
                     tail.apply_to_path(var_data, vars, &mut var_path, errors)
                 } else {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name).as_str(),
-                        &[Key::Field(var_name.clone())],
+                        &[json!(var_name)],
                     ));
                     None
                 }
             }
             Self::Key(key, tail) => {
-                input_path.push(key.clone());
+                input_path.push(key.to_json());
 
                 if !matches!(data, JSON::Object(_)) {
                     errors.insert(ApplyToError::new(
@@ -334,7 +330,7 @@ impl ApplyTo for SubSelection {
         &self,
         data: &JSON,
         vars: &IndexMap<String, JSON>,
-        input_path: &mut Vec<Key>,
+        input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         if let JSON::Array(array) = data {
