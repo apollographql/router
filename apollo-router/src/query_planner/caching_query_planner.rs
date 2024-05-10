@@ -74,6 +74,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     config_mode: ConfigMode,
+    introspection: bool,
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -121,6 +122,7 @@ where
             plugins: Arc::new(plugins),
             enable_authorization_directives,
             config_mode,
+            introspection: configuration.supergraph.introspection,
         })
     }
 
@@ -168,6 +170,7 @@ where
                             plan_options,
                             config_mode: _,
                             sdl: _,
+                            introspection: _,
                         },
                         _,
                     )| WarmUpCachingQueryKey {
@@ -177,6 +180,7 @@ where
                         metadata: metadata.clone(),
                         plan_options: plan_options.clone(),
                         config_mode: self.config_mode.clone(),
+                        introspection: self.introspection,
                     },
                 )
                 .take(count)
@@ -209,6 +213,7 @@ where
                     metadata: CacheKeyMetadata::default(),
                     plan_options: PlanOptions::default(),
                     config_mode: self.config_mode.clone(),
+                    introspection: self.introspection,
                 });
             }
         }
@@ -224,6 +229,7 @@ where
             metadata,
             plan_options,
             config_mode: _,
+            introspection: _,
         } in all_cache_keys
         {
             let context = Context::new();
@@ -240,6 +246,7 @@ where
                 metadata,
                 plan_options,
                 config_mode: self.config_mode.clone(),
+                introspection: self.introspection,
             };
 
             if experimental_reuse_query_plans {
@@ -422,6 +429,7 @@ where
             metadata,
             plan_options,
             config_mode: self.config_mode.clone(),
+            introspection: self.introspection,
         };
 
         let context = request.context.clone();
@@ -562,6 +570,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: ConfigMode,
+    pub(crate) introspection: bool,
 }
 
 // Update this key every time the cache key or the query plan format has to change
@@ -582,6 +591,7 @@ impl std::fmt::Display for CachingQueryKey {
         hasher
             .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
         hasher.update(&serde_json::to_vec(&self.sdl).expect("serialization should not fail"));
+        hasher.update([self.introspection as u8]);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
@@ -611,6 +621,7 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: ConfigMode,
+    pub(crate) introspection: bool,
 }
 
 #[cfg(test)]
