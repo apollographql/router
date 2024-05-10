@@ -1810,6 +1810,21 @@ impl SelectionSet {
         }
     }
 
+    #[cfg(any(doc, test))]
+    pub fn parse(
+        schema: ValidFederationSchema,
+        type_position: CompositeTypeDefinitionPosition,
+        source_text: &str,
+    ) -> Result<Self, FederationError> {
+        let selection_set = crate::schema::field_set::parse_field_set_without_normalization(
+            schema.schema(),
+            type_position.type_name().clone(),
+            source_text,
+        )?;
+        let named_fragments = NamedFragments::new(&IndexMap::new(), &schema);
+        SelectionSet::from_selection_set(&selection_set, &named_fragments, &schema)
+    }
+
     fn is_empty(&self) -> bool {
         self.selections.is_empty()
     }
@@ -2598,10 +2613,12 @@ impl SelectionSet {
     /// selections would make sense.
     /// When final selections are provided, unecessary fragments will be automatically removed
     /// at the junction between the path and those final selections.
+    ///
     /// For instance, suppose that we have:
     ///  - a `path` argument that is `a::b::c`,
     ///    where the type of the last field `c` is some object type `C`.
     ///  - a `selections` argument that is `{ ... on C { d } }`.
+    ///
     /// Then the resulting built selection set will be: `{ a { b { c { d } } }`,
     /// and in particular the `... on C` fragment will be eliminated since it is unecesasry
     /// (since again, `c` is of type `C`).
@@ -5063,7 +5080,10 @@ mod tests {
     use super::ContainmentOptions;
     use super::NamedFragments;
     use super::Operation;
+    use super::SelectionSet;
+    use crate::query_graph::graph_path::OpPathElement;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::subgraph::Subgraph;
 
@@ -7097,5 +7117,159 @@ type T {
             get_value_at_path(&result, &[name!("foo"), name!("__typename")])
                 .expect("foo.__typename should exist");
         }
+    }
+
+    fn field_element(
+        schema: &ValidFederationSchema,
+        object: apollo_compiler::schema::Name,
+        field: apollo_compiler::schema::Name,
+    ) -> OpPathElement {
+        OpPathElement::Field(super::Field::new(super::FieldData {
+            schema: schema.clone(),
+            field_position: ObjectTypeDefinitionPosition::new(object)
+                .field(field)
+                .into(),
+            alias: None,
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
+    const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
+        type A { b: B }
+        type B { c: C }
+        type C implements X {
+            d: Int
+            e(arg: Int): Int
+        }
+        type D implements X {
+            d: Int
+            e: Boolean
+        }
+
+        interface X {
+            d: Int
+        }
+        type Query {
+            a: A
+            something: Boolean!
+            scalar: String
+            withArg(arg: Int): X
+        }
+    "#;
+
+    #[test]
+    fn add_at_path_merge_scalar_fields() {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
+                .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+
+        let mut selection_set = SelectionSet::empty(
+            schema.clone(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+        );
+
+        selection_set
+            .add_at_path(
+                &[field_element(&schema, name!("Query"), name!("scalar")).into()],
+                None,
+            )
+            .unwrap();
+
+        selection_set
+            .add_at_path(
+                &[field_element(&schema, name!("Query"), name!("scalar")).into()],
+                None,
+            )
+            .unwrap();
+
+        insta::assert_snapshot!(selection_set, @r#"{ scalar }"#);
+    }
+
+    #[test]
+    fn add_at_path_merge_subselections() {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
+                .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+
+        let mut selection_set = SelectionSet::empty(
+            schema.clone(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+        );
+
+        let path_to_c = [
+            field_element(&schema, name!("Query"), name!("a")).into(),
+            field_element(&schema, name!("A"), name!("b")).into(),
+            field_element(&schema, name!("B"), name!("c")).into(),
+        ];
+
+        selection_set
+            .add_at_path(
+                &path_to_c,
+                Some(
+                    &SelectionSet::parse(
+                        schema.clone(),
+                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
+                        "d",
+                    )
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .unwrap();
+        selection_set
+            .add_at_path(
+                &path_to_c,
+                Some(
+                    &SelectionSet::parse(
+                        schema.clone(),
+                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
+                        "e(arg: 1)",
+                    )
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .unwrap();
+
+        insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d e(arg: 1) } } } }"#);
+    }
+
+    // TODO: `.add_at_path` should collapse unnecessary fragments
+    #[test]
+    #[ignore]
+    fn add_at_path_collapses_unnecessary_fragments() {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
+                .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+
+        let mut selection_set = SelectionSet::empty(
+            schema.clone(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+        );
+        selection_set
+            .add_at_path(
+                &[
+                    field_element(&schema, name!("Query"), name!("a")).into(),
+                    field_element(&schema, name!("A"), name!("b")).into(),
+                    field_element(&schema, name!("B"), name!("c")).into(),
+                ],
+                Some(
+                    &SelectionSet::parse(
+                        schema.clone(),
+                        InterfaceTypeDefinitionPosition::new(name!("X")).into(),
+                        "... on C { d }",
+                    )
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .unwrap();
+
+        insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d } } } }"#);
     }
 }
