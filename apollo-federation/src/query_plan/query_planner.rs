@@ -482,6 +482,11 @@ impl QueryPlanner {
             statistics: parameters.statistics,
         })
     }
+
+    /// Get Query Planner's API Schema.
+    pub fn api_schema(&self) -> &ValidFederationSchema {
+        &self.api_schema
+    }
 }
 
 fn compute_root_serial_dependency_graph(
