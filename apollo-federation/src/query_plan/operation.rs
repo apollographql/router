@@ -2073,19 +2073,18 @@ impl SelectionSet {
         let mut selections_to_merge = vec![];
         for other in others {
             if other.schema != self.schema {
-                return Err(Internal {
-                    message: "Cannot merge selection sets from different schemas".to_owned(),
-                }
-                .into());
+                return Err(FederationError::internal(
+                    "Cannot merge selection sets from different schemas",
+                ));
             }
             if other.type_position != self.type_position {
-                return Err(Internal {
-                        message: format!(
-                            "Cannot merge selection set for type \"{}\" into a selection set for type \"{}\"",
-                            other.type_position,
-                            self.type_position,
-                        ),
-                    }.into());
+                return Err(FederationError::internal(
+                    format!(
+                        "Cannot merge selection set for type \"{}\" into a selection set for type \"{}\"",
+                        other.type_position,
+                        self.type_position,
+                    ),
+                ));
             }
             selections_to_merge.extend(other.selections.values());
         }
@@ -3377,12 +3376,6 @@ pub(crate) fn subselection_type_if_abstract(
                 CompositeTypeDefinitionPosition::Object(_) => None,
             }
         }
-    }
-}
-
-impl From<SelectionSet> for executable::SelectionSet {
-    fn from(_value: SelectionSet) -> Self {
-        todo!()
     }
 }
 
