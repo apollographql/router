@@ -14,17 +14,17 @@ use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
+use crate::sources::connect::federated_query_graph::builder::ConnectFederatedQueryGraphBuilder;
+use crate::sources::connect::fetch_dependency_graph::ConnectFetchDependencyGraph;
 use crate::sources::connect::ConnectFederatedAbstractFieldQueryGraphEdge;
 use crate::sources::connect::ConnectFederatedAbstractQueryGraphNode;
 use crate::sources::connect::ConnectFederatedConcreteFieldQueryGraphEdge;
 use crate::sources::connect::ConnectFederatedConcreteQueryGraphNode;
 use crate::sources::connect::ConnectFederatedEnumQueryGraphNode;
 use crate::sources::connect::ConnectFederatedQueryGraph;
-use crate::sources::connect::ConnectFederatedQueryGraphBuilder;
 use crate::sources::connect::ConnectFederatedScalarQueryGraphNode;
 use crate::sources::connect::ConnectFederatedSourceEnteringQueryGraphEdge;
 use crate::sources::connect::ConnectFederatedTypeConditionQueryGraphEdge;
-use crate::sources::connect::ConnectFetchDependencyGraph;
 use crate::sources::connect::ConnectFetchDependencyGraphNode;
 use crate::sources::connect::ConnectFetchNode;
 use crate::sources::connect::ConnectId;
@@ -75,6 +75,13 @@ pub(crate) enum SourceFederatedQueryGraph {
 #[derive(Debug)]
 pub(crate) struct SourceFederatedQueryGraphs {
     graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>,
+}
+
+#[cfg(test)]
+impl SourceFederatedQueryGraphs {
+    pub(crate) fn with_graphs(graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>) -> Self {
+        Self { graphs }
+    }
 }
 
 #[derive(Debug)]
@@ -179,7 +186,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
     fn add_node<'path_tree>(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
-        merge_at: &[FetchDataPathElement],
+        merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         self_condition_resolution: Option<ConditionResolutionId>,
         path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
@@ -194,7 +201,7 @@ pub(crate) trait SourceFetchDependencyGraphApi {
     fn new_path(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
-        merge_at: &[FetchDataPathElement],
+        merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         self_condition_resolution: Option<ConditionResolutionId>,
     ) -> Result<SourcePath, FederationError>;
