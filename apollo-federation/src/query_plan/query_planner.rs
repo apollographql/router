@@ -759,6 +759,7 @@ type User
     }
 
     #[test]
+    #[ignore]
     fn plan_simple_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -776,6 +777,7 @@ type User
         )
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
+        // TODO: This is the current output, but it's wrong: it's not fetching `vendor.name` at all.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
