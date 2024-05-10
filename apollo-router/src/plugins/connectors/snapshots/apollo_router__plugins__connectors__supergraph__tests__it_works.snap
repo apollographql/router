@@ -1,0 +1,220 @@
+---
+source: apollo-router/src/plugins/connectors/supergraph.rs
+expression: inner.serialize().to_string()
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: SECURITY) {
+  query: Query
+  mutation: Mutation
+}
+
+directive @inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
+
+directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type EntityAcrossBoth @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, key: "a b") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_F_1, key: "d") {
+  d: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_F_1)
+  a: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
+  b: ID @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
+  e: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
+  f: String @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_F_1)
+}
+
+scalar _Any @specifiedBy(url: "https://whatever") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_F_1) @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__type(graph: CONNECTOR_HELLO_2) @join__type(graph: CONNECTOR_HELLO_RELATED_3) @join__type(graph: CONNECTOR_HELLO_WORLD_2) @join__type(graph: CONNECTOR_MUTATION_MUTATION_4) @join__type(graph: CONNECTOR_QUERY_HELLOS_7) @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8) @join__type(graph: CONNECTOR_QUERY_HELLO_6) @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_5) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12)
+
+type Query @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_F_1) @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__type(graph: CONNECTOR_HELLO_2) @join__type(graph: CONNECTOR_HELLO_RELATED_3) @join__type(graph: CONNECTOR_HELLO_WORLD_2) @join__type(graph: CONNECTOR_QUERY_HELLOS_7) @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8) @join__type(graph: CONNECTOR_QUERY_HELLO_6) @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_5) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11) @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12) {
+  _EntityAcrossBoth_a_b(representations: [_Any!]!): [EntityAcrossBoth!]! @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_E_0)
+  _EntityAcrossBoth_d(representations: [_Any!]!): [EntityAcrossBoth!]! @join__field(graph: CONNECTOR_ENTITYACROSSBOTH_F_1)
+  _EntityInterface_id(representations: [_Any!]!): [EntityInterface!]! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+  _Hello_id(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_2) @join__field(graph: CONNECTOR_HELLO_WORLD_2)
+  _Hello_relatedId(representations: [_Any!]!): [Hello!]! @join__field(graph: CONNECTOR_HELLO_RELATED_3)
+  hellos: [Hello] @join__field(graph: CONNECTOR_QUERY_HELLOS_7)
+  helloWithHeaders: Hello @join__field(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8)
+  hello: Hello @join__field(graph: CONNECTOR_QUERY_HELLO_6)
+  interfaces: [TestingInterface] @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  unions: [TestingUnion] @join__field(graph: CONNECTOR_QUERY_UNIONS_10)
+  withArguments(value: String, done: Boolean, enum: InputEnum): String @join__field(graph: CONNECTOR_QUERY_WITHARGUMENTS_5)
+  _TestingInterfaceObject_id(representations: [_Any!]!): [TestingInterfaceObject!]! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11)
+  _TestRequires_weight(representations: [_Any!]!): [TestRequires!]! @join__field(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12)
+  _entities(representations: [_Any!]!): [_Entity!]!
+}
+
+interface EntityInterface @join__type(graph: CONNECTOR_ENTITYINTERFACE_1, key: "id") {
+  id: ID! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+}
+
+type EIa implements EntityInterface @join__implements(graph: CONNECTOR_ENTITYINTERFACE_1, interface: "EntityInterface") @join__type(graph: CONNECTOR_ENTITYINTERFACE_1, key: "id") {
+  id: ID! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+  a: String @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+}
+
+type EIb implements EntityInterface @join__implements(graph: CONNECTOR_ENTITYINTERFACE_1, interface: "EntityInterface") @join__type(graph: CONNECTOR_ENTITYINTERFACE_1, key: "id") {
+  id: ID! @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+  b: String @join__field(graph: CONNECTOR_ENTITYINTERFACE_1)
+}
+
+type Hello @join__type(graph: CONNECTOR_HELLO_2, key: "id") @join__type(graph: CONNECTOR_HELLO_RELATED_3, key: "relatedId") @join__type(graph: CONNECTOR_HELLO_WORLD_2, key: "id") @join__type(graph: CONNECTOR_QUERY_HELLOS_7) @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8) @join__type(graph: CONNECTOR_QUERY_HELLO_6) {
+  id: ID! @join__field(graph: CONNECTOR_HELLO_2) @join__field(graph: CONNECTOR_HELLO_WORLD_2) @join__field(graph: CONNECTOR_QUERY_HELLOS_7) @join__field(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8) @join__field(graph: CONNECTOR_QUERY_HELLO_6)
+  field: String @join__field(graph: CONNECTOR_HELLO_2)
+  enum: OutputEnum @join__field(graph: CONNECTOR_HELLO_2)
+  related: Related @join__field(graph: CONNECTOR_HELLO_RELATED_3)
+  relatedId: ID! @join__field(graph: CONNECTOR_HELLO_RELATED_3) @join__field(graph: CONNECTOR_QUERY_HELLOS_7)
+  world: World @join__field(graph: CONNECTOR_HELLO_WORLD_2)
+}
+
+enum OutputEnum @join__type(graph: CONNECTOR_HELLO_2) {
+  A @join__enumValue(graph: CONNECTOR_HELLO_2)
+  B @join__enumValue(graph: CONNECTOR_HELLO_2)
+  C @join__enumValue(graph: CONNECTOR_HELLO_2)
+}
+
+type Related @join__type(graph: CONNECTOR_HELLO_RELATED_3) {
+  id: ID! @join__field(graph: CONNECTOR_HELLO_RELATED_3)
+  field: String @join__field(graph: CONNECTOR_HELLO_RELATED_3)
+}
+
+type World @join__type(graph: CONNECTOR_HELLO_WORLD_2) {
+  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_2)
+  nested: Nested @join__field(graph: CONNECTOR_HELLO_WORLD_2)
+}
+
+type Nested @join__type(graph: CONNECTOR_HELLO_WORLD_2) {
+  field: String @join__field(graph: CONNECTOR_HELLO_WORLD_2)
+}
+
+type Mutation @join__type(graph: CONNECTOR_MUTATION_MUTATION_4) {
+  mutation(input: MutationInput): MutationOutput @join__field(graph: CONNECTOR_MUTATION_MUTATION_4)
+}
+
+type MutationOutput @join__type(graph: CONNECTOR_MUTATION_MUTATION_4) {
+  success: Boolean @join__field(graph: CONNECTOR_MUTATION_MUTATION_4)
+}
+
+input MutationInput @join__type(graph: CONNECTOR_MUTATION_MUTATION_4) {
+  nums: [Int!] @join__field(graph: CONNECTOR_MUTATION_MUTATION_4)
+  values: [MutationNestedInput!] @join__field(graph: CONNECTOR_MUTATION_MUTATION_4)
+}
+
+input MutationNestedInput @join__type(graph: CONNECTOR_MUTATION_MUTATION_4) {
+  num: Int @join__field(graph: CONNECTOR_MUTATION_MUTATION_4)
+}
+
+interface TestingInterface @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) {
+  id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  nested: NestedInterface @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+}
+
+type Ia implements TestingInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_9, interface: "TestingInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) {
+  id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  a: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  nested: NestedInterface @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+}
+
+type Ib implements TestingInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_9, interface: "TestingInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) {
+  id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  b: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  nested: NestedInterface @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+}
+
+interface NestedInterface @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) {
+  id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+}
+
+type NIa implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_9, interface: "NestedInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) {
+  id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  a: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+}
+
+type NIb implements NestedInterface @join__implements(graph: CONNECTOR_QUERY_INTERFACES_9, interface: "NestedInterface") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) {
+  id: ID! @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+  b: String @join__field(graph: CONNECTOR_QUERY_INTERFACES_9)
+}
+
+union TestingUnion @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "UnionA") @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "UnionB") = UnionA | UnionB
+
+type UnionA @join__type(graph: CONNECTOR_QUERY_UNIONS_10) {
+  z: String @join__field(graph: CONNECTOR_QUERY_UNIONS_10)
+  nested: NestedUnion @join__field(graph: CONNECTOR_QUERY_UNIONS_10)
+}
+
+type UnionB @join__type(graph: CONNECTOR_QUERY_UNIONS_10) {
+  y: String @join__field(graph: CONNECTOR_QUERY_UNIONS_10)
+}
+
+union NestedUnion @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "NestedUnionC") @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "NestedUnionD") = NestedUnionC | NestedUnionD
+
+type NestedUnionC @join__type(graph: CONNECTOR_QUERY_UNIONS_10) {
+  x: String @join__field(graph: CONNECTOR_QUERY_UNIONS_10)
+}
+
+type NestedUnionD @join__type(graph: CONNECTOR_QUERY_UNIONS_10) {
+  w: String @join__field(graph: CONNECTOR_QUERY_UNIONS_10)
+}
+
+enum InputEnum @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_5) {
+  Y @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_5)
+  Z @join__enumValue(graph: CONNECTOR_QUERY_WITHARGUMENTS_5)
+}
+
+interface TestingInterfaceObject @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3, key: "id", isInterfaceObject: true) @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11, key: "id", isInterfaceObject: true) {
+  c: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3)
+  id: ID! @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11)
+  d: String @join__field(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11)
+}
+
+type TestRequires @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12, key: "weight") {
+  shippingCost: Int @join__field(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12)
+  weight: Int @join__field(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12)
+}
+
+enum join__Graph {
+  CONNECTOR_ENTITYACROSSBOTH_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_0", url: "http://unused")
+  CONNECTOR_ENTITYACROSSBOTH_E_0 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_E_0", url: "http://unused")
+  CONNECTOR_ENTITYACROSSBOTH_F_1 @join__graph(name: "CONNECTOR_ENTITYACROSSBOTH_F_1", url: "http://unused")
+  CONNECTOR_ENTITYINTERFACE_1 @join__graph(name: "CONNECTOR_ENTITYINTERFACE_1", url: "http://unused")
+  CONNECTOR_HELLO_2 @join__graph(name: "CONNECTOR_HELLO_2", url: "http://unused")
+  CONNECTOR_HELLO_RELATED_3 @join__graph(name: "CONNECTOR_HELLO_RELATED_3", url: "http://unused")
+  CONNECTOR_HELLO_WORLD_2 @join__graph(name: "CONNECTOR_HELLO_WORLD_2", url: "http://unused")
+  CONNECTOR_MUTATION_MUTATION_4 @join__graph(name: "CONNECTOR_MUTATION_MUTATION_4", url: "http://unused")
+  CONNECTOR_QUERY_HELLOS_7 @join__graph(name: "CONNECTOR_QUERY_HELLOS_7", url: "http://unused")
+  CONNECTOR_QUERY_HELLOWITHHEADERS_8 @join__graph(name: "CONNECTOR_QUERY_HELLOWITHHEADERS_8", url: "http://unused")
+  CONNECTOR_QUERY_HELLO_6 @join__graph(name: "CONNECTOR_QUERY_HELLO_6", url: "http://unused")
+  CONNECTOR_QUERY_INTERFACES_9 @join__graph(name: "CONNECTOR_QUERY_INTERFACES_9", url: "http://unused")
+  CONNECTOR_QUERY_UNIONS_10 @join__graph(name: "CONNECTOR_QUERY_UNIONS_10", url: "http://unused")
+  CONNECTOR_QUERY_WITHARGUMENTS_5 @join__graph(name: "CONNECTOR_QUERY_WITHARGUMENTS_5", url: "http://unused")
+  CONNECTOR_TESTINGINTERFACEOBJECT_3 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_3", url: "http://unused")
+  CONNECTOR_TESTINGINTERFACEOBJECT_D_11 @join__graph(name: "CONNECTOR_TESTINGINTERFACEOBJECT_D_11", url: "http://unused")
+  CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12 @join__graph(name: "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12", url: "http://unused")
+}
+
+union _Entity @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__unionMember(graph: CONNECTOR_ENTITYACROSSBOTH_0, member: "EntityAcrossBoth") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__unionMember(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, member: "EntityAcrossBoth") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_F_1) @join__unionMember(graph: CONNECTOR_ENTITYACROSSBOTH_F_1, member: "EntityAcrossBoth") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_0) @join__unionMember(graph: CONNECTOR_ENTITYACROSSBOTH_0, member: "Query") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_E_0) @join__unionMember(graph: CONNECTOR_ENTITYACROSSBOTH_E_0, member: "Query") @join__type(graph: CONNECTOR_ENTITYACROSSBOTH_F_1) @join__unionMember(graph: CONNECTOR_ENTITYACROSSBOTH_F_1, member: "Query") @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__unionMember(graph: CONNECTOR_ENTITYINTERFACE_1, member: "Query") @join__type(graph: CONNECTOR_HELLO_2) @join__unionMember(graph: CONNECTOR_HELLO_2, member: "Query") @join__type(graph: CONNECTOR_HELLO_RELATED_3) @join__unionMember(graph: CONNECTOR_HELLO_RELATED_3, member: "Query") @join__type(graph: CONNECTOR_HELLO_WORLD_2) @join__unionMember(graph: CONNECTOR_HELLO_WORLD_2, member: "Query") @join__type(graph: CONNECTOR_QUERY_HELLOS_7) @join__unionMember(graph: CONNECTOR_QUERY_HELLOS_7, member: "Query") @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8) @join__unionMember(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8, member: "Query") @join__type(graph: CONNECTOR_QUERY_HELLO_6) @join__unionMember(graph: CONNECTOR_QUERY_HELLO_6, member: "Query") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) @join__unionMember(graph: CONNECTOR_QUERY_INTERFACES_9, member: "Query") @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "Query") @join__type(graph: CONNECTOR_QUERY_WITHARGUMENTS_5) @join__unionMember(graph: CONNECTOR_QUERY_WITHARGUMENTS_5, member: "Query") @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3) @join__unionMember(graph: CONNECTOR_TESTINGINTERFACEOBJECT_3, member: "Query") @join__type(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11) @join__unionMember(graph: CONNECTOR_TESTINGINTERFACEOBJECT_D_11, member: "Query") @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12) @join__unionMember(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12, member: "Query") @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__unionMember(graph: CONNECTOR_ENTITYINTERFACE_1, member: "EIa") @join__type(graph: CONNECTOR_ENTITYINTERFACE_1) @join__unionMember(graph: CONNECTOR_ENTITYINTERFACE_1, member: "EIb") @join__type(graph: CONNECTOR_HELLO_2) @join__unionMember(graph: CONNECTOR_HELLO_2, member: "Hello") @join__type(graph: CONNECTOR_HELLO_RELATED_3) @join__unionMember(graph: CONNECTOR_HELLO_RELATED_3, member: "Hello") @join__type(graph: CONNECTOR_HELLO_WORLD_2) @join__unionMember(graph: CONNECTOR_HELLO_WORLD_2, member: "Hello") @join__type(graph: CONNECTOR_QUERY_HELLOS_7) @join__unionMember(graph: CONNECTOR_QUERY_HELLOS_7, member: "Hello") @join__type(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8) @join__unionMember(graph: CONNECTOR_QUERY_HELLOWITHHEADERS_8, member: "Hello") @join__type(graph: CONNECTOR_QUERY_HELLO_6) @join__unionMember(graph: CONNECTOR_QUERY_HELLO_6, member: "Hello") @join__type(graph: CONNECTOR_HELLO_RELATED_3) @join__unionMember(graph: CONNECTOR_HELLO_RELATED_3, member: "Related") @join__type(graph: CONNECTOR_HELLO_WORLD_2) @join__unionMember(graph: CONNECTOR_HELLO_WORLD_2, member: "World") @join__type(graph: CONNECTOR_HELLO_WORLD_2) @join__unionMember(graph: CONNECTOR_HELLO_WORLD_2, member: "Nested") @join__type(graph: CONNECTOR_MUTATION_MUTATION_4) @join__unionMember(graph: CONNECTOR_MUTATION_MUTATION_4, member: "Mutation") @join__type(graph: CONNECTOR_MUTATION_MUTATION_4) @join__unionMember(graph: CONNECTOR_MUTATION_MUTATION_4, member: "MutationOutput") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) @join__unionMember(graph: CONNECTOR_QUERY_INTERFACES_9, member: "Ia") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) @join__unionMember(graph: CONNECTOR_QUERY_INTERFACES_9, member: "Ib") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) @join__unionMember(graph: CONNECTOR_QUERY_INTERFACES_9, member: "NIa") @join__type(graph: CONNECTOR_QUERY_INTERFACES_9) @join__unionMember(graph: CONNECTOR_QUERY_INTERFACES_9, member: "NIb") @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "UnionA") @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "UnionB") @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "NestedUnionC") @join__type(graph: CONNECTOR_QUERY_UNIONS_10) @join__unionMember(graph: CONNECTOR_QUERY_UNIONS_10, member: "NestedUnionD") @join__type(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12) @join__unionMember(graph: CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12, member: "TestRequires") = EntityAcrossBoth | Query | EIa | EIb | Hello | Related | World | Nested | Mutation | MutationOutput | Ia | Ib | NIa | NIb | UnionA | UnionB | NestedUnionC | NestedUnionD | TestRequires

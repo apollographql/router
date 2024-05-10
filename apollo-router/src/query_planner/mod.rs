@@ -7,6 +7,7 @@ pub(crate) use bridge_query_planner_pool::*;
 pub(crate) use caching_query_planner::*;
 pub use plan::QueryPlan;
 pub(crate) use plan::*;
+pub(crate) use selection::Selection as QueryPlannerSelection;
 
 pub use self::fetch::OperationKind;
 

@@ -159,7 +159,8 @@ fn rearrange_plan_node<'a>(
                 path: flatten_node.path.clone(),
             })
         }
-        PlanNode::Sequence { nodes } => {
+        // TODO: file uploads ?
+        PlanNode::Sequence { nodes, .. } => {
             // We can't rearange nodes inside a Sequence so just error if "file ranges" of nodes overlaps.
             let mut sequence = Vec::new();
             let mut sequence_last = None;
@@ -197,7 +198,10 @@ fn rearrange_plan_node<'a>(
             if has_overlap {
                 return Err(FileUploadError::MisorderedVariables);
             }
-            PlanNode::Sequence { nodes: sequence }
+            PlanNode::Sequence {
+                nodes: sequence,
+                connector: None,
+            }
         }
         PlanNode::Parallel { nodes } => {
             // We can rearange nodes inside a Parallel, so we order all nodes based on the first file they use and wrap them into Sequence node.
@@ -260,10 +264,16 @@ fn rearrange_plan_node<'a>(
 
                 if parallel.is_empty() {
                     // if all nodes competing for files replace Parallel with Sequence
-                    PlanNode::Sequence { nodes }
+                    PlanNode::Sequence {
+                        nodes,
+                        connector: None,
+                    }
                 } else {
                     // if some of the nodes competing for files wrap them with Sequence within Parallel
-                    parallel.push(PlanNode::Sequence { nodes });
+                    parallel.push(PlanNode::Sequence {
+                        nodes,
+                        connector: None,
+                    });
                     PlanNode::Parallel { nodes: parallel }
                 }
             }
@@ -369,7 +379,8 @@ mod tests {
             "nodes": [
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
           }
         }));
 
@@ -395,7 +406,8 @@ mod tests {
               "elseClause":  fake_fetch("uploads2", vec!["file"]),
             },
             fake_fetch("uploads3", vec!["file"]),
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -440,7 +452,8 @@ mod tests {
               // error about variables inside subscription instead of internal error.
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
            }
         }));
 
@@ -488,7 +501,8 @@ mod tests {
                   // error about variables inside deffered instead of internal error.
                   fake_fetch("uploads1", vec!["file2"]),
                   fake_fetch("uploads2", vec!["file1"])
-                ]
+                ],
+                "connector": null
               }))
           ],
         }));
@@ -515,7 +529,8 @@ mod tests {
             "nodes": [
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
           })),
           "deferred":  []
         }));
@@ -541,7 +556,8 @@ mod tests {
               "deferred":  []
             },
             fake_fetch("uploads2", vec!["file"]),
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -584,7 +600,8 @@ mod tests {
             "nodes": [
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
-            ]
+            ],
+            "connector": null
           },
         }));
 
@@ -609,7 +626,8 @@ mod tests {
               "node": fake_fetch("uploads1", vec!["file"]),
             },
             fake_fetch("uploads2", vec!["file"]),
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -631,7 +649,8 @@ mod tests {
           "nodes": [
             fake_fetch("uploads1", vec!["file1"]),
             fake_fetch("uploads2", vec!["file2"])
-          ]
+          ],
+          "connector": null
         });
         let query_plan = fake_query_plan(root_json.clone());
 
@@ -652,7 +671,8 @@ mod tests {
           "nodes": [
             fake_fetch("uploads1", vec!["file2"]),
             fake_fetch("uploads2", vec!["file1"])
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -672,7 +692,8 @@ mod tests {
           "nodes": [
             fake_fetch("uploads1", vec!["files1"]),
             fake_fetch("uploads2", vec!["files2"])
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -695,7 +716,8 @@ mod tests {
             fake_fetch("uploads2", vec!["file2", "file3"]),
             fake_fetch("uploads3", vec!["file1"]),
             fake_fetch("uploads4", vec!["file2", "file4"])
-          ]
+          ],
+          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -767,7 +789,8 @@ mod tests {
               "nodes": [
                 fake_fetch("uploads1", vec!["file1"]),
                 fake_fetch("uploads2", vec!["file2"])
-              ]
+              ],
+              "connector": null
             })
         );
     }
@@ -801,7 +824,8 @@ mod tests {
                   "nodes": [
                     fake_fetch("uploads1", vec!["file1"]),
                     fake_fetch("uploads2", vec!["file2"])
-                  ]
+                  ],
+                  "connector": null
                 }
               ]
             })
@@ -832,7 +856,8 @@ mod tests {
               "nodes": [
                 fake_fetch("uploads2", vec!["file0"]),
                 fake_fetch("uploads1", vec!["file1"])
-              ]
+              ],
+              "connector": null
             })
         );
     }

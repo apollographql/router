@@ -18,6 +18,7 @@ use crate::configuration::ApiSchemaMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::plugins::connectors::Source;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -28,6 +29,12 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<ApiSchema>,
+    #[allow(dead_code)]
+    pub(crate) subgraph_definition_and_names: HashMap<String, String>,
+
+    /// If the schema contains connectors, we'll extract them and the inner
+    /// supergraph schema here for use in the router factory and query planner.
+    pub(crate) source: Option<Source>,
 }
 
 /// TODO: remove and use apollo_federation::Supergraph unconditionally
@@ -77,13 +84,19 @@ impl Schema {
         let definitions = Self::parse_compiler_schema(sdl)?;
 
         let mut subgraphs = HashMap::new();
+        let mut subgraph_definition_and_names = HashMap::new();
+
         // TODO: error if not found?
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
-            for (name, url) in join_enum.values.iter().filter_map(|(_name, value)| {
-                let join_directive = value.directives.get("join__graph")?;
+            for (subgraph_name, name, url) in join_enum.values.values().filter_map(|value| {
+                let subgraph_name = value.value.to_string();
+                let join_directive = value
+                    .directives
+                    .iter()
+                    .find(|directive| directive.name.eq_ignore_ascii_case("join__graph"))?;
                 let name = join_directive.argument_by_name("name")?.as_str()?;
                 let url = join_directive.argument_by_name("url")?.as_str()?;
-                Some((name, url))
+                Some((subgraph_name, name, url))
             }) {
                 if url.is_empty() {
                     return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
@@ -110,6 +123,7 @@ impl Schema {
                         "must not have several subgraphs with same name '{name}'"
                     )));
                 }
+                subgraph_definition_and_names.insert(subgraph_name, name.to_string());
             }
         }
 
@@ -120,6 +134,10 @@ impl Schema {
         );
 
         let implementers_map = definitions.implementers_map();
+
+        let source = Source::new(&definitions)
+            .map_err(|e| SchemaError::Connector(format!("Failed to create connectors: {}", e)))?;
+
         let legacy_only = config.experimental_query_planner_mode == QueryPlannerMode::Legacy
             && config.experimental_api_schema_generation_mode == ApiSchemaMode::Legacy;
         let supergraph = if cfg!(test) || !legacy_only {
@@ -134,6 +152,8 @@ impl Schema {
             subgraphs,
             implementers_map,
             api_schema: None,
+            subgraph_definition_and_names,
+            source,
         })
     }
 
@@ -377,6 +397,7 @@ impl std::fmt::Debug for Schema {
             subgraphs,
             implementers_map,
             api_schema: _, // skip
+            ..
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)

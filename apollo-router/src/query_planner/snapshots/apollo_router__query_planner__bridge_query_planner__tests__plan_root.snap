@@ -21,5 +21,6 @@ Fetch(
             scopes: [],
             policies: [],
         },
+        protocol: GraphQL,
     },
 )
