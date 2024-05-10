@@ -2729,8 +2729,8 @@ impl SelectionSet {
             rebased_selections.insert(rebased.clone());
         }
         Ok(SelectionSet {
-            schema: self.schema.clone(),
-            type_position: self.type_position.clone(),
+            schema: schema.clone(),
+            type_position: parent_type.clone(),
             selections: Arc::new(rebased_selections),
         })
     }
