@@ -1741,9 +1741,9 @@ impl Operation {
 
 /// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
 /// - Preserves the insertion order of keys and values.
-struct MultiMap<K, V>(IndexMap<K, Vec<V>>);
+struct MultiIndexMap<K, V>(IndexMap<K, Vec<V>>);
 
-impl<K, V> Deref for MultiMap<K, V> {
+impl<K, V> Deref for MultiIndexMap<K, V> {
     type Target = IndexMap<K, Vec<V>>;
 
     fn deref(&self) -> &Self::Target {
@@ -1751,7 +1751,7 @@ impl<K, V> Deref for MultiMap<K, V> {
     }
 }
 
-impl<K, V> MultiMap<K, V>
+impl<K, V> MultiIndexMap<K, V>
 where
     K: Eq + Hash,
 {
@@ -2351,7 +2351,8 @@ impl SelectionSet {
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
-        let mut sub_selection_updates: MultiMap<SelectionKey, Selection> = MultiMap::new();
+        let mut sub_selection_updates: MultiIndexMap<SelectionKey, Selection> =
+            MultiIndexMap::new();
         for selection in [first, second].into_iter().chain(iter) {
             if let Some(sub_selection_set) = selection.selection_set()? {
                 sub_selection_updates.extend(
@@ -2424,7 +2425,7 @@ impl SelectionSet {
         let first_changed = first_changed?;
         // Copy the first half of the selections until the `index`-th item, since they are not
         // changed.
-        let mut updated_selections = MultiMap::new();
+        let mut updated_selections = MultiIndexMap::new();
         updated_selections.extend(
             self.selections
                 .iter()
