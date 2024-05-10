@@ -2615,8 +2615,8 @@ impl SelectionSet {
             })
             .collect::<Result<Vec<_>, _>>()?;
         Ok(SelectionSet::from_raw_selections(
-            self.schema.clone(),
-            self.type_position.clone(),
+            schema.clone(),
+            parent_type.clone(),
             rebased_results,
         ))
     }
