@@ -142,6 +142,14 @@ pub enum SourceName {
     Invalid(String),
 }
 
+impl From<SourceName> for String {
+    fn from(source_name: SourceName) -> String {
+        match source_name {
+            SourceName::Valid(name) | SourceName::Invalid(name) => name,
+        }
+    }
+}
+
 impl TryFrom<&Component<Directive>> for SourceName {
     type Error = ValidationError;
 
