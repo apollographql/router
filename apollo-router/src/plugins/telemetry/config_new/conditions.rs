@@ -189,6 +189,24 @@ where
                 let right = eq[1].on_event_response(response, ctx);
                 left == right
             }
+            Condition::Gt(gt) => {
+                let left_att = gt[0]
+                    .on_event_response(response, ctx)
+                    .map(AttributeValue::from);
+                let right_att = gt[1]
+                    .on_event_response(response, ctx)
+                    .map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+            }
+            Condition::Lt(gt) => {
+                let left_att = gt[0]
+                    .on_event_response(response, ctx)
+                    .map(AttributeValue::from);
+                let right_att = gt[1]
+                    .on_event_response(response, ctx)
+                    .map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+            }
             Condition::Exists(exist) => exist.on_event_response(response, ctx).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_event_response(response, ctx)),
             Condition::Any(any) => any.iter().any(|c| c.evaluate_event_response(response, ctx)),
@@ -230,6 +248,16 @@ where
                 let left = eq[0].on_error(error);
                 let right = eq[1].on_error(error);
                 left == right
+            }
+            Condition::Gt(gt) => {
+                let left_att = gt[0].on_error(error).map(AttributeValue::from);
+                let right_att = gt[1].on_error(error).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+            }
+            Condition::Lt(gt) => {
+                let left_att = gt[0].on_error(error).map(AttributeValue::from);
+                let right_att = gt[1].on_error(error).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
             }
             Condition::Exists(exist) => exist.on_error(error).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_error(error)),
