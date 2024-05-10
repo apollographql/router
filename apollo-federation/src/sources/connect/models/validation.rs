@@ -185,7 +185,7 @@ pub enum ValidationError {
         inner: url::ParseError,
         source_name: SourceName,
     },
-    #[error("baseURL argument for @source \"{source_name}\" be http or https, got {scheme}")]
+    #[error("baseURL argument for @source \"{source_name}\" must be http or https, got {scheme}")]
     SourceScheme {
         scheme: String,
         source_name: SourceName,
