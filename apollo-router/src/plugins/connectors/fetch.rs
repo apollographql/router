@@ -89,8 +89,8 @@ impl FetchNode {
         current_dir: &'a Path,
     ) -> (Value, Vec<Error>) {
         if let Some(source_node) = self.source_node.clone() {
-            if let SourceFetchNode::Connect(c) = source_node.as_ref() {
-                return process_source_node(c, parameters, data, current_dir).await;
+            if let SourceFetchNode::Connect(_c) = source_node.as_ref() {
+                // return process_source_node(c, parameters, data, current_dir).await;
             }
         }
         let FetchNode {
