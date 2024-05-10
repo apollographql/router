@@ -28,7 +28,7 @@ async fn query_planner() -> Result<(), BoxError> {
     // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:0:v2.7.5:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:57aba98645d707751907f32b6175e3cfd682356ecadd0318b03dd0aab6b1865f";
+    let known_cache_key = "plan:0:v2.7.5:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:9c26cb1f820a78848ba3d5d3295c16aa971368c5295422fd33cc19d4a6006a9c";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -77,7 +77,7 @@ async fn query_planner() -> Result<(), BoxError> {
         Ok(s) => s,
         Err(e) => {
             println!("keys in Redis server:");
-            let mut scan = client.scan("plan:*", None, Some(ScanType::String));
+            let mut scan = client.scan("plan:*", Some(u32::MAX), Some(ScanType::String));
             while let Some(key) = scan.next().await {
                 let key = key.as_ref().unwrap().results();
                 println!("\t{key:?}");
@@ -900,47 +900,61 @@ async fn connection_failure_blocks_startup() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_query_fragments() {
-    test_redis_query_plan_config_update(include_str!(
-        "fixtures/query_planner_redis_config_update_query_fragments.router.yaml"
-    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:ae8b525534cb7446a34715fc80edd41d4d29aa65c5f39f9237d4ed8459e3fe82",
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "extraction of subgraphs from supergraph is not yet implemented"]
 async fn query_planner_redis_update_planner_mode() {
-    test_redis_query_plan_config_update(include_str!(
-        "fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"
-    ), "aplan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn query_planner_redis_update_introspection() {
     test_redis_query_plan_config_update(
-        include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
+        include_str!("fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"),
         "",
     )
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_introspection() {
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_defer() {
-    test_redis_query_plan_config_update(include_str!(
-        "fixtures/query_planner_redis_config_update_defer.router.yaml"
-    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:a0b325def7a039b75c63bec4798c9ba825782066356a4c90cdd733b172bd04f5").await;
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8a17c5b196af5e3a18d24596424e9849d198f456dd48297b852a5f2ca847169b",
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_type_conditional_fetching() {
-    test_redis_query_plan_config_update(include_str!(
-        "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
-    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:2af3e950e598bb7d1f015d3646b5aba4abdb95bb4d8d3a8b4da02018b08bef0c").await;
+    test_redis_query_plan_config_update(
+        include_str!(
+            "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
+        ),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:275f78612ed3d45cdf6bf328ef83e368b5a44393bd8c944d4a7d694aed61f017",
+    )
+    .await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn query_planner_redis_update_reuse_query_fragments() {
-    test_redis_query_plan_config_update(include_str!(
-        "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
-    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:dcbde5a1190ae7807abdf08af13212926da59126ff4da27175d526aae900fe85").await;
+    test_redis_query_plan_config_update(
+        include_str!(
+            "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
+        ),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:15fbb62c94e8da6ea78f28a6eb86a615dcaf27ff6fd0748fac4eb614b0b17662",
+    )
+    .await;
 }
 
 async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key: &str) {
@@ -958,7 +972,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:7a3d4ce3c2479cdb029f061aa64b4335b2de75d89011190643d302140a1c6ae5";
+    let starting_key = "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c";
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
