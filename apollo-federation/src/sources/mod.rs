@@ -67,6 +67,7 @@ impl SourceId {
     }
 }
 
+#[derive(Debug)]
 pub(crate) enum SourceFederatedQueryGraph {
     Graphql(GraphqlFederatedQueryGraph),
     Connect(ConnectFederatedQueryGraph),
@@ -74,12 +75,12 @@ pub(crate) enum SourceFederatedQueryGraph {
 
 #[derive(Debug)]
 pub(crate) struct SourceFederatedQueryGraphs {
-    graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>,
+    graphs: IndexMap<SourceKind, SourceFederatedQueryGraph>,
 }
 
 #[cfg(test)]
 impl SourceFederatedQueryGraphs {
-    pub(crate) fn with_graphs(graphs: IndexMap<SourceKind, SourceFetchDependencyGraph>) -> Self {
+    pub(crate) fn with_graphs(graphs: IndexMap<SourceKind, SourceFederatedQueryGraph>) -> Self {
         Self { graphs }
     }
 }
