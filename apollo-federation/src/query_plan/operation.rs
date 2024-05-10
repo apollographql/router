@@ -31,13 +31,11 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
-use multimap::MultiMap;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::query_graph::graph_path::OpPath;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -299,9 +297,17 @@ pub(crate) mod normalized_selection_map {
             self.0.insert(value.key(), value)
         }
 
-        pub(crate) fn remove(&mut self, key: &SelectionKey) -> Option<Selection> {
+        /// Insert a selection at a specific index.
+        pub(crate) fn insert_at(&mut self, index: usize, value: Selection) -> Option<Selection> {
+            self.0.shift_insert(index, value.key(), value)
+        }
+
+        /// Remove a selection from the map. Returns the selection and its numeric index.
+        pub(crate) fn remove(&mut self, key: &SelectionKey) -> Option<(usize, Selection)> {
             // We specifically use shift_remove() instead of swap_remove() to maintain order.
-            self.0.shift_remove(key)
+            self.0
+                .shift_remove_full(key)
+                .map(|(index, _key, selection)| (index, selection))
         }
 
         pub(crate) fn retain(
@@ -517,6 +523,18 @@ pub(crate) mod normalized_selection_map {
     pub(crate) enum Entry<'a> {
         Occupied(OccupiedEntry<'a>),
         Vacant(VacantEntry<'a>),
+    }
+
+    impl<'a> Entry<'a> {
+        pub fn or_insert(
+            self,
+            produce: impl FnOnce() -> Result<Selection, FederationError>,
+        ) -> Result<SelectionValue<'a>, FederationError> {
+            match self {
+                Self::Occupied(entry) => Ok(entry.into_mut()),
+                Self::Vacant(entry) => entry.insert(produce()?),
+            }
+        }
     }
 
     pub(crate) struct OccupiedEntry<'a>(indexmap::map::OccupiedEntry<'a, SelectionKey, Selection>);
@@ -1143,6 +1161,10 @@ mod normalized_field_selection {
             }
         }
 
+        pub(crate) fn schema(&self) -> &ValidFederationSchema {
+            &self.data.schema
+        }
+
         pub(crate) fn data(&self) -> &FieldData {
             &self.data
         }
@@ -1645,6 +1667,10 @@ mod normalized_inline_fragment_selection {
             }
         }
 
+        pub(crate) fn schema(&self) -> &ValidFederationSchema {
+            &self.data.schema
+        }
+
         pub(crate) fn data(&self) -> &InlineFragmentData {
             &self.data
         }
@@ -1795,6 +1821,37 @@ impl Operation {
     }
 }
 
+/// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
+/// - Preserves the insertion order of keys and values.
+struct MultiIndexMap<K, V>(IndexMap<K, Vec<V>>);
+
+impl<K, V> Deref for MultiIndexMap<K, V> {
+    type Target = IndexMap<K, Vec<V>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<K, V> MultiIndexMap<K, V>
+where
+    K: Eq + Hash,
+{
+    fn new() -> Self {
+        Self(IndexMap::new())
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        self.0.entry(key).or_default().push(value);
+    }
+
+    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iterable: I) {
+        for (key, value) in iterable {
+            self.insert(key, value);
+        }
+    }
+}
+
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
 enum SelectionMapperReturn {
@@ -1851,6 +1908,21 @@ impl SelectionSet {
             type_position,
             selections: Arc::new(selections.into_iter().collect()),
         }
+    }
+
+    #[cfg(any(doc, test))]
+    pub fn parse(
+        schema: ValidFederationSchema,
+        type_position: CompositeTypeDefinitionPosition,
+        source_text: &str,
+    ) -> Result<Self, FederationError> {
+        let selection_set = crate::schema::field_set::parse_field_set_without_normalization(
+            schema.schema(),
+            type_position.type_name().clone(),
+            source_text,
+        )?;
+        let named_fragments = NamedFragments::new(&IndexMap::new(), &schema);
+        SelectionSet::from_selection_set(&selection_set, &named_fragments, &schema)
     }
 
     fn is_empty(&self) -> bool {
@@ -2267,7 +2339,7 @@ impl SelectionSet {
             (typename_field_key, sibling_field_key)
         {
             if let (
-                Some(Selection::Field(typename_field)),
+                Some((_, Selection::Field(typename_field))),
                 Some(SelectionValue::Field(mut sibling_field)),
             ) = (
                 mutable_selection_map.remove(&typename_key),
@@ -2347,7 +2419,7 @@ impl SelectionSet {
         schema: &ValidFederationSchema,
         parent_type: &CompositeTypeDefinitionPosition,
         selections: impl Iterator<Item = &'a Selection>,
-    ) -> Result<Option<Selection>, FederationError> {
+    ) -> Result<Selection, FederationError> {
         let mut iter = selections;
         let Some(first) = iter.next() else {
             // PORT_NOTE: The TypeScript version asserts here.
@@ -2358,12 +2430,14 @@ impl SelectionSet {
         let Some(second) = iter.next() else {
             // Optimize for the simple case of a single selection, as we don't have to do anything
             // complex to merge the sub-selections.
-            return first.rebase_on(
-                parent_type,
-                /*named_fragments*/ &Default::default(),
-                schema,
-                RebaseErrorHandlingOption::ThrowError,
-            );
+            return first
+                .rebase_on(
+                    parent_type,
+                    /*named_fragments*/ &Default::default(),
+                    schema,
+                    RebaseErrorHandlingOption::ThrowError,
+                )?
+                .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
         let element = first.element()?.rebase_on(
@@ -2383,11 +2457,12 @@ impl SelectionSet {
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
-            return Selection::from_element(element, /*sub_selection*/ None).map(Some);
+            return Selection::from_element(element, /*sub_selection*/ None);
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
-        let mut sub_selection_updates: MultiMap<SelectionKey, Selection> = MultiMap::new();
+        let mut sub_selection_updates: MultiIndexMap<SelectionKey, Selection> =
+            MultiIndexMap::new();
         for selection in [first, second].into_iter().chain(iter) {
             if let Some(sub_selection_set) = selection.selection_set()? {
                 sub_selection_updates.extend(
@@ -2398,17 +2473,12 @@ impl SelectionSet {
                 );
             }
         }
-        // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
-        // against the multimap repo.
-        let update_slices = sub_selection_updates
-            .keys()
-            .flat_map(|k| sub_selection_updates.get_vec(k).map(|v| v.iter()));
         let updated_sub_selection = Some(Self::make_selection_set(
             schema,
             sub_selection_parent_type,
-            update_slices,
+            sub_selection_updates.values().map(|v| v.iter()),
         )?);
-        Selection::from_element(element, updated_sub_selection).map(Some)
+        Selection::from_element(element, updated_sub_selection)
     }
 
     /// Build a selection set by aggregating all items from the `selection_key_groups` iterator.
@@ -2421,10 +2491,9 @@ impl SelectionSet {
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
     ) -> Result<SelectionSet, FederationError> {
         let mut result = SelectionMap::new();
-        for group in selection_key_groups.into_iter() {
-            if let Some(selection) = Self::make_selection(schema, parent_type, group)? {
-                result.insert(selection);
-            }
+        for group in selection_key_groups {
+            let selection = Self::make_selection(schema, parent_type, group)?;
+            result.insert(selection);
         }
         Ok(SelectionSet {
             schema: schema.clone(),
@@ -2466,7 +2535,7 @@ impl SelectionSet {
         let first_changed = first_changed?;
         // Copy the first half of the selections until the `index`-th item, since they are not
         // changed.
-        let mut updated_selections = MultiMap::new();
+        let mut updated_selections = MultiIndexMap::new();
         updated_selections.extend(
             self.selections
                 .iter()
@@ -2490,14 +2559,10 @@ impl SelectionSet {
             update_new_selection(mapper(selection)?)
         }
 
-        // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
-        // against the multimap repo.
         Self::make_selection_set(
             &self.schema,
             &self.type_position,
-            updated_selections
-                .keys()
-                .flat_map(|k| updated_selections.get_vec(k).map(|v| v.iter())),
+            updated_selections.values().map(|v| v.iter()),
         )
     }
 
@@ -2531,7 +2596,7 @@ impl SelectionSet {
             });
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
-            Ok([updated, typename_selection].into_iter().collect())
+            Ok([typename_selection, updated].into_iter().collect())
         })
     }
 
@@ -2588,8 +2653,117 @@ impl SelectionSet {
         self.selections.contains_key(key)
     }
 
-    pub(crate) fn add_at_path(&mut self, path: &OpPath, selection_set: Option<&Arc<SelectionSet>>) {
-        Arc::make_mut(&mut self.selections).add_at_path(path, selection_set)
+    /// Inserts a `Selection` into the inner map. Should a selection with the same key already
+    /// exist in the map, the existing selection and the given selection are merged, replacing the
+    /// existing selection while keeping the same insertion index.
+    fn add_selection(
+        &mut self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        selection: Selection,
+    ) -> Result<(), FederationError> {
+        let selections = Arc::make_mut(&mut self.selections);
+
+        let key = selection.key();
+        match selections.remove(&key) {
+            Some((index, existing_selection)) => {
+                let to_merge = [existing_selection, selection];
+                // `existing_selection` and `selection` both have the same selection key,
+                // so the merged selection will also have the same selection key.
+                let selection = SelectionSet::make_selection(schema, parent_type, to_merge.iter())?;
+                selections.insert_at(index, selection);
+            }
+            None => {
+                selections.insert(selection);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Adds a path, and optional some selections following that path, to this selection map.
+    ///
+    /// Today, it is possible here to add conflicting paths, such as:
+    /// - `add_at_path("field1(arg: 1)")`
+    /// - `add_at_path("field1(arg: 2)")`
+    ///
+    /// Users of this method should guarantee that this doesn't happen. Otherwise, converting this
+    /// SelectionSet back to an ExecutableDocument will return a validation error.
+    ///
+    /// The final selections are optional. If `path` ends on a leaf field, then no followup
+    /// selections would make sense.
+    /// When final selections are provided, unecessary fragments will be automatically removed
+    /// at the junction between the path and those final selections.
+    ///
+    /// For instance, suppose that we have:
+    ///  - a `path` argument that is `a::b::c`,
+    ///    where the type of the last field `c` is some object type `C`.
+    ///  - a `selections` argument that is `{ ... on C { d } }`.
+    ///
+    /// Then the resulting built selection set will be: `{ a { b { c { d } } }`,
+    /// and in particular the `... on C` fragment will be eliminated since it is unecesasry
+    /// (since again, `c` is of type `C`).
+    pub(crate) fn add_at_path(
+        &mut self,
+        path: &[Arc<OpPathElement>],
+        selection_set: Option<&Arc<SelectionSet>>,
+    ) -> Result<(), FederationError> {
+        // PORT_NOTE: This method was ported from the JS class `SelectionSetUpdates`. Unlike the
+        // JS code, this mutates the selection set map in-place.
+        match path.split_first() {
+            // If we have a sub-path, recurse.
+            Some((ele, path @ &[_, ..])) => {
+                let mut selection = Arc::make_mut(&mut self.selections)
+                    .entry(ele.key())
+                    .or_insert(|| {
+                        Selection::from_element(
+                            OpPathElement::clone(ele),
+                            // We immediately add a selection afterward to make this selection set
+                            // valid.
+                            Some(SelectionSet::empty(
+                                self.schema.clone(),
+                                self.type_position.clone(),
+                            )),
+                        )
+                    })?;
+                match &mut selection {
+                    SelectionValue::Field(field) => match field.get_selection_set_mut() {
+                        Some(sub_selection) => sub_selection.add_at_path(path, selection_set)?,
+                        None => return Err(FederationError::internal("add_at_path encountered a field without a subselection which should never happen".to_string())),
+                    },
+                    SelectionValue::InlineFragment(fragment) => fragment
+                        .get_selection_set_mut()
+                        .add_at_path(path, selection_set)?,
+                    SelectionValue::FragmentSpread(_fragment) => {
+                        return Err(FederationError::internal("add_at_path encountered a named fragment spread which should never happen".to_string()));
+                    }
+                };
+            }
+            // If we have no sub-path, we can add the selection.
+            Some((ele, &[])) => {
+                // PORT_NOTE: The JS code waited until the final selection was being constructed to
+                // turn the path and selection set into a selection. Because we are mutating things
+                // in-place, we eagerly construct the selection.
+                let element = OpPathElement::clone(ele);
+                let selection = Selection::from_element(
+                    element,
+                    selection_set.map(|set| SelectionSet::clone(set)),
+                )?;
+                self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
+            }
+            // If we don't have any path, we merge in the given subselections at the root.
+            None => {
+                if let Some(sel) = selection_set {
+                    let parent_type = &sel.type_position;
+                    let schema = sel.schema.clone();
+                    sel.selections
+                        .values()
+                        .cloned()
+                        .try_for_each(|sel| self.add_selection(parent_type, &schema, sel))?;
+                }
+            }
+        }
+        Ok(())
     }
 
     fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
@@ -2910,10 +3084,7 @@ impl SelectionSet {
         _variable_definitions: &[Node<executable::VariableDefinition>],
     ) -> Result<(), FederationError> {
         if self.selections.is_empty() {
-            Err(SingleFederationError::Internal {
-                message: "Invalid empty selection set".to_string(),
-            }
-            .into())
+            Err(FederationError::internal("Invalid empty selection set"))
         } else {
             for selection in self.selections.values() {
                 if let Some(s) = selection.selection_set()? {
@@ -3212,29 +3383,6 @@ pub(crate) fn subselection_type_if_abstract(
 impl From<SelectionSet> for executable::SelectionSet {
     fn from(_value: SelectionSet) -> Self {
         todo!()
-    }
-}
-
-impl SelectionMap {
-    /// Adds a path, and optional some selections following that path, to those updates.
-    ///
-    /// The final selections are optional (for instance, if `path` ends on a leaf field,
-    /// then no followup selections would make sense),
-    /// but when some are provided, uncesssary fragments will be automaticaly removed
-    /// at the junction between the path and those final selections.
-    /// For instance, suppose that we have:
-    ///  - a `path` argument that is `a::b::c`,
-    ///    where the type of the last field `c` is some object type `C`.
-    ///  - a `selections` argument that is `{ ... on C { d } }`.
-    /// Then the resulting built selection set will be: `{ a { b { c { d } } }`,
-    /// and in particular the `... on C` fragment will be eliminated since it is unecesasry
-    /// (since again, `c` is of type `C`).
-    pub(crate) fn add_at_path(
-        &mut self,
-        _path: &OpPath,
-        _selection_set: Option<&Arc<SelectionSet>>,
-    ) {
-        // TODO: port a `SelectionSetUpdates` data structure or mutate directly?
     }
 }
 
@@ -4754,8 +4902,24 @@ impl From<&FragmentSpreadSelection> for executable::FragmentSpread {
 impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
     type Error = FederationError;
 
-    fn try_from(_value: Operation) -> Result<Self, Self::Error> {
-        todo!()
+    fn try_from(value: Operation) -> Result<Self, Self::Error> {
+        let operation = executable::Operation::try_from(&value)?;
+        let fragments = value
+            .named_fragments
+            .fragments
+            .iter()
+            .map(|(name, fragment)| {
+                Ok((
+                    name.clone(),
+                    Node::new(executable::Fragment::try_from(&**fragment)?),
+                ))
+            })
+            .collect::<Result<IndexMap<_, _>, FederationError>>()?;
+
+        let mut document = executable::ExecutableDocument::new();
+        document.fragments = fragments;
+        document.insert_operation(operation);
+        Ok(document.validate(value.schema.schema())?)
     }
 }
 
@@ -4962,9 +5126,15 @@ mod tests {
     use super::normalize_operation;
     use super::Containment;
     use super::ContainmentOptions;
+    use super::Name;
     use super::NamedFragments;
     use super::Operation;
+    use super::Selection;
+    use super::SelectionKey;
+    use super::SelectionSet;
+    use crate::query_graph::graph_path::OpPathElement;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::subgraph::Subgraph;
 
@@ -6812,48 +6982,115 @@ type T {
         "###);
     }
 
+    fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
+        ss.selections.contains_key(&SelectionKey::Field {
+            response_name: field_name,
+            directives: Default::default(),
+        })
+    }
+
+    fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
+        matches!(sk,
+            SelectionKey::Field { response_name, directives: _ }
+                if *response_name == name)
+    }
+
+    fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Selection> {
+        let Some((first, rest)) = path.split_first() else {
+            // Error: empty path
+            return None;
+        };
+        let result = ss.selections.get(&SelectionKey::Field {
+            response_name: (*first).clone(),
+            directives: Default::default(),
+        });
+        let Some(value) = result else {
+            // Error: No matching field found.
+            return None;
+        };
+        if rest.is_empty() {
+            // Base case => We are done.
+            Some(value)
+        } else {
+            // Recursive case
+            match value.selection_set().unwrap() {
+                None => None, // Error: Sub-selection expected, but not found.
+                Some(ss) => get_value_at_path(ss, rest),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod make_selection_tests {
+        use super::super::*;
+        use super::*;
+
+        const SAMPLE_OPERATION_DOC: &str = r#"
+        type Query {
+            foo: Foo!
+        }
+
+        type Foo {
+            a: Int!
+            b: Int!
+            c: Int!
+        }
+
+        query TestQuery {
+            foo {
+                a
+                b
+                c
+            }
+        }
+        "#;
+
+        // Tests if `make_selection`'s subselection ordering is preserved.
+        #[test]
+        fn test_make_selection_order() {
+            let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
+            let normalized_operation = normalize_operation(
+                executable_document.get_operation(None).unwrap(),
+                Default::default(),
+                &schema,
+                &Default::default(),
+            )
+            .unwrap();
+
+            let foo = get_value_at_path(&normalized_operation.selection_set, &[name!("foo")])
+                .expect("foo should exist");
+            assert_eq!(foo.to_string(), "foo { a b c }");
+
+            // Create a new foo with a different selection order using `make_selection`.
+            let clone_selection_at_path = |base: &Selection, path: &[Name]| {
+                let base_selection_set = base.selection_set().unwrap().unwrap();
+                let selection =
+                    get_value_at_path(base_selection_set, path).expect("path should exist");
+                let subselections = SelectionSet::from_selection(
+                    base_selection_set.type_position.clone(),
+                    selection.clone(),
+                );
+                Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
+            };
+
+            let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
+            let foo_with_b = clone_selection_at_path(foo, &[name!("b")]);
+            let foo_with_c = clone_selection_at_path(foo, &[name!("c")]);
+            let new_selection = SelectionSet::make_selection(
+                &schema,
+                &foo.element().unwrap().parent_type_position(),
+                [foo_with_c, foo_with_b, foo_with_a].iter(),
+            )
+            .unwrap();
+            // Make sure the ordering of c, b and a is preserved.
+            assert_eq!(new_selection.to_string(), "foo { c b a }");
+        }
+    }
+
     #[cfg(test)]
     mod lazy_map_tests {
         use super::super::*;
         use super::*;
-
-        fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
-            ss.selections.contains_key(&SelectionKey::Field {
-                response_name: field_name,
-                directives: Default::default(),
-            })
-        }
-
-        fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
-            matches!(sk,
-                SelectionKey::Field { response_name, directives: _ }
-                    if *response_name == name)
-        }
-
-        fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Selection> {
-            let Some((first, rest)) = path.split_first() else {
-                // Error: empty path
-                return None;
-            };
-            let result = ss.selections.get(&SelectionKey::Field {
-                response_name: (*first).clone(),
-                directives: Default::default(),
-            });
-            let Some(value) = result else {
-                // Error: No matching field found.
-                return None;
-            };
-            if rest.is_empty() {
-                // Base case => We are done.
-                Some(value)
-            } else {
-                // Recursive case
-                match value.selection_set().unwrap() {
-                    None => None, // Error: Sub-selection expected, but not found.
-                    Some(ss) => get_value_at_path(ss, rest),
-                }
-            }
-        }
 
         // recursive filter implementation using `lazy_map`
         fn filter_rec(
@@ -6998,5 +7235,159 @@ type T {
             get_value_at_path(&result, &[name!("foo"), name!("__typename")])
                 .expect("foo.__typename should exist");
         }
+    }
+
+    fn field_element(
+        schema: &ValidFederationSchema,
+        object: apollo_compiler::schema::Name,
+        field: apollo_compiler::schema::Name,
+    ) -> OpPathElement {
+        OpPathElement::Field(super::Field::new(super::FieldData {
+            schema: schema.clone(),
+            field_position: ObjectTypeDefinitionPosition::new(object)
+                .field(field)
+                .into(),
+            alias: None,
+            arguments: Default::default(),
+            directives: Default::default(),
+            sibling_typename: None,
+        }))
+    }
+
+    const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
+        type A { b: B }
+        type B { c: C }
+        type C implements X {
+            d: Int
+            e(arg: Int): Int
+        }
+        type D implements X {
+            d: Int
+            e: Boolean
+        }
+
+        interface X {
+            d: Int
+        }
+        type Query {
+            a: A
+            something: Boolean!
+            scalar: String
+            withArg(arg: Int): X
+        }
+    "#;
+
+    #[test]
+    fn add_at_path_merge_scalar_fields() {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
+                .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+
+        let mut selection_set = SelectionSet::empty(
+            schema.clone(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+        );
+
+        selection_set
+            .add_at_path(
+                &[field_element(&schema, name!("Query"), name!("scalar")).into()],
+                None,
+            )
+            .unwrap();
+
+        selection_set
+            .add_at_path(
+                &[field_element(&schema, name!("Query"), name!("scalar")).into()],
+                None,
+            )
+            .unwrap();
+
+        insta::assert_snapshot!(selection_set, @r#"{ scalar }"#);
+    }
+
+    #[test]
+    fn add_at_path_merge_subselections() {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
+                .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+
+        let mut selection_set = SelectionSet::empty(
+            schema.clone(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+        );
+
+        let path_to_c = [
+            field_element(&schema, name!("Query"), name!("a")).into(),
+            field_element(&schema, name!("A"), name!("b")).into(),
+            field_element(&schema, name!("B"), name!("c")).into(),
+        ];
+
+        selection_set
+            .add_at_path(
+                &path_to_c,
+                Some(
+                    &SelectionSet::parse(
+                        schema.clone(),
+                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
+                        "d",
+                    )
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .unwrap();
+        selection_set
+            .add_at_path(
+                &path_to_c,
+                Some(
+                    &SelectionSet::parse(
+                        schema.clone(),
+                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
+                        "e(arg: 1)",
+                    )
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .unwrap();
+
+        insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d e(arg: 1) } } } }"#);
+    }
+
+    // TODO: `.add_at_path` should collapse unnecessary fragments
+    #[test]
+    #[ignore]
+    fn add_at_path_collapses_unnecessary_fragments() {
+        let schema =
+            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
+                .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+
+        let mut selection_set = SelectionSet::empty(
+            schema.clone(),
+            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
+        );
+        selection_set
+            .add_at_path(
+                &[
+                    field_element(&schema, name!("Query"), name!("a")).into(),
+                    field_element(&schema, name!("A"), name!("b")).into(),
+                    field_element(&schema, name!("B"), name!("c")).into(),
+                ],
+                Some(
+                    &SelectionSet::parse(
+                        schema.clone(),
+                        InterfaceTypeDefinitionPosition::new(name!("X")).into(),
+                        "... on C { d }",
+                    )
+                    .unwrap()
+                    .into(),
+                ),
+            )
+            .unwrap();
+
+        insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d } } } }"#);
     }
 }

@@ -42,7 +42,7 @@ use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
     /// Whether the query planner should try to reused the named fragments of the planned query in
     /// subgraph fetches.
@@ -89,7 +89,7 @@ impl Default for QueryPlannerConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Hash)]
 pub struct QueryPlanIncrementalDeliveryConfig {
     /// Enables @defer support by the query planner.
     ///
@@ -100,7 +100,7 @@ pub struct QueryPlanIncrementalDeliveryConfig {
     pub enable_defer: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerDebugConfig {
     /// If used and the supergraph is built from a single subgraph, then user queries do not go
     /// through the normal query planning and instead a fetch to the one subgraph is built directly
@@ -726,8 +726,7 @@ type User
     "#;
 
     #[test]
-    #[allow(unused)] // remove when build_query_plan() can run without panicking
-    fn it_does_not_crash() {
+    fn plan_simple_query_for_single_subgraph() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -745,7 +744,19 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        // let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+                    userById(id: 1) {
+                name
+                email
+              }
+            }
+          }
+        }
+        "###);
     }
 
     #[test]
