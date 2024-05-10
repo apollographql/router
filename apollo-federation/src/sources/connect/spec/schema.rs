@@ -61,9 +61,8 @@ pub(crate) struct SourceHTTPArguments {
 pub(crate) struct HTTPHeaderMappings(pub(crate) IndexMap<NodeStr, Option<HTTPHeaderOption>>);
 
 /// Configuration option for an HTTP header
-#[cfg_attr(test, derive(Debug))]
-#[derive(Clone)]
-pub(crate) enum HTTPHeaderOption {
+#[derive(Debug, Clone)]
+pub enum HTTPHeaderOption {
     /// The alias for the header name used when making a request
     ///
     /// This assumes that a header exists in the original request, as it will be

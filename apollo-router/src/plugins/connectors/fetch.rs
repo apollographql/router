@@ -9,6 +9,7 @@ use apollo_federation::sources::connect::ConnectFetchNode;
 use apollo_federation::sources::connect::ConnectId;
 use apollo_federation::sources::connect::Selection;
 use apollo_federation::sources::connect::SubSelection;
+use apollo_federation::sources::connect::Transport;
 use apollo_federation::sources::SourceFetchNode;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -87,9 +88,11 @@ impl FetchNode {
         data: &'a Value,
         current_dir: &'a Path,
     ) -> (Value, Vec<Error>) {
-        // if self.source_node.is_some() {
-        // return process_source_node(parameters, data, current_dir);
-        // }
+        if let Some(source_node) = self.source_node.clone() {
+            if let SourceFetchNode::Connect(c) = source_node.as_ref() {
+                return process_source_node(c, parameters, data, current_dir).await;
+            }
+        }
         let FetchNode {
             operation,
             operation_kind,
@@ -228,17 +231,45 @@ impl FetchNode {
 }
 
 #[allow(dead_code)]
-fn process_source_node<'a>(
-    _execution_parameters: &'a ExecutionParameters<'a>,
+async fn process_source_node<'a>(
+    source_node: &'a ConnectFetchNode,
+    execution_parameters: &'a ExecutionParameters<'a>,
     _data: &'a Value,
     _current_dir: &'a Path,
 ) -> (Value, Vec<Error>) {
-    (Default::default(), Default::default())
+    let connector_transport = execution_parameters
+        .connector_transports
+        .get(&source_node.source_id)
+        .unwrap();
+    let requests = create_requests(connector_transport);
+
+    let responses = make_requests(requests).await;
+
+    process_responses(connector_transport, responses)
 }
 
+fn create_requests(_connector_transport: &Transport) -> Vec<http::Request<hyper::Body>> {
+    Vec::new()
+}
+
+async fn make_requests(
+    _requests: Vec<http::Request<hyper::Body>>,
+) -> Vec<http::Response<hyper::Body>> {
+    Vec::new()
+}
+
+fn process_responses(
+    _connector_transport: &Transport,
+    _responses: Vec<http::Response<hyper::Body>>,
+) -> (Value, Vec<Error>) {
+    (Default::default(), Default::default())
+}
 #[cfg(test)]
 mod soure_node_tests {
     use apollo_compiler::NodeStr;
+    use apollo_federation::sources::connect::HTTPMethod;
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use indexmap::IndexMap;
 
     use super::*;
     use crate::query_planner::fetch::SubgraphOperation;
@@ -267,8 +298,8 @@ mod soure_node_tests {
         }
         "#;
 
-    #[test]
-    fn test_process_source_node() {
+    #[tokio::test]
+    async fn test_process_source_node() {
         let context = Default::default();
         let service_factory = Arc::new(SubgraphServiceFactory::empty());
         let schema = Arc::new(Schema::parse_test(SCHEMA, &Default::default()).unwrap());
@@ -293,7 +324,18 @@ mod soure_node_tests {
         let subscription_handle = Default::default();
         let subscription_config = Default::default();
 
-        let connector_drivers = Default::default();
+        let mut connector_transports: IndexMap<ConnectId, Transport> = Default::default();
+
+        connector_transports.insert(
+            fake_connect_id(),
+            Transport::HttpJson(HttpJsonTransport {
+                base_url: NodeStr::new("test"),
+                path_template: Default::default(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            }),
+        );
 
         let execution_parameters = ExecutionParameters {
             context: &context,
@@ -305,15 +347,46 @@ mod soure_node_tests {
             root_node: &root_node,
             subscription_handle: &subscription_handle,
             subscription_config: &subscription_config,
-            connector_drivers: &connector_drivers,
+            connector_transports: &Arc::new(connector_transports),
         };
+        let source_node = fake_source_node();
         let data = Default::default();
         let current_dir = Default::default();
 
         let expected = (Default::default(), Default::default());
 
-        let actual = process_source_node(&execution_parameters, &data, &current_dir);
+        let actual =
+            process_source_node(&source_node, &execution_parameters, &data, &current_dir).await;
 
         assert_eq!(expected, actual);
+    }
+
+    fn fake_source_node() -> ConnectFetchNode {
+        ConnectFetchNode {
+            source_id: fake_connect_id(),
+            field_response_name: name!("Field"),
+            field_arguments: Default::default(),
+            selection: Selection::Named(SubSelection {
+                selections: vec![],
+                star: None,
+            }),
+        }
+    }
+
+    fn fake_connect_id() -> ConnectId {
+        ConnectId {
+            label: "this_is_a_placeholder_for_now".to_string(),
+            subgraph_name: "this_is_a_placeholder".into(),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: ObjectOrInterfaceFieldDefinitionPosition::Object(
+                    ObjectFieldDefinitionPosition {
+                        type_name: name!("TypeName"),
+                        field_name: name!("field_name"),
+                    },
+                ),
+                directive_name: name!("Directive__name"),
+                directive_index: 0,
+            },
+        }
     }
 }

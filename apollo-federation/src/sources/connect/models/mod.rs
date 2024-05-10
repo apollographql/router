@@ -24,8 +24,8 @@ pub(crate) struct Connector {
     pub(crate) selection: Selection,
 }
 
-#[cfg_attr(test, derive(Debug))]
-enum Transport {
+#[derive(Debug)]
+pub enum Transport {
     HttpJson(HttpJsonTransport),
 }
 
@@ -101,13 +101,13 @@ fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Tran
 
 // --- HTTP JSON ---------------------------------------------------------------
 
-#[cfg_attr(test, derive(Debug))]
-struct HttpJsonTransport {
-    base_url: NodeStr,
-    path_template: URLPathTemplate,
-    method: HTTPMethod,
-    headers: IndexMap<NodeStr, Option<HTTPHeaderOption>>,
-    body: Option<Selection>,
+#[derive(Debug)]
+pub struct HttpJsonTransport {
+    pub base_url: NodeStr,
+    pub path_template: URLPathTemplate,
+    pub method: HTTPMethod,
+    pub headers: IndexMap<NodeStr, Option<HTTPHeaderOption>>,
+    pub body: Option<Selection>,
 }
 
 impl HttpJsonTransport {
@@ -157,9 +157,8 @@ impl HttpJsonTransport {
 }
 
 /// The HTTP arguments needed for a connect request
-#[cfg_attr(test, derive(Debug))]
-#[derive(strum_macros::Display)]
-pub(crate) enum HTTPMethod {
+#[derive(Debug, strum_macros::Display)]
+pub enum HTTPMethod {
     Get,
     Post,
     Patch,

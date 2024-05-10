@@ -22,6 +22,9 @@ pub use selection_parser::SubSelection;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 
+pub use self::models::HTTPMethod;
+pub use self::models::HttpJsonTransport;
+pub use self::models::Transport;
 use crate::error::FederationError;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldDefinitionPosition;
@@ -40,7 +43,7 @@ use crate::sources::SourcePath;
 use crate::sources::SourcePathApi;
 use crate::ValidFederationSubgraph;
 
-pub type ConnectorDrivers = IndexMap<ConnectId, ()>;
+pub type ConnectorTransports = Arc<IndexMap<ConnectId, Transport>>;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ConnectId {

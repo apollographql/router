@@ -808,7 +808,7 @@ impl BridgeQueryPlanner {
                         query: Arc::new(selections),
                     }),
                     // TODO[igni]
-                    connector_drivers: Default::default(),
+                    connector_transports: Default::default(),
                 })
             }
             #[cfg_attr(feature = "failfast", allow(unused_variables))]
