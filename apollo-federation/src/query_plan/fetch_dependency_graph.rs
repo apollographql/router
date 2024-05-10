@@ -25,7 +25,6 @@ use petgraph::visit::EdgeRef;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
-use crate::query_graph::graph_path::selection_of_element;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPath;
@@ -1473,7 +1472,7 @@ fn operation_for_entities_fetch(
 
     let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
 
-    let entities_call = selection_of_element(
+    let entities_call = Selection::from_element(
         OpPathElement::Field(Field::new(FieldData {
             schema: subgraph_schema.clone(),
             field_position: entities,
