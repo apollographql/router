@@ -31,7 +31,6 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
-use multimap::MultiMap;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -1740,6 +1739,37 @@ impl Operation {
     }
 }
 
+/// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
+/// - Preserves the insertion order of keys and values.
+struct MultiIndexMap<K, V>(IndexMap<K, Vec<V>>);
+
+impl<K, V> Deref for MultiIndexMap<K, V> {
+    type Target = IndexMap<K, Vec<V>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl<K, V> MultiIndexMap<K, V>
+where
+    K: Eq + Hash,
+{
+    fn new() -> Self {
+        Self(IndexMap::new())
+    }
+
+    fn insert(&mut self, key: K, value: V) {
+        self.0.entry(key).or_default().push(value);
+    }
+
+    fn extend<I: IntoIterator<Item = (K, V)>>(&mut self, iterable: I) {
+        for (key, value) in iterable {
+            self.insert(key, value);
+        }
+    }
+}
+
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
 enum SelectionMapperReturn {
@@ -2279,7 +2309,7 @@ impl SelectionSet {
         schema: &ValidFederationSchema,
         parent_type: &CompositeTypeDefinitionPosition,
         selections: impl Iterator<Item = &'a Selection>,
-    ) -> Result<Option<Selection>, FederationError> {
+    ) -> Result<Selection, FederationError> {
         let mut iter = selections;
         let Some(first) = iter.next() else {
             // PORT_NOTE: The TypeScript version asserts here.
@@ -2290,12 +2320,14 @@ impl SelectionSet {
         let Some(second) = iter.next() else {
             // Optimize for the simple case of a single selection, as we don't have to do anything
             // complex to merge the sub-selections.
-            return first.rebase_on(
-                parent_type,
-                /*named_fragments*/ &Default::default(),
-                schema,
-                RebaseErrorHandlingOption::ThrowError,
-            );
+            return first
+                .rebase_on(
+                    parent_type,
+                    /*named_fragments*/ &Default::default(),
+                    schema,
+                    RebaseErrorHandlingOption::ThrowError,
+                )?
+                .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
         let element = first.element()?.rebase_on(
@@ -2315,11 +2347,12 @@ impl SelectionSet {
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
-            return Selection::from_element(element, /*sub_selection*/ None).map(Some);
+            return Selection::from_element(element, /*sub_selection*/ None);
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
-        let mut sub_selection_updates: MultiMap<SelectionKey, Selection> = MultiMap::new();
+        let mut sub_selection_updates: MultiIndexMap<SelectionKey, Selection> =
+            MultiIndexMap::new();
         for selection in [first, second].into_iter().chain(iter) {
             if let Some(sub_selection_set) = selection.selection_set()? {
                 sub_selection_updates.extend(
@@ -2330,17 +2363,12 @@ impl SelectionSet {
                 );
             }
         }
-        // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
-        // against the multimap repo.
-        let update_slices = sub_selection_updates
-            .keys()
-            .flat_map(|k| sub_selection_updates.get_vec(k).map(|v| v.iter()));
         let updated_sub_selection = Some(Self::make_selection_set(
             schema,
             sub_selection_parent_type,
-            update_slices,
+            sub_selection_updates.values().map(|v| v.iter()),
         )?);
-        Selection::from_element(element, updated_sub_selection).map(Some)
+        Selection::from_element(element, updated_sub_selection)
     }
 
     /// Build a selection set by aggregating all items from the `selection_key_groups` iterator.
@@ -2353,10 +2381,9 @@ impl SelectionSet {
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
     ) -> Result<SelectionSet, FederationError> {
         let mut result = SelectionMap::new();
-        for group in selection_key_groups.into_iter() {
-            if let Some(selection) = Self::make_selection(schema, parent_type, group)? {
-                result.insert(selection);
-            }
+        for group in selection_key_groups {
+            let selection = Self::make_selection(schema, parent_type, group)?;
+            result.insert(selection);
         }
         Ok(SelectionSet {
             schema: schema.clone(),
@@ -2398,7 +2425,7 @@ impl SelectionSet {
         let first_changed = first_changed?;
         // Copy the first half of the selections until the `index`-th item, since they are not
         // changed.
-        let mut updated_selections = MultiMap::new();
+        let mut updated_selections = MultiIndexMap::new();
         updated_selections.extend(
             self.selections
                 .iter()
@@ -2422,14 +2449,10 @@ impl SelectionSet {
             update_new_selection(mapper(selection)?)
         }
 
-        // Note: It's currently awkward to get MultiMap values as slices. An issue has been opened
-        // against the multimap repo.
         Self::make_selection_set(
             &self.schema,
             &self.type_position,
-            updated_selections
-                .keys()
-                .flat_map(|k| updated_selections.get_vec(k).map(|v| v.iter())),
+            updated_selections.values().map(|v| v.iter()),
         )
     }
 
@@ -2463,7 +2486,7 @@ impl SelectionSet {
             });
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
-            Ok([updated, typename_selection].into_iter().collect())
+            Ok([typename_selection, updated].into_iter().collect())
         })
     }
 
@@ -4918,8 +4941,12 @@ mod tests {
     use super::normalize_operation;
     use super::Containment;
     use super::ContainmentOptions;
+    use super::Name;
     use super::NamedFragments;
     use super::Operation;
+    use super::Selection;
+    use super::SelectionKey;
+    use super::SelectionSet;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::subgraph::Subgraph;
@@ -6768,48 +6795,115 @@ type T {
         "###);
     }
 
+    fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
+        ss.selections.contains_key(&SelectionKey::Field {
+            response_name: field_name,
+            directives: Default::default(),
+        })
+    }
+
+    fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
+        matches!(sk,
+            SelectionKey::Field { response_name, directives: _ }
+                if *response_name == name)
+    }
+
+    fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Selection> {
+        let Some((first, rest)) = path.split_first() else {
+            // Error: empty path
+            return None;
+        };
+        let result = ss.selections.get(&SelectionKey::Field {
+            response_name: (*first).clone(),
+            directives: Default::default(),
+        });
+        let Some(value) = result else {
+            // Error: No matching field found.
+            return None;
+        };
+        if rest.is_empty() {
+            // Base case => We are done.
+            Some(value)
+        } else {
+            // Recursive case
+            match value.selection_set().unwrap() {
+                None => None, // Error: Sub-selection expected, but not found.
+                Some(ss) => get_value_at_path(ss, rest),
+            }
+        }
+    }
+
+    #[cfg(test)]
+    mod make_selection_tests {
+        use super::super::*;
+        use super::*;
+
+        const SAMPLE_OPERATION_DOC: &str = r#"
+        type Query {
+            foo: Foo!
+        }
+
+        type Foo {
+            a: Int!
+            b: Int!
+            c: Int!
+        }
+
+        query TestQuery {
+            foo {
+                a
+                b
+                c
+            }
+        }
+        "#;
+
+        // Tests if `make_selection`'s subselection ordering is preserved.
+        #[test]
+        fn test_make_selection_order() {
+            let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
+            let normalized_operation = normalize_operation(
+                executable_document.get_operation(None).unwrap(),
+                Default::default(),
+                &schema,
+                &Default::default(),
+            )
+            .unwrap();
+
+            let foo = get_value_at_path(&normalized_operation.selection_set, &[name!("foo")])
+                .expect("foo should exist");
+            assert_eq!(foo.to_string(), "foo { a b c }");
+
+            // Create a new foo with a different selection order using `make_selection`.
+            let clone_selection_at_path = |base: &Selection, path: &[Name]| {
+                let base_selection_set = base.selection_set().unwrap().unwrap();
+                let selection =
+                    get_value_at_path(base_selection_set, path).expect("path should exist");
+                let subselections = SelectionSet::from_selection(
+                    base_selection_set.type_position.clone(),
+                    selection.clone(),
+                );
+                Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
+            };
+
+            let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
+            let foo_with_b = clone_selection_at_path(foo, &[name!("b")]);
+            let foo_with_c = clone_selection_at_path(foo, &[name!("c")]);
+            let new_selection = SelectionSet::make_selection(
+                &schema,
+                &foo.element().unwrap().parent_type_position(),
+                [foo_with_c, foo_with_b, foo_with_a].iter(),
+            )
+            .unwrap();
+            // Make sure the ordering of c, b and a is preserved.
+            assert_eq!(new_selection.to_string(), "foo { c b a }");
+        }
+    }
+
     #[cfg(test)]
     mod lazy_map_tests {
         use super::super::*;
         use super::*;
-
-        fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
-            ss.selections.contains_key(&SelectionKey::Field {
-                response_name: field_name,
-                directives: Default::default(),
-            })
-        }
-
-        fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
-            matches!(sk,
-                SelectionKey::Field { response_name, directives: _ }
-                    if *response_name == name)
-        }
-
-        fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Selection> {
-            let Some((first, rest)) = path.split_first() else {
-                // Error: empty path
-                return None;
-            };
-            let result = ss.selections.get(&SelectionKey::Field {
-                response_name: (*first).clone(),
-                directives: Default::default(),
-            });
-            let Some(value) = result else {
-                // Error: No matching field found.
-                return None;
-            };
-            if rest.is_empty() {
-                // Base case => We are done.
-                Some(value)
-            } else {
-                // Recursive case
-                match value.selection_set().unwrap() {
-                    None => None, // Error: Sub-selection expected, but not found.
-                    Some(ss) => get_value_at_path(ss, rest),
-                }
-            }
-        }
 
         // recursive filter implementation using `lazy_map`
         fn filter_rec(
