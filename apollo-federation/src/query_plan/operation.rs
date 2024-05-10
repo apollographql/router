@@ -2660,22 +2660,6 @@ impl SelectionSet {
             }
             // If we have no sub-path, we can add the selection.
             Some((ele, &[])) => {
-                if selection_set.is_none() {
-                    // PORT_NOTE: The original code also check if the element is a 'Field'. This is
-                    // taken care of in `is_terminal`.
-                    if ele.is_terminal()? {
-                        // This is a somewhat common case (when we deal with @key "conditions", those are often trivial and end up here),
-                        // so we unpack it directly instead of creating unecessary temporary objects (not that we only do it for leaf
-                        // field; for non-leaf ones, we'd have to create an empty sub-selectionSet, and that may have to get merged
-                        // with other entries of this `SelectionSetUpdates`, so we wouldn't really save work).
-                        let element = OpPathElement::clone(ele);
-                        // NOTE: We know that `selection_set` is `None`, so we just pass None here.
-                        let selection = Selection::from_element(element, None)?;
-                        let schema = ele.schema();
-                        let parent_type = &ele.parent_type_position();
-                        return self.add_selection(parent_type, schema, selection);
-                    }
-                }
                 // PORT_NOTE: The JS code waited until the final selection was being constructed to
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection.
