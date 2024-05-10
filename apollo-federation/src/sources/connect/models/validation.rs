@@ -40,10 +40,12 @@
 
 */
 
-use apollo_compiler::schema::{Component, Directive};
+use std::fmt::Display;
+
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::Directive;
 use apollo_compiler::Schema;
 use itertools::Itertools;
-use std::fmt::Display;
 use url::Url;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
@@ -162,7 +164,9 @@ impl TryFrom<&Component<Directive>> for SourceName {
             .value
             .as_str()
             .ok_or(ValidationError::SourceNameType)?;
-        if str_value.chars().all(|c| c.is_alphanumeric() || c == '_') {
+        if str_value.is_empty() {
+            Err(ValidationError::EmptySourceName)
+        } else if str_value.chars().all(|c| c.is_alphanumeric() || c == '_') {
             Ok(Self::Valid(str_value.to_string()))
         } else {
             Ok(Self::Invalid(str_value.to_string()))
@@ -190,16 +194,18 @@ pub enum ValidationError {
         scheme: String,
         source_name: SourceName,
     },
-    #[error("Missing name argument for a @source directive")]
+    #[error("missing name argument for a @source directive")]
     MissingSourceName,
     #[error("name argument for a @source directive must be a string")]
     SourceNameType,
+    #[error("name argument to @source can't be empty")]
+    EmptySourceName,
     #[error(
-        "Invalid characters in source name {0}. Only alphanumeric and underscores are allowed."
+        "invalid characters in source name {0}, only alphanumeric and underscores are allowed"
     )]
     InvalidSourceName(SourceName),
     /// Intentionally a String so we remember to only check valid source names
-    #[error("Every @source name must be unique; found duplicate source name {0}")]
+    #[error("every @source name must be unique; found duplicate source name {0}")]
     DuplicateSourceName(String),
 }
 #[cfg(test)]
@@ -234,6 +240,15 @@ mod test_validate_source {
             &errors[0],
             ValidationError::InvalidSourceName(SourceName::Invalid(_))
         ));
+    }
+
+    #[test]
+    fn empty_source_name() {
+        let schema = include_str!("test_data/empty_source_name.graphql");
+        let schema = Schema::parse(schema, "test.graphql").unwrap();
+        let errors = validate(schema);
+        assert_eq!(errors.len(), 1);
+        assert!(matches!(&errors[0], ValidationError::EmptySourceName));
     }
 
     #[test]
