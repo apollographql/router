@@ -42,7 +42,7 @@ use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
     /// Whether the query planner should try to reused the named fragments of the planned query in
     /// subgraph fetches.
@@ -89,7 +89,7 @@ impl Default for QueryPlannerConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Hash)]
 pub struct QueryPlanIncrementalDeliveryConfig {
     /// Enables @defer support by the query planner.
     ///
@@ -100,7 +100,7 @@ pub struct QueryPlanIncrementalDeliveryConfig {
     pub enable_defer: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerDebugConfig {
     /// If used and the supergraph is built from a single subgraph, then user queries do not go
     /// through the normal query planning and instead a fetch to the one subgraph is built directly
@@ -481,6 +481,11 @@ impl QueryPlanner {
             node: root_node,
             statistics: parameters.statistics,
         })
+    }
+
+    /// Get Query Planner's API Schema.
+    pub fn api_schema(&self) -> &ValidFederationSchema {
+        &self.api_schema
     }
 }
 
