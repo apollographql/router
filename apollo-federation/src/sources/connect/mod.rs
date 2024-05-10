@@ -14,6 +14,8 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+pub use models::validate;
+pub use models::ValidationError;
 use petgraph::graph::EdgeIndex;
 pub use selection_parser::ApplyTo;
 pub use selection_parser::ApplyToError;
@@ -39,8 +41,6 @@ use crate::sources::SourceId;
 use crate::sources::SourcePath;
 use crate::sources::SourcePathApi;
 use crate::ValidFederationSubgraph;
-
-pub use models::{validate, ValidationError};
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ConnectId {

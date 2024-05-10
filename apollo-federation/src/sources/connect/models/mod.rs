@@ -2,6 +2,8 @@ mod validation;
 
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
+pub use validation::validate;
+pub use validation::ValidationError;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;
@@ -14,8 +16,6 @@ use crate::schema::ValidFederationSchema;
 use crate::sources::connect::spec::extract_connect_directive_arguments;
 use crate::sources::connect::spec::extract_source_directive_arguments;
 use crate::sources::connect::ConnectSpecDefinition;
-
-pub use validation::{validate, ValidationError};
 
 // --- Connector ---------------------------------------------------------------
 
