@@ -87,9 +87,8 @@ impl FetchNode {
         data: &'a Value,
         current_dir: &'a Path,
     ) -> (Value, Vec<Error>) {
-        // so it begins
         // if self.source_node.is_some() {
-        //     return self.process_source_node(parameters, data, current_dir);
+            // return process_source_node(parameters, data, current_dir);
         // }
         let FetchNode {
             operation,
@@ -226,4 +225,12 @@ impl FetchNode {
         }
         (value, errors)
     }
+}
+
+fn process_source_node<'a>(
+    execution_parameters: ExecutionParameters<'a>,
+    data: &'a Value,
+    current_dir: &'a Path,
+) -> (Value, Vec<Error>) {
+    (Default::default(), Default::default())
 }
