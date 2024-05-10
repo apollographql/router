@@ -3322,12 +3322,6 @@ pub(crate) fn subselection_type_if_abstract(
     }
 }
 
-impl From<SelectionSet> for executable::SelectionSet {
-    fn from(_value: SelectionSet) -> Self {
-        todo!()
-    }
-}
-
 impl FieldSelection {
     /// Normalize this field selection (merging selections with the same keys), with the following
     /// additional transformations:

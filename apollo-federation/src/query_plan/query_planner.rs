@@ -778,7 +778,56 @@ type User
         let plan = planner.build_query_plan(&document, None).unwrap();
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
-          TODO
+          Sequence {
+            Fetch(service: "reviews") {
+              {
+                        bestRatedProducts {
+                  ... on Book {
+                    id
+                    __typename
+                  }
+                  ... on Movie {
+                    id
+                    __typename
+                  }
+                }
+              }
+            }
+            Parallel {
+              Flatten(path: "bestRatedProducts.*") {
+                Fetch(service: "products") {
+                  {
+                                ... on Movie {
+                      id
+                    }
+                  } => {
+                                ... on Movie {
+                      vendor {
+                        id
+                        __typename
+                      }
+                    }
+                  }
+                }
+              }
+              Flatten(path: "bestRatedProducts.*") {
+                Fetch(service: "products") {
+                  {
+                                ... on Book {
+                      id
+                    }
+                  } => {
+                                ... on Book {
+                      vendor {
+                        id
+                        __typename
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
         }
         "###);
     }

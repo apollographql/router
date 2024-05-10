@@ -1297,7 +1297,11 @@ impl FetchDependencyGraphNode {
             subgraph_name: self.subgraph_name.clone(),
             id: self.id.get().copied(),
             variable_usages,
-            requires: input_nodes.map(|sel| executable::SelectionSet::from(sel).selections),
+            requires: input_nodes
+                .as_ref()
+                .map(executable::SelectionSet::try_from)
+                .transpose()?
+                .map(|selection_set| selection_set.selections),
             operation_document,
             operation_name,
             operation_kind: self.root_kind.into(),
