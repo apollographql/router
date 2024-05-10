@@ -354,7 +354,7 @@ pub(crate) mod normalized_selection_map {
                         if let Some(sub_selections) = &field.selection_set {
                             match sub_selections.filter_recursive_depth_first(predicate)? {
                                 Cow::Borrowed(_) => Cow::Borrowed(selection),
-                                Cow::Owned(new) => Cow::Owned(Selection::from_normalized_field(
+                                Cow::Owned(new) => Cow::Owned(Selection::from_field(
                                     field.field.clone(),
                                     Some(new),
                                 )),
@@ -675,10 +675,7 @@ pub(crate) enum Selection {
 }
 
 impl Selection {
-    pub(crate) fn from_normalized_field(
-        field: Field,
-        sub_selections: Option<SelectionSet>,
-    ) -> Self {
+    pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
         let field_selection = FieldSelection {
             field,
             selection_set: sub_selections,
@@ -686,7 +683,7 @@ impl Selection {
         Self::Field(Arc::new(field_selection))
     }
 
-    pub(crate) fn from_normalized_inline_fragment(
+    pub(crate) fn from_inline_fragment(
         inline_fragment: InlineFragment,
         sub_selections: SelectionSet,
     ) -> Self {
@@ -704,17 +701,14 @@ impl Selection {
         // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
         // TODO: validate that the subSelection is ok for the element
         match element {
-            OpPathElement::Field(field) => Ok(Self::from_normalized_field(field, sub_selections)),
+            OpPathElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
             OpPathElement::InlineFragment(inline_fragment) => {
                 let Some(sub_selections) = sub_selections else {
                     return Err(FederationError::internal(
                         "unexpected inline fragment without sub-selections",
                     ));
                 };
-                Ok(Self::from_normalized_inline_fragment(
-                    inline_fragment,
-                    sub_selections,
-                ))
+                Ok(Self::from_inline_fragment(inline_fragment, sub_selections))
             }
         }
     }
@@ -1442,7 +1436,7 @@ impl FragmentSpreadSelection {
             return if expanded_selection_set.selections.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(Selection::from_normalized_inline_fragment(
+                Ok(Some(Selection::from_inline_fragment(
                     InlineFragment::new(InlineFragmentData {
                         schema: schema.clone(),
                         parent_type_position: parent_type.clone(),
@@ -2158,7 +2152,7 @@ impl SelectionSet {
                         Some(s) => Some(s.expand_all_fragments()?),
                         None => None,
                     };
-                    destination.push(Selection::from_normalized_field(
+                    destination.push(Selection::from_field(
                         field_selection.field.clone(),
                         selections,
                     ))
@@ -2183,7 +2177,7 @@ impl SelectionSet {
                     }
                 }
                 Selection::InlineFragment(inline_selection) => {
-                    destination.push(Selection::from_normalized_inline_fragment(
+                    destination.push(Selection::from_inline_fragment(
                         inline_selection.inline_fragment.clone(),
                         inline_selection.selection_set.expand_all_fragments()?,
                     ));
@@ -2550,7 +2544,7 @@ impl SelectionSet {
         if let Some(parent) = parent_type_if_abstract {
             if !self.has_top_level_typename_field() {
                 let field_position = parent.introspection_typename_field();
-                let typename_selection = Selection::from_normalized_field(
+                let typename_selection = Selection::from_field(
                     Field::new(FieldData::from_position(&self.schema, field_position)),
                     None,
                 );
@@ -2828,10 +2822,8 @@ impl SelectionSet {
                             Some(alias) => field.with_updated_alias(alias.alias.clone()),
                             None => field.field.clone(),
                         };
-                        selection_map.insert(Selection::from_normalized_field(
-                            updated_field,
-                            updated_selection_set,
-                        ));
+                        selection_map
+                            .insert(Selection::from_field(updated_field, updated_selection_set));
                     }
                 }
                 Selection::InlineFragment(_) => {
@@ -3333,7 +3325,7 @@ impl FieldSelection {
                             value: Node::new(executable::Value::Boolean(false)),
                         })],
                     })]);
-                let non_included_typename = Selection::from_normalized_field(
+                let non_included_typename = Selection::from_field(
                     Field::new(FieldData {
                         schema: schema.clone(),
                         field_position: parent_type.introspection_typename_field(),
@@ -3389,7 +3381,7 @@ impl FieldSelection {
 
         let Some(selection_set) = &self.selection_set else {
             // leaf field
-            return Ok(Some(Selection::from_normalized_field(rebased, None)));
+            return Ok(Some(Selection::from_field(rebased, None)));
         };
 
         let rebased_type_name = rebased
@@ -3406,7 +3398,7 @@ impl FieldSelection {
             && &rebased_base_type == selection_set_type
         {
             // we are rebasing within the same schema and the same base type
-            return Ok(Some(Selection::from_normalized_field(
+            return Ok(Some(Selection::from_field(
                 rebased.clone(),
                 self.selection_set.clone(),
             )));
@@ -3418,7 +3410,7 @@ impl FieldSelection {
             // empty selection set
             Ok(None)
         } else {
-            Ok(Some(Selection::from_normalized_field(
+            Ok(Some(Selection::from_field(
                 rebased.clone(),
                 Some(rebased_selection_set),
             )))
@@ -3840,7 +3832,7 @@ impl InlineFragmentSelection {
                     } else {
                         parent_type.introspection_typename_field()
                     };
-                    let typename_field_selection = Selection::from_normalized_field(
+                    let typename_field_selection = Selection::from_field(
                         Field::new(FieldData {
                             schema: schema.clone(),
                             field_position: parent_typename_field,
@@ -3853,7 +3845,7 @@ impl InlineFragmentSelection {
                     );
 
                     return Ok(Some(SelectionOrSet::Selection(
-                        Selection::from_normalized_inline_fragment(
+                        Selection::from_inline_fragment(
                             rebased_fragment,
                             SelectionSet::from_selection(
                                 parent_type.clone(),
@@ -3922,7 +3914,7 @@ impl InlineFragmentSelection {
                 let mut mutable_selections = self.selection_set.selections.clone();
                 let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
                 final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
-                let final_inline_fragment = Selection::from_normalized_inline_fragment(
+                let final_inline_fragment = Selection::from_inline_fragment(
                     self.inline_fragment.clone(),
                     SelectionSet {
                         schema: schema.clone(),
@@ -3996,7 +3988,7 @@ impl InlineFragmentSelection {
             .unwrap_or(rebased_fragment.data().parent_type_position.clone());
         if &self.inline_fragment.data().schema == schema && rebased_casted_type == *parent_type {
             // we are within the same schema - selection set does not have to be rebased
-            Ok(Some(Selection::from_normalized_inline_fragment(
+            Ok(Some(Selection::from_inline_fragment(
                 rebased_fragment,
                 self.selection_set.clone(),
             )))
@@ -4011,7 +4003,7 @@ impl InlineFragmentSelection {
                 // empty selection set
                 Ok(None)
             } else {
-                Ok(Some(Selection::from_normalized_inline_fragment(
+                Ok(Some(Selection::from_inline_fragment(
                     rebased_fragment,
                     rebased_selection_set,
                 )))
