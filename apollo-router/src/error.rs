@@ -652,10 +652,9 @@ pub(crate) struct ValidationErrors {
     pub(crate) errors: Vec<apollo_compiler::execution::GraphQLError>,
 }
 
-impl IntoGraphQLErrors for ValidationErrors {
-    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
-        Ok(self
-            .errors
+impl ValidationErrors {
+    pub(crate) fn into_graphql_errors_infallible(self) -> Vec<Error> {
+        self.errors
             .iter()
             .map(|diagnostic| {
                 Error::builder()
@@ -673,7 +672,12 @@ impl IntoGraphQLErrors for ValidationErrors {
                     .extension_code("GRAPHQL_VALIDATION_FAILED")
                     .build()
             })
-            .collect())
+            .collect()
+    }
+}
+impl IntoGraphQLErrors for ValidationErrors {
+    fn into_graphql_errors(self) -> Result<Vec<Error>, Self> {
+        Ok(self.into_graphql_errors_infallible())
     }
 }
 

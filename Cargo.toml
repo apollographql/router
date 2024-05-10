@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-default-members = ["apollo-router"]
+default-members = ["apollo-router", "apollo-federation"]
 members = [
     "apollo-router",
     "apollo-router-benchmarks",
