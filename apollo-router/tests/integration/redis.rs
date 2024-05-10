@@ -899,62 +899,72 @@ async fn connection_failure_blocks_startup() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn query_planner_redis_update() {
-    // This test shows that the redis key changes when the query planner config changes.
-    // The test starts a router with a specific config, executes a query, and checks the redis cache key.
-    // Then it updates the config, executes the query again, and checks the redis cache key.
-    let mut router = IntegrationTest::builder()
-        .config(include_str!(
-            "fixtures/query_planner_redis_config_update1.router.yaml"
-        ))
-        .build()
-        .await;
-
-    router.start().await;
-    router.assert_started().await;
-    router
-        .clear_redis_cache("test_query_planner_redis_update")
-        .await;
-
-    router.execute_default_query().await;
-    router.assert_redis_cache_contains("test_query_planner_redis_update:plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:7a3d4ce3c2479cdb029f061aa64b4335b2de75d89011190643d302140a1c6ae5").await;
-    router
-        .update_config(include_str!(
-            "fixtures/query_planner_redis_config_update2.router.yaml"
-        ))
-        .await;
-    router.assert_reloaded().await;
-    router.execute_default_query().await;
-    router.assert_redis_cache_contains("test_query_planner_redis_update:plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
+async fn query_planner_redis_update_query_fragments() {
+    test_redis_query_plan_config_update(include_str!(
+        "fixtures/query_planner_redis_config_update_query_fragments.router.yaml"
+    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
 }
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "extraction of subgraphs from supergraph is not yet implemented"]
-async fn rust_query_planner_redis_update() {
+async fn query_planner_redis_update_planner_mode() {
+    test_redis_query_plan_config_update(include_str!(
+        "fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"
+    ), "aplan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_introspection() {
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
+        "",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_defer() {
+    test_redis_query_plan_config_update(include_str!(
+        "fixtures/query_planner_redis_config_update_defer.router.yaml"
+    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:a0b325def7a039b75c63bec4798c9ba825782066356a4c90cdd733b172bd04f5").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_type_conditional_fetching() {
+    test_redis_query_plan_config_update(include_str!(
+        "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
+    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:2af3e950e598bb7d1f015d3646b5aba4abdb95bb4d8d3a8b4da02018b08bef0c").await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_reuse_query_fragments() {
+    test_redis_query_plan_config_update(include_str!(
+        "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
+    ), "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:dcbde5a1190ae7807abdf08af13212926da59126ff4da27175d526aae900fe85").await;
+}
+
+async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key: &str) {
     // This test shows that the redis key changes when the query planner config changes.
     // The test starts a router with a specific config, executes a query, and checks the redis cache key.
     // Then it updates the config, executes the query again, and checks the redis cache key.
     let mut router = IntegrationTest::builder()
         .config(include_str!(
-            "fixtures/rust_query_planner_redis_config_update1.router.yaml"
+            "fixtures/query_planner_redis_config_update.router.yaml"
         ))
         .build()
         .await;
 
     router.start().await;
     router.assert_started().await;
-    router
-        .clear_redis_cache("test_rust_query_planner_redis_update")
-        .await;
+    router.clear_redis_cache().await;
 
+    let starting_key = "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:7a3d4ce3c2479cdb029f061aa64b4335b2de75d89011190643d302140a1c6ae5";
     router.execute_default_query().await;
-    router.assert_redis_cache_contains("test_rust_query_planner_redis_update:plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:7a3d4ce3c2479cdb029f061aa64b4335b2de75d89011190643d302140a1c6ae5").await;
-    router
-        .update_config(include_str!(
-            "fixtures/rust_query_planner_redis_config_update2.router.yaml"
-        ))
-        .await;
+    router.assert_redis_cache_contains(starting_key, None).await;
+    router.update_config(updated_config).await;
     router.assert_reloaded().await;
     router.execute_default_query().await;
-    router.assert_redis_cache_contains("test_rust_query_planner_redis_update:plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8c8fbee8a082e4402d1c44a05e984657ba77572f6cbc9902f1d8679069ef8b2c").await;
+    router
+        .assert_redis_cache_contains(new_cache_key, Some(starting_key))
+        .await;
 }

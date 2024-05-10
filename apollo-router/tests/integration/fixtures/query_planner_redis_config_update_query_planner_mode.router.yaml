@@ -1,9 +1,8 @@
-# This config is used for testing query plans to redis
+# This config updates the query plan options so that we can see if there is a different redis cache entry generted for query plans
 supergraph:
   query_planning:
     cache:
       redis:
-        namespace: "test_rust_query_planner_redis_update"
         required_to_start: true
         urls:
           - redis://localhost:6379

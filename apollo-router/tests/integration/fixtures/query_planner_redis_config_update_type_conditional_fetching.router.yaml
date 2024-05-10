@@ -3,12 +3,8 @@ supergraph:
   query_planning:
     cache:
       redis:
-        namespace: "test_rust_query_planner_redis_update"
         required_to_start: true
         urls:
           - redis://localhost:6379
-  generate_query_fragments: true
+experimental_type_conditioned_fetching: true
 
-
-experimental_query_planner_mode: new
-experimental_apollo_metrics_generation_mode: new
