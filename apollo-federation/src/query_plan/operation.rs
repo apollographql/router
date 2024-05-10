@@ -2380,7 +2380,7 @@ impl SelectionSet {
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
     ) -> Result<SelectionSet, FederationError> {
         let mut result = SelectionMap::new();
-        for group in selection_key_groups.into_iter() {
+        for group in selection_key_groups {
             let selection = Self::make_selection(schema, parent_type, group)?;
             result.insert(selection);
         }
@@ -2485,7 +2485,7 @@ impl SelectionSet {
             });
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
-            Ok([updated, typename_selection].into_iter().collect())
+            Ok([typename_selection, updated].into_iter().collect())
         })
     }
 
