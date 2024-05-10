@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
-use apollo_federation::sources::connect::ConnectId;
+use apollo_federation::sources::connect::ConnectorDrivers;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -407,7 +407,7 @@ async fn subscription_task(
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
-    connector_drivers: IndexMap<ConnectId, ()>,
+    connector_drivers: ConnectorDrivers,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -583,7 +583,7 @@ async fn dispatch_event(
     context: Context,
     mut val: graphql::Response,
     sender: mpsc::Sender<Response>,
-    connector_drivers: IndexMap<ConnectId, ()>,
+    connector_drivers: ConnectorDrivers,
 ) -> Result<(), SendError<Response>> {
     let start = Instant::now();
     let span = Span::current();

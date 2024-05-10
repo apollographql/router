@@ -40,6 +40,8 @@ use crate::sources::SourcePath;
 use crate::sources::SourcePathApi;
 use crate::ValidFederationSubgraph;
 
+pub type ConnectorDrivers = IndexMap<ConnectId, ()>;
+
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
 pub struct ConnectId {
     pub label: String,

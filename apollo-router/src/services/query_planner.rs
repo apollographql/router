@@ -2,10 +2,9 @@
 
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::ConnectId;
+use apollo_federation::sources::connect::ConnectorDrivers;
 use async_trait::async_trait;
 use derivative::Derivative;
-use indexmap::IndexMap;
 use serde::Deserialize;
 use serde::Serialize;
 use static_assertions::assert_impl_all;
@@ -83,7 +82,7 @@ pub(crate) enum QueryPlannerContent {
     Plan {
         plan: Arc<QueryPlan>,
         #[serde(default, skip)]
-        connector_drivers: IndexMap<ConnectId, ()>,
+        connector_drivers: ConnectorDrivers,
     },
     Response {
         response: Box<graphql::Response>,

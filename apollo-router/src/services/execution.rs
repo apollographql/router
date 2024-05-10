@@ -2,8 +2,7 @@
 
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::ConnectId;
-use indexmap::IndexMap;
+use apollo_federation::sources::connect::ConnectorDrivers;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tokio::sync::mpsc;
@@ -32,7 +31,7 @@ pub struct Request {
 
     pub context: Context,
 
-    pub(crate) connector_drivers: IndexMap<ConnectId, ()>,
+    pub(crate) connector_drivers: ConnectorDrivers,
 
     /// Initial data coming from subscription event if it's a subscription
     pub(crate) source_stream_value: Option<Value>,
@@ -51,7 +50,7 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
-        connector_drivers: Option<IndexMap<ConnectId, ()>>,
+        connector_drivers: Option<ConnectorDrivers>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -71,7 +70,7 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
-        connector_drivers: Option<IndexMap<ConnectId, ()>>,
+        connector_drivers: Option<ConnectorDrivers>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -95,7 +94,7 @@ impl Request {
         supergraph_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
-        connector_drivers: Option<IndexMap<ConnectId, ()>>,
+        connector_drivers: Option<ConnectorDrivers>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {

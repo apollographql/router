@@ -2,10 +2,9 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::NodeStr;
-use apollo_federation::sources::connect::ConnectId;
+use apollo_federation::sources::connect::ConnectorDrivers;
 use futures::future::join_all;
 use futures::prelude::*;
-use indexmap::IndexMap;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
@@ -56,7 +55,7 @@ impl QueryPlan {
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
         initial_value: Option<Value>,
-        connector_drivers: &'a IndexMap<ConnectId, ()>,
+        connector_drivers: &'a ConnectorDrivers,
     ) -> Response {
         let root = Path::empty();
 
@@ -110,7 +109,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
-    pub(crate) connector_drivers: &'a IndexMap<ConnectId, ()>,
+    pub(crate) connector_drivers: &'a ConnectorDrivers,
 }
 
 impl PlanNode {
