@@ -268,7 +268,8 @@ async fn defer() {
                     output_rewrites: None,
                     schema_aware_hash: Default::default(),
                     authorization: Default::default(),
-                    protocol: Default::default()
+                    protocol: Default::default(),
+                    source_node: None,
                 }))),
             },
             deferred: vec![DeferredNode {
@@ -314,7 +315,8 @@ async fn defer() {
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                        protocol: Default::default()
+                        protocol: Default::default(),
+                        source_node: None,
                     })),
                 }))),
             }],
@@ -1805,6 +1807,7 @@ fn broken_plan_does_not_panic() {
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
             protocol: Default::default(),
+            source_node: Default::default(),
         }),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting {

@@ -89,6 +89,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
             protocol: Default::default(),
+            source_node: None,
         })
     }
 }

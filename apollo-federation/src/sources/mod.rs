@@ -260,7 +260,7 @@ pub(crate) trait SourcePathApi {
     ) -> Result<SourcePath, FederationError>;
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum SourceFetchNode {
     Graphql(GraphqlFetchNode),
     Connect(ConnectFetchNode),

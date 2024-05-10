@@ -320,28 +320,6 @@ impl Change {
 
                 add_entities_field(ty, graph_name, field_name, type_name);
             }
-            // Change::FakeEntities {
-            //     graph_name,
-            //     member_names,
-            // } => {
-            //     add_type(
-            //         schema,
-            //         "_Entity",
-            //         ExtendedType::Union(Node::new(UnionType {
-            //             description: None,
-            //             name: name!("_Entity"),
-            //             directives: Default::default(),
-            //             members: member_names.clone(),
-            //         })),
-            //     )
-            //     .unwrap();
-
-            //     let arg_ty = add_type(schema, "_Any", make_any_scalar())?;
-            //     add_join_type_directive(arg_ty, graph_name, None, None);
-
-            //     let ty = upsert_type(original_schema, schema, "Query")?;
-            //     add_entities_field(ty, graph_name, "_entities", "_Entity");
-            // }
             Change::EnumValue {
                 enum_name,
                 value_name,
