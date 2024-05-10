@@ -2442,7 +2442,7 @@ fn wrap_input_selections(
                }
             */
             let parent_type_position = fragment.data().parent_type_position.clone();
-            let selection = Selection::from_normalized_inline_fragment(fragment, sub_selections);
+            let selection = Selection::from_inline_fragment(fragment, sub_selections);
             SelectionSet::from_selection(parent_type_position, selection)
         },
     )
