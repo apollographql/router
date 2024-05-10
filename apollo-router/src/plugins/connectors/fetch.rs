@@ -88,7 +88,7 @@ impl FetchNode {
         current_dir: &'a Path,
     ) -> (Value, Vec<Error>) {
         // if self.source_node.is_some() {
-            // return process_source_node(parameters, data, current_dir);
+        // return process_source_node(parameters, data, current_dir);
         // }
         let FetchNode {
             operation,
@@ -228,9 +228,88 @@ impl FetchNode {
 }
 
 fn process_source_node<'a>(
-    execution_parameters: ExecutionParameters<'a>,
+    execution_parameters: &'a ExecutionParameters<'a>,
     data: &'a Value,
     current_dir: &'a Path,
 ) -> (Value, Vec<Error>) {
     (Default::default(), Default::default())
+}
+
+#[cfg(test)]
+mod soure_node_tests {
+    use apollo_compiler::NodeStr;
+
+    use crate::query_planner::fetch::SubgraphOperation;
+    use crate::query_planner::PlanNode;
+    use crate::services::SubgraphServiceFactory;
+    use crate::spec::{Query, Schema};
+
+    use super::*;
+
+    static SCHEMA: &str = r#"
+        schema
+          @core(feature: "https://specs.apollo.dev/core/v0.1"),
+          @core(feature: "https://specs.apollo.dev/join/v0.1")
+        {
+          query: Query
+        }
+
+        type Query {
+          me: String
+        }
+
+        directive @core(feature: String!) repeatable on SCHEMA
+
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+        enum join__Graph {
+          ACCOUNTS @join__graph(name: "accounts" url: "http://localhost:4001/graphql")
+        }
+        "#;
+
+    #[test]
+    fn test_process_source_node() {
+        let context = Default::default();
+        let service_factory = Arc::new(SubgraphServiceFactory::empty());
+        let schema = Arc::new(Schema::parse_test(SCHEMA, &Default::default()).unwrap());
+        let supergraph_request = Default::default();
+        let deferred_fetches = Default::default();
+        let query = Arc::new(Query::empty());
+        let root_node = PlanNode::Fetch(FetchNode {
+            service_name: NodeStr::new("test"),
+            requires: Default::default(),
+            variable_usages: Default::default(),
+            operation: SubgraphOperation::from_string(""),
+            operation_name: Default::default(),
+            operation_kind: Default::default(),
+            id: Default::default(),
+            input_rewrites: Default::default(),
+            output_rewrites: Default::default(),
+            schema_aware_hash: Default::default(),
+            authorization: Default::default(),
+            protocol: Default::default(),
+            source_node: Default::default(),
+        });
+        let subscription_handle = Default::default();
+        let subscription_config = Default::default();
+
+        let execution_parameters = ExecutionParameters {
+            context: &context,
+            service_factory: &service_factory,
+            schema: &schema,
+            supergraph_request: &supergraph_request,
+            deferred_fetches: &deferred_fetches,
+            query: &query,
+            root_node: &root_node,
+            subscription_handle: &subscription_handle,
+            subscription_config: &subscription_config,
+        };
+        let data = Default::default();
+        let current_dir = Default::default();
+
+        let expected = (Default::default(), Default::default());
+
+        let actual = process_source_node(&execution_parameters, &data, &current_dir);
+
+        assert_eq!(expected, actual);
+    }
 }
