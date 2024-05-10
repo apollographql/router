@@ -14,6 +14,7 @@ use nom::sequence::preceded;
 use nom::sequence::tuple;
 use nom::IResult;
 use serde::Serialize;
+use serde_json_bytes::Value as JSON;
 
 use super::helpers::spaces_or_comments;
 
@@ -358,6 +359,14 @@ impl Key {
             map(parse_identifier, Self::Field),
             map(parse_string_literal, Self::Quoted),
         ))(input)
+    }
+
+    pub fn to_json(&self) -> JSON {
+        match self {
+            Key::Field(name) => JSON::String(name.clone().into()),
+            Key::Quoted(name) => JSON::String(name.clone().into()),
+            Key::Index(index) => JSON::Number((*index).into()),
+        }
     }
 
     // This method returns the field/property name as a String, and is
