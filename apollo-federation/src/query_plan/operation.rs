@@ -416,6 +416,19 @@ pub(crate) mod normalized_selection_map {
         }
     }
 
+    impl<A> FromIterator<A> for SelectionMap
+    where
+        A: Into<Selection>,
+    {
+        fn from_iter<T: IntoIterator<Item = A>>(iter: T) -> Self {
+            let mut map = Self::new();
+            for selection in iter {
+                map.insert(selection.into());
+            }
+            map
+        }
+    }
+
     type IterMut<'a> = Map<
         indexmap::map::IterMut<'a, SelectionKey, Selection>,
         fn((&'a SelectionKey, &'a mut Selection)) -> (&'a SelectionKey, SelectionValue<'a>),
@@ -943,6 +956,24 @@ impl Selection {
     }
 }
 
+impl From<FieldSelection> for Selection {
+    fn from(value: FieldSelection) -> Self {
+        Self::Field(value.into())
+    }
+}
+
+impl From<FragmentSpreadSelection> for Selection {
+    fn from(value: FragmentSpreadSelection) -> Self {
+        Self::FragmentSpread(value.into())
+    }
+}
+
+impl From<InlineFragmentSelection> for Selection {
+    fn from(value: InlineFragmentSelection) -> Self {
+        Self::InlineFragment(value.into())
+    }
+}
+
 impl HasSelectionKey for Selection {
     fn key(&self) -> SelectionKey {
         match self {
@@ -1099,6 +1130,26 @@ mod normalized_field_selection {
             }
         }
 
+        /// Create a trivial field selection without any arguments or directives.
+        pub(crate) fn from_position(
+            schema: &ValidFederationSchema,
+            field_position: FieldDefinitionPosition,
+        ) -> Self {
+            Self::new(FieldData::from_position(schema, field_position))
+        }
+
+        /// Turn this `Field` into a `FieldSelection` with the given sub-selection. If this is
+        /// meant to be a leaf selection, use `None`.
+        pub(crate) fn with_subselection(
+            self,
+            selection_set: Option<SelectionSet>,
+        ) -> FieldSelection {
+            FieldSelection {
+                field: self,
+                selection_set,
+            }
+        }
+
         pub(crate) fn data(&self) -> &FieldData {
             &self.data
         }
@@ -1172,6 +1223,21 @@ mod normalized_field_selection {
     }
 
     impl FieldData {
+        /// Create a trivial field selection without any arguments or directives.
+        pub fn from_position(
+            schema: &ValidFederationSchema,
+            field_position: FieldDefinitionPosition,
+        ) -> Self {
+            Self {
+                schema: schema.clone(),
+                field_position,
+                alias: None,
+                arguments: Default::default(),
+                directives: Default::default(),
+                sibling_typename: None,
+            }
+        }
+
         pub(crate) fn name(&self) -> &Name {
             self.field_position.field_name()
         }
@@ -1799,6 +1865,7 @@ impl SelectionSet {
         }
     }
 
+    /// Build a selection set from a single selection.
     pub(crate) fn from_selection(
         type_position: CompositeTypeDefinitionPosition,
         selection: Selection,
@@ -1810,6 +1877,20 @@ impl SelectionSet {
             schema,
             type_position,
             selections: Arc::new(selection_map),
+        }
+    }
+
+    /// Build a selection set from the given selections. This does **not** handle merging of
+    /// selections with the same keys!
+    pub(crate) fn from_raw_selections<S: Into<Selection>>(
+        schema: ValidFederationSchema,
+        type_position: CompositeTypeDefinitionPosition,
+        selections: impl IntoIterator<Item = S>,
+    ) -> Self {
+        Self {
+            schema,
+            type_position,
+            selections: Arc::new(selections.into_iter().collect()),
         }
     }
 
@@ -4941,6 +5022,7 @@ mod tests {
     use super::normalize_operation;
     use super::Containment;
     use super::ContainmentOptions;
+    use super::Field;
     use super::Name;
     use super::NamedFragments;
     use super::Operation;
@@ -4948,6 +5030,7 @@ mod tests {
     use super::SelectionKey;
     use super::SelectionSet;
     use crate::schema::position::InterfaceTypeDefinitionPosition;
+    use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::subgraph::Subgraph;
 
@@ -7048,5 +7131,71 @@ type T {
             get_value_at_path(&result, &[name!("foo"), name!("__typename")])
                 .expect("foo.__typename should exist");
         }
+    }
+
+    #[test]
+    fn make_selection_ordering() {
+        let schema = apollo_compiler::Schema::parse_and_validate(
+            r#"
+        interface Intf {
+            intfField: Int
+        }
+        type HasA implements Intf {
+            a: Boolean
+            intfField: Int
+        }
+        type Nested {
+            a: Int
+            b: Int
+            c: Int
+        }
+        type Query {
+            object: Nested
+            intf: Intf
+        }
+        "#,
+            "schema.graphql",
+        )
+        .unwrap();
+        let schema = ValidFederationSchema::new(schema).unwrap();
+        let position = ObjectTypeDefinitionPosition::new(name!("Query")).into();
+        let nested = ObjectTypeDefinitionPosition::new(name!("Nested"));
+
+        let selection = SelectionSet::make_selection(
+            &schema,
+            &position,
+            [
+                Selection::from_normalized_field(
+                    Field::from_position(&schema, position.field(name!("object")).unwrap()),
+                    Some(SelectionSet::from_raw_selections(
+                        schema.clone(),
+                        position.clone(),
+                        [
+                            Field::from_position(&schema, nested.field(name!("c")).into())
+                                .with_subselection(None),
+                            Field::from_position(&schema, nested.field(name!("a")).into())
+                                .with_subselection(None),
+                        ],
+                    )),
+                ),
+                Selection::from_normalized_field(
+                    Field::from_position(&schema, position.field(name!("object")).unwrap()),
+                    Some(SelectionSet::from_raw_selections(
+                        schema.clone(),
+                        position.clone(),
+                        [
+                            Field::from_position(&schema, nested.field(name!("b")).into())
+                                .with_subselection(None),
+                            Field::from_position(&schema, nested.field(name!("a")).into())
+                                .with_subselection(None),
+                        ],
+                    )),
+                ),
+            ]
+            .iter(),
+        )
+        .unwrap();
+
+        insta::assert_snapshot!(selection, @"object { c a b }");
     }
 }
