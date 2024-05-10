@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/query_planner/tests.rs
+assertion_line: 56
 expression: query_plan
 ---
 Sequence {
@@ -168,10 +169,7 @@ Sequence {
                                             policies: [],
                                         },
                                         protocol: GraphQL,
-<<<<<<< HEAD
                                         source_node: None,
-=======
->>>>>>> connectors
                                     },
                                 ),
                             },
@@ -235,10 +233,7 @@ Sequence {
                                             policies: [],
                                         },
                                         protocol: GraphQL,
-<<<<<<< HEAD
                                         source_node: None,
-=======
->>>>>>> connectors
                                     },
                                 ),
                             },
@@ -311,10 +306,7 @@ Sequence {
                                             policies: [],
                                         },
                                         protocol: GraphQL,
-<<<<<<< HEAD
                                         source_node: None,
-=======
->>>>>>> connectors
                                     },
                                 ),
                             },

@@ -293,7 +293,7 @@ impl Alias {
 
 // Property ::= Identifier | StringLiteral
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
 pub enum Property {
     Field(String),
     Quoted(String),

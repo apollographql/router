@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use apollo_federation::sources::SourceFetchNode;
 use indexmap::IndexSet;
+use once_cell::sync::OnceCell as OnceLock;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use serde::Deserialize;
@@ -25,6 +25,7 @@ use super::QueryPlanResult;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::error::QueryPlannerError;
+use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -213,17 +214,17 @@ impl SubgraphOperation {
     pub(crate) fn as_parsed(
         &self,
         subgraph_schema: &Valid<apollo_compiler::Schema>,
-    ) -> &Arc<Valid<ExecutableDocument>> {
-        self.parsed.get_or_init(|| {
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
+        self.parsed.get_or_try_init(|| {
             let serialized = self
                 .serialized
                 .get()
                 .expect("SubgraphOperation has neither representation initialized");
-            Arc::new(Valid::assume_valid(
+
+            Ok(Arc::new(Valid::assume_valid(
                 ExecutableDocument::parse(subgraph_schema, serialized, "operation.graphql")
-                    .map_err(|e| e.errors)
-                    .expect("Subgraph operation should be valid"),
-            ))
+                    .map_err(|e| e.errors)?,
+            )))
         })
     }
 }
@@ -373,7 +374,7 @@ impl FetchNode {
     pub(crate) fn parsed_operation(
         &self,
         subgraph_schemas: &SubgraphSchemas,
-    ) -> &Arc<Valid<ExecutableDocument>> {
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
         self.operation
             .as_parsed(&subgraph_schemas[self.service_name().as_str()])
     }
@@ -669,8 +670,8 @@ impl FetchNode {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
-    ) {
-        let doc = self.parsed_operation(subgraph_schemas);
+    ) -> Result<(), ValidationErrors> {
+        let doc = self.parsed_operation(subgraph_schemas)?;
         let schema = &subgraph_schemas[self.service_name().as_str()];
 
         if let Ok(hash) = QueryHashVisitor::hash_query(
@@ -681,6 +682,7 @@ impl FetchNode {
         ) {
             self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
+        Ok(())
     }
 
     pub(crate) fn extract_authorization_metadata(

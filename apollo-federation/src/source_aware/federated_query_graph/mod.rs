@@ -4,7 +4,9 @@ use petgraph::graph::DiGraph;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::query_plan::operation::SelectionSet;
 use crate::schema::position::AbstractFieldDefinitionPosition;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -31,13 +33,29 @@ pub(crate) mod path_tree;
 
 #[derive(Debug)]
 pub struct FederatedQueryGraph {
-    graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
+    pub(crate) graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
     supergraph_types_to_root_nodes: IndexMap<ObjectTypeDefinitionPosition, NodeIndex>,
     supergraph_root_kinds_to_types:
         IndexMap<SchemaRootDefinitionKind, ObjectTypeDefinitionPosition>,
-    self_conditions: Vec<NormalizedSelectionSet>,
+    self_conditions: Vec<SelectionSet>,
     non_trivial_followup_edges: IndexMap<EdgeIndex, IndexSet<EdgeIndex>>,
     source_data: SourceFederatedQueryGraphs,
+}
+
+impl FederatedQueryGraph {
+    #[cfg(test)]
+    pub(crate) fn with_graph(
+        graph: DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge>,
+    ) -> Self {
+        Self {
+            graph,
+            supergraph_types_to_root_nodes: IndexMap::new(),
+            supergraph_root_kinds_to_types: IndexMap::new(),
+            self_conditions: Vec::new(),
+            non_trivial_followup_edges: IndexMap::new(),
+            source_data: SourceFederatedQueryGraphs::with_graphs(IndexMap::new()),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -139,5 +157,68 @@ pub(crate) enum FederatedQueryGraphEdge {
 #[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
 pub(crate) struct SelfConditionIndex(usize);
 
-#[derive(Debug)]
-pub(crate) struct ConditionNormalizedSelectionSet(NormalizedSelectionSet);
+impl FederatedQueryGraph {
+    pub(crate) fn graph(&self) -> &DiGraph<FederatedQueryGraphNode, FederatedQueryGraphEdge> {
+        &self.graph
+    }
+
+    pub(crate) fn node_weight(
+        &self,
+        node: NodeIndex,
+    ) -> Result<&FederatedQueryGraphNode, FederationError> {
+        self.graph.node_weight(node).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Node unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    fn node_weight_mut(
+        &mut self,
+        node: NodeIndex,
+    ) -> Result<&mut FederatedQueryGraphNode, FederationError> {
+        self.graph.node_weight_mut(node).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Node unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    pub(crate) fn edge_weight(
+        &self,
+        edge: EdgeIndex,
+    ) -> Result<&FederatedQueryGraphEdge, FederationError> {
+        self.graph.edge_weight(edge).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Edge unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    fn edge_weight_mut(
+        &mut self,
+        edge: EdgeIndex,
+    ) -> Result<&mut FederatedQueryGraphEdge, FederationError> {
+        self.graph.edge_weight_mut(edge).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Edge unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+
+    pub(crate) fn edge_endpoints(
+        &self,
+        edge: EdgeIndex,
+    ) -> Result<(NodeIndex, NodeIndex), FederationError> {
+        self.graph.edge_endpoints(edge).ok_or_else(|| {
+            SingleFederationError::Internal {
+                message: "Edge unexpectedly missing".to_owned(),
+            }
+            .into()
+        })
+    }
+}

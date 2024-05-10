@@ -2091,11 +2091,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the request without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -2115,11 +2110,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"
@@ -2138,11 +2128,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the response without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -2157,11 +2142,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"
@@ -4263,11 +4243,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the request without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -4287,11 +4262,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"
@@ -4310,11 +4280,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the response without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -4329,11 +4294,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"
@@ -5061,11 +5021,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the request without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -5085,11 +5040,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the subgraph URI",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"
@@ -5108,11 +5058,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the response without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -5127,11 +5072,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the http status",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"
@@ -5760,11 +5700,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the request without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -5779,11 +5714,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the SDL",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"
@@ -5802,11 +5732,6 @@ expression: "&schema"
           "description": "Send the context",
           "type": "boolean"
         },
-        "detached": {
-          "default": false,
-          "description": "Handles the response without waiting for the coprocessor to respond",
-          "type": "boolean"
-        },
         "headers": {
           "default": false,
           "description": "Send the headers",
@@ -5821,11 +5746,6 @@ expression: "&schema"
           "default": false,
           "description": "Send the HTTP status",
           "type": "boolean"
-        },
-        "url": {
-          "default": null,
-          "description": "The url you'd like to offload processing to",
-          "type": "string"
         }
       },
       "type": "object"

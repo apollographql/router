@@ -15,7 +15,7 @@ use crate::query_graph::graph_path::OpGraphPath;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
-use crate::query_plan::operation::NormalizedSelectionSet;
+use crate::query_plan::operation::SelectionSet;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
 /// node, in which each node of the tree corresponds to a node in the query graph, and a tree's node
@@ -39,7 +39,7 @@ where
     /// such paths where this `PathTree`'s node corresponds to that final node, those selection sets
     /// are collected here. This is really an optimization to avoid unnecessary merging of selection
     /// sets when they query a single subgraph.
-    pub(crate) local_selection_sets: Vec<Arc<NormalizedSelectionSet>>,
+    pub(crate) local_selection_sets: Vec<Arc<SelectionSet>>,
     /// The child `PathTree`s for this `PathTree` node. There is a child for every unique pair of
     /// edge and trigger present at this particular sub-path within the `GraphPath`s covered by this
     /// `PathTree` node.
@@ -79,7 +79,7 @@ impl OpPathTree {
     pub(crate) fn from_op_paths(
         graph: Arc<QueryGraph>,
         node: NodeIndex,
-        paths: &[(&OpGraphPath, Option<&Arc<NormalizedSelectionSet>>)],
+        paths: &[(&OpGraphPath, Option<&Arc<SelectionSet>>)],
     ) -> Result<Self, FederationError> {
         assert!(
             !paths.is_empty(),
@@ -171,7 +171,7 @@ where
         node: NodeIndex,
         graph_paths_and_selections: Vec<(
             impl Iterator<Item = GraphPathItem<'inputs, TTrigger, TEdge>>,
-            Option<&'inputs Arc<NormalizedSelectionSet>>,
+            Option<&'inputs Arc<SelectionSet>>,
         )>,
     ) -> Result<Self, FederationError>
     where
@@ -189,8 +189,7 @@ where
 
         struct PathTreeChildInputs<'inputs, GraphPathIter> {
             conditions: Option<Arc<OpPathTree>>,
-            sub_paths_and_selections:
-                Vec<(GraphPathIter, Option<&'inputs Arc<NormalizedSelectionSet>>)>,
+            sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
         }
 
         let mut local_selection_sets = Vec::new();
@@ -381,8 +380,8 @@ mod tests {
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
     use crate::query_plan::operation::normalize_operation;
-    use crate::query_plan::operation::NormalizedField;
-    use crate::query_plan::operation::NormalizedFieldData;
+    use crate::query_plan::operation::Field;
+    use crate::query_plan::operation::FieldData;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::ValidFederationSchema;
 
@@ -439,7 +438,7 @@ mod tests {
                 .unwrap();
 
             // build the trigger for the edge
-            let data = NormalizedFieldData {
+            let data = FieldData {
                 schema: query_graph.schema().unwrap().clone(),
                 field_position: field_def.clone(),
                 alias: None,
@@ -447,8 +446,7 @@ mod tests {
                 directives: Arc::new(DirectiveList::new()),
                 sibling_typename: None,
             };
-            let trigger =
-                OpGraphPathTrigger::OpPathElement(OpPathElement::Field(NormalizedField::new(data)));
+            let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
 
             // add the edge to the path
             graph_path = graph_path
@@ -508,7 +506,7 @@ mod tests {
         );
 
         let normalized_operation =
-            normalize_operation(operation, &Default::default(), &schema, &Default::default())
+            normalize_operation(operation, Default::default(), &schema, &Default::default())
                 .unwrap();
         let selection_set = Arc::new(normalized_operation.selection_set);
 
