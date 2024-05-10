@@ -1,0 +1,60 @@
+---
+source: apollo-router/src/plugins/connectors/directives.rs
+expression: source_types
+---
+[
+  {
+    "graph": "contacts",
+    "type_name": "ValidSourceType",
+    "api": "contacts",
+    "http": {
+      "path_template": "/contacts/{contactId!}",
+      "method": "GET",
+      "headers": [],
+      "body": null
+    },
+    "selection": {
+      "Named": {
+        "selections": [
+          {
+            "Field": [
+              null,
+              "a",
+              null
+            ]
+          }
+        ],
+        "star": null
+      }
+    },
+    "key_type_map": null,
+    "is_interface_object": false
+  },
+  {
+    "graph": "contacts",
+    "type_name": "ValidSourceTypeDefaultHttp",
+    "api": "contacts",
+    "http": {
+      "path_template": "/contacts/{contactId!}",
+      "method": "GET",
+      "headers": [],
+      "body": null
+    },
+    "selection": {
+      "Named": {
+        "selections": [
+          {
+            "Field": [
+              null,
+              "a",
+              null
+            ]
+          }
+        ],
+        "star": null
+      }
+    },
+    "key_type_map": null,
+    "is_interface_object": false
+  }
+]

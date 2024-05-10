@@ -231,8 +231,8 @@ impl PathSelection {
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct SubSelection {
-    pub(crate) selections: Vec<NamedSelection>,
-    pub(crate) star: Option<StarSelection>,
+    pub selections: Vec<NamedSelection>,
+    pub star: Option<StarSelection>,
 }
 
 impl SubSelection {
@@ -293,7 +293,7 @@ impl Alias {
 
 // Property ::= Identifier | StringLiteral
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Serialize)]
 pub enum Property {
     Field(String),
     Quoted(String),

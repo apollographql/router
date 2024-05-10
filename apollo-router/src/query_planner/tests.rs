@@ -252,77 +252,82 @@ async fn fetch_makes_post_requests() {
 async fn defer() {
     // plan for { t { x ... @defer { y } }}
     let query_plan: QueryPlan = QueryPlan {
-            formatted_query_plan: Default::default(),
-            root: PlanNode::Defer {
-                primary: Primary {
-                    subselection: Some("{ t { x } }".to_string()),
-                    node: Some(Box::new(PlanNode::Fetch(FetchNode {
-                        service_name: "X".into(),
-                        requires: vec![],
+        formatted_query_plan: Default::default(),
+        root: PlanNode::Defer {
+            primary: Primary {
+                subselection: Some("{ t { x } }".to_string()),
+                node: Some(Box::new(PlanNode::Fetch(FetchNode {
+                    service_name: "X".into(),
+                    requires: vec![],
+                    variable_usages: vec![],
+                    operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
+                    operation_name: Some("t".into()),
+                    operation_kind: OperationKind::Query,
+                    id: Some("fetch1".into()),
+                    input_rewrites: None,
+                    output_rewrites: None,
+                    schema_aware_hash: Default::default(),
+                    authorization: Default::default(),
+                    protocol: Default::default(),
+                    source_node: None,
+                }))),
+            },
+            deferred: vec![DeferredNode {
+                depends: vec![Depends {
+                    id: "fetch1".into(),
+                }],
+                label: None,
+                query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                subselection: Some("{ y }".to_string()),
+                node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
+                    path: Path(vec![PathElement::Key("t".to_string(), None)]),
+                    node: Box::new(PlanNode::Fetch(FetchNode {
+                        service_name: "Y".into(),
+                        requires: vec![query_planner::selection::Selection::InlineFragment(
+                            query_planner::selection::InlineFragment {
+                                type_condition: Some(name!("T")),
+                                selections: vec![
+                                    query_planner::selection::Selection::Field(
+                                        query_planner::selection::Field {
+                                            alias: None,
+                                            name: name!("id"),
+                                            selections: None,
+                                        },
+                                    ),
+                                    query_planner::selection::Selection::Field(
+                                        query_planner::selection::Field {
+                                            alias: None,
+                                            name: name!("__typename"),
+                                            selections: None,
+                                        },
+                                    ),
+                                ],
+                            },
+                        )],
                         variable_usages: vec![],
-                        operation: SubgraphOperation::from_string("{ t { id __typename x } }"),
-                        operation_name: Some("t".into()),
+                        operation: SubgraphOperation::from_string(
+                            "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
+                        ),
+                        operation_name: None,
                         operation_kind: OperationKind::Query,
-                        id: Some("fetch1".into()),
+                        id: Some("fetch2".into()),
                         input_rewrites: None,
                         output_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
-                    }))),
-                },
-                deferred: vec![DeferredNode {
-                    depends: vec![Depends {
-                        id: "fetch1".into(),
-                    }],
-                    label: None,
-                    query_path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                    subselection: Some("{ y }".to_string()),
-                    node: Some(Arc::new(PlanNode::Flatten(FlattenNode {
-                        path: Path(vec![PathElement::Key("t".to_string(), None)]),
-                        node: Box::new(PlanNode::Fetch(FetchNode {
-                            service_name: "Y".into(),
-                            requires: vec![query_planner::selection::Selection::InlineFragment(
-                                query_planner::selection::InlineFragment {
-                                    type_condition: Some(name!("T")),
-                                    selections: vec![
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
-                                                alias: None,
-                                                name: name!("id"),
-                                                selections: None,
-                                            },
-                                        ),
-                                        query_planner::selection::Selection::Field(
-                                            query_planner::selection::Field {
-                                                alias: None,
-                                                name: name!("__typename"),
-                                                selections: None,
-                                            },
-                                        ),
-                                    ],
-                                },
-                            )],
-                            variable_usages: vec![],
-                            operation: SubgraphOperation::from_string(
-                                "query($representations:[_Any!]!){_entities(representations:$representations){...on T{y}}}"
-                            ),
-                            operation_name: None,
-                            operation_kind: OperationKind::Query,
-                            id: Some("fetch2".into()),
-                            input_rewrites: None,
-                            output_rewrites: None,
-                            schema_aware_hash: Default::default(),
-                            authorization: Default::default(),
-                        })),
-                    }))),
-                }],
-            },
-            usage_reporting: UsageReporting {
-                stats_report_key: "this is a test report key".to_string(),
-                referenced_fields_by_type: Default::default(),
-            }.into(),
-            query: Arc::new(Query::empty()),
-        };
+                        protocol: Default::default(),
+                        source_node: None,
+                    })),
+                }))),
+            }],
+        },
+        usage_reporting: UsageReporting {
+            stats_report_key: "this is a test report key".to_string(),
+            referenced_fields_by_type: Default::default(),
+        }
+        .into(),
+        query: Arc::new(Query::empty()),
+    };
 
     let mut mock_x_service = plugin::test::MockSubgraphService::new();
     mock_x_service.expect_clone().return_once(|| {
@@ -1801,6 +1806,8 @@ fn broken_plan_does_not_panic() {
             output_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
+            protocol: Default::default(),
+            source_node: Default::default(),
         }),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting {

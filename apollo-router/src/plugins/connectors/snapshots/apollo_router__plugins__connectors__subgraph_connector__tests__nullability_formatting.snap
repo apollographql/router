@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/plugins/connectors/subgraph_connector.rs
+expression: response
+---
+{
+  "data": {
+    "serverNetworkInfo": {
+      "ip": "1.2.3.4",
+      "hostname": "hello"
+    }
+  }
+}
