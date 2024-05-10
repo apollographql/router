@@ -6,6 +6,7 @@ use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
+use apollo_federation::sources::connect::ConnectId;
 use futures::future::BoxFuture;
 use futures::stream::StreamExt;
 use futures::TryFutureExt;
@@ -223,7 +224,10 @@ async fn service_call(
             Ok(response)
         }
 
-        Some(QueryPlannerContent::Plan { plan }) => {
+        Some(QueryPlannerContent::Plan {
+            plan,
+            connector_drivers,
+        }) => {
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
@@ -308,6 +312,7 @@ async fn service_call(
                     let execution_service_factory_cloned = execution_service_factory.clone();
                     let cloned_supergraph_req =
                         clone_supergraph_request(&req.supergraph_request, context.clone());
+                    let cd = connector_drivers.clone();
                     // Spawn task for subscription
                     tokio::spawn(async move {
                         subscription_task(
@@ -317,6 +322,7 @@ async fn service_call(
                             subs_rx,
                             notify,
                             cloned_supergraph_req,
+                            cd,
                         )
                         .await;
                     });
@@ -331,6 +337,7 @@ async fn service_call(
                             .query_plan(plan.clone())
                             .context(context)
                             .and_subscription_tx(subscription_tx)
+                            .connector_drivers(connector_drivers)
                             .build()
                             .await,
                     )
@@ -400,6 +407,7 @@ async fn subscription_task(
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
+    connector_drivers: IndexMap<ConnectId, ()>,
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
@@ -502,7 +510,7 @@ async fn subscription_task(
                             tracing::info!(http.request.body = ?val, apollo.subgraph.name = %service_name, "Subscription event body from subgraph {service_name:?}");
                         }
                         val.created_at = Some(Instant::now());
-                        let res = dispatch_event(&supergraph_req, &execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone())
+                        let res = dispatch_event(&supergraph_req, &execution_service_factory, query_plan.as_ref(), context.clone(), val, sender.clone(), connector_drivers.clone())
                             .instrument(tracing::info_span!(SUBSCRIPTION_EVENT_SPAN_NAME,
                                 graphql.operation.name = %operation_name,
                                 otel.kind = "INTERNAL",
@@ -575,6 +583,7 @@ async fn dispatch_event(
     context: Context,
     mut val: graphql::Response,
     sender: mpsc::Sender<Response>,
+    connector_drivers: IndexMap<ConnectId, ()>,
 ) -> Result<(), SendError<Response>> {
     let start = Instant::now();
     let span = Span::current();
@@ -588,6 +597,7 @@ async fn dispatch_event(
                 .supergraph_request(cloned_supergraph_req.supergraph_request)
                 .query_plan(query_plan.clone())
                 .context(context)
+                .connector_drivers(connector_drivers)
                 .source_stream_value(val.data.take().unwrap_or_default())
                 .build()
                 .await;
