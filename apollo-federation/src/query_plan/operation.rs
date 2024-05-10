@@ -2594,9 +2594,9 @@ impl SelectionSet {
     /// Users of this method should guarantee that this doesn't happen. Otherwise, converting this
     /// SelectionSet back to an ExecutableDocument will return a validation error.
     ///
-    /// The final selections are optional (for instance, if `path` ends on a leaf field,
-    /// then no followup selections would make sense),
-    /// but when some are provided, uncesssary fragments will be automaticaly removed
+    /// The final selections are optional. If `path` ends on a leaf field, then no followup
+    /// selections would make sense.
+    /// When final selections are provided, unecessary fragments will be automatically removed
     /// at the junction between the path and those final selections.
     /// For instance, suppose that we have:
     ///  - a `path` argument that is `a::b::c`,
