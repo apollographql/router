@@ -806,7 +806,7 @@ mod tests {
                 directive: ObjectOrInterfaceFieldDirectivePosition {
                     field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                         ObjectFieldDefinitionPosition {
-                            type_name: name!("TestObject"),
+                            type_name: name!("_testObject"),
                             field_name: name!("testField"),
                         },
                     ),
@@ -824,7 +824,7 @@ mod tests {
             // Fill in some dummy data
             graph.add_node(federated_query_graph::Node::Concrete {
                 supergraph_type: ObjectTypeDefinitionPosition {
-                    type_name: name!("Query"),
+                    type_name: name!("_query"),
                 },
                 field_edges: IndexMap::new(),
                 source_exiting_edge: None,
@@ -832,26 +832,11 @@ mod tests {
                 source_data: source::federated_query_graph::ConcreteNode::Connect(
                     connect::federated_query_graph::ConcreteNode::SelectionRoot {
                         subgraph_type: ObjectTypeDefinitionPosition {
-                            type_name: name!("Query"),
+                            type_name: name!("_query"),
                         },
                         property_path: Vec::new(),
                     },
                 ),
-            });
-
-            let source_id = SourceId::Connect(ConnectId {
-                label: "test connect".to_string(),
-                subgraph_name: "CONNECT".into(),
-                directive: ObjectOrInterfaceFieldDirectivePosition {
-                    field: ObjectOrInterfaceFieldDefinitionPosition::Object(
-                        ObjectFieldDefinitionPosition {
-                            type_name: name!("TestObject"),
-                            field_name: name!("testField"),
-                        },
-                    ),
-                    directive_name: name!("connect"),
-                    directive_index: 0,
-                },
             });
 
             SetupInfo {
@@ -871,11 +856,11 @@ mod tests {
             } = setup();
 
             let node_type = ObjectTypeDefinitionPosition {
-                type_name: name!("NoFieldConcreteNode"),
+                type_name: name!("_noFieldConcreteNode"),
             };
             let field_pos = ObjectFieldDefinitionPosition {
-                type_name: name!("NoFieldTypeName"),
-                field_name: name!("NoFieldFieldName"),
+                type_name: name!("_noFieldTypeName"),
+                field_name: name!("_noFieldFieldName"),
             };
             let node = graph.add_node(federated_query_graph::Node::Concrete {
                 supergraph_type: node_type.clone(),
@@ -913,7 +898,7 @@ mod tests {
             let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
                 schema,
                 field_position: FieldDefinitionPosition::Object(field_pos),
-                alias: Some(name!("NoFieldTestAlias")),
+                alias: Some(name!("_noFieldTestAlias")),
                 arguments: Arc::new(Vec::new()),
                 directives: Arc::new(DirectiveList::new()),
                 sibling_typename: None,
@@ -938,7 +923,7 @@ mod tests {
                             label: "test connect",
                             subgraph_name: "CONNECT",
                             directive: ObjectOrInterfaceFieldDirectivePosition {
-                                field: Object(TestObject.testField),
+                                field: Object(_testObject.testField),
                                 directive_name: "connect",
                                 directive_index: 0,
                             },
@@ -946,7 +931,7 @@ mod tests {
                     ),
                     field: Some(
                         PathField {
-                            response_name: "NoFieldTestAlias",
+                            response_name: "_noFieldTestAlias",
                             arguments: {},
                             selections: Selections {
                                 head_property_path: [
@@ -974,11 +959,11 @@ mod tests {
             } = setup();
 
             let node_type = EnumTypeDefinitionPosition {
-                type_name: name!("NoFieldEnumNode"),
+                type_name: name!("_noFieldEnumNode"),
             };
             let field_pos = ObjectFieldDefinitionPosition {
-                type_name: name!("NoFieldTypeName"),
-                field_name: name!("NoFieldFieldName"),
+                type_name: name!("_noFieldTypeName"),
+                field_name: name!("_noFieldFieldName"),
             };
             let node = graph.add_node(federated_query_graph::Node::Enum {
                 supergraph_type: node_type.clone(),
@@ -1014,7 +999,7 @@ mod tests {
             let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
                 schema,
                 field_position: FieldDefinitionPosition::Object(field_pos),
-                alias: Some(name!("NoFieldTestAlias")),
+                alias: Some(name!("_noFieldTestAlias")),
                 arguments: Arc::new(Vec::new()),
                 directives: Arc::new(DirectiveList::new()),
                 sibling_typename: None,
@@ -1039,7 +1024,7 @@ mod tests {
                             label: "test connect",
                             subgraph_name: "CONNECT",
                             directive: ObjectOrInterfaceFieldDirectivePosition {
-                                field: Object(TestObject.testField),
+                                field: Object(_testObject.testField),
                                 directive_name: "connect",
                                 directive_index: 0,
                             },
@@ -1047,7 +1032,7 @@ mod tests {
                     ),
                     field: Some(
                         PathField {
-                            response_name: "NoFieldTestAlias",
+                            response_name: "_noFieldTestAlias",
                             arguments: {},
                             selections: Selections {
                                 head_property_path: [
@@ -1076,11 +1061,11 @@ mod tests {
 
             let (_, selection) = JSONSelection::parse(".one.two.three").unwrap();
             let node_type = ScalarTypeDefinitionPosition {
-                type_name: name!("NoFieldCustomScalarNode"),
+                type_name: name!("_noFieldCustomScalarNode"),
             };
             let field_pos = ObjectFieldDefinitionPosition {
-                type_name: name!("NoFieldTypeName"),
-                field_name: name!("NoFieldFieldName"),
+                type_name: name!("_noFieldTypeName"),
+                field_name: name!("_noFieldFieldName"),
             };
             let node = graph.add_node(federated_query_graph::Node::Scalar {
                 supergraph_type: node_type.clone(),
@@ -1116,7 +1101,7 @@ mod tests {
             let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
                 schema,
                 field_position: FieldDefinitionPosition::Object(field_pos),
-                alias: Some(name!("NoFieldTestAlias")),
+                alias: Some(name!("_noFieldTestAlias")),
                 arguments: Arc::new(Vec::new()),
                 directives: Arc::new(DirectiveList::new()),
                 sibling_typename: None,
@@ -1141,7 +1126,7 @@ mod tests {
                             label: "test connect",
                             subgraph_name: "CONNECT",
                             directive: ObjectOrInterfaceFieldDirectivePosition {
-                                field: Object(TestObject.testField),
+                                field: Object(_testObject.testField),
                                 directive_name: "connect",
                                 directive_index: 0,
                             },
@@ -1149,7 +1134,7 @@ mod tests {
                     ),
                     field: Some(
                         PathField {
-                            response_name: "NoFieldTestAlias",
+                            response_name: "_noFieldTestAlias",
                             arguments: {},
                             selections: CustomScalarRoot {
                                 selection: Path(
@@ -1188,11 +1173,11 @@ mod tests {
             } = setup();
 
             let node_type = EnumTypeDefinitionPosition {
-                type_name: name!("FieldEnumNode"),
+                type_name: name!("_fieldEnumNode"),
             };
             let field_pos = ObjectFieldDefinitionPosition {
-                type_name: name!("FieldTypeName"),
-                field_name: name!("FieldFieldName"),
+                type_name: name!("_fieldTypeName"),
+                field_name: name!("_fieldFieldName"),
             };
             let node = graph.add_node(federated_query_graph::Node::Enum {
                 supergraph_type: node_type.clone(),
@@ -1228,7 +1213,7 @@ mod tests {
                 source_entering_edge: EdgeIndex::end(),
                 source_id,
                 field: Some(connect::fetch_dependency_graph::PathField {
-                    response_name: name!("ConnectPathResponseName"),
+                    response_name: name!("_connectPathResponseName"),
                     arguments: IndexMap::new(),
                     selections: connect::fetch_dependency_graph::PathSelections::Selections {
                         head_property_path: Vec::new(),
@@ -1240,7 +1225,7 @@ mod tests {
             let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
                 schema,
                 field_position: FieldDefinitionPosition::Object(field_pos),
-                alias: Some(name!("FieldTestAlias")),
+                alias: Some(name!("_fieldTestAlias")),
                 arguments: Arc::new(Vec::new()),
                 directives: Arc::new(DirectiveList::new()),
                 sibling_typename: None,
@@ -1265,7 +1250,7 @@ mod tests {
                             label: "test connect",
                             subgraph_name: "CONNECT",
                             directive: ObjectOrInterfaceFieldDirectivePosition {
-                                field: Object(TestObject.testField),
+                                field: Object(_testObject.testField),
                                 directive_name: "connect",
                                 directive_index: 0,
                             },
@@ -1273,14 +1258,14 @@ mod tests {
                     ),
                     field: Some(
                         PathField {
-                            response_name: "ConnectPathResponseName",
+                            response_name: "_connectPathResponseName",
                             arguments: {},
                             selections: Selections {
                                 head_property_path: [],
                                 named_selections: [],
                                 tail_selection: Some(
                                     (
-                                        "FieldTestAlias",
+                                        "_fieldTestAlias",
                                         Selection {
                                             property_path: [
                                                 Field(
