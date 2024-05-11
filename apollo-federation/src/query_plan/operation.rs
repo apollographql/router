@@ -231,6 +231,22 @@ impl Operation {
 
         self
     }
+
+    fn with_updated_selection_set_and_fragments(
+        &self,
+        new_selection_set: SelectionSet,
+        new_fragments: Option<NamedFragments>,
+    ) -> Self {
+        Self {
+            schema: self.schema.clone(),
+            root_kind: self.root_kind,
+            name: self.name.clone(),
+            variables: self.variables.clone(),
+            selection_set: new_selection_set,
+            named_fragments: new_fragments.unwrap_or_default(),
+            directives: self.directives.clone(),
+        }
+    }
 }
 
 /// An analogue of the apollo-compiler type `SelectionSet` with these changes:
@@ -915,9 +931,16 @@ impl Selection {
             Selection::Field(field) => Ok(Selection::from(
                 field.with_updated_selection_set(selection_set),
             )),
-            Selection::InlineFragment(inline_fragment) => Ok(Selection::from(
-                inline_fragment.with_updated_selection_set(selection_set),
-            )),
+            Selection::InlineFragment(inline_fragment) => {
+                let Some(selection_set) = selection_set else {
+                    return Err(FederationError::internal(
+                        "updating inline fragment without a sub-selection set",
+                    ));
+                };
+                Ok(inline_fragment
+                    .with_updated_selection_set(selection_set)
+                    .into())
+            }
             Selection::FragmentSpread(_) => {
                 Err(FederationError::internal("unexpected fragment spread"))
             }
@@ -1663,14 +1686,10 @@ mod normalized_inline_fragment_selection {
     }
 
     impl InlineFragmentSelection {
-        pub(crate) fn with_updated_selection_set(
-            &self,
-            selection_set: Option<SelectionSet>,
-        ) -> Self {
+        pub(crate) fn with_updated_selection_set(&self, selection_set: SelectionSet) -> Self {
             Self {
                 inline_fragment: self.inline_fragment.clone(),
-                //FIXME
-                selection_set: selection_set.unwrap(),
+                selection_set,
             }
         }
 
