@@ -11,17 +11,9 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::federated_query_graph::SelfConditionIndex;
-use crate::sources::SourceFederatedAbstractFieldQueryGraphEdge;
-use crate::sources::SourceFederatedConcreteFieldQueryGraphEdge;
-use crate::sources::SourceFederatedConcreteQueryGraphNode;
-use crate::sources::SourceFederatedEnumQueryGraphNode;
-use crate::sources::SourceFederatedQueryGraph;
-use crate::sources::SourceFederatedQueryGraphBuilders;
-use crate::sources::SourceFederatedScalarQueryGraphNode;
-use crate::sources::SourceFederatedSourceEnteringQueryGraphEdge;
-use crate::sources::SourceFederatedTypeConditionQueryGraphEdge;
-use crate::sources::SourceId;
-use crate::sources::SourceKind;
+use crate::sources::source;
+use crate::sources::source::SourceId;
+use crate::sources::source::SourceKind;
 use crate::ValidFederationSubgraph;
 
 struct FederatedQueryGraphBuilder {
@@ -29,7 +21,7 @@ struct FederatedQueryGraphBuilder {
     api_schema: ValidFederationSchema,
     subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
     is_for_query_planning: bool,
-    source_data: SourceFederatedQueryGraphBuilders,
+    source_data: source::federated_query_graph::builder::FederatedQueryGraphBuilders,
 }
 
 impl FederatedQueryGraphBuilder {
@@ -58,7 +50,9 @@ struct IntraSourceQueryGraphBuilder {
 }
 
 pub(crate) trait IntraSourceQueryGraphBuilderApi {
-    fn source_query_graph(&mut self) -> Result<&mut SourceFederatedQueryGraph, FederationError>;
+    fn source_query_graph(
+        &mut self,
+    ) -> Result<&mut source::federated_query_graph::FederatedQueryGraph, FederationError>;
 
     fn is_for_query_planning(&self) -> bool;
 
@@ -75,25 +69,25 @@ pub(crate) trait IntraSourceQueryGraphBuilderApi {
     fn add_abstract_node(
         &mut self,
         supergraph_type_name: NamedType,
-        source_data: SourceFederatedAbstractFieldQueryGraphEdge,
+        source_data: source::federated_query_graph::AbstractNode,
     ) -> Result<NodeIndex, FederationError>;
 
     fn add_concrete_node(
         &mut self,
         supergraph_type_name: NamedType,
-        source_data: SourceFederatedConcreteQueryGraphNode,
+        source_data: source::federated_query_graph::ConcreteNode,
     ) -> Result<NodeIndex, FederationError>;
 
     fn add_enum_node(
         &mut self,
         supergraph_type_name: NamedType,
-        source_data: SourceFederatedEnumQueryGraphNode,
+        source_data: source::federated_query_graph::EnumNode,
     ) -> Result<NodeIndex, FederationError>;
 
     fn add_scalar_node(
         &mut self,
         supergraph_type_name: NamedType,
-        source_data: SourceFederatedScalarQueryGraphNode,
+        source_data: source::federated_query_graph::ScalarNode,
     ) -> Result<NodeIndex, FederationError>;
 
     fn add_abstract_field_edge(
@@ -102,7 +96,7 @@ pub(crate) trait IntraSourceQueryGraphBuilderApi {
         tail: NodeIndex,
         supergraph_field_name: Name,
         self_conditions: IndexSet<SelfConditionIndex>,
-        source_data: SourceFederatedAbstractFieldQueryGraphEdge,
+        source_data: source::federated_query_graph::AbstractFieldEdge,
     ) -> Result<EdgeIndex, FederationError>;
 
     fn add_concrete_field_edge(
@@ -111,20 +105,20 @@ pub(crate) trait IntraSourceQueryGraphBuilderApi {
         tail: NodeIndex,
         supergraph_field_name: Name,
         self_conditions: IndexSet<SelfConditionIndex>,
-        source_data: SourceFederatedConcreteFieldQueryGraphEdge,
+        source_data: source::federated_query_graph::ConcreteFieldEdge,
     ) -> Result<EdgeIndex, FederationError>;
 
     fn add_type_condition_edge(
         &mut self,
         head: NodeIndex,
         tail: NodeIndex,
-        source_data: SourceFederatedTypeConditionQueryGraphEdge,
+        source_data: source::federated_query_graph::TypeConditionEdge,
     ) -> Result<EdgeIndex, FederationError>;
 
     fn add_source_entering_edge(
         &mut self,
         tail: NodeIndex,
         self_conditions: Option<SelfConditionIndex>,
-        source_data: SourceFederatedSourceEnteringQueryGraphEdge,
+        source_data: source::federated_query_graph::SourceEnteringEdge,
     ) -> Result<EdgeIndex, FederationError>;
 }

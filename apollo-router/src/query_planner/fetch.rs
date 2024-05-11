@@ -5,7 +5,7 @@ use std::sync::Arc;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
-use apollo_federation::sources::SourceFetchNode;
+use apollo_federation::sources::source;
 use indexmap::IndexSet;
 use once_cell::sync::OnceCell as OnceLock;
 use router_bridge::planner::PlanSuccess;
@@ -144,7 +144,7 @@ pub(crate) struct FetchNode {
     #[serde(default)]
     pub(crate) protocol: Arc<Protocol>,
     #[serde(default, skip)]
-    pub(crate) source_node: Option<Arc<SourceFetchNode>>,
+    pub(crate) source_node: Option<Arc<source::query_plan::FetchNode>>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]

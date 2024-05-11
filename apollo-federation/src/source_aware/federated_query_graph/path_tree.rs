@@ -14,12 +14,12 @@ use crate::source_aware::federated_query_graph::SelfConditionIndex;
 pub(crate) struct FederatedPathTree {
     graph: Arc<FederatedQueryGraph>,
     node: NodeIndex,
-    childs: Vec<Arc<FederatedPathTreeChild>>,
+    childs: Vec<Arc<Child>>,
 }
 
 #[derive(Debug)]
-pub(crate) struct FederatedPathTreeChild {
-    key: FederatedPathTreeChildKey,
+pub(crate) struct Child {
+    key: ChildKey,
     self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
     source_entering_condition_resolutions_at_edge:
         IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
@@ -28,7 +28,7 @@ pub(crate) struct FederatedPathTreeChild {
 }
 
 #[derive(Debug)]
-pub(crate) struct FederatedPathTreeChildKey {
+pub(crate) struct ChildKey {
     operation_element: Option<Arc<OperationPathElement>>,
     edge: Option<EdgeIndex>,
 }
