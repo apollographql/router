@@ -1297,7 +1297,11 @@ impl FetchDependencyGraphNode {
             subgraph_name: self.subgraph_name.clone(),
             id: self.id.get().copied(),
             variable_usages,
-            requires: input_nodes.map(|sel| executable::SelectionSet::from(sel).selections),
+            requires: input_nodes
+                .as_ref()
+                .map(executable::SelectionSet::try_from)
+                .transpose()?
+                .map(|selection_set| selection_set.selections),
             operation_document,
             operation_name,
             operation_kind: self.root_kind.into(),
@@ -2019,9 +2023,17 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    input_selections.merge_into(std::iter::once(edge_conditions.as_ref()))?;
-    let new_node =
-        &mut FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
+    let edge_conditions = edge_conditions.rebase_on(
+        &input_type,
+        // Conditions do not use named fragments
+        &Default::default(),
+        &dependency_graph.supergraph_schema,
+        super::operation::RebaseErrorHandlingOption::ThrowError,
+    )?;
+
+    input_selections.merge_into(std::iter::once(&edge_conditions))?;
+
+    let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
         &dependency_graph.supergraph_schema,
         &wrap_input_selections(
@@ -2430,7 +2442,7 @@ fn wrap_input_selections(
                }
             */
             let parent_type_position = fragment.data().parent_type_position.clone();
-            let selection = Selection::from_normalized_inline_fragment(fragment, sub_selections);
+            let selection = Selection::from_inline_fragment(fragment, sub_selections);
             SelectionSet::from_selection(parent_type_position, selection)
         },
     )
