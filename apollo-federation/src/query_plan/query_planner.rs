@@ -748,7 +748,7 @@ type User
         QueryPlan {
           Fetch(service: "accounts") {
             {
-                    userById(id: 1) {
+              userById(id: 1) {
                 name
                 email
               }
@@ -931,7 +931,7 @@ type User
         QueryPlan {
           Fetch(service: "A") {
             {
-                    a {
+              a {
                 b {
                   x
                   y
