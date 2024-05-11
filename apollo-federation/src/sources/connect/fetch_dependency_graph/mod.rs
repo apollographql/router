@@ -1,34 +1,43 @@
 use std::sync::Arc;
 
+use apollo_compiler::ast::Name;
+use apollo_compiler::ast::Value;
+use apollo_compiler::Node as NodeElement;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 use petgraph::prelude::EdgeIndex;
 
 use crate::error::FederationError;
+use crate::source_aware::federated_query_graph;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
-use crate::source_aware::federated_query_graph::path_tree::FederatedPathTreeChildKey;
+use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
+use crate::source_aware::federated_query_graph::path_tree;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
-use crate::source_aware::federated_query_graph::FederatedQueryGraphEdge;
+use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
-use crate::sources::connect::ConnectPath;
-use crate::sources::SourceFetchDependencyGraphApi;
-use crate::sources::SourceFetchDependencyGraphNode;
-use crate::sources::SourceFetchNode;
-use crate::sources::SourceId;
-use crate::sources::SourcePath;
+use crate::sources::connect::selection_parser::PathSelection;
+use crate::sources::connect::selection_parser::Property;
+use crate::sources::connect::Selection;
+use crate::sources::connect::SubSelection;
+use crate::sources::source;
+use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
+use crate::sources::source::fetch_dependency_graph::PathApi;
+use crate::sources::source::SourceId;
 
 /// A connect-specific dependency graph for fetches.
 #[derive(Debug)]
-pub(crate) struct ConnectFetchDependencyGraph;
+pub(crate) struct FetchDependencyGraph;
 
-impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
+impl FetchDependencyGraphApi for FetchDependencyGraph {
     fn can_reuse_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
         _source_entering_edge: EdgeIndex,
-        _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
-        _source_data: &SourceFetchDependencyGraphNode,
-    ) -> Result<Vec<&'path_tree FederatedPathTreeChildKey>, FederationError> {
+        _path_tree_edges: Vec<&'path_tree path_tree::ChildKey>,
+        _source_data: &source::fetch_dependency_graph::Node,
+    ) -> Result<Vec<&'path_tree path_tree::ChildKey>, FederationError> {
         todo!()
     }
 
@@ -38,11 +47,11 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
         _merge_at: Arc<[FetchDataPathElement]>,
         _source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
-        _path_tree_edges: Vec<&'path_tree FederatedPathTreeChildKey>,
+        _path_tree_edges: Vec<&'path_tree path_tree::ChildKey>,
     ) -> Result<
         (
-            SourceFetchDependencyGraphNode,
-            Vec<&'path_tree FederatedPathTreeChildKey>,
+            source::fetch_dependency_graph::Node,
+            Vec<&'path_tree path_tree::ChildKey>,
         ),
         FederationError,
     > {
@@ -55,13 +64,14 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
         merge_at: Arc<[FetchDataPathElement]>,
         source_entering_edge: EdgeIndex,
         _self_condition_resolution: Option<ConditionResolutionId>,
-    ) -> Result<SourcePath, FederationError> {
+    ) -> Result<source::fetch_dependency_graph::Path, FederationError> {
         // Grab the corresponding source for this edge, making sure that the edge is
         // actually a valid entrypoint.
         let edge_source_id = {
             let graph_edge = query_graph.edge_weight(source_entering_edge)?;
 
-            let FederatedQueryGraphEdge::SourceEntering { tail_source_id, .. } = graph_edge else {
+            let federated_query_graph::Edge::SourceEntering { tail_source_id, .. } = graph_edge
+            else {
                 return Err(FederationError::internal(
                     "a path should start from an entering edge",
                 ));
@@ -70,19 +80,20 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
             tail_source_id.clone()
         };
 
-        Ok(SourcePath::Connect(ConnectPath {
+        Ok(Path {
             merge_at,
             source_entering_edge,
             source_id: edge_source_id,
             field: None,
-        }))
+        }
+        .into())
     }
 
     fn add_path(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _source_path: SourcePath,
-        _source_data: &mut SourceFetchDependencyGraphNode,
+        _source_path: source::fetch_dependency_graph::Path,
+        _source_data: &mut source::fetch_dependency_graph::Node,
     ) -> Result<(), FederationError> {
         todo!()
     }
@@ -91,7 +102,7 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _source_id: SourceId,
-        _source_data: &SourceFetchDependencyGraphNode,
+        _source_data: &source::fetch_dependency_graph::Node,
     ) -> Result<QueryPlanCost, FederationError> {
         todo!()
     }
@@ -100,9 +111,75 @@ impl SourceFetchDependencyGraphApi for ConnectFetchDependencyGraph {
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _source_id: SourceId,
-        _source_data: &SourceFetchDependencyGraphNode,
+        _source_data: &source::fetch_dependency_graph::Node,
         _fetch_count: u32,
-    ) -> Result<SourceFetchNode, FederationError> {
+    ) -> Result<source::query_plan::FetchNode, FederationError> {
+        todo!()
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct Node {
+    merge_at: Arc<[FetchDataPathElement]>,
+    source_entering_edge: EdgeIndex,
+    field_response_name: Name,
+    field_arguments: IndexMap<Name, Value>,
+    selection: Selection,
+}
+
+#[derive(Debug)]
+pub(crate) struct Path {
+    merge_at: Arc<[FetchDataPathElement]>,
+    source_entering_edge: EdgeIndex,
+    source_id: SourceId,
+    field: Option<PathField>,
+}
+
+#[derive(Debug)]
+pub(crate) struct PathField {
+    response_name: Name,
+    arguments: IndexMap<Name, NodeElement<Value>>,
+    selections: PathSelections,
+}
+
+#[derive(Debug)]
+pub(crate) enum PathSelections {
+    Selections {
+        head_property_path: Vec<Property>,
+        named_selections: Vec<(Name, Vec<Property>)>,
+        tail_selection: Option<(Name, PathTailSelection)>,
+    },
+    CustomScalarRoot {
+        selection: Selection,
+    },
+}
+
+#[derive(Debug)]
+pub(crate) enum PathTailSelection {
+    Selection {
+        property_path: Vec<Property>,
+    },
+    CustomScalarPathSelection {
+        path_selection: PathSelection,
+    },
+    CustomScalarStarSelection {
+        star_subselection: Option<SubSelection>,
+        excluded_properties: IndexSet<Property>,
+    },
+}
+
+impl PathApi for Path {
+    fn source_id(&self) -> &SourceId {
+        todo!()
+    }
+
+    fn add_operation_element(
+        &self,
+        _query_graph: Arc<FederatedQueryGraph>,
+        _operation_element: Arc<OperationPathElement>,
+        _edge: Option<EdgeIndex>,
+        _self_condition_resolutions: IndexMap<SelfConditionIndex, ConditionResolutionId>,
+    ) -> Result<source::fetch_dependency_graph::Path, FederationError> {
         todo!()
     }
 }
@@ -118,23 +195,23 @@ mod tests {
     use petgraph::graph::DiGraph;
     use petgraph::prelude::EdgeIndex;
 
-    use super::ConnectFetchDependencyGraph;
+    use super::FetchDependencyGraph;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
     use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
     use crate::schema::position::ObjectTypeDefinitionPosition;
+    use crate::source_aware::federated_query_graph;
     use crate::source_aware::federated_query_graph::FederatedQueryGraph;
-    use crate::source_aware::federated_query_graph::FederatedQueryGraphEdge;
-    use crate::source_aware::federated_query_graph::FederatedQueryGraphNode;
+    use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
+    use crate::sources::connect::federated_query_graph::ConcreteNode;
+    use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
     use crate::sources::connect::selection_parser::Property;
-    use crate::sources::connect::ConnectFederatedConcreteQueryGraphNode;
     use crate::sources::connect::ConnectId;
-    use crate::sources::SourceFederatedConcreteQueryGraphNode;
-    use crate::sources::SourceFetchDependencyGraphApi;
-    use crate::sources::SourceId;
+    use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
+    use crate::sources::source::SourceId;
 
     struct SetupInfo {
-        fetch_graph: ConnectFetchDependencyGraph,
+        fetch_graph: FetchDependencyGraph,
         query_graph: Arc<FederatedQueryGraph>,
         source_id: SourceId,
         source_entry_edges: Vec<EdgeIndex>,
@@ -164,21 +241,20 @@ mod tests {
         });
 
         // Create a root
-        let query = graph.add_node(FederatedQueryGraphNode::Concrete {
+        let query = graph.add_node(federated_query_graph::Node::Concrete {
             supergraph_type: ObjectTypeDefinitionPosition {
                 type_name: name!("Query"),
             },
             field_edges: IndexMap::new(),
             source_exiting_edge: None,
             source_id: source_id.clone(),
-            source_data: SourceFederatedConcreteQueryGraphNode::Connect(
-                ConnectFederatedConcreteQueryGraphNode::SelectionRoot {
-                    subgraph_type: ObjectTypeDefinitionPosition {
-                        type_name: name!("Query"),
-                    },
-                    property_path: Vec::new(),
+            source_data: ConcreteNode::SelectionRoot {
+                subgraph_type: ObjectTypeDefinitionPosition {
+                    type_name: name!("Query"),
                 },
-            ),
+                property_path: Vec::new(),
+            }
+            .into(),
         });
 
         // Make the nodes with entrypoints
@@ -189,56 +265,66 @@ mod tests {
                 type_name: Name::new(type_name).unwrap(),
             };
 
-            let node = graph.add_node(FederatedQueryGraphNode::Concrete {
+            let node = graph.add_node(federated_query_graph::Node::Concrete {
                 supergraph_type: node_type.clone(),
                 field_edges: IndexMap::new(),
                 source_exiting_edge: None,
                 source_id: source_id.clone(),
-                source_data: SourceFederatedConcreteQueryGraphNode::Connect(
-                    ConnectFederatedConcreteQueryGraphNode::SelectionRoot {
-                        subgraph_type: node_type.clone(),
-                        property_path: vec![Property::Field(type_name.to_lowercase().to_string())],
-                    },
-                ),
+                source_data: ConcreteNode::SelectionRoot {
+                    subgraph_type: node_type.clone(),
+                    property_path: vec![Property::Field(type_name.to_lowercase().to_string())],
+                }
+                .into(),
             });
 
-            edges.push(graph.add_edge(
-                query,
-                node,
-                FederatedQueryGraphEdge::ConcreteField {
-                    supergraph_field: ObjectFieldDefinitionPosition {
-                        type_name: Name::new(type_name).unwrap(),
-                        field_name: Name::new(type_name.to_lowercase()).unwrap(),
+            let field = ObjectFieldDefinitionPosition {
+                type_name: Name::new(type_name).unwrap(),
+                field_name: Name::new(type_name.to_lowercase()).unwrap(),
+            };
+            edges.push(
+                graph.add_edge(
+                    query,
+                    node,
+                    federated_query_graph::Edge::ConcreteField {
+                        supergraph_field: field.clone(),
+                        self_conditions: None,
+                        source_id: source_id.clone(),
+                        source_data: ConcreteFieldEdge::Connect {
+                            subgraph_field: field.clone(),
+                        }
+                        .into(),
                     },
-                    self_conditions: None,
-                    source_id: source_id.clone(),
-                    source_data: None,
-                },
-            ));
+                ),
+            );
 
             // Optionally add the entrypoint
             if index < entrypoints {
-                edges.push(graph.add_edge(
-                    query,
-                    node,
-                    FederatedQueryGraphEdge::SourceEntering {
-                        supergraph_type: node_type,
-                        self_conditions: None,
-                        tail_source_id: source_id.clone(),
-                        source_data: None,
-                    },
-                ));
+                edges.push(
+                    graph.add_edge(
+                        query,
+                        node,
+                        federated_query_graph::Edge::SourceEntering {
+                            supergraph_type: node_type.clone(),
+                            self_conditions: None,
+                            tail_source_id: source_id.clone(),
+                            source_data: SourceEnteringEdge::ConnectParent {
+                                subgraph_type: node_type,
+                            }
+                            .into(),
+                        },
+                    ),
+                );
             }
         }
 
         let (entry, non_entry) = edges.into_iter().partition(|&edge_index| {
             matches!(
                 graph.edge_weight(edge_index),
-                Some(FederatedQueryGraphEdge::SourceEntering { .. })
+                Some(federated_query_graph::Edge::SourceEntering { .. })
             )
         });
         SetupInfo {
-            fetch_graph: ConnectFetchDependencyGraph,
+            fetch_graph: FetchDependencyGraph,
             query_graph: Arc::new(FederatedQueryGraph::with_graph(graph)),
             source_id,
             source_entry_edges: entry,
@@ -319,7 +405,7 @@ mod tests {
             path,
             @r###"
         Connect(
-            ConnectPath {
+            Path {
                 merge_at: [],
                 source_entering_edge: EdgeIndex(3),
                 source_id: Connect(

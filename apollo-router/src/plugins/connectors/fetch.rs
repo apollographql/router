@@ -5,11 +5,11 @@ use apollo_compiler::name;
 use apollo_federation::schema::ObjectFieldDefinitionPosition;
 use apollo_federation::schema::ObjectOrInterfaceFieldDefinitionPosition;
 use apollo_federation::schema::ObjectOrInterfaceFieldDirectivePosition;
-use apollo_federation::sources::connect::ConnectFetchNode;
+use apollo_federation::sources::connect;
 use apollo_federation::sources::connect::ConnectId;
 use apollo_federation::sources::connect::Selection;
 use apollo_federation::sources::connect::SubSelection;
-use apollo_federation::sources::SourceFetchNode;
+use apollo_federation::sources::source;
 use tower::ServiceExt;
 use tracing::Instrument;
 
@@ -29,9 +29,9 @@ use crate::query_planner::log;
 use crate::query_planner::ExecutionParameters;
 use crate::services::SubgraphRequest;
 
-impl From<FetchNode> for SourceFetchNode {
-    fn from(_value: FetchNode) -> SourceFetchNode {
-        SourceFetchNode::Connect(ConnectFetchNode {
+impl From<FetchNode> for source::query_plan::FetchNode {
+    fn from(_value: FetchNode) -> source::query_plan::FetchNode {
+        source::query_plan::FetchNode::Connect(connect::query_plan::FetchNode {
             source_id: ConnectId {
                 label: "this_is_a_placeholder_for_now".to_string(),
                 subgraph_name: "this_is_a_placeholder".into(),
@@ -63,7 +63,7 @@ impl FetchNode {
         parent_service_name: &String,
         connectors: &Arc<HashMap<Arc<String>, Connector>>,
     ) {
-        let as_fednext_node: apollo_federation::sources::SourceFetchNode = self.clone().into();
+        let as_fednext_node: source::query_plan::FetchNode = self.clone().into();
 
         let parent_service_name = parent_service_name.to_string();
         let connector = connectors.get(&self.service_name.to_string()).unwrap(); // TODO

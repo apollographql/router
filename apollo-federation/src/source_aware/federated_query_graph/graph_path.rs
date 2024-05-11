@@ -17,14 +17,14 @@ pub(crate) struct FederatedGraphPath {
     graph: Arc<FederatedQueryGraph>,
     head: NodeIndex,
     tail: NodeIndex,
-    edges: Vec<Arc<FederatedGraphPathEdge>>,
+    edges: Vec<Arc<Edge>>,
     last_source_entering_edge_info: Option<SourceEnteringEdgeInfo>,
     possible_concrete_nodes_at_tail: Arc<IndexSet<NodeIndex>>,
     possible_concrete_nodes_before_last_edge_if_type_condition: Option<Arc<IndexSet<NodeIndex>>>,
 }
 
 #[derive(Debug)]
-pub(crate) struct FederatedGraphPathEdge {
+pub(crate) struct Edge {
     operation_element: Option<Arc<OperationPathElement>>,
     edge: Option<EdgeIndex>,
     self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
