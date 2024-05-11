@@ -965,6 +965,44 @@ impl Selection {
             Ok(self.clone())
         }
     }
+
+    /// Expand fragments that are not in the `fragments_to_keep`.
+    fn expand_fragments(
+        &self,
+        fragments_to_keep: &NamedFragments,
+    ) -> Result<SelectionOrSet, FederationError> {
+        match self {
+            Selection::FragmentSpread(fragment) => {
+                if fragments_to_keep.contains(&fragment.spread.data().fragment_name) {
+                    // Keep this spread
+                    Ok(self.clone().into())
+                } else {
+                    // Expand the fragment
+                    let expanded_sub_selections =
+                        fragment.selection_set.expand_fragments(fragments_to_keep)?;
+                    if self.element()?.parent_type_position()
+                        == fragment.spread.data().type_condition_position
+                    {
+                        // The fragment is of the same type as the parent, so we can just use
+                        // the expanded sub-selections directly.
+                        Ok(expanded_sub_selections.into())
+                    } else {
+                        // Create an inline fragment since type condition is necessary.
+                        let inline =
+                            InlineFragmentSelection::from_fragment_spread_selection(fragment)?;
+                        Ok(Selection::from(inline).into())
+                    }
+                }
+            }
+
+            // Otherwise, expand the sub-selections.
+            _ => Ok(self
+                .map_selection_set(|selection_set| {
+                    Ok(Some(selection_set.expand_fragments(fragments_to_keep)?))
+                })?
+                .into()),
+        }
+    }
 }
 
 impl From<FieldSelection> for Selection {
@@ -1869,6 +1907,20 @@ impl FromIterator<Selection> for SelectionMapperReturn {
     }
 }
 
+// Note: `expand_fragments` methods may return a selection or a selection set. The items in a
+//       selection set needs to be cloned here, since it's sub-selections are contained in an
+//       `Arc`.
+impl From<SelectionOrSet> for SelectionMapperReturn {
+    fn from(value: SelectionOrSet) -> Self {
+        match value {
+            SelectionOrSet::Selection(selection) => selection.into(),
+            SelectionOrSet::SelectionSet(selections) => {
+                Vec::from_iter(selections.selections.values().cloned()).into()
+            }
+        }
+    }
+}
+
 impl SelectionSet {
     pub(crate) fn empty(
         schema: ValidFederationSchema,
@@ -2256,6 +2308,14 @@ impl SelectionSet {
             }
         }
         Ok(())
+    }
+
+    /// Expand fragments that are not in the `fragments_to_keep`.
+    fn expand_fragments(
+        &self,
+        fragments_to_keep: &NamedFragments,
+    ) -> Result<Self, FederationError> {
+        self.lazy_map(|selection| Ok(selection.expand_fragments(fragments_to_keep)?.into()))
     }
 
     /// Modifies the provided selection set to optimize the handling of __typename selections for query planning.
