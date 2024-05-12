@@ -94,6 +94,30 @@ type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
   t: T! @join__field(graph: SUBGRAPH1)
   tList: [T]! @join__field(graph: SUBGRAPH1)
   a: Int! @join__field(graph: SUBGRAPH2)
+  k: K! @join__field(graph: SUBGRAPH1)
+}
+
+union K 
+  @join__type(graph: SUBGRAPH1)
+  @join__unionMember(graph: SUBGRAPH1, member: "A")
+  @join__unionMember(graph: SUBGRAPH1, member: "B")
+  @context(name: "Subgraph1__context")
+ = A | B
+
+type A
+  @join__type(graph: SUBGRAPH1, key: "id")
+{
+  id: ID!
+  v: V!
+  prop: String!
+}
+
+type B
+  @join__type(graph: SUBGRAPH1, key: "id")
+{
+  id: ID!
+  v: V!
+  prop: String!
 }
 
 type T
@@ -119,6 +143,25 @@ type U
           name: "a"
           type: "String!"
           selection: "{ prop }"
+        }
+      ]
+    )
+  }
+
+type V
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id") {
+  id: ID!
+  b: String! @join__field(graph: SUBGRAPH2)
+  field: Int!
+    @join__field(
+      graph: SUBGRAPH1
+      contextArguments: [
+        {
+          context: "Subgraph1__context"
+          name: "a"
+          type: "String!"
+          selection: "... on A { prop } ... on B { prop } ... on T { prop }"
         }
       ]
     )

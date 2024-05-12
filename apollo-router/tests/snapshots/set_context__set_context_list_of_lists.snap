@@ -51,6 +51,7 @@ expression: response
             {
               "kind": "Flatten",
               "path": [
+                "",
                 "tList",
                 "@",
                 "uList",
@@ -105,7 +106,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        tList {\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"tList.@.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        tList {\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".tList.@.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

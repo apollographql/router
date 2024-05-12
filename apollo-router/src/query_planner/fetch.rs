@@ -369,9 +369,18 @@ fn test_query_batching_for_contextual_args() {
 
 // TODO: There is probably a function somewhere else that already does this
 fn data_at_path<'v>(data: &'v Value, path: &Path) -> Option<&'v Value> {
-    // TODO: We will have fragments with type conditions that need to be dealt with, but it's not working just yet
     let v = match &path.0[0] {
-        PathElement::Fragment(s) => data.get(s),
+        PathElement::Fragment(s) => {
+            // get the value at data.get("__typename") and compare it with s. If the values are equal, return data, otherwise None
+            let mut z: Option<&Value> = None;
+            let wrapped_typename = data.get("__typename");
+            if let Some(t) = wrapped_typename {
+                if t.as_str() == Some(s.as_str()) {
+                    z = Some(data);
+                }
+            }
+            z
+        },
         PathElement::Key(v, _) => data.get(v),
         PathElement::Index(idx) => Some(&data[idx]),
         PathElement::Flatten(_) => None,

@@ -171,6 +171,43 @@ async fn test_set_context_list_of_lists() {
     insta::assert_json_snapshot!(response);
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_context_union() {
+    let harness = setup_from_mocks(
+        json! {{
+            "experimental_type_conditioned_fetching": true,
+            // will make debugging easier
+            "plugins": {
+                "experimental.expose_query_plan": true
+            },
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }},
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    );
+    let supergraph_service = harness.build_supergraph().await.unwrap();
+    let request: supergraph::Request = supergraph::Request::fake_builder()
+        .query(QUERY_WITH_UNION.to_string())
+        .header("Apollo-Expose-Query-Plan", "true")
+        .variables(Default::default())
+        .build()
+        .expect("expecting valid request");
+
+    let response = supergraph_service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+}
+
 fn setup_from_mocks(
     configuration: serde_json::Value,
     mocks: &[(&'static str, &'static str)],
@@ -238,3 +275,18 @@ static QUERY_WITH_LIST_OF_LISTS: &str = r#"query QueryLL {
           }
         }
       }"#;
+
+static QUERY_WITH_UNION: &str = r#"query QueryUnion {
+    k {
+        ... on A {
+          v {
+            field
+          }
+        }
+        ... on B {
+          v {
+            field
+          }
+        }
+      }
+    }"#;

@@ -99,6 +99,25 @@
     },
     {
       "request": {
+        "query": "query QueryUnion__Subgraph1__0{k{__typename ...on A{prop v{__typename id}}...on B{prop v{__typename id}}}}",
+        "operationName": "QueryUnion__Subgraph1__0"
+      },
+      "response": {
+        "data": {
+          "k": {
+            "__typename": "A",
+            "prop": "prop value 3",
+            "id": 1,
+            "v": {
+              "__typename": "V",
+              "id": "2"
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
         "query": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{__typename id field(a:$Subgraph1_U_field_a)}}}",
         "operationName": "Query__Subgraph1__1",
         "variables": {
@@ -226,6 +245,27 @@
           ]
         }
       }
-    }
-  ]
+    },
+    {
+      "request": {
+        "query": "query QueryUnion__Subgraph1__1($representations:[_Any!]!$Subgraph1_V_field_a:String!){_entities(representations:$representations){...on V{id field(a:$Subgraph1_V_field_a)}}}",
+        "operationName": "QueryUnion__Subgraph1__1",
+        "variables": {
+          "Subgraph1_V_field_a": "prop value 3",
+          "representations": [
+            { "__typename": "V", "id": "2" }
+          ]
+        }
+      },
+      "response": {
+        "data": {
+          "_entities": [
+            {
+              "id": "3",
+              "field": 3456
+            }
+          ]
+        }
+      }
+    }  ]
 }
