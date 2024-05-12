@@ -28,9 +28,9 @@ pub(crate) struct Edge {
     operation_element: Option<Arc<OperationPathElement>>,
     edge: Option<EdgeIndex>,
     self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
-    source_entering_condition_resolutions_at_edge:
+    source_entering_condition_resolutions_at_head:
         IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
-    condition_resolutions_at_edge: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
+    condition_resolutions_at_head: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
