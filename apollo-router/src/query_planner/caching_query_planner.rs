@@ -573,7 +573,8 @@ pub(crate) struct CachingQueryKey {
     pub(crate) introspection: bool,
 }
 
-// Update this key every time the cache key or the query plan format has to change
+// Update this key every time the cache key or the query plan format has to change.
+// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
 const CACHE_KEY_VERSION: usize = 0;
 const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 
