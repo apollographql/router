@@ -1,3 +1,19 @@
+//! Validation of the `@source` and `@connect` directives.
+
+// No panics allowed in this module
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::exit,
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::unimplemented
+        // TODO: clippy::todo
+    )
+)]
+
 /* TODO:
 
 ## @connect
@@ -48,6 +64,11 @@ use apollo_compiler::Schema;
 use itertools::Itertools;
 use url::Url;
 
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
 /// This function attempts to collect as many validation errors as possible, so it does not bail
@@ -59,7 +80,7 @@ pub fn validate(schema: Schema) -> Vec<ValidationError> {
         .directives
         .iter()
         .filter_map(|directive| {
-            if directive.name == "source" {
+            if directive.name == CONNECT_SOURCE_ARGUMENT_NAME {
                 match validate_source(directive) {
                     Ok(source_directive) => {
                         if let SourceName::Valid(name) = source_directive.name {
@@ -75,6 +96,11 @@ pub fn validate(schema: Schema) -> Vec<ValidationError> {
         })
         .flatten()
         .collect_vec();
+
+    if source_names.is_empty() && errors.is_empty() {
+        todo!("Check for renamed directives—this code is _only_ called for connectors subgraphs")
+    }
+
     // Check for duplicate source names
     source_names
         .into_iter()
@@ -92,13 +118,15 @@ fn validate_source(directive: &Component<Directive>) -> Result<SourceDirective, 
     let url_error = directive
         .arguments
         .iter()
-        .find(|arg| arg.name == "http")
+        .find(|arg| arg.name == CONNECT_HTTP_ARGUMENT_NAME)
         .and_then(|arg| {
             let value = arg
                 .value
                 .as_object()?
                 .iter()
-                .find_map(|(name, value)| (name == "baseURL").then_some(value))?
+                .find_map(|(name, value)| {
+                    (*name == SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value)
+                })?
                 .as_str()?;
             let url = match Url::parse(value) {
                 Err(inner) => {
@@ -159,8 +187,10 @@ impl TryFrom<&Component<Directive>> for SourceName {
         let str_value = directive
             .arguments
             .iter()
-            .find(|arg| arg.name == "name")
-            .ok_or(ValidationError::MissingSourceName)?
+            .find(|arg| arg.name == SOURCE_NAME_ARGUMENT_NAME)
+            .ok_or(ValidationError::GraphQLError(
+                "missing name argument for a @source directive",
+            ))?
             .value
             .as_str()
             .ok_or(ValidationError::SourceNameType)?;
@@ -184,6 +214,8 @@ impl Display for SourceName {
 
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
+    #[error("invalid GraphQL: {0}")]
+    GraphQLError(&'static str),
     #[error("baseURL argument for @source \"{source_name}\" was not a valid URL: {inner}")]
     SourceUrl {
         inner: url::ParseError,
@@ -194,8 +226,6 @@ pub enum ValidationError {
         scheme: String,
         source_name: SourceName,
     },
-    #[error("missing name argument for a @source directive")]
-    MissingSourceName,
     #[error("name argument for a @source directive must be a string")]
     SourceNameType,
     #[error("name argument to @source can't be empty")]
