@@ -529,7 +529,7 @@ async fn call_websocket(
     let signing_params = context
         .extensions()
         .lock()
-        .get::<SigningParamsConfig>()
+        .get::<Arc<SigningParamsConfig>>()
         .cloned();
 
     let request = if let Some(signing_params) = signing_params {
