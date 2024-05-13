@@ -82,13 +82,6 @@
           "enterprise"
         ]
       ],
-      "File uploads": [
-        "/executing-operations/file-uploads",
-        [
-          "enterprise",
-          "preview"
-        ]
-      ],
       "GraphQL Subscriptions": {
         "Subscriptions setup": [
           "/executing-operations/subscription-support",
