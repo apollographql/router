@@ -55,11 +55,11 @@ macro_rules! assert_plan {
 
 #[track_caller]
 pub(crate) fn api_schema_and_planner(
-    test_name: &str,
+    function_path: &str,
     config: QueryPlannerConfig,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> (ValidFederationSchema, QueryPlanner) {
-    let supergraph = compose(test_name, subgraph_names_and_schemas);
+    let supergraph = compose(function_path, subgraph_names_and_schemas);
     let supergraph = apollo_federation::Supergraph::new(&supergraph).unwrap();
     let planner = QueryPlanner::new(&supergraph, config).unwrap();
     let api_schema_config = apollo_federation::ApiSchemaOptions {
@@ -71,7 +71,7 @@ pub(crate) fn api_schema_and_planner(
 }
 
 #[track_caller]
-pub(crate) fn compose(test_name: &str, subgraph_names_and_schemas: &[(&str, &str)]) -> String {
+pub(crate) fn compose(function_path: &str, subgraph_names_and_schemas: &[(&str, &str)]) -> String {
     let unique_names: std::collections::HashSet<_> = subgraph_names_and_schemas
         .iter()
         .map(|(name, _)| name)
@@ -102,11 +102,12 @@ pub(crate) fn compose(test_name: &str, subgraph_names_and_schemas: &[(&str, &str
     let expected_hash = hex::encode(hasher.finalize());
     let prefix = "# Composed from subgraphs with hash: ";
 
+    let test_name = function_path.rsplit("::").next().unwrap();
     let supergraph_path = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("tests")
         .join("query_plan")
         .join("supergraphs")
-        .join(format!("{}.graphql", test_name.replace("::", "__")));
+        .join(format!("{test_name}.graphql",));
     let supergraph = match std::fs::read_to_string(&supergraph_path) {
         Ok(contents) => {
             if let Some(hash) = contents
