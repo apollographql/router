@@ -490,6 +490,8 @@ id name friends: friend_ids { id: $ }
 
 Because `friend_ids` is an array, the `{ id: $ }` selection maps over each
 element of the array, with `$` taking on the value of each scalar ID in turn.
+See [the FAQ](#what-about-arrays) for more discussion of this array-handling
+behavior.
 
 The `$` variable is also essential for disambiguating a `KeyPath` consisting of
 only one key from a `NamedFieldSelection` with no `Alias`. For example,
@@ -655,11 +657,11 @@ Analogous to a JSON primitive value, with the only differences being that
 
 A numeric literal that is possibly negative and may contain a fractional
 component. The integer component is required unless a fractional component is
-present, and the fractional component can have zero digits when there the
-integer component is present (as in `-123.`), but the fractional component must
-have at least one digit when there is no integer component, since `.` is not a
-valid numeric literal by itself. Leading and trailing zeroes are essential for
-the fractional component, but leading zeroes are disallowed for the integer
+present, and the fractional component can have zero digits when the integer
+component is present (as in `-123.`), but the fractional component must have at
+least one digit when there is no integer component, since `.` is not a valid
+numeric literal by itself. Leading and trailing zeroes are essential for the
+fractional component, but leading zeroes are disallowed for the integer
 component, except when the integer component is exactly zero.
 
 ### `UnsignedInt ::=`
