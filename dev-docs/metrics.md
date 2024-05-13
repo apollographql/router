@@ -227,7 +227,8 @@ When defining new operation metrics use the following conventions:
 **Attributes:**
 * `<feature>.<feature-specific-attribute>` - (usually a boolean or number, but can be a string if the set of possible values is fixed)
 
-> :warning: **Remember that attributes are not to be used to store high cardinality or user specific information. Operation name is not permitted!**
+> [!WARNING]
+> **Remember that attributes are not to be used to store high cardinality or user specific information. Operation name is not permitted!**
 
 #### Config metrics
 Each new feature MUST have a config metric that gives us information if a feature has been enabled. 
