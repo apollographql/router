@@ -113,6 +113,17 @@ struct OpenBranchAndSelections {
     selections: Vec<Selection>,
 }
 
+struct PlanInfo {
+    fetch_dependency_graph: FetchDependencyGraph,
+    path_tree: Arc<OpPathTree>,
+}
+
+impl std::fmt::Debug for PlanInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.path_tree.fmt(f)
+    }
+}
+
 pub(crate) struct BestQueryPlanInfo {
     /// The fetch dependency graph for this query plan.
     pub fetch_dependency_graph: FetchDependencyGraph,
@@ -603,13 +614,16 @@ impl<'a> QueryPlanningTraversal<'a> {
             .collect();
 
         let (best, cost) = generate_all_plans_and_find_best(
-            (initial_dependency_graph, Arc::new(initial_tree)),
+            PlanInfo {
+                fetch_dependency_graph: initial_dependency_graph,
+                path_tree: Arc::new(initial_tree),
+            },
             other_trees,
             /*plan_builder*/ self,
         )?;
         self.best_plan = BestQueryPlanInfo {
-            fetch_dependency_graph: best.0,
-            path_tree: best.1,
+            fetch_dependency_graph: best.fetch_dependency_graph,
+            path_tree: best.path_tree,
             cost,
         }
         .into();
@@ -948,35 +962,34 @@ impl<'a> QueryPlanningTraversal<'a> {
     }
 }
 
-impl PlanBuilder<(FetchDependencyGraph, Arc<OpPathTree>), Arc<OpPathTree>>
-    for QueryPlanningTraversal<'_>
-{
-    fn add_to_plan(
-        &mut self,
-        (plan_graph, plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
-        tree: Arc<OpPathTree>,
-    ) -> (FetchDependencyGraph, Arc<OpPathTree>) {
-        let mut updated_graph = plan_graph.clone();
+impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
+    fn add_to_plan(&mut self, plan_info: &PlanInfo, tree: Arc<OpPathTree>) -> PlanInfo {
+        let mut updated_graph = plan_info.fetch_dependency_graph.clone();
         let result = self.updated_dependency_graph(&mut updated_graph, &tree);
         if result.is_ok() {
-            let updated_tree = plan_tree.merge(&tree);
-            (updated_graph, updated_tree)
+            PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.merge(&tree),
+            }
         } else {
             // Failed to update. Return the original plan.
-            (updated_graph, plan_tree.clone())
+            PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.clone(),
+            }
         }
     }
 
     fn compute_plan_cost(
         &mut self,
-        (plan_graph, _): &mut (FetchDependencyGraph, Arc<OpPathTree>),
+        plan_info: &mut PlanInfo,
     ) -> Result<QueryPlanCost, FederationError> {
-        self.cost(plan_graph)
+        self.cost(&mut plan_info.fetch_dependency_graph)
     }
 
     fn on_plan_generated(
         &self,
-        (_, _plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
+        _plan_info: &PlanInfo,
         _cost: QueryPlanCost,
         _prev_cost: Option<QueryPlanCost>,
     ) {

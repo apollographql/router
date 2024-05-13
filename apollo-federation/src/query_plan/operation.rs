@@ -1124,10 +1124,16 @@ mod normalized_field_selection {
 
     /// The non-selection-set data of `FieldSelection`, used with operation paths and graph
     /// paths.
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone, PartialEq, Eq, Hash)]
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
+    }
+
+    impl std::fmt::Debug for Field {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.data.fmt(f)
+        }
     }
 
     impl Field {
@@ -1332,10 +1338,16 @@ mod normalized_fragment_spread_selection {
     /// An analogue of the apollo-compiler type `FragmentSpread` with these changes:
     /// - Stores the schema (may be useful for directives).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Clone, PartialEq, Eq)]
     pub(crate) struct FragmentSpread {
         data: FragmentSpreadData,
         key: SelectionKey,
+    }
+
+    impl std::fmt::Debug for FragmentSpread {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.data.fmt(f)
+        }
     }
 
     impl FragmentSpread {
@@ -1665,10 +1677,16 @@ mod normalized_inline_fragment_selection {
 
     /// The non-selection-set data of `InlineFragmentSelection`, used with operation paths and
     /// graph paths.
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone, PartialEq, Eq, Hash)]
     pub(crate) struct InlineFragment {
         data: InlineFragmentData,
         key: SelectionKey,
+    }
+
+    impl std::fmt::Debug for InlineFragment {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.data.fmt(f)
+        }
     }
 
     impl InlineFragment {
