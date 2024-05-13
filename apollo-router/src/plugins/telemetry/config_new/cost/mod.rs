@@ -65,7 +65,8 @@ impl Selectors for SupergraphCostAttributes {
 
     fn on_event_response(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
-        if let Some(cost_result) = &ctx.extensions().lock().get::<CostContext>() {
+        let cost_result = ctx.extensions().lock().get::<CostContext>().cloned();
+        if let Some(cost_result) = cost_result {
             if let Some(true) = self.cost_estimated {
                 attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
             }
