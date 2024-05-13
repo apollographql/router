@@ -456,6 +456,14 @@ impl Variables {
         let mut variables: serde_json_bytes::Map<serde_json_bytes::ByteString, Value> =
             Object::with_capacity(1 + variable_usages.len());
 
+        let body = request.body();
+
+        variables.extend(variable_usages.iter().filter_map(|key| {
+            body.variables
+                .get_key_value(key.as_str())
+                .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+        }));
+
         if !requires.is_empty() {
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::new();
@@ -572,17 +580,11 @@ impl Variables {
                 (HashMap::new(), None)
             };
 
-            let body = request.body();
             variables.extend(
                 extended_vars
                     .iter()
                     .map(|(key, value)| (key.as_str().into(), value.clone())),
             );
-            variables.extend(variable_usages.iter().filter_map(|key| {
-                body.variables
-                    .get_key_value(key.as_str())
-                    .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-            }));
 
             variables.insert("representations", representations);
             Some(Variables {
