@@ -75,10 +75,10 @@ below.
 JSONSelection        ::= NakedSubSelection | PathSelection
 NakedSubSelection    ::= NamedSelection* StarSelection?
 SubSelection         ::= "{" NakedSubSelection "}"
-NamedSelection       ::= NamedFieldSelection | NamedQuotedSelection | NamedPathSelection | NamedGroupSelection
+NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+NamedPathSelection   ::= Alias PathSelection
 NamedFieldSelection  ::= Alias? Identifier SubSelection?
 NamedQuotedSelection ::= Alias StringLiteral SubSelection?
-NamedPathSelection   ::= Alias PathSelection
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Identifier ":"
 PathSelection        ::= (VarPath | KeyPath) SubSelection?
@@ -112,17 +112,21 @@ operator. Every `CamelCase` identifier on the left side of the `::=` operator
 can be recursively expanded into one of its right-side alternatives.
 
 Methodically trying out all these alternatives is the fundamental job of the
-parser. While this grammar is not believed to have any ambiguities, ambiguities
-can be resolved by applying the alternatives left to right, accepting the first
-set of expansions that fully matches the input tokens. Parsing succeeds when
-only terminal tokens remain (quoted text or regular expression character
-classes).
+parser. Parsing succeeds when only terminal tokens remain (quoted text or
+regular expression character classes).
 
-Much like regular expression syntax, the `*` and `+` operators denote repetition
-(_zero or more_ and _one or more_, respectively), `?` denotes optionality (_zero
-or one_), parentheses allow grouping, `"quoted"` or `'quoted'` text represents
-raw characters that cannot be expanded further, and `[...]` specifies character
-ranges.
+Ambiguities can be resolved by applying the alternatives left to right,
+accepting the first set of expansions that fully matches the input tokens. An
+example where this kind of ordering matters is the `NamedSelection` rule, which
+specifies parsing `NamedPathSelection` before `NamedFieldSelection` and
+`NamedQuotedSelection`, so the entire path will be consumed, rather than
+mistakenly consuming only the first key in the path as a field name.
+
+As in many regular expression syntaxes, the `*` and `+` operators denote
+repetition (_zero or more_ and _one or more_, respectively), `?` denotes
+optionality (_zero or one_), parentheses allow grouping, `"quoted"` or
+`'quoted'` text represents raw characters that cannot be expanded further, and
+`[...]` specifies character ranges.
 
 ### Whitespace, comments, and `NO_SPACE`
 
@@ -253,6 +257,34 @@ Every possible production of the `NamedSelection` non-terminal corresponds to a
 named property in the output object, though each one obtains its value from the
 input object in a slightly different way.
 
+### `NamedPathSelection ::=`
+
+![NamedPathSelection](./grammar/NamedPathSelection.svg)
+
+Since `PathSelection` returns an anonymous value extracted from the given path,
+if you want to use a `PathSelection` alongside other `NamedSelection` items, you
+have to prefix it with an `Alias`, turning it into a `NamedPathSelection`.
+
+For example, you cannot omit the `pathName:` alias in the following
+`NakedSubSelection`, because `some.nested.path` has no output name by itself:
+
+```graphql
+position { x y }
+pathName: some.nested.path { a b c }
+scalarField
+```
+
+The ordering of alternatives in the `NamedSelection` rule is important, so the
+`NamedPathSelection` alternative can be considered before `NamedFieldSelection`
+and `NamedQuotedSelection`, because a `NamedPathSelection` such as `pathName:
+some.nested.path` has a prefix that looks like a `NamedFieldSelection`:
+`pathName: some`, causing an error when the parser encounters the remaining
+`.nested.path` text. Some parsers would resolve this ambiguity by forbidding `.`
+in the lookahead for `Named{Field,Quoted}Selection`, but negative lookahead is
+tricky for this parser (see similar discussion regarding `NO_SPACE`), so instead
+we greedily parse `NamedPathSelection` first, when possible, since that ensures
+the whole path will be consumed.
+
 ### `NamedFieldSelection ::=`
 
 ![NamedFieldSelection](./grammar/NamedFieldSelection.svg)
@@ -289,23 +321,6 @@ Besides extracting the `first` and `third` fields in typical GraphQL fashion,
 this selection extracts the `second property` field as `second`, subselecting
 `x`, `y`, and `z` from the extracted object. The final object will have the
 properties `first`, `second`, and `third`.
-
-### `NamedPathSelection ::=`
-
-![NamedPathSelection](./grammar/NamedPathSelection.svg)
-
-Since `PathSelection` returns an anonymous value extracted from the given path,
-if you want to use a `PathSelection` alongside other `NamedSelection` items, you
-have to prefix it with an `Alias`, turning it into a `NamedPathSelection`.
-
-For example, you cannot omit the `pathName:` alias in the following
-`NakedSubSelection`, because `some.nested.path` has no output name by itself:
-
-```graphql
-position { x y }
-pathName: some.nested.path { a b c }
-scalarField
-```
 
 ### `NamedGroupSelection ::=`
 
@@ -490,6 +505,8 @@ id name friends: friend_ids { id: $ }
 
 Because `friend_ids` is an array, the `{ id: $ }` selection maps over each
 element of the array, with `$` taking on the value of each scalar ID in turn.
+See [the FAQ](#what-about-arrays) for more discussion of this array-handling
+behavior.
 
 The `$` variable is also essential for disambiguating a `KeyPath` consisting of
 only one key from a `NamedFieldSelection` with no `Alias`. For example,
@@ -655,11 +672,11 @@ Analogous to a JSON primitive value, with the only differences being that
 
 A numeric literal that is possibly negative and may contain a fractional
 component. The integer component is required unless a fractional component is
-present, and the fractional component can have zero digits when there the
-integer component is present (as in `-123.`), but the fractional component must
-have at least one digit when there is no integer component, since `.` is not a
-valid numeric literal by itself. Leading and trailing zeroes are essential for
-the fractional component, but leading zeroes are disallowed for the integer
+present, and the fractional component can have zero digits when the integer
+component is present (as in `-123.`), but the fractional component must have at
+least one digit when there is no integer component, since `.` is not a valid
+numeric literal by itself. Leading and trailing zeroes are essential for the
+fractional component, but leading zeroes are disallowed for the integer
 component, except when the integer component is exactly zero.
 
 ### `UnsignedInt ::=`
