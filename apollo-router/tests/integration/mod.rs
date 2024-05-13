@@ -3,6 +3,7 @@ mod batching;
 pub(crate) mod common;
 pub(crate) use common::IntegrationTest;
 
+mod coprocessor;
 mod docs;
 mod file_upload;
 mod lifecycle;

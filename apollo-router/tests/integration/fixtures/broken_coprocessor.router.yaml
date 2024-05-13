@@ -1,0 +1,6 @@
+# This coprocessor doesn't point to anything
+coprocessor:
+  url: "http://localhost:10000"
+  router:
+    request:
+      body: true
