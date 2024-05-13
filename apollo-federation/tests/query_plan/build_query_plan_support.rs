@@ -106,7 +106,7 @@ pub(crate) fn compose(test_name: &str, subgraph_names_and_schemas: &[(&str, &str
         .join("tests")
         .join("query_plan")
         .join("supergraphs")
-        .join(format!("{test_name}.graphql"));
+        .join(format!("{}.graphql", test_name.replace("::", "__")));
     let supergraph = match std::fs::read_to_string(&supergraph_path) {
         Ok(contents) => {
             if let Some(hash) = contents
