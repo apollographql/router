@@ -624,9 +624,13 @@ print(`${response.body.errors}`); // logs the response errors
 
 Convert response status code to a string.
 
-### `response.status_code.to_number()`
+```rhai
+if response.status_code.to_string() == "200" {
+    print(`ok`);
+}
+```
 
-Convert response status code to a number
+Also useful if you want to convert response status code to a number
 
 ```rhai
 if parse_int(response.status_code.to_string()) == 200 {
