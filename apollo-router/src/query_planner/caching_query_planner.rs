@@ -611,6 +611,7 @@ impl Hash for CachingQueryKey {
         self.metadata.hash(state);
         self.plan_options.hash(state);
         self.config_mode.hash(state);
+        self.introspection.hash(state);
     }
 }
 
