@@ -50,10 +50,10 @@ impl JSONSelection {
     }
 }
 
-// NamedSelection       ::= NamedFieldSelection | NamedQuotedSelection | NamedPathSelection | NamedGroupSelection
+// NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+// NamedPathSelection   ::= Alias PathSelection
 // NamedFieldSelection  ::= Alias? Identifier SubSelection?
 // NamedQuotedSelection ::= Alias StringLiteral SubSelection?
-// NamedPathSelection   ::= Alias PathSelection
 // NamedGroupSelection  ::= Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -67,9 +67,17 @@ pub enum NamedSelection {
 impl NamedSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
+            // We must try parsing NamedPathSelection before NamedFieldSelection
+            // and NamedQuotedSelection because a NamedPathSelection without a
+            // leading `.`, such as `alias: some.nested.path` has a prefix that
+            // can be parsed as a NamedFieldSelection: `alias: some`. Parsing
+            // then fails when it finds the remaining `.nested.path` text. Some
+            // parsers would solve this by forbidding `.` in the "lookahead" for
+            // Named{Field,Quoted}Selection, but negative lookahead is tricky in
+            // nom, so instead we greedily parse NamedPathSelection first.
+            Self::parse_path,
             Self::parse_field,
             Self::parse_quoted,
-            Self::parse_path,
             Self::parse_group,
         ))(input)
     }

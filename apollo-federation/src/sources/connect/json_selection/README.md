@@ -75,10 +75,10 @@ below.
 JSONSelection        ::= NakedSubSelection | PathSelection
 NakedSubSelection    ::= NamedSelection* StarSelection?
 SubSelection         ::= "{" NakedSubSelection "}"
-NamedSelection       ::= NamedFieldSelection | NamedQuotedSelection | NamedPathSelection | NamedGroupSelection
+NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+NamedPathSelection   ::= Alias PathSelection
 NamedFieldSelection  ::= Alias? Identifier SubSelection?
 NamedQuotedSelection ::= Alias StringLiteral SubSelection?
-NamedPathSelection   ::= Alias PathSelection
 NamedGroupSelection  ::= Alias SubSelection
 Alias                ::= Identifier ":"
 PathSelection        ::= (VarPath | KeyPath) SubSelection?
@@ -112,17 +112,21 @@ operator. Every `CamelCase` identifier on the left side of the `::=` operator
 can be recursively expanded into one of its right-side alternatives.
 
 Methodically trying out all these alternatives is the fundamental job of the
-parser. While this grammar is not believed to have any ambiguities, ambiguities
-can be resolved by applying the alternatives left to right, accepting the first
-set of expansions that fully matches the input tokens. Parsing succeeds when
-only terminal tokens remain (quoted text or regular expression character
-classes).
+parser. Parsing succeeds when only terminal tokens remain (quoted text or
+regular expression character classes).
 
-Much like regular expression syntax, the `*` and `+` operators denote repetition
-(_zero or more_ and _one or more_, respectively), `?` denotes optionality (_zero
-or one_), parentheses allow grouping, `"quoted"` or `'quoted'` text represents
-raw characters that cannot be expanded further, and `[...]` specifies character
-ranges.
+Ambiguities can be resolved by applying the alternatives left to right,
+accepting the first set of expansions that fully matches the input tokens. An
+example where this kind of ordering matters is the `NamedSelection` rule, which
+specifies parsing `NamedPathSelection` before `NamedFieldSelection` and
+`NamedQuotedSelection`, so the entire path will be consumed, rather than
+mistakenly consuming only the first key in the path as a field name.
+
+As in many regular expression syntaxes, the `*` and `+` operators denote
+repetition (_zero or more_ and _one or more_, respectively), `?` denotes
+optionality (_zero or one_), parentheses allow grouping, `"quoted"` or
+`'quoted'` text represents raw characters that cannot be expanded further, and
+`[...]` specifies character ranges.
 
 ### Whitespace, comments, and `NO_SPACE`
 
@@ -253,6 +257,34 @@ Every possible production of the `NamedSelection` non-terminal corresponds to a
 named property in the output object, though each one obtains its value from the
 input object in a slightly different way.
 
+### `NamedPathSelection ::=`
+
+![NamedPathSelection](./grammar/NamedPathSelection.svg)
+
+Since `PathSelection` returns an anonymous value extracted from the given path,
+if you want to use a `PathSelection` alongside other `NamedSelection` items, you
+have to prefix it with an `Alias`, turning it into a `NamedPathSelection`.
+
+For example, you cannot omit the `pathName:` alias in the following
+`NakedSubSelection`, because `some.nested.path` has no output name by itself:
+
+```graphql
+position { x y }
+pathName: some.nested.path { a b c }
+scalarField
+```
+
+The ordering of alternatives in the `NamedSelection` rule is important, so the
+`NamedPathSelection` alternative can be considered before `NamedFieldSelection`
+and `NamedQuotedSelection`, because a `NamedPathSelection` such as `pathName:
+some.nested.path` has a prefix that looks like a `NamedFieldSelection`:
+`pathName: some`, causing an error when the parser encounters the remaining
+`.nested.path` text. Some parsers would resolve this ambiguity by forbidding `.`
+in the lookahead for `Named{Field,Quoted}Selection`, but negative lookahead is
+tricky for this parser (see similar discussion regarding `NO_SPACE`), so instead
+we greedily parse `NamedPathSelection` first, when possible, since that ensures
+the whole path will be consumed.
+
 ### `NamedFieldSelection ::=`
 
 ![NamedFieldSelection](./grammar/NamedFieldSelection.svg)
@@ -289,23 +321,6 @@ Besides extracting the `first` and `third` fields in typical GraphQL fashion,
 this selection extracts the `second property` field as `second`, subselecting
 `x`, `y`, and `z` from the extracted object. The final object will have the
 properties `first`, `second`, and `third`.
-
-### `NamedPathSelection ::=`
-
-![NamedPathSelection](./grammar/NamedPathSelection.svg)
-
-Since `PathSelection` returns an anonymous value extracted from the given path,
-if you want to use a `PathSelection` alongside other `NamedSelection` items, you
-have to prefix it with an `Alias`, turning it into a `NamedPathSelection`.
-
-For example, you cannot omit the `pathName:` alias in the following
-`NakedSubSelection`, because `some.nested.path` has no output name by itself:
-
-```graphql
-position { x y }
-pathName: some.nested.path { a b c }
-scalarField
-```
 
 ### `NamedGroupSelection ::=`
 
