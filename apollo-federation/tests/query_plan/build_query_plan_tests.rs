@@ -33,29 +33,27 @@ fn shareable_root_fields() {
             }
           }
         "#,
-        @"QueryPlan {}"
+        @r###"
+          QueryPlan {
+            Parallel {
+              Fetch(service: "Subgraph1") {
+                {
+                  me {
+                    prop1
+                  }
+                }
+              }
+              Fetch(service: "Subgraph2") {
+                {
+                  me {
+                    prop2
+                  }
+                }
+              }
+            }
+          }
+        "###
     );
-    // TODO: the resulting query plan above is wrong, it should like like below.
-    // For now this test exist to exercise macros and ensure that planning does not panic.
-    //
-    //   QueryPlan {
-    //     Parallel {
-    //       Fetch(service: "Subgraph1") {
-    //         {
-    //           me {
-    //             prop1
-    //           }
-    //         }
-    //       },
-    //       Fetch(service: "Subgraph2") {
-    //         {
-    //           me {
-    //             prop2
-    //           }
-    //         }
-    //       },
-    //     },
-    //   }
 }
 
 // TODO: port the rest of query-planner-js/src/__tests__/buildPlan.test.ts
