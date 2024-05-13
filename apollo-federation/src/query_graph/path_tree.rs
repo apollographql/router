@@ -439,6 +439,7 @@ mod tests {
             // find the edge that matches `field_name`
             let (edge_ref, field_def) = query_graph
                 .out_edges(curr_node_idx)
+                .into_iter()
                 .find_map(|e_ref| {
                     let edge = e_ref.weight();
                     match &edge.transition {

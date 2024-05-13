@@ -106,6 +106,7 @@ pub(crate) struct QueryPlanningTraversal<'a> {
     resolver_cache: ConditionResolverCache,
 }
 
+#[derive(Debug)]
 struct OpenBranchAndSelections {
     /// The options for this open branch.
     open_branch: OpenBranch,
@@ -120,7 +121,7 @@ struct PlanInfo {
 
 impl std::fmt::Debug for PlanInfo {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.path_tree.fmt(f)
+        std::fmt::Display::fmt(&self.path_tree, f)
     }
 }
 

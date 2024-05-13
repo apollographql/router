@@ -794,10 +794,12 @@ impl std::fmt::Display for ClosedPath {
 
 /// A list of the options generated during query planning for a specific "closed branch", which is a
 /// full/closed path in a GraphQL operation (i.e. one that ends in a leaf field).
+#[derive(Debug)]
 pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
+#[derive(Debug)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
@@ -1169,6 +1171,7 @@ where
             return Ok(Box::new(
                 self.graph
                     .out_edges_with_federation_self_edges(self.tail)
+                    .into_iter()
                     .map(|edge_ref| edge_ref.id()),
             ));
         }
@@ -1194,6 +1197,7 @@ where
         Ok(Box::new(
             self.graph
                 .out_edges(self.tail)
+                .into_iter()
                 .map(|edge_ref| edge_ref.id()),
         ))
     }
