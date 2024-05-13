@@ -41,15 +41,15 @@ fn can_use_same_root_operation_from_multiple_subgraphs_in_parallel() {
                     prop1
                   }
                 }
-              }
+              },
               Fetch(service: "Subgraph2") {
                 {
                   me {
                     prop2
                   }
                 }
-              }
-            }
+              },
+            },
           }
         "###
     );
