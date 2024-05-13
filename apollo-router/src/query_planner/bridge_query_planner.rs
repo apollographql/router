@@ -309,8 +309,16 @@ impl PlannerMode {
 
                     (Ok(js_plan), Ok(rust_plan)) => {
                         is_matched = js_plan.data.query_plan == rust_plan.into();
-                        if !is_matched {
-                            // TODO: tracing::debug!(diff)
+                        if is_matched {
+                            tracing::debug!("JS and Rust query plans match! 🎉");
+                        } else {
+                            tracing::warn!("JS v.s. Rust query plan mismatch");
+                            if let Some(formatted) = &js_plan.data.formatted_query_plan {
+                                tracing::debug!(
+                                    "Diff:\n{}",
+                                    render_diff(&diff::lines(formatted, &rust_plan.to_string()))
+                                );
+                            }
                         }
                     }
                 }

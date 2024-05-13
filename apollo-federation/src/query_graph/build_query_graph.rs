@@ -1138,7 +1138,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = Arc::new(parse_field_set(
                     schema,
                     type_pos.type_name().clone(),
-                    application.fields.clone(),
+                    &application.fields,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1263,7 +1263,7 @@ impl FederatedQueryGraphBuilder {
                                 implementation_type_in_other_subgraph_pos
                                     .type_name()
                                     .clone(),
-                                application.fields.clone(),
+                                &application.fields,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1328,7 +1328,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = parse_field_set(
                     schema,
                     field_definition_position.parent().type_name().clone(),
-                    application.fields,
+                    &application.fields,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1393,7 +1393,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = parse_field_set(
                     schema,
                     field_type_pos.type_name().clone(),
-                    application.fields,
+                    &application.fields,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1825,7 +1825,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = Arc::new(parse_field_set(
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
-                    NodeStr::from_static(&"__typename"),
+                    "__typename",
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema
