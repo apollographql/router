@@ -245,7 +245,8 @@ When defining new config metrics use the following conventions:
 Users may create custom instrument to monitor the health and performance of their system. They are highly configurable and the user has the ability to add custom attributes as they see fit. 
 These metrics will NOT be transmitted to Apollo and are only available to the user via their APM. 
 
-> :warning: **Failure to add dynamic metrics for a feature will render it un-debuggable and un-monitorable by the user.**
+> [!WARNING]
+> **Failure to add dynamic metrics for a feature will render it un-debuggable and un-monitorable by the user.**
 
 Adding a new dynamic instrument means:
 * Adding new selector(s) in the telemetry plugin.
