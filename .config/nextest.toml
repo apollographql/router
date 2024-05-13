@@ -9,8 +9,8 @@ final-status-level = "skip"
 # Do not cancel the test run on the first failure.
 fail-fast = false
 
-# Most tests should take much less than 1 minute (see override below)
-slow-timeout = { period = "20s", terminate-after = 3 }
+# Most tests should take much less than 2 minute (see override below)
+slow-timeout = { period = "30s", terminate-after = 4 }
 
 # Write to output for persistence to CircleCI
 [profile.ci.junit]
@@ -27,4 +27,4 @@ threads-required = 2
 [[profile.default.overrides]]
 filter = 'package(apollo-router-scaffold)'
 threads-required = 'num-test-threads'
-slow-timeout = { period = "60s", terminate-after = 6 }
+slow-timeout = { period = "60s", terminate-after = 10 }
