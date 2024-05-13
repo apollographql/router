@@ -8,8 +8,8 @@ use indexmap::map::Entry;
 use indexmap::IndexMap;
 
 use crate::error::FederationError;
-use crate::query_graph::graph_path::selection_of_element;
 use crate::query_graph::graph_path::OpPathElement;
+use crate::query_plan::operation::Selection;
 use crate::query_plan::operation::SelectionMap;
 use crate::query_plan::operation::SelectionSet;
 
@@ -221,12 +221,12 @@ pub(crate) fn remove_conditions_from_selection_set(
                             selection.with_updated_selection_set(Some(updated_selection_set))?
                         }
                     } else {
-                        selection_of_element(updated_element, Some(updated_selection_set))?
+                        Selection::from_element(updated_element, Some(updated_selection_set))?
                     }
                 } else if updated_element == element {
                     selection.clone()
                 } else {
-                    selection_of_element(updated_element, None)?
+                    Selection::from_element(updated_element, None)?
                 };
                 selection_map.insert(new_selection);
             }

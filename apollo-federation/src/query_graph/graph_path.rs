@@ -38,12 +38,12 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::operation::Field;
 use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::FieldSelection;
+use crate::query_plan::operation::HasSelectionKey;
 use crate::query_plan::operation::InlineFragment;
 use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::InlineFragmentSelection;
-use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::RebaseErrorHandlingOption;
 use crate::query_plan::operation::SelectionId;
+use crate::query_plan::operation::SelectionKey;
 use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
@@ -260,11 +260,18 @@ impl Display for OpGraphPathTrigger {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
+impl Deref for OpPath {
+    type Target = [Arc<OpPathElement>];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl std::fmt::Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
             if i > 0 {
-                write!(f, ", ")?;
+                write!(f, "::")?;
             }
             match element.deref() {
                 OpPathElement::Field(field) => write!(f, "{field}")?,
@@ -281,11 +288,27 @@ pub(crate) enum OpPathElement {
     InlineFragment(InlineFragment),
 }
 
+impl HasSelectionKey for OpPathElement {
+    fn key(&self) -> SelectionKey {
+        match self {
+            OpPathElement::Field(field) => field.key(),
+            OpPathElement::InlineFragment(fragment) => fragment.key(),
+        }
+    }
+}
+
 impl OpPathElement {
     pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
         match self {
             OpPathElement::Field(field) => &field.data().directives,
             OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.data().directives,
+        }
+    }
+
+    pub(crate) fn schema(&self) -> &ValidFederationSchema {
+        match self {
+            OpPathElement::Field(field) => field.schema(),
+            OpPathElement::InlineFragment(fragment) => fragment.schema(),
         }
     }
 
@@ -407,27 +430,22 @@ impl OpPathElement {
             }
         }
     }
-}
 
-pub(crate) fn selection_of_element(
-    element: OpPathElement,
-    sub_selection: Option<SelectionSet>,
-) -> Result<Selection, FederationError> {
-    // TODO: validate that the subSelection is ok for the element
-    Ok(match element {
-        OpPathElement::Field(field) => Selection::Field(Arc::new(FieldSelection {
-            field,
-            selection_set: sub_selection,
-        })),
-        OpPathElement::InlineFragment(inline_fragment) => {
-            Selection::InlineFragment(Arc::new(InlineFragmentSelection {
-                inline_fragment,
-                selection_set: sub_selection.ok_or_else(|| {
-                    FederationError::internal("Expected a selection set for an inline fragment")
-                })?,
-            }))
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        error_handling: RebaseErrorHandlingOption,
+    ) -> Result<Option<OpPathElement>, FederationError> {
+        match self {
+            OpPathElement::Field(field) => field
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
+            OpPathElement::InlineFragment(inline) => inline
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
         }
-    })
+    }
 }
 
 impl Display for OpPathElement {
@@ -3473,6 +3491,10 @@ impl ClosedBranch {
 }
 
 impl OpPath {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
