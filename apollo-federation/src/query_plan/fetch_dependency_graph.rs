@@ -770,10 +770,11 @@ impl FetchDependencyGraph {
 
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
     fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+        let mut stack = vec![];
         for start_index in self.children_of(node_index) {
-            let mut stack = self.children_of(start_index).collect::<Vec<_>>();
+            stack.extend(self.children_of(start_index));
             while let Some(v) = stack.pop() {
-                for edge in self.graph.edges_connecting(start_index, v) {
+                for edge in self.graph.edges_connecting(node_index, v) {
                     acc.insert(edge.id());
                 }
 
@@ -1173,14 +1174,16 @@ impl std::fmt::Display for FetchDependencyGraph {
                 let Ok(child) = g.node_weight(child_id) else {
                     continue;
                 };
-                write!(f, "{}", child.display(child_id))?;
+                write!(f, "{}", child.subgraph_name)?;
+            }
+
+            if g.children_of(node_id).next().is_some() {
+                f.write_char('\n')?;
             }
 
             for child_id in g.children_of(node_id) {
-                if g.children_of(child_id).next().is_some() {
-                    f.write_char('\n')?;
-                    fmt_node(g, child_id, f, indent + 1)?;
-                }
+                fmt_node(g, child_id, f, indent + 1)?;
+                f.write_char('\n')?;
             }
             Ok(())
         }
@@ -1371,7 +1374,7 @@ impl FetchDependencyGraphNode {
                     write!(f, "{x}")?;
                 }
                 for x in iter {
-                    write!(f, ",{x}")?;
+                    write!(f, "::{x}")?;
                 }
                 Ok(())
             }
@@ -1398,7 +1401,7 @@ impl FetchDependencyGraphNode {
                     (Some(merge_at), Some(inputs)) => {
                         write!(
                             f,
-                            // @(path,to,*,field)[{input1,input2} => { id }]
+                            // @(path::to::*::field)[{input1,input2} => { id }]
                             "@({})[{} => {}]",
                             DisplayList(merge_at),
                             inputs,
@@ -1408,7 +1411,7 @@ impl FetchDependencyGraphNode {
                     (Some(merge_at), None) => {
                         write!(
                             f,
-                            // @(path,to,*,field)[{} => { id }]
+                            // @(path::to::*::field)[{} => { id }]
                             "@({})[{{}} => {}]",
                             DisplayList(merge_at),
                             self.node.selection_set.selection_set

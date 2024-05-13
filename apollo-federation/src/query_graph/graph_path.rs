@@ -271,7 +271,7 @@ impl std::fmt::Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
             if i > 0 {
-                write!(f, ", ")?;
+                write!(f, "::")?;
             }
             match element.deref() {
                 OpPathElement::Field(field) => write!(f, "{field}")?,

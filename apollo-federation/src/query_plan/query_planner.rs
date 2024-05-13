@@ -759,7 +759,6 @@ type User
     }
 
     #[test]
-    #[ignore]
     fn plan_simple_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -783,7 +782,7 @@ type User
           Sequence {
             Fetch(service: "reviews") {
               {
-                        bestRatedProducts {
+                bestRatedProducts {
                   ... on Book {
                     id
                     __typename
@@ -796,33 +795,63 @@ type User
               }
             }
             Parallel {
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                                ... on Movie {
-                      id
-                    }
-                  } => {
-                                ... on Movie {
-                      vendor {
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Movie {
                         id
-                        __typename
+                      }
+                    } => {
+                      ... on Movie {
+                        vendor {
+                          id
+                          __typename
+                        }
+                      }
+                    }
+                  }
+                }
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        id
+                      }
+                    } => {
+                      ... on User {
+                        name
                       }
                     }
                   }
                 }
               }
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                                ... on Book {
-                      id
-                    }
-                  } => {
-                                ... on Book {
-                      vendor {
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Book {
                         id
-                        __typename
+                      }
+                    } => {
+                      ... on Book {
+                        vendor {
+                          id
+                          __typename
+                        }
+                      }
+                    }
+                  }
+                }
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        id
+                      }
+                    } => {
+                      ... on User {
+                        name
                       }
                     }
                   }
