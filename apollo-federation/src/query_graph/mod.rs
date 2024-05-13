@@ -758,7 +758,7 @@ impl QueryGraph {
             else {
                 continue;
             };
-            let selection = parse_field_set(schema, ty.name().clone(), value)?;
+            let selection = parse_field_set(schema, ty.name().clone(), &value)?;
             let has_external = metadata
                 .external_metadata()
                 .selects_any_external_field(&selection)?;
