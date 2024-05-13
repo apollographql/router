@@ -1988,14 +1988,11 @@ impl OpGraphPath {
         else {
             return Ok(path);
         };
-        let typename_field = Field::new(FieldData {
-            schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
-            field_position: tail_type_pos.introspection_typename_field(),
-            alias: None,
-            arguments: Arc::new(vec![]),
-            directives: Arc::new(Default::default()),
-            sibling_typename: None,
-        });
+        let typename_field = Field::new_introspection_typename(
+            self.graph.schema_by_source(&tail_weight.source)?,
+            &tail_type_pos,
+            None,
+        );
         let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
