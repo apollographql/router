@@ -439,6 +439,15 @@ pub(crate) mod normalized_selection_map {
         fn((&'a SelectionKey, &'a mut Selection)) -> (&'a SelectionKey, SelectionValue<'a>),
     >;
 
+    impl<'a> IntoIterator for &'a mut SelectionMap {
+        type Item = <IterMut<'a> as Iterator>::Item;
+        type IntoIter = IterMut<'a>;
+
+        fn into_iter(self) -> Self::IntoIter {
+            self.iter_mut()
+        }
+    }
+
     /// A mutable reference to a `Selection` value in a `SelectionMap`, which
     /// also disallows changing key-related data (to maintain the invariant that a value's key is
     /// the same as it's map entry's key).
@@ -2161,7 +2170,7 @@ impl SelectionSet {
             }
         }
 
-        for (key, self_selection) in self.selections.iter_mut() {
+        for (key, self_selection) in &mut self.selections {
             match self_selection {
                 SelectionValue::Field(mut self_field_selection) => {
                     if let Some(other_field_selections) = fields.shift_remove(key) {
@@ -2298,7 +2307,7 @@ impl SelectionSet {
         let mut typename_field_key: Option<SelectionKey> = None;
         let mut sibling_field_key: Option<SelectionKey> = None;
 
-        for (key, entry) in self.selections.iter_mut() {
+        for (key, entry) in &mut self.selections {
             match entry {
                 SelectionValue::Field(mut field_selection) => {
                     if field_selection.get().field.data().name() == &TYPENAME_FIELD
