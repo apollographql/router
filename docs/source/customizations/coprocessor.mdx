@@ -5,7 +5,7 @@ description: Customize your router's behavior in any language
 
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-<EnterpriseFeature />
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 With **external coprocessing**, you can hook into the Apollo Router's request-handling lifecycle by writing standalone code in any language and framework. This code (i.e., your **coprocessor**) can run anywhere on your network that's accessible to the router over HTTP.
 
@@ -825,8 +825,11 @@ When `stage` is `SupergraphResponse`, if present and `true` then there will be s
 
 An object mapping of all HTTP header names and values for the corresponding request or response.
 
+Ensure headers are handled like HTTP headers in general. For example, normalize header case before your coprocessor operates on them. 
+
 If your coprocessor [returns a _different_ value](#responding-to-coprocessor-requests) for `headers`, the router replaces the existing headers with that value.
-⚠️ `content-length` sent by Coprocessors are discarded by the router. (Wrong `content-length` values could lead to failure for HTTP requests to be sent)
+
+> The router discards any `content-length` headers sent by coprocessors because incorrect `content-length` values can lead to HTTP request failures.
 
 </td>
 </tr>
@@ -1055,7 +1058,7 @@ If you return a successful response, make sure the structure of the `data` prope
 
 ### Failed responses
 
-Your router considers all of the following scenarios to be a **failed response** from your coprocessor:
+If a request to a coprocessor results in a **failed response**, which is seperate from a **control break**, the Router will return an error to the client making the supergraph request. The router considers all of the following scenarios to be a **failed response** from your coprocessor:
 
 - Your coprocessor doesn't respond within the amount of time specified by the `timeout` key in your [configuration](#typical-configuration) (default one second).
 - Your coprocessor responds with a non-`2xx` HTTP code.

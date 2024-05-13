@@ -9,6 +9,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::time::Instant;
+use tower::BoxError;
 
 use super::redis::*;
 use crate::configuration::RedisCache;
@@ -40,6 +41,8 @@ where
     // It has the functions it needs already
 }
 
+pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
+
 // placeholder storage module
 //
 // this will be replaced by the multi level (in memory + redis/memcached) once we find
@@ -60,18 +63,22 @@ where
         max_capacity: NonZeroUsize,
         config: Option<RedisCache>,
         caller: &str,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, BoxError> {
+        Ok(Self {
             caller: caller.to_string(),
             inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
             redis: if let Some(config) = config {
+                let required_to_start = config.required_to_start;
                 match RedisCacheStorage::new(config).await {
                     Err(e) => {
                         tracing::error!(
-                            "could not open connection to Redis for {} caching: {:?}",
-                            caller,
-                            e
+                            cache = caller,
+                            e,
+                            "could not open connection to Redis for caching",
                         );
+                        if required_to_start {
+                            return Err(e);
+                        }
                         None
                     }
                     Ok(storage) => Some(storage),
@@ -79,7 +86,7 @@ where
             } else {
                 None
             },
-        }
+        })
     }
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
@@ -173,13 +180,19 @@ where
         );
     }
 
-    pub(crate) async fn in_memory_keys(&self) -> Vec<K> {
-        self.inner
-            .lock()
-            .await
-            .iter()
-            .map(|(k, _)| k.clone())
-            .collect()
+    pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
+        let mut in_memory = self.inner.lock().await;
+        in_memory.put(key, value);
+        let size = in_memory.len() as u64;
+        tracing::info!(
+            value.apollo_router_cache_size = size,
+            kind = %self.caller,
+            storage = &tracing::field::display(CacheStorageName::Memory),
+        );
+    }
+
+    pub(crate) fn in_memory_cache(&self) -> InMemoryCache<K, V> {
+        self.inner.clone()
     }
 
     #[cfg(test)]

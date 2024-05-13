@@ -5,8 +5,9 @@ description: Capture standard and custom events from the Apollo Router's request
 ---
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
+import TelemetryPerformanceNote from '../../../../shared/telemetry-performance.mdx';
 
-An **event** is used to signal when something of note happens in the [Apollo Router's request lifecycle](../../../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
+An _event_ is used to signal when something of note happens in the [Apollo Router's request lifecycle](../../../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
 
 You can configure events for each service in `router.yaml`. Events can be standard or custom, and they can be triggered by configurable conditions.
 
@@ -61,7 +62,7 @@ telemetry:
 
 ### Custom events
 
-<EnterpriseFeature />
+<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
 
 For each service you can also configure custom events.
 
@@ -74,6 +75,12 @@ telemetry:
         my.event: # This key will automatically be added as a 'type' attribute of the event
           # Custom event configuration
 ```
+
+<Note>
+
+<TelemetryPerformanceNote/>
+
+</Note>
 
 ### `message`
 
@@ -185,9 +192,9 @@ telemetry:
             - request_header: "x-log-request"
         
     supergraph:
-        # ...
+        # Custom event configuration for supergraph service ...
     subgraph:
-        # ...
+        # Custom event configuration for subgraph service ...
 ```
 
 ## Event configuration reference

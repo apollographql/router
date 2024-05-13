@@ -3,6 +3,7 @@ use std::task::Poll;
 use std::time::Duration;
 
 use futures::future;
+use futures::stream::SplitStream;
 use futures::Future;
 use futures::Sink;
 use futures::SinkExt;
@@ -16,6 +17,7 @@ use serde::Serialize;
 use serde_json_bytes::Value;
 use tokio::io::AsyncRead;
 use tokio::io::AsyncWrite;
+use tokio_stream::wrappers::IntervalStream;
 use tokio_tungstenite::tungstenite::protocol::frame::coding::CloseCode;
 use tokio_tungstenite::tungstenite::protocol::CloseFrame;
 use tokio_tungstenite::tungstenite::Message;
@@ -213,21 +215,19 @@ impl ServerMessage {
     }
 }
 
-pin_project! {
 pub(crate) struct GraphqlWebSocket<S> {
-    #[pin]
     stream: S,
     id: String,
     protocol: WebSocketProtocol,
-    // Booleans for state machine when closing the stream
-    completed: bool,
-    terminated: bool,
-}
 }
 
 impl<S> GraphqlWebSocket<S>
 where
-    S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage> + std::marker::Unpin,
+    S: Stream<Item = serde_json::Result<ServerMessage>>
+        + Sink<ClientMessage>
+        + std::marker::Unpin
+        + std::marker::Send
+        + 'static,
 {
     pub(crate) async fn new(
         mut stream: S,
@@ -289,9 +289,36 @@ where
             stream,
             id,
             protocol,
-            completed: false,
-            terminated: false,
         })
+    }
+
+    pub(crate) async fn into_subscription(
+        mut self,
+        request: graphql::Request,
+        heartbeat_interval: Option<tokio::time::Duration>,
+    ) -> Result<SubscriptionStream<S>, graphql::Error> {
+        tracing::info!(
+            monotonic_counter
+                .apollo
+                .router
+                .operations
+                .subscriptions
+                .events = 1u64,
+            subscriptions.mode = "passthrough"
+        );
+
+        self.stream
+            .send(self.protocol.subscribe(self.id.to_string(), request))
+            .await
+            .map(|_| {
+                SubscriptionStream::new(self.stream, self.id, self.protocol, heartbeat_interval)
+            })
+            .map_err(|_err| {
+                graphql::Error::builder()
+                    .message("cannot send to websocket connection")
+                    .extension_code("WEBSOCKET_CONNECTION_ERROR")
+                    .build()
+            })
     }
 }
 
@@ -361,7 +388,123 @@ where
         })
 }
 
-impl<S> Stream for GraphqlWebSocket<S>
+pub(crate) struct SubscriptionStream<S> {
+    inner_stream: SplitStream<InnerStream<S>>,
+    close_signal: Option<tokio::sync::oneshot::Sender<()>>,
+}
+
+impl<S> SubscriptionStream<S>
+where
+    S: Stream<Item = serde_json::Result<ServerMessage>>
+        + Sink<ClientMessage>
+        + std::marker::Unpin
+        + std::marker::Send
+        + 'static,
+{
+    pub(crate) fn new(
+        stream: S,
+        id: String,
+        protocol: WebSocketProtocol,
+        heartbeat_interval: Option<tokio::time::Duration>,
+    ) -> Self {
+        let (mut sink, inner_stream) = InnerStream::new(stream, id, protocol).split();
+        let (close_signal, close_sentinel) = tokio::sync::oneshot::channel::<()>();
+
+        tokio::task::spawn(async move {
+            if let (WebSocketProtocol::GraphqlWs, Some(duration)) = (protocol, heartbeat_interval) {
+                let mut interval =
+                    tokio::time::interval_at(tokio::time::Instant::now() + duration, duration);
+                interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                let mut heartbeat_stream = IntervalStream::new(interval)
+                    .map(|_| Ok(ClientMessage::Ping { payload: None }))
+                    .take_until(close_sentinel);
+                if let Err(err) = sink.send_all(&mut heartbeat_stream).await {
+                    tracing::trace!("cannot send heartbeat: {err:?}");
+                    if let Some(close_sentinel) = heartbeat_stream.take_future() {
+                        if let Err(err) = close_sentinel.await {
+                            tracing::trace!("cannot shutdown sink: {err:?}");
+                        }
+                    }
+                }
+            } else if let Err(err) = close_sentinel.await {
+                tracing::trace!("cannot shutdown sink: {err:?}");
+            };
+
+            tracing::info!(
+                monotonic_counter
+                    .apollo
+                    .router
+                    .operations
+                    .subscriptions
+                    .events = 1u64,
+                subscriptions.mode = "passthrough",
+                subscriptions.complete = true
+            );
+
+            if let Err(err) = sink.close().await {
+                tracing::trace!("cannot close the websocket stream: {err:?}");
+            }
+        });
+
+        Self {
+            inner_stream,
+            close_signal: Some(close_signal),
+        }
+    }
+}
+
+impl<S> Drop for SubscriptionStream<S> {
+    fn drop(&mut self) {
+        if let Some(close_signal) = self.close_signal.take() {
+            if let Err(err) = close_signal.send(()) {
+                tracing::trace!("cannot close the websocket stream: {err:?}");
+            }
+        }
+    }
+}
+
+impl<S> Stream for SubscriptionStream<S>
+where
+    S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage> + std::marker::Unpin,
+{
+    type Item = graphql::Response;
+
+    fn poll_next(
+        mut self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        self.inner_stream.poll_next_unpin(cx)
+    }
+}
+
+pin_project! {
+struct InnerStream<S> {
+    #[pin]
+    stream: S,
+    id: String,
+    protocol: WebSocketProtocol,
+    // Booleans for state machine when closing the stream
+    completed: bool,
+    terminated: bool,
+}
+}
+
+impl<S> InnerStream<S>
+where
+    S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage> + std::marker::Unpin,
+{
+    fn new(stream: S, id: String, protocol: WebSocketProtocol) -> Self {
+        Self {
+            stream,
+            id,
+            protocol,
+            completed: false,
+            terminated: false,
+        }
+    }
+}
+
+impl<S> Stream for InnerStream<S>
 where
     S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage>,
 {
@@ -419,7 +562,7 @@ where
     }
 }
 
-impl<S> Sink<graphql::Request> for GraphqlWebSocket<S>
+impl<S> Sink<ClientMessage> for InnerStream<S>
 where
     S: Stream<Item = serde_json::Result<ServerMessage>> + Sink<ClientMessage>,
 {
@@ -444,26 +587,15 @@ where
         })
     }
 
-    fn start_send(self: Pin<&mut Self>, item: graphql::Request) -> Result<(), Self::Error> {
+    fn start_send(self: Pin<&mut Self>, item: ClientMessage) -> Result<(), Self::Error> {
         let mut this = self.project();
 
-        tracing::info!(
-            monotonic_counter
-                .apollo
-                .router
-                .operations
-                .subscriptions
-                .events = 1u64,
-            subscriptions.mode = "passthrough"
-        );
-        Pin::new(&mut this.stream)
-            .start_send(this.protocol.subscribe(this.id.to_string(), item))
-            .map_err(|_err| {
-                graphql::Error::builder()
-                    .message("cannot send to websocket connection")
-                    .extension_code("WEBSOCKET_CONNECTION_ERROR")
-                    .build()
-            })
+        Pin::new(&mut this.stream).start_send(item).map_err(|_err| {
+            graphql::Error::builder()
+                .message("cannot send to websocket connection")
+                .extension_code("WEBSOCKET_CONNECTION_ERROR")
+                .build()
+        })
     }
 
     fn poll_flush(
@@ -483,16 +615,6 @@ where
         self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Result<(), Self::Error>> {
-        tracing::info!(
-            monotonic_counter
-                .apollo
-                .router
-                .operations
-                .subscriptions
-                .events = 1u64,
-            subscriptions.mode = "passthrough",
-            subscriptions.complete = true
-        );
         let mut this = self.project();
         if !*this.completed {
             match Pin::new(
@@ -548,7 +670,7 @@ mod tests {
     use axum::routing::get;
     use axum::Router;
     use axum::Server;
-    use futures::StreamExt;
+    use futures::FutureExt;
     use http::HeaderValue;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
@@ -559,6 +681,7 @@ mod tests {
 
     async fn emulate_correct_websocket_server_new_protocol(
         send_ping: bool,
+        heartbeat_interval: Option<tokio::time::Duration>,
         port: Option<u16>,
     ) -> SocketAddr {
         let ws_handler = move |ws: WebSocketUpgrade| async move {
@@ -615,6 +738,26 @@ mod tests {
                     ))
                     .await
                     .unwrap();
+
+                if let Some(duration) = heartbeat_interval {
+                   tokio::time::pause();
+                   assert!(
+                       socket.next().now_or_never().is_none(),
+                       "It should be no pending messages"
+                   );
+
+                   tokio::time::sleep(duration).await;
+                   let ping_message = socket.next().await.unwrap().unwrap();
+                   assert_eq!(ping_message, AxumWsMessage::Text(
+                       serde_json::to_string(&ClientMessage::Ping { payload: None }).unwrap(),
+                   ));
+
+                   assert!(
+                       socket.next().now_or_never().is_none(),
+                       "It should be no pending messages"
+                   );
+                   tokio::time::resume();
+                }
 
                 socket
                     .send(AxumWsMessage::Text(
@@ -774,16 +917,27 @@ mod tests {
 
     #[tokio::test]
     async fn test_ws_connection_new_proto_with_ping() {
-        test_ws_connection_new_proto(true, None).await
+        test_ws_connection_new_proto(true, None, None).await
     }
 
     #[tokio::test]
     async fn test_ws_connection_new_proto_without_ping() {
-        test_ws_connection_new_proto(false, None).await
+        test_ws_connection_new_proto(false, None, None).await
     }
 
-    async fn test_ws_connection_new_proto(send_ping: bool, port: Option<u16>) {
-        let socket_addr = emulate_correct_websocket_server_new_protocol(send_ping, port).await;
+    #[tokio::test]
+    async fn test_ws_connection_new_proto_with_heartbeat() {
+        test_ws_connection_new_proto(false, Some(tokio::time::Duration::from_secs(60)), None).await
+    }
+
+    async fn test_ws_connection_new_proto(
+        send_ping: bool,
+        heartbeat_interval: Option<tokio::time::Duration>,
+        port: Option<u16>,
+    ) {
+        let socket_addr =
+            emulate_correct_websocket_server_new_protocol(send_ping, heartbeat_interval, port)
+                .await;
         let url = url::Url::parse(format!("ws://{}/ws", socket_addr).as_str()).unwrap();
         let mut request = url.into_client_request().unwrap();
         request.headers_mut().insert(
@@ -793,7 +947,7 @@ mod tests {
         let (ws_stream, _resp) = connect_async(request).await.unwrap();
 
         let sub_uuid = Uuid::new_v4();
-        let gql_stream = GraphqlWebSocket::new(
+        let gql_socket = GraphqlWebSocket::new(
             convert_websocket_stream(ws_stream, sub_uuid.to_string()),
             sub_uuid.to_string(),
             WebSocketProtocol::GraphqlWs,
@@ -805,13 +959,13 @@ mod tests {
         .unwrap();
 
         let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
-        let (mut gql_sink, mut gql_read_stream) = gql_stream.split();
-        let _handle = tokio::task::spawn(async move {
-            gql_sink
-                .send(graphql::Request::builder().query(sub).build())
-                .await
-                .unwrap();
-        });
+        let mut gql_read_stream = gql_socket
+            .into_subscription(
+                graphql::Request::builder().query(sub).build(),
+                heartbeat_interval,
+            )
+            .await
+            .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
         assert_eq!(next_payload, graphql::Response::builder()
@@ -834,7 +988,7 @@ mod tests {
                 .build()
         );
         assert!(
-            gql_read_stream.next().await.is_none(),
+            gql_read_stream.next().now_or_never().is_none(),
             "It should be completed"
         );
     }
@@ -860,7 +1014,7 @@ mod tests {
         let (ws_stream, _resp) = connect_async(request).await.unwrap();
 
         let sub_uuid = Uuid::new_v4();
-        let gql_stream = GraphqlWebSocket::new(
+        let gql_socket = GraphqlWebSocket::new(
             convert_websocket_stream(ws_stream, sub_uuid.to_string()),
             sub_uuid.to_string(),
             WebSocketProtocol::SubscriptionsTransportWs,
@@ -870,14 +1024,10 @@ mod tests {
         .unwrap();
 
         let sub = "subscription {\n  userWasCreated {\n    username\n  }\n}";
-        let (mut gql_sink, mut gql_read_stream) = gql_stream.split();
-        let _handle = tokio::task::spawn(async move {
-            gql_sink
-                .send(graphql::Request::builder().query(sub).build())
-                .await
-                .unwrap();
-            gql_sink.close().await.unwrap();
-        });
+        let mut gql_read_stream = gql_socket
+            .into_subscription(graphql::Request::builder().query(sub).build(), None)
+            .await
+            .unwrap();
 
         let next_payload = gql_read_stream.next().await.unwrap();
         assert_eq!(next_payload, graphql::Response::builder()
@@ -900,7 +1050,7 @@ mod tests {
                 .build()
         );
         assert!(
-            gql_read_stream.next().await.is_none(),
+            gql_read_stream.next().now_or_never().is_none(),
             "It should be completed"
         );
     }

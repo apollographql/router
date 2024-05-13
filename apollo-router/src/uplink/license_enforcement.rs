@@ -212,7 +212,28 @@ impl LicenseEnforcementReport {
             })
             .collect::<HashMap<_, _>>();
 
-        let mut schema_violations = Vec::new();
+        let mut schema_violations: Vec<SchemaViolation> = Vec::new();
+
+        for subgraph_url in schema
+            .definitions
+            .iter()
+            .filter_map(|def| def.as_enum_type_definition())
+            .filter(|def| def.name == "join__Graph")
+            .flat_map(|def| def.values.iter())
+            .flat_map(|val| val.directives.iter())
+            .filter(|d| d.name == "join__graph")
+            .filter_map(|dir| (dir.arguments.iter().find(|arg| arg.name == "url")))
+            .filter_map(|arg| arg.value.as_str())
+        {
+            if subgraph_url.starts_with("unix://") {
+                schema_violations.push(SchemaViolation::DirectiveArgument {
+                    url: "https://specs.apollo.dev/join/v0.3".to_string(),
+                    name: "join__Graph".to_string(),
+                    argument: "url".to_string(),
+                    explanation: "Unix socket support for subgraph requests is restricted to Enterprise users".to_string(),
+                });
+            }
+        }
 
         for restriction in schema_restrictions {
             match restriction {
@@ -356,6 +377,18 @@ impl LicenseEnforcementReport {
             ConfigurationRestriction::builder()
                 .path("$.telemetry..instruments")
                 .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.preview_file_uploads")
+                .name("File uploads plugin")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.batching")
+                .name("Batching support")
+                .build(),
+            ConfigurationRestriction::builder()
+                .path("$.experimental_demand_control")
+                .name("Demand control plugin")
                 .build(),
         ]
     }
@@ -650,6 +683,20 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/authorization.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn test_restricted_unix_socket_via_schema() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/unix_socket.graphql"),
         );
 
         assert!(

@@ -8,11 +8,14 @@ use once_cell::sync::OnceCell;
 use opentelemetry::sdk::trace::Tracer;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_api::trace::SpanContext;
+use opentelemetry_api::trace::TraceFlags;
+use opentelemetry_api::trace::TraceState;
+use opentelemetry_api::Context;
 use rand::thread_rng;
 use rand::Rng;
 use tower::BoxError;
 use tracing_core::Subscriber;
-use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::filter::Filtered;
 use tracing_subscriber::fmt::FormatFields;
 use tracing_subscriber::layer::Filter;
@@ -28,7 +31,7 @@ use tracing_subscriber::Registry;
 
 use super::config::SamplerOption;
 use super::config_new::logging::RateLimit;
-use super::dynamic_attribute::DynAttributeLayer;
+use super::dynamic_attribute::DynSpanAttributeLayer;
 use super::fmt_layer::FmtLayer;
 use super::formatters::json::Json;
 use super::metrics::span_metrics_exporter::SpanMetricsLayer;
@@ -39,10 +42,14 @@ use crate::metrics::meter_provider;
 use crate::plugins::telemetry::formatters::filter_metric_events;
 use crate::plugins::telemetry::formatters::text::Text;
 use crate::plugins::telemetry::formatters::FilteringFormatter;
+use crate::plugins::telemetry::otel;
+use crate::plugins::telemetry::otel::OpenTelemetryLayer;
+use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
 use crate::router_factory::STARTING_SPAN_NAME;
 
-pub(crate) type LayeredRegistry = Layered<SpanMetricsLayer, Layered<DynAttributeLayer, Registry>>;
+pub(crate) type LayeredRegistry =
+    Layered<SpanMetricsLayer, Layered<DynSpanAttributeLayer, Registry>>;
 
 pub(super) type LayeredTracer = Layered<
     Filtered<
@@ -79,7 +86,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             None,
         ),
     );
-    let opentelemetry_layer = tracing_opentelemetry::layer()
+    let opentelemetry_layer = otel::layer()
         .with_tracer(hot_tracer.clone())
         .with_filter(SamplingFilter::new());
 
@@ -111,7 +118,7 @@ pub(crate) fn init_telemetry(log_level: &str) -> Result<()> {
             // Env filter is separate because of https://github.com/tokio-rs/tracing/issues/1629
             // the tracing registry is only created once
             tracing_subscriber::registry()
-                .with(DynAttributeLayer::new())
+                .with(DynSpanAttributeLayer::new())
                 .with(SpanMetricsLayer::default())
                 .with(opentelemetry_layer)
                 .with(fmt_layer)
@@ -139,6 +146,26 @@ pub(crate) fn apollo_opentelemetry_initialized() -> bool {
     OPENTELEMETRY_TRACER_HANDLE.get().is_some()
 }
 
+// When propagating trace headers to a subgraph or coprocessor, we need a valid trace id and span id
+// When the SamplingFilter does not sample a trace, those ids are set to 0 and mark the trace as invalid.
+// In that case we still need to propagate headers to subgraphs to tell them they should not sample the trace.
+// To that end, we update the context just for that request to create valid span et trace ids, with the
+// sampling bit set to false
+pub(crate) fn prepare_context(context: Context) -> Context {
+    if !context.span().span_context().is_valid() {
+        if let Some(tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
+            let span_context = SpanContext::new(
+                tracer.new_trace_id(),
+                tracer.new_span_id(),
+                TraceFlags::default(),
+                false,
+                TraceState::default(),
+            );
+            return context.with_remote_span_context(span_context);
+        }
+    }
+    context
+}
 pub(crate) struct SamplingFilter;
 
 #[allow(dead_code)]

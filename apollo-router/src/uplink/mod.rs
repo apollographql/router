@@ -33,6 +33,7 @@ pub(crate) enum Error {
     #[error("fetch failed from all {url_count} uplink endpoints")]
     FetchFailedMultiple { url_count: usize },
 
+    #[allow(clippy::enum_variant_names)]
     #[error("uplink error: code={code} message={message}")]
     UplinkError { code: String, message: String },
 
@@ -213,6 +214,7 @@ where
     let query = query_name::<Query>();
     let (sender, receiver) = channel(2);
     let client = match reqwest::Client::builder()
+        .no_gzip()
         .timeout(uplink_config.timeout)
         .build()
     {

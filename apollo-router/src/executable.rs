@@ -1,5 +1,6 @@
 //! Main entry point for CLI command to start server.
 
+use std::cell::Cell;
 use std::env;
 use std::ffi::OsStr;
 use std::fmt;
@@ -519,6 +520,7 @@ impl Executable {
                 ));
             }
             (Some(config), None) => config,
+            #[allow(clippy::blocks_in_conditions)]
             _ => match opt.config_path.as_ref().map(|path| {
                 let path = if path.is_relative() {
                     current_directory.join(path)
@@ -680,6 +682,7 @@ impl Executable {
         }
 
         let router = RouterHttpServer::builder()
+            .is_telemetry_disabled(opt.is_telemetry_disabled())
             .configuration(configuration)
             .and_uplink(uplink_config)
             .schema(schema_source)
@@ -710,14 +713,22 @@ fn setup_panic_handler() {
     std::panic::set_hook(Box::new(move |e| {
         if show_backtraces {
             let backtrace = std::backtrace::Backtrace::capture();
-            tracing::error!("{}\n{:?}", e, backtrace)
+            tracing::error!("{}\n{}", e, backtrace)
         } else {
             tracing::error!("{}", e)
         }
-        // Once we've panic'ed the behaviour of the router is non-deterministic
-        // We've logged out the panic details. Terminate with an error code
-        std::process::exit(1);
+        if !USING_CATCH_UNWIND.get() {
+            // Once we've panic'ed the behaviour of the router is non-deterministic
+            // We've logged out the panic details. Terminate with an error code
+            std::process::exit(1);
+        }
     }));
+}
+
+// TODO: once the Rust query planner does not use `todo!()` anymore,
+// remove this and the use of `catch_unwind` to call it.
+thread_local! {
+    pub(crate) static USING_CATCH_UNWIND: Cell<bool> = const { Cell::new(false) };
 }
 
 static COPIED: AtomicBool = AtomicBool::new(false);

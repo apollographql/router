@@ -77,6 +77,7 @@ impl Plugin for IncludeSubgraphErrors {
 
 #[cfg(test)]
 mod test {
+    use std::num::NonZeroUsize;
     use std::sync::Arc;
 
     use bytes::Bytes;
@@ -90,7 +91,7 @@ mod test {
     use crate::json_ext::Object;
     use crate::plugin::test::MockSubgraph;
     use crate::plugin::DynPlugin;
-    use crate::query_planner::BridgeQueryPlanner;
+    use crate::query_planner::BridgeQueryPlannerPool;
     use crate::router_factory::create_plugins;
     use crate::services::layers::persisted_queries::PersistedQueryLayer;
     use crate::services::layers::query_analysis::QueryAnalysisLayer;
@@ -190,23 +191,32 @@ mod test {
 
         let schema =
             include_str!("../../../apollo-router-benchmarks/benches/fixtures/supergraph.graphql");
-        let planner = BridgeQueryPlanner::new(schema.to_string(), Default::default())
-            .await
-            .unwrap();
+        let planner = BridgeQueryPlannerPool::new(
+            schema.to_string(),
+            Default::default(),
+            NonZeroUsize::new(1).unwrap(),
+        )
+        .await
+        .unwrap();
         let schema = planner.schema();
+        let subgraph_schemas = planner.subgraph_schemas();
 
-        let mut builder = PluggableSupergraphServiceBuilder::new(planner);
+        let builder = PluggableSupergraphServiceBuilder::new(planner);
 
-        let plugins = create_plugins(&Configuration::default(), &schema, None, None)
-            .await
-            .unwrap();
+        let mut plugins = create_plugins(
+            &Configuration::default(),
+            &schema,
+            subgraph_schemas,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
 
-        for (name, plugin) in plugins.into_iter() {
-            builder = builder.with_dyn_plugin(name, plugin);
-        }
+        plugins.insert("apollo.include_subgraph_errors".to_string(), plugin);
 
         let builder = builder
-            .with_dyn_plugin("apollo.include_subgraph_errors".to_string(), plugin)
+            .with_plugins(Arc::new(plugins))
             .with_subgraph_service("accounts", account_service.clone())
             .with_subgraph_service("reviews", review_service.clone())
             .with_subgraph_service("products", product_service.clone());

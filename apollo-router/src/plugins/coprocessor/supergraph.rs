@@ -105,11 +105,12 @@ impl SupergraphStage {
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::SupergraphRequest,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::SupergraphRequest,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }
@@ -140,15 +141,16 @@ impl SupergraphStage {
                     .map_err(|error| {
                         succeeded = false;
                         tracing::error!(
-                            "external extensibility: router response stage error: {error}"
+                            "external extensibility: supergraph response stage error: {error}"
                         );
                         error
                     });
-                    tracing::info!(
-                        monotonic_counter.apollo.router.operations.coprocessor = 1u64,
-                        coprocessor.stage = %PipelineStep::SupergraphResponse,
-                        coprocessor.succeeded = succeeded,
-                        "Total operations with co-processors enabled"
+                    u64_counter!(
+                        "apollo.router.operations.coprocessor",
+                        "Total operations with co-processors enabled",
+                        1,
+                        "coprocessor.stage" = PipelineStep::SupergraphResponse,
+                        "coprocessor.succeeded" = succeeded
                     );
                     result
                 }

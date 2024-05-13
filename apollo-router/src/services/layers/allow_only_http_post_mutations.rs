@@ -48,7 +48,13 @@ where
                         return Ok(ControlFlow::Continue(req));
                     }
 
-                    let doc = match req.context.extensions().lock().get::<ParsedDocument>() {
+                    let doc = match req
+                        .context
+                        .extensions()
+                        .lock()
+                        .get::<ParsedDocument>()
+                        .cloned()
+                    {
                         None => {
                             let errors = vec![Error::builder()
                                 .message("Cannot find executable document".to_string())
@@ -63,7 +69,7 @@ where
 
                             return Ok(ControlFlow::Break(res));
                         }
-                        Some(c) => c.clone(),
+                        Some(c) => c,
                     };
 
                     let op = doc
@@ -278,7 +284,6 @@ mod forbid_http_get_mutations_tests {
 
         let ast = ast::Document::parse(query, "").unwrap();
         let (_schema, executable) = ast.to_mixed_validate().unwrap();
-        let executable = executable.into_inner();
 
         let context = Context::new();
         context
@@ -286,9 +291,8 @@ mod forbid_http_get_mutations_tests {
             .lock()
             .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
                 ast,
-                executable,
-                parse_errors: None,
-                validation_errors: None,
+                executable: Arc::new(executable),
+                hash: Default::default(),
             }));
 
         SupergraphRequest::fake_builder()

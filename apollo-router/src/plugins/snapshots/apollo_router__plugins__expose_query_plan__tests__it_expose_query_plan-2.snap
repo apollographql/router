@@ -68,7 +68,7 @@ expression: "serde_json::to_value(response).unwrap()"
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
-              "schemaAwareHash": "330b684002dfeb54a17451591d1ac7834c6004d641c9c69599c0cf1ddf75d005",
+              "schemaAwareHash": "7245d488e97c3b2ac9f5fa4dd4660940b94ad81af070013305b2c0f76337b2f9",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -107,7 +107,7 @@ expression: "serde_json::to_value(response).unwrap()"
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
-                "schemaAwareHash": "c78203a67f808f38117410251f2bd629d13f960c6d7dd9b38ec1bfe906cac897",
+                "schemaAwareHash": "6e0b4156706ea0cf924500cfdc99dd44b9f0ed07e2d3f888d4aff156e6a33238",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -153,7 +153,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
-                    "schemaAwareHash": "a4799bf4639ea9c24898cd72ede3a27b939fcb7976a43ef27378641763a7a4c1",
+                    "schemaAwareHash": "ff649f3d70241d5a8cd5f5d03ff4c41ecff72b0e4129a480207b05ac92318042",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],
@@ -196,7 +196,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
-                    "schemaAwareHash": "36d755acdab9a67a3d42cd572fdf9a82c95602e1b657a191c028f6da21fe4f66",
+                    "schemaAwareHash": "bf9f3beda78a7a565e47c862157bad4ec871d724d752218da1168455dddca074",
                     "authorization": {
                       "is_authenticated": false,
                       "scopes": [],

@@ -21,14 +21,10 @@ use crate::error::SchemaError;
 #[cfg(unix)]
 #[test]
 fn schema_generation() {
-    let settings = SchemaSettings::draft2019_09().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
-        s.inline_subschemas = true;
+    let schema = generate_config_schema();
+    insta::with_settings!({sort_maps => true}, {
+        assert_json_snapshot!(&schema)
     });
-    let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<Configuration>();
-    assert_json_snapshot!(&schema)
 }
 
 #[test]
@@ -55,7 +51,7 @@ fn routing_url_in_schema() {
           REVIEWS @join__graph(name: "reviews" url: "http://localhost:4004/graphql")
         }
         "#;
-    let schema = crate::spec::Schema::parse(schema, &Default::default()).unwrap();
+    let schema = crate::spec::Schema::parse_test(schema, &Default::default()).unwrap();
 
     let subgraphs: HashMap<&String, &Uri> = schema.subgraphs().collect();
 
@@ -107,7 +103,7 @@ fn missing_subgraph_url() {
           PRODUCTS @join__graph(name: "products" url: "http://localhost:4003/graphql")
           REVIEWS @join__graph(name: "reviews" url: "")
         }"#;
-    let schema_error = crate::spec::Schema::parse(schema_error, &Default::default())
+    let schema_error = crate::spec::Schema::parse_test(schema_error, &Default::default())
         .expect_err("Must have an error because we have one missing subgraph routing url");
 
     if let SchemaError::MissingSubgraphUrl(subgraph) = schema_error {
@@ -691,12 +687,16 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
                     for (k, v) in properties {
                         let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
-                            errors.push(format!("{path} was missing a description"));
+                            // Enum type does not get a description
+                            if k != "type" {
+                                errors.push(format!("{path} was missing a description"));
+                            }
                         }
                         visit_schema(&path, v, errors)
                     }
                 } else {
-                    visit_schema(path, v, errors)
+                    let path = format!("{path}.{k}");
+                    visit_schema(&path, v, errors)
                 }
             }
         }
@@ -968,6 +968,132 @@ fn it_adds_slash_to_custom_health_check_path_if_missing() {
     assert_eq!(&conf.health_check.path, "/healthz");
 }
 
+#[test]
+fn it_processes_batching_subgraph_all_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": true
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(config.batch_include("anything"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_all_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": true
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": false
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_disabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": true
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": false
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(config.batch_include("anything"));
+    assert!(!config.batch_include("accounts"));
+}
+
+#[test]
+fn it_processes_batching_subgraph_accounts_override_enabled_correctly() {
+    let json_config = json!({
+        "enabled": true,
+        "mode": "batch_http_link",
+        "subgraph": {
+            "all": {
+                "enabled": false
+            },
+            "subgraphs": {
+                "accounts": {
+                    "enabled": true
+                }
+            }
+        }
+    });
+
+    let config: Batching = serde_json::from_value(json_config).unwrap();
+
+    assert!(!config.batch_include("anything"));
+    assert!(config.batch_include("accounts"));
+}
+
 fn has_field_level_serde_defaults(lines: &[&str], line_number: usize) -> bool {
     let serde_field_default = Regex::new(
         r#"^\s*#[\s\n]*\[serde\s*\((.*,)?\s*default\s*=\s*"[a-zA-Z0-9_:]+"\s*(,.*)?\)\s*\]\s*$"#,
@@ -999,4 +1125,20 @@ fn find_struct_name(lines: &[&str], line_number: usize) -> Option<String> {
             })
         })
         .next()
+}
+
+#[test]
+fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
+    let conf = Configuration::builder()
+        .supergraph(
+            Supergraph::builder()
+                .generate_query_fragments(true)
+                .reuse_query_fragments(true)
+                .build(),
+        )
+        .build()
+        .unwrap();
+
+    assert!(conf.supergraph.generate_query_fragments);
+    assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
 }

@@ -1,5 +1,5 @@
 ---
-title: Router Metrics
+title: Metrics exporters
 subtitle: Export Apollo Router metrics
 description: Collect and export metrics from the Apollo Router for Prometheus, OpenTelemetry Protocol (OTLP), Datadog, and New Relic
 ---
@@ -75,7 +75,7 @@ If the service name isn't explicitly set, it defaults to `unknown_service:router
 
 ### `resource`
 
-A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
+A resource attribute is a set of key-value pairs that provide additional information to an exporter. It's an attribute of an [OpenTelemetry resource](https://opentelemetry.io/docs/specs/otel/resource/sdk/). Application performance monitors (APM) can interpret and display resource information. 
 
 In [`router.yaml`](../../../overview/#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
@@ -118,10 +118,16 @@ telemetry:
 
 You can add custom attributes (OpenTelemetry) and labels (Prometheus) to the `apollo_router_http_requests` metric. Attributes can be:
 
-* static values (preferably using a [resource](#resource-attribute))
+* static values (preferably using a [resource](#resource))
 * headers from the request or response
 * a value from a context
 * a value from the request or response body ([JSON path](https://goessner.net/articles/JsonPath/))
+
+<Note>
+
+Use [resource attributes](#resource) instead to provide information about telemetry resources, including hosts and environments.
+
+</Note>
 
 An example of configuring these attributes is shown below:
 
@@ -180,7 +186,7 @@ telemetry:
 
 <Note>
 
-OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use these via custom [instruments](../instrumentation/instruments). 
+OpenTelemetry includes many [standard attributes](https://opentelemetry.io/docs/specs/semconv/attributes-registry/) that you can use via custom [instruments](../../instrumentation/instruments). 
 
 </Note>
 

@@ -7,7 +7,6 @@ expression: "&metrics.non_zero()"
     datapoints:
       - value: 1
         attributes:
-          opt.router.tls.server.: true
-          opt.router.tls.subgraph.ca_override.: true
-          opt.router.tls.subgraph.client_authentication.: true
-
+          opt.router.tls.server: true
+          opt.router.tls.subgraph.ca_override: true
+          opt.router.tls.subgraph.client_authentication: true

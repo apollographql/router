@@ -1,11 +1,13 @@
 //! Authorization plugin
 
 use std::collections::HashMap;
-use std::collections::HashSet;
 
 use apollo_compiler::ast;
+use apollo_compiler::executable;
 use apollo_compiler::schema;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -21,7 +23,7 @@ pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     pub(crate) found: bool,
     authenticated_directive_name: String,
     entity_query: bool,
@@ -30,13 +32,13 @@ pub(crate) struct AuthenticatedCheckVisitor<'a> {
 impl<'a> AuthenticatedCheckVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
-        executable: &'a ast::Document,
+        executable: &'a executable::ExecutableDocument,
         entity_query: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             entity_query,
-            fragments: transform::collect_fragments(executable),
+            fragments: executable.fragments.iter().collect(),
             found: false,
             authenticated_directive_name: Schema::directive_name(
                 schema,
@@ -60,22 +62,22 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
         t.directives().has(&self.authenticated_directive_name)
     }
 
-    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+    fn entities_operation(&mut self, node: &executable::Operation) -> Result<(), BoxError> {
         use crate::spec::query::traverse::Visitor;
 
-        if node.selection_set.len() != 1 {
+        if node.selection_set.selections.len() != 1 {
             return Err("invalid number of selections for _entities query".into());
         }
 
-        match node.selection_set.first() {
-            Some(ast::Selection::Field(field)) => {
+        match node.selection_set.selections.first() {
+            Some(executable::Selection::Field(field)) => {
                 if field.name.as_str() != "_entities" {
                     return Err("expected _entities field".into());
                 }
 
-                for selection in &field.selection_set {
+                for selection in &field.selection_set.selections {
                     match selection {
-                        ast::Selection::InlineFragment(f) => {
+                        executable::Selection::InlineFragment(f) => {
                             match f.type_condition.as_ref() {
                                 None => {
                                     return Err("expected type condition".into());
@@ -94,11 +96,7 @@ impl<'a> AuthenticatedCheckVisitor<'a> {
 }
 
 impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
-    fn operation(
-        &mut self,
-        root_type: &str,
-        node: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+    fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if !self.entity_query {
             traverse::operation(self, root_type, node)
         } else {
@@ -109,7 +107,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
-        node: &ast::Field,
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
         if self.is_field_authenticated(field_def) {
             self.found = true;
@@ -118,25 +116,25 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
         traverse::field(self, field_def, node)
     }
 
-    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
+    fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
         if self
             .schema
             .types
-            .get(&node.type_condition)
+            .get(node.type_condition())
             .is_some_and(|type_definition| self.is_type_authenticated(type_definition))
         {
             self.found = true;
             return Ok(());
         }
-        traverse::fragment_definition(self, node)
+        traverse::fragment(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
-        let condition = &self
+    fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
+        let condition = self
             .fragments
             .get(&node.fragment_name)
             .ok_or("MissingFragment")?
-            .type_condition;
+            .type_condition();
 
         if self
             .schema
@@ -153,7 +151,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        node: &ast::InlineFragment,
+        node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
         if let Some(name) = &node.type_condition {
             if self
@@ -178,7 +176,7 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    implementers_map: &'a HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
@@ -193,7 +191,7 @@ impl<'a> AuthenticatedVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        implementers_map: &'a HashMap<Name, Implementers>,
         dry_run: bool,
     ) -> Option<Self> {
         Some(Self {
@@ -225,6 +223,14 @@ impl<'a> AuthenticatedVisitor<'a> {
 
     fn is_type_authenticated(&self, t: &schema::ExtendedType) -> bool {
         t.directives().has(&self.authenticated_directive_name)
+    }
+
+    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+        self.implementers_map
+            .get(type_name)
+            .map(|implementers| implementers.iter())
+            .into_iter()
+            .flatten()
     }
 
     fn implementors_with_different_requirements(
@@ -264,10 +270,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             let mut is_authenticated: Option<bool> = None;
 
             for ty in self
-                .implementers_map
-                .get(type_name)
-                .into_iter()
-                .flatten()
+                .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
                 let ty_is_authenticated = ty.directives().has(&self.authenticated_directive_name);
@@ -294,7 +297,7 @@ impl<'a> AuthenticatedVisitor<'a> {
             if t.is_interface() {
                 let mut is_authenticated: Option<bool> = None;
 
-                for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
+                for ty in self.implementors(parent_type) {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
                         let field_is_authenticated =
                             f.directives.has(&self.authenticated_directive_name);
@@ -351,11 +354,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         let is_field_list = field_def.ty.is_list();
 
         let field_requires_authentication = self.is_field_authenticated(field_def);
-
         self.current_path
-            .push(PathElement::Key(field_name.as_str().into()));
+            .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
-            self.current_path.push(PathElement::Flatten);
+            self.current_path.push(PathElement::Flatten(None));
         }
 
         let implementors_with_different_requirements =
@@ -643,7 +645,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -666,7 +668,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -689,7 +691,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -709,7 +711,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -734,7 +736,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -759,7 +761,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -786,7 +788,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -812,7 +814,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -835,7 +837,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -861,7 +863,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -925,7 +927,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -948,7 +950,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             result: doc,
             paths
@@ -1016,7 +1018,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1041,7 +1043,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             result: doc,
             paths
@@ -1106,7 +1108,7 @@ mod tests {
 
         let (doc, paths) = filter(UNION_MEMBERS_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1194,7 +1196,7 @@ mod tests {
 
         let (doc, paths) = filter(RENAMED_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1355,7 +1357,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1375,7 +1377,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             result: doc,
             paths

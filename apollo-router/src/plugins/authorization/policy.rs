@@ -10,8 +10,11 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use apollo_compiler::ast;
+use apollo_compiler::executable;
 use apollo_compiler::schema;
+use apollo_compiler::schema::Implementers;
 use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
 use tower::BoxError;
 
 use crate::json_ext::Path;
@@ -23,7 +26,7 @@ use crate::spec::TYPENAME;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     pub(crate) extracted_policies: HashSet<String>,
     policy_directive_name: String,
     entity_query: bool,
@@ -37,13 +40,13 @@ impl<'a> PolicyExtractionVisitor<'a> {
     #[allow(dead_code)]
     pub(crate) fn new(
         schema: &'a schema::Schema,
-        executable: &'a ast::Document,
+        executable: &'a executable::ExecutableDocument,
         entity_query: bool,
     ) -> Option<Self> {
         Some(Self {
             schema,
             entity_query,
-            fragments: transform::collect_fragments(executable),
+            fragments: executable.fragments.iter().collect(),
             extracted_policies: HashSet::new(),
             policy_directive_name: Schema::directive_name(
                 schema,
@@ -70,22 +73,22 @@ impl<'a> PolicyExtractionVisitor<'a> {
         ));
     }
 
-    fn entities_operation(&mut self, node: &ast::OperationDefinition) -> Result<(), BoxError> {
+    fn entities_operation(&mut self, node: &executable::Operation) -> Result<(), BoxError> {
         use crate::spec::query::traverse::Visitor;
 
-        if node.selection_set.len() != 1 {
+        if node.selection_set.selections.len() != 1 {
             return Err("invalid number of selections for _entities query".into());
         }
 
-        match node.selection_set.first() {
-            Some(ast::Selection::Field(field)) => {
+        match node.selection_set.selections.first() {
+            Some(executable::Selection::Field(field)) => {
                 if field.name.as_str() != "_entities" {
                     return Err("expected _entities field".into());
                 }
 
-                for selection in &field.selection_set {
+                for selection in &field.selection_set.selections {
                     match selection {
-                        ast::Selection::InlineFragment(f) => {
+                        executable::Selection::InlineFragment(f) => {
                             match f.type_condition.as_ref() {
                                 None => {
                                     return Err("expected type condition".into());
@@ -119,11 +122,7 @@ fn policy_argument(
 }
 
 impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
-    fn operation(
-        &mut self,
-        root_type: &str,
-        node: &ast::OperationDefinition,
-    ) -> Result<(), BoxError> {
+    fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         if let Some(ty) = self.schema.types.get(root_type) {
             self.extracted_policies.extend(policy_argument(
                 ty.directives().get(&self.policy_directive_name),
@@ -141,26 +140,26 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
         &mut self,
         _parent_type: &str,
         field_def: &ast::FieldDefinition,
-        node: &ast::Field,
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
         self.get_policies_from_field(field_def);
 
         traverse::field(self, field_def, node)
     }
 
-    fn fragment_definition(&mut self, node: &ast::FragmentDefinition) -> Result<(), BoxError> {
-        if let Some(ty) = self.schema.types.get(&node.type_condition) {
+    fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
+        if let Some(ty) = self.schema.types.get(node.type_condition()) {
             self.get_policies_from_type(ty);
         }
-        traverse::fragment_definition(self, node)
+        traverse::fragment(self, node)
     }
 
-    fn fragment_spread(&mut self, node: &ast::FragmentSpread) -> Result<(), BoxError> {
-        let type_condition = &self
+    fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
+        let type_condition = self
             .fragments
             .get(&node.fragment_name)
             .ok_or("MissingFragment")?
-            .type_condition;
+            .type_condition();
 
         if let Some(ty) = self.schema.types.get(type_condition) {
             self.get_policies_from_type(ty);
@@ -171,7 +170,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
     fn inline_fragment(
         &mut self,
         parent_type: &str,
-        node: &ast::InlineFragment,
+        node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
         if let Some(type_condition) = &node.type_condition {
             if let Some(ty) = self.schema.types.get(type_condition) {
@@ -189,7 +188,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
 pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
     fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
-    implementers_map: &'a HashMap<Name, HashSet<Name>>,
+    implementers_map: &'a HashMap<Name, Implementers>,
     dry_run: bool,
     request_policies: HashSet<String>,
     pub(crate) query_requires_policies: bool,
@@ -224,7 +223,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
     pub(crate) fn new(
         schema: &'a schema::Schema,
         executable: &'a ast::Document,
-        implementers_map: &'a HashMap<Name, HashSet<Name>>,
+        implementers_map: &'a HashMap<Name, Implementers>,
         successful_policies: HashSet<String>,
         dry_run: bool,
     ) -> Option<Self> {
@@ -291,6 +290,14 @@ impl<'a> PolicyFilteringVisitor<'a> {
         }
     }
 
+    fn implementors(&self, type_name: &str) -> impl Iterator<Item = &Name> {
+        self.implementers_map
+            .get(type_name)
+            .map(|implementers| implementers.iter())
+            .into_iter()
+            .flatten()
+    }
+
     fn implementors_with_different_requirements(
         &self,
         field_def: &ast::FieldDefinition,
@@ -328,10 +335,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             let mut policies_sets: Option<Vec<Vec<String>>> = None;
 
             for ty in self
-                .implementers_map
-                .get(type_name)
-                .into_iter()
-                .flatten()
+                .implementors(type_name)
                 .filter_map(|ty| self.schema.types.get(ty))
             {
                 // aggregate the list of policies sets
@@ -376,7 +380,7 @@ impl<'a> PolicyFilteringVisitor<'a> {
             if t.is_interface() {
                 let mut policies_sets: Option<Vec<Vec<String>>> = None;
 
-                for ty in self.implementers_map.get(parent_type).into_iter().flatten() {
+                for ty in self.implementors(parent_type) {
                     if let Ok(f) = self.schema.type_field(ty, &field.name) {
                         // aggregate the list of policies sets
                         // we transform to a common representation of sorted vectors because the element order
@@ -471,11 +475,10 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
 
         let implementors_with_different_field_requirements =
             self.implementors_with_different_field_requirements(parent_type, node);
-
         self.current_path
-            .push(PathElement::Key(field_name.as_str().into()));
+            .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
-            self.current_path.push(PathElement::Flatten);
+            self.current_path.push(PathElement::Flatten(None));
         }
 
         let res = if is_authorized
@@ -637,6 +640,7 @@ mod tests {
 
     use apollo_compiler::ast;
     use apollo_compiler::ast::Document;
+    use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
 
     use crate::json_ext::Path;
@@ -708,10 +712,9 @@ mod tests {
 
     fn extract(schema: &str, query: &str) -> BTreeSet<String> {
         let schema = Schema::parse_and_validate(schema, "schema.graphql").unwrap();
-        let doc = ast::Document::parse(query, "query.graphql").unwrap();
-        doc.to_executable_validate(&schema).unwrap();
+        let doc = ExecutableDocument::parse(&schema, query, "query.graphql").unwrap();
         let mut visitor = PolicyExtractionVisitor::new(&schema, &doc, false).unwrap();
-        traverse::document(&mut visitor, &doc).unwrap();
+        traverse::document(&mut visitor, &doc, None).unwrap();
 
         visitor.extracted_policies.into_iter().collect()
     }
@@ -789,7 +792,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -804,7 +807,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["profile".to_string(), "internal".to_string()]
@@ -825,7 +828,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: [
@@ -850,7 +853,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: [
@@ -879,7 +882,7 @@ mod tests {
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -905,7 +908,7 @@ mod tests {
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -930,7 +933,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -952,7 +955,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -979,7 +982,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1006,7 +1009,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1035,7 +1038,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1050,7 +1053,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["read user".to_string(), "read username".to_string()]
@@ -1081,7 +1084,7 @@ mod tests {
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1102,7 +1105,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1117,7 +1120,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["read user".to_string(), "internal".to_string()]
@@ -1132,7 +1135,7 @@ mod tests {
             QUERY,
             ["read user".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["read user".to_string(),].into_iter().collect(),
@@ -1147,7 +1150,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["admin".to_string(), "read user".to_string()]
@@ -1212,7 +1215,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1225,7 +1228,7 @@ mod tests {
             QUERY,
             ["itf".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["itf".to_string()].into_iter().collect(),
@@ -1249,7 +1252,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1262,7 +1265,7 @@ mod tests {
             QUERY2,
             ["itf".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: ["itf".to_string()].into_iter().collect(),
@@ -1275,7 +1278,7 @@ mod tests {
             QUERY2,
             ["itf".to_string(), "a".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: ["itf".to_string(), "a".to_string()].into_iter().collect(),
@@ -1342,7 +1345,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_FIELD_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1368,7 +1371,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_FIELD_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1436,7 +1439,7 @@ mod tests {
             QUERY,
             ["a".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["a".to_string()].into_iter().collect(),
@@ -1516,7 +1519,7 @@ mod tests {
         let extracted_policies = extract(RENAMED_SCHEMA, QUERY);
         let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1596,7 +1599,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(doc);
+        insta::assert_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
 
         static QUERY2: &str = r#"
@@ -1613,7 +1616,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(doc);
+        insta::assert_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
     }
 }
