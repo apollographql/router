@@ -39,7 +39,7 @@ pub(crate) mod cost_calculator;
 pub(crate) mod strategy;
 
 /// The cost calculation information stored in context for use in telemetry and other plugins that need to know what cost was calculated.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct CostContext {
     pub(crate) estimated: f64,
     pub(crate) actual: f64,
