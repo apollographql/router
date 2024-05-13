@@ -4,8 +4,10 @@ use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::Document;
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
@@ -256,15 +258,20 @@ pub(crate) struct Variables {
     pub(crate) contextual_args: Option<(HashSet<String>, usize)>,
 }
 
+#[derive(Debug)]
+enum ContextBatchingError {
+    InvalidDocument(WithErrors<Document>),
+    NoSelectionSet,
+}
+
 fn query_batching_for_contextual_args(
     operation: &str,
     contextual_args: &Option<(HashSet<String>, usize)>,
-) -> Option<String> {
+) -> Result<Option<String>, ContextBatchingError> {
     if let Some((ctx, times)) = contextual_args {
         let parser = apollo_compiler::Parser::new()
             .parse_ast(operation, "")
-            // TODO: remove unwrap
-            .unwrap();
+            .map_err(ContextBatchingError::InvalidDocument)?;
         if let Some(mut operation) = parser
             .definitions
             .into_iter()
@@ -279,18 +286,22 @@ fn query_batching_for_contextual_args(
                 let new_selection_set: Vec<_> = (0..*times)
                     .map(|i| {
                         // TODO: Unwrap
-                        let mut s = operation.selection_set.first().unwrap().clone();
+                        let mut s = operation
+                            .selection_set
+                            .first()
+                            .ok_or_else(|| ContextBatchingError::NoSelectionSet)?
+                            .clone();
                         if let ast::Selection::Field(f) = &mut s {
                             let f = f.make_mut();
-                            f.alias = Some(Name::new(format!("_{}", i)).unwrap());
+                            f.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
                         }
 
                         for v in &operation.variables {
                             if ctx.contains(v.name.as_str()) {
                                 let mut cloned = v.clone();
                                 let new_variable = cloned.make_mut();
-                                // TODO: remove unwrap
-                                new_variable.name = Name::new(format!("{}_{}", v.name, i)).unwrap();
+                                new_variable.name =
+                                    Name::new_unchecked(format!("{}_{}", v.name, i).into());
                                 new_variables.push(Node::new(new_variable.clone()));
 
                                 s = rename_variables(s, v.name.clone(), new_variable.name.clone());
@@ -299,20 +310,20 @@ fn query_batching_for_contextual_args(
                             }
                         }
 
-                        s
+                        Ok(s)
                     })
-                    .collect();
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 let new_operation = operation.make_mut();
                 new_operation.selection_set = new_selection_set;
                 new_operation.variables = new_variables;
 
-                return Some(new_operation.serialize().no_indent().to_string());
+                return Ok(Some(new_operation.serialize().no_indent().to_string()));
             }
         }
     }
 
-    None
+    Ok(None)
 }
 
 fn rename_variables(selection_set: ast::Selection, from: Name, to: Name) -> ast::Selection {
@@ -362,7 +373,9 @@ fn test_query_batching_for_contextual_args() {
 
     assert_eq!(
         expected,
-        query_batching_for_contextual_args(old_query, &contextual_args).unwrap()
+        query_batching_for_contextual_args(old_query, &contextual_args)
+            .unwrap()
+            .unwrap()
     );
 }
 
@@ -653,8 +666,14 @@ impl FetchNode {
             }
         };
 
-        let query_batched_query =
-            query_batching_for_contextual_args(operation.as_serialized(), &contextual_args);
+        let query_batched_query = if let Ok(qbq) =
+            query_batching_for_contextual_args(operation.as_serialized(), &contextual_args)
+        {
+            qbq
+        } else {
+            // TODO: do we need to provide an error here ?
+            return (Default::default(), Default::default());
+        };
 
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
