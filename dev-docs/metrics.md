@@ -194,6 +194,17 @@ There are different types of metrics.
 > 
 > This *is* a departure from the previous way of doing things, but as dynamic metrics are not available we need to move away from statically defined metrics.
 
+### Naming
+Metrics should be named in a way that is consistent with the rest of the metrics in the system.
+
+**Metrics**
+* `<feature>` - This should be a noun that describes the feature that the metric is monitoring.
+
+* `<feature>.<verb>` - Sub-metrics are usually a verb that describes the action that the metric is monitoring.
+
+**Attributes**
+* `<feature>.<feature-specific-attribute>` - Are always prefixed with the feature name unless they are standard metrics from the [otel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/). 
+
 ### Static metrics
 When adding a new feature to the Router you must also add new static metrics to monitor the usage of that feature and users cannot turn them off.
 These metrics must be low cardinality and not leak any sensitive information. Users cannot change these metrics and they are primarily for us to see how our features are used so that we can inform future development.
