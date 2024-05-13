@@ -796,33 +796,63 @@ type User
               }
             }
             Parallel {
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                    ... on Movie {
-                      id
-                    }
-                  } => {
-                    ... on Movie {
-                      vendor {
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Movie {
                         id
-                        __typename
+                      }
+                    } => {
+                      ... on Movie {
+                        vendor {
+                          id
+                          __typename
+                        }
+                      }
+                    }
+                  }
+                }
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        id
+                      }
+                    } => {
+                      ... on User {
+                        name
                       }
                     }
                   }
                 }
               }
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                    ... on Book {
-                      id
-                    }
-                  } => {
-                    ... on Book {
-                      vendor {
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Book {
                         id
-                        __typename
+                      }
+                    } => {
+                      ... on Book {
+                        vendor {
+                          id
+                          __typename
+                        }
+                      }
+                    }
+                  }
+                }
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        id
+                      }
+                    } => {
+                      ... on User {
+                        name
                       }
                     }
                   }
