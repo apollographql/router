@@ -1,0 +1,6 @@
+query {
+    basicResponseQuery {
+        id @withArgs(arg1: "")
+        id
+    }
+}

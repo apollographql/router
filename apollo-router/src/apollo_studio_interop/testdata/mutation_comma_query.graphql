@@ -1,0 +1,5 @@
+mutation Test_Mutation_Comma($arg1withalongnamegoeshere012345678: Boolean) {
+    mutation2(id: "x") {
+        updateCheckConfiguration(arg1: $arg1withalongnamegoeshere012345678, arg2: false)
+    }
+}

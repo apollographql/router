@@ -1,0 +1,8 @@
+query QueryArgLength($StringInputWithAVeryyyLongNameSoLineLengthIs80: String!, $inputType: AnotherInputType, $enumInputWithAVryLongNameSoLineLengthIsOver80: SomeEnum, $enumInputType: EnumInputType) {
+    enumInputQuery (enumInput:$enumInputWithAVryLongNameSoLineLengthIsOver80,inputType:$enumInputType) {
+        enumResponse
+    }
+    defaultArgQuery(stringInput:$StringInputWithAVeryyyLongNameSoLineLengthIs80,inputType:$inputType) {
+        id
+    }
+}

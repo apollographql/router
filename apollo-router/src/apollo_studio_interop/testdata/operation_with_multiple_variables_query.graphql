@@ -1,0 +1,8 @@
+query QueryWithVars($stringInput: String!, $floatInput: Float!, $boolInput: Boolean!) {
+    scalarInputQuery(listInput: ["x"], stringInput: $stringInput, intInput: 6, floatInput: $floatInput, boolInput: $boolInput, idInput: "y") {
+        enumResponse
+    }
+    inputTypeQuery(input: { inputInt: 2, inputString: "z", listInput: [], nestedType: { someFloat: 5 }}) {
+        enumResponse
+    }
+}

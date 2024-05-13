@@ -1,0 +1,5 @@
+query QueryCommaEdgeCase {
+    enumInputQuery (anotherStr:"",enumInput:SOME_VALUE_1,stringInput:"") {
+        enumResponse
+    }
+}

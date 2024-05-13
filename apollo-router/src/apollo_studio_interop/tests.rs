@@ -88,54 +88,7 @@ fn generate_enhanced(
 async fn test_complex_query() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query UnusedQuery {
-            noInputQuery {
-              enumResponse
-            }
-          }
-          
-          fragment UnusedFragment on EverythingResponse {
-            enumResponse
-          }
-          
-          fragment Fragment2 on EverythingResponse {
-            basicTypes {
-              nullableFloat
-            }
-          }
-          
-          query        TransformedQuery    {
-          
-          
-            scalarInputQuery(idInput: "a1", listInput: [], boolInput: true, intInput: 1, stringInput: "x", floatInput: 1.2)      @skip(if: false)   @include(if: true) {
-              ...Fragment2,
-          
-          
-              objectTypeWithInputField(boolInput: true, secondInput: false) {
-                stringField
-                __typename
-                intField
-              }
-          
-              enumResponse
-              interfaceResponse {
-                sharedField
-                ... on InterfaceImplementation2 {
-                  implementation2Field
-                }
-                ... on InterfaceImplementation1 {
-                  implementation1Field
-                }
-              }
-              ...Fragment1,
-            }
-          }
-          
-          fragment Fragment1 on EverythingResponse {
-            basicTypes {
-              nonNullFloat
-            }
-          }"#;
+    let query_str = include_str!("testdata/complex_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -207,20 +160,20 @@ async fn test_complex_query() {
               nullableFloat
             }
           }
-          
+
           query        TransformedQuery    {
-          
-          
+
+
             scalarInputQuery(idInput: "a1", listInput: [], boolInput: true, intInput: 1, stringInput: "x", floatInput: 1.2)      @skip(if: false)   @include(if: true) {
               ...Fragment2,
-          
-          
+
+
               objectTypeWithInputField(boolInput: true, secondInput: false) {
                 stringField
                 __typename
                 intField
               }
-          
+
               enumResponse
               interfaceResponse {
                 sharedField
@@ -234,7 +187,7 @@ async fn test_complex_query() {
               ...Fragment1,
             }
           }
-          
+
           fragment Fragment1 on EverythingResponse {
             basicTypes {
               nonNullFloat
@@ -254,51 +207,7 @@ async fn test_complex_query() {
 async fn test_complex_references() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query Query($secondInput: Boolean!) {
-            scalarResponseQuery
-            noInputQuery {
-              basicTypes {
-                nonNullId
-                nonNullInt
-              }
-              enumResponse
-              interfaceImplementationResponse {
-                sharedField
-                implementation2Field
-              }
-              interfaceResponse {
-                ... on InterfaceImplementation1 {
-                  implementation1Field
-                  sharedField
-                }
-                ... on InterfaceImplementation2 {
-                  implementation2Field
-                  sharedField
-                }
-              }
-              listOfUnions {
-                ... on UnionType1 {
-                  nullableString
-                }
-              }
-              objectTypeWithInputField(secondInput: $secondInput) {
-                intField
-              }
-            }
-            basicInputTypeQuery(input: { someFloat: 1 }) {
-              unionResponse {
-                ... on UnionType1 {
-                  nullableString
-                }
-              }
-              unionType2Response {
-                unionType2Field
-              }
-              listOfObjects {
-                stringField
-              }
-            }
-          }"#;
+    let query_str = include_str!("testdata/complex_references_query.graphql");
 
     let schema: Valid<Schema> = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -387,11 +296,7 @@ async fn test_complex_references() {
 async fn test_basic_whitespace() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query MyQuery {
-            noInputQuery {
-              id
-            }
-          }"#;
+    let query_str = include_str!("testdata/named_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -424,11 +329,7 @@ async fn test_basic_whitespace() {
 async fn test_anonymous_query() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query {
-            noInputQuery {
-              id
-            }
-          }"#;
+    let query_str = include_str!("testdata/anonymous_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -498,11 +399,7 @@ async fn test_anonymous_mutation() {
 async fn test_anonymous_subscription() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str: &str = r#"subscription {
-            noInputSubscription {
-              id
-            }
-          }"#;
+    let query_str: &str = include_str!("testdata/subscription_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -535,23 +432,7 @@ async fn test_anonymous_subscription() {
 async fn test_ordered_fields_and_variables() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query VariableScalarInputQuery($idInput: ID!, $boolInput: Boolean!, $floatInput: Float!, $intInput: Int!, $listInput: [String!]!, $stringInput: String!, $nullableStringInput: String) {
-            sortQuery(
-              idInput: $idInput
-              boolInput: $boolInput
-              floatInput: $floatInput
-              INTInput: $intInput
-              listInput: $listInput
-              stringInput: $stringInput
-              nullableStringInput: $nullableStringInput
-            ) {
-              zzz
-              CCC
-              nullableId
-              aaa
-              id
-            }
-          }"#;
+    let query_str = include_str!("testdata/ordered_fields_and_variables_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -590,70 +471,7 @@ async fn test_ordered_fields_and_variables() {
 async fn test_fragments() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query FragmentQuery {
-            noInputQuery {
-              listOfBools
-              interfaceResponse {
-                sharedField
-                ... on InterfaceImplementation2 {
-                  implementation2Field
-                }
-                ...bbbInterfaceFragment
-                ...aaaInterfaceFragment
-                ... {
-                  ... on InterfaceImplementation1 {
-                    implementation1Field
-                  }
-                }
-                ... on InterfaceImplementation1 {
-                  implementation1Field
-                }
-              }
-              unionResponse {
-                ... on UnionType2 {
-                  unionType2Field
-                }
-                ... on UnionType1 {
-                  unionType1Field
-                }
-              }
-              ...zzzFragment
-              ...aaaFragment
-              ...ZZZFragment
-            }
-          }
-          
-          fragment zzzFragment on EverythingResponse {
-            listOfInterfaces {
-              sharedField
-            }
-          }
-          
-          fragment ZZZFragment on EverythingResponse {
-            listOfInterfaces {
-              sharedField
-            }
-          }
-          
-          fragment aaaFragment on EverythingResponse {
-            listOfInterfaces {
-              sharedField
-            }
-          }
-
-          fragment UnusedFragment on InterfaceImplementation2 {
-            sharedField
-            implementation2Field
-          }
-          
-          fragment bbbInterfaceFragment on InterfaceImplementation2 {
-            sharedField
-            implementation2Field
-          }
-          
-          fragment aaaInterfaceFragment on InterfaceImplementation1 {
-            sharedField
-          }"#;
+    let query_str = include_str!("testdata/fragments_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -800,30 +618,7 @@ async fn test_fragments() {
 async fn test_directives() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"fragment Fragment1 on InterfaceImplementation1 {
-            sharedField
-            implementation1Field
-          }
-          
-          fragment Fragment2 on InterfaceImplementation2 @withArgs(arg2: "" arg1: "test" arg3: true arg5: [1,2] arg4: 2) @noArgs {
-            sharedField
-            implementation2Field
-          }
-          
-          query DirectiveQuery @withArgs(arg2: "" arg1: "test") @noArgs {
-            noInputQuery {
-              enumResponse @withArgs(arg3: false arg5: [1,2] arg4: 2) @noArgs
-              unionResponse {
-                ... on UnionType1 @withArgs(arg2: "" arg1: "test") @noArgs {
-                  unionType1Field
-                }
-              }
-              interfaceResponse {
-                ... Fragment1 @withArgs(arg1: "test") @noArgs
-                ... Fragment2
-              }
-            }
-          }"#;
+    let query_str = include_str!("testdata/directives_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -888,17 +683,7 @@ async fn test_directives() {
 async fn test_aliases() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query AliasQuery {
-            xxAlias: enumInputQuery(enumInput: SOME_VALUE_1) {
-              aliased: enumResponse
-            }
-            aaAlias: enumInputQuery(enumInput: SOME_VALUE_2) {
-              aliasedAgain: enumResponse
-            }
-            ZZAlias: enumInputQuery(enumInput: SOME_VALUE_3) {
-              enumResponse
-            }
-          }"#;
+    let query_str = include_str!("testdata/aliases_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -931,19 +716,7 @@ async fn test_aliases() {
 async fn test_inline_values() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query InlineInputTypeQuery {
-            inputTypeQuery(input: { 
-                inputString: "foo", 
-                inputInt: 42, 
-                inputBoolean: null, 
-                nestedType: { someFloat: 4.2 }, 
-                enumInput: SOME_VALUE_1, 
-                nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ], 
-                listInput: [1, 2, 3] 
-            }) {
-              enumResponse
-            }
-          }"#;
+    let query_str = include_str!("testdata/inline_values_query.graphql");
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
@@ -975,18 +748,7 @@ async fn test_inline_values() {
 async fn test_root_type_fragment() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query SomeQuery {
-            ... on Query {
-              ... {
-                basicResponseQuery {
-                  id
-                }
-              }
-            }
-            noInputQuery {
-              enumResponse
-            }
-          }"#;
+    let query_str = include_str!("testdata/root_type_fragment_query.graphql");
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
@@ -1025,12 +787,7 @@ async fn test_root_type_fragment() {
 async fn test_directive_arg_spacing() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query {
-            basicResponseQuery {
-              id @withArgs(arg1: "")
-              id
-            }
-          }"#;
+    let query_str = include_str!("testdata/directive_arg_spacing_query.graphql");
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
@@ -1062,11 +819,7 @@ async fn test_directive_arg_spacing() {
 async fn test_operation_with_single_variable() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query QueryWithVar($input_enum: SomeEnum) {
-            enumInputQuery(enumInput: $input_enum) {
-              listOfBools
-            }
-          }"#;
+    let query_str = include_str!("testdata/operation_with_single_variable_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1099,14 +852,7 @@ async fn test_operation_with_single_variable() {
 async fn test_operation_with_multiple_variables() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query QueryWithVars($stringInput: String!, $floatInput: Float!, $boolInput: Boolean!) {
-            scalarInputQuery(listInput: ["x"], stringInput: $stringInput, intInput: 6, floatInput: $floatInput, boolInput: $boolInput, idInput: "y") {
-              enumResponse
-            }
-            inputTypeQuery(input: { inputInt: 2, inputString: "z", listInput: [], nestedType: { someFloat: 5 }}) {
-              enumResponse
-            }
-          }"#;
+    let query_str = include_str!("testdata/operation_with_multiple_variables_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1139,14 +885,7 @@ async fn test_operation_with_multiple_variables() {
 async fn test_field_arg_comma_or_space() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query QueryArgLength($StringInputWithAVeryyyLongNameSoLineLengthIs80: String!, $inputType: AnotherInputType, $enumInputWithAVryLongNameSoLineLengthIsOver80: SomeEnum, $enumInputType: EnumInputType) {
-            enumInputQuery (enumInput:$enumInputWithAVryLongNameSoLineLengthIsOver80,inputType:$enumInputType) {
-              enumResponse
-            }
-            defaultArgQuery(stringInput:$StringInputWithAVeryyyLongNameSoLineLengthIs80,inputType:$inputType) {
-              id
-            }
-          }"#;
+    let query_str = include_str!("testdata/field_arg_comma_or_space_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1189,11 +928,7 @@ async fn test_field_arg_comma_or_space() {
 async fn test_operation_arg_always_commas() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query QueryArgLength($enumInputWithAVerrrrrrrrrrrryLongNameSoLineLengthIsOver80: SomeEnum, $enumInputType: EnumInputType) {
-            enumInputQuery (enumInput:$enumInputWithAVerrrrrrrrrrrryLongNameSoLineLengthIsOver80,inputType:$enumInputType) {
-              enumResponse
-            }
-          }"#;
+    let query_str = include_str!("testdata/operation_arg_always_commas_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1228,11 +963,7 @@ async fn test_operation_arg_always_commas() {
 async fn test_comma_separator_always() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"query QueryCommaEdgeCase {
-        enumInputQuery (anotherStr:"",enumInput:SOME_VALUE_1,stringInput:"") {
-          enumResponse
-        }
-      }"#;
+    let query_str = include_str!("testdata/comma_separator_always_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1265,37 +996,7 @@ async fn test_comma_separator_always() {
 async fn test_nested_fragments() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      fragment UnionType1Fragment on UnionType1 {
-        unionType1Field
-      }
-
-      fragment ObjectResponseFragment on ObjectTypeResponse {
-        intField
-      }
-
-      fragment EverythingResponseFragment on EverythingResponse {
-        listOfObjects {
-          ...ObjectResponseFragment
-          ... on ObjectTypeResponse {
-            stringField
-          }
-        }
-      }
-
-      query NestedFragmentQuery {
-        noInputQuery {
-          ...EverythingResponseFragment
-          ... on EverythingResponse {
-            listOfUnions {
-              ...UnionType1Fragment
-              ... on UnionType2 {
-                unionType2Field
-              }
-            }
-          }
-        }
-      }";
+    let query_str = include_str!("testdata/nested_fragments_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1349,12 +1050,7 @@ async fn test_nested_fragments() {
 async fn test_mutation_space() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      mutation Test_Mutation_Space($arg1withalongnamegoeshere0123456789: Boolean) {
-        mutation2(id: \"x\") {
-          updateCheckConfiguration(arg1: $arg1withalongnamegoeshere0123456789, arg2: false)
-        }
-      }";
+    let query_str = include_str!("testdata/mutation_space_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1387,12 +1083,7 @@ async fn test_mutation_space() {
 async fn test_mutation_comma() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      mutation Test_Mutation_Comma($arg1withalongnamegoeshere012345678: Boolean) {
-        mutation2(id: \"x\") {
-          updateCheckConfiguration(arg1: $arg1withalongnamegoeshere012345678, arg2: false)
-        }
-      }";
+    let query_str = include_str!("testdata/mutation_comma_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1425,12 +1116,7 @@ async fn test_mutation_comma() {
 async fn test_comma_lower_bound() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      query TestCommaLowerBound($arg: String, $slightlyTooLongName1234: String) {
-        manyArgsQuery(arg1: $arg, arg2: $arg, arg3: $arg, arg4: $slightlyTooLongName1234) {
-          enumResponse
-        }
-      }";
+    let query_str = include_str!("testdata/comma_lower_bound_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1463,12 +1149,7 @@ async fn test_comma_lower_bound() {
 async fn test_comma_upper_bound() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      query TestCommaUpperBound($arg: String, $slightlyTooLongName12345: String) {
-        manyArgsQuery(arg1: $arg, arg2: $arg, arg3: $arg, arg4: $slightlyTooLongName12345) {
-          enumResponse
-        }
-      }";
+    let query_str = include_str!("testdata/comma_upper_bound_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1501,15 +1182,7 @@ async fn test_comma_upper_bound() {
 async fn test_underscore() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      query UnderscoreQuery($arg2_: String, $_arg3_: String) {
-        underscoreQuery(arg_: \"x\", _arg2: $arg2_, _arg3_: $_arg3_) {
-          _
-          _name
-          _name_
-          name_
-        }
-      }";
+    let query_str = include_str!("testdata/underscore_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1542,16 +1215,7 @@ async fn test_underscore() {
 async fn test_enhanced_uses_comma_always() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = "
-      query TestCommaEnhanced($arg1: String, $arg2: String, $veryMuchUsuallyTooLongName1234567890: String) {
-        manyArgsQuery(arg1: $arg1, arg2: $arg2, arg3: \"\", arg4: $veryMuchUsuallyTooLongName1234567890) {
-          enumResponse
-          basicTypes {
-            nullableId
-          }
-          id
-        }
-      }";
+    let query_str = include_str!("testdata/enhanced_uses_comma_always_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1565,75 +1229,7 @@ async fn test_enhanced_uses_comma_always() {
 async fn test_enhanced_sorts_fragments() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"
-      query EnhancedFragmentQuery {
-        noInputQuery {
-          listOfBools
-          interfaceResponse {
-            ... on InterfaceImplementation2 {
-              implementation2Field
-            }
-            ...bbbInterfaceFragment
-            ...aaaInterfaceFragment
-            ... {
-              ... on InterfaceImplementation1 {
-                implementation1Field
-              }
-            }
-            ... {
-              ... on InterfaceImplementation2 {
-                sharedField
-              }
-            }
-            ... on InterfaceImplementation1 {
-              implementation1Field
-            }
-          }
-          unionResponse {
-            ... on UnionType2 {
-              unionType2Field
-            }
-            ... on UnionType1 {
-              unionType1Field
-            }
-          }
-          ...zzzFragment
-          ...aaaFragment
-          ...ZZZFragment
-        }
-      }
-      
-      fragment zzzFragment on EverythingResponse {
-        listOfInterfaces {
-          sharedField
-        }
-      }
-      
-      fragment ZZZFragment on EverythingResponse {
-        listOfInterfaces {
-          sharedField
-        }
-      }
-      
-      fragment aaaFragment on EverythingResponse {
-        listOfInterfaces {
-          sharedField
-        }
-      }
-      
-      fragment UnusedFragment on InterfaceImplementation2 {
-        sharedField
-        implementation2Field
-      }
-      
-      fragment bbbInterfaceFragment on InterfaceImplementation2 {
-        sharedField
-        implementation2Field
-      }
-      
-      fragment aaaInterfaceFragment on InterfaceImplementation1 {
-        sharedField
-      }"#;
+    let query_str = include_str!("testdata/enhanced_sorts_fragments_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1647,31 +1243,7 @@ async fn test_enhanced_sorts_fragments() {
 async fn test_enhanced_sorts_directives() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"
-      fragment Fragment1 on InterfaceImplementation1 {
-        sharedField
-        implementation1Field
-      }
-      
-      fragment Fragment2 on InterfaceImplementation2 @withArgs(arg2: "" arg1: "test" arg3: true arg5: [1,2] arg4: 2) @noArgs {
-        sharedField
-        implementation2Field
-      }
-      
-      query DirectiveQuery @withArgs(arg2: "" arg1: "test") @noArgs {
-        noInputQuery {
-          enumResponse @withArgs(arg3: false arg5: [1,2] arg4: 2) @noArgs
-          unionResponse {
-            ... on UnionType1 @withArgs(arg2: "" arg1: "test") @noArgs {
-              unionType1Field
-            }
-          }
-          interfaceResponse {
-            ... Fragment1 @withArgs(arg1: "test") @noArgs
-            ... Fragment2
-          }
-        }
-      }"#;
+    let query_str = include_str!("testdata/enhanced_sorts_directives_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1685,20 +1257,7 @@ async fn test_enhanced_sorts_directives() {
 async fn test_enhanced_inline_input_object() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str: &str = r#"
-      query InputObjectTypeQuery {
-        inputTypeQuery(input: {
-            inputString: "foo",
-            inputInt: 42,
-            inputBoolean: null,
-            nestedType: { someFloat: 4.2 },
-            enumInput: SOME_VALUE_1,
-            nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ],
-            listInput: [1, 2, 3]
-        }) {
-          enumResponse
-        }
-      }"#;
+    let query_str: &str = include_str!("testdata/enhanced_inline_input_object_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
@@ -1709,26 +1268,10 @@ async fn test_enhanced_inline_input_object() {
 }
 
 #[test(tokio::test)]
-async fn test_enhanced_should_preserve_aliases() {
+async fn test_enhanced_alias_preservation() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"
-      query AliasQuery {
-        xxAlias: enumInputQuery(enumInput: SOME_VALUE_1) {
-          aliased: enumResponse
-        }
-        aaAlias: enumInputQuery(enumInput: SOME_VALUE_2) {
-          aliasedAgain: enumResponse
-        }
-        ZZAlias: enumInputQuery(enumInput: SOME_VALUE_3) {
-          enumResponse
-        }
-        enumInputQuery(enumInput: SOME_VALUE_1) {
-          enumResponse
-          aliasedId: id
-          nullableId
-        }
-      }"#;
+    let query_str = include_str!("testdata/enhanced_alias_preservation_query.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();

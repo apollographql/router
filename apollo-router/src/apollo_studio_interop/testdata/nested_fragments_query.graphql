@@ -1,0 +1,30 @@
+fragment UnionType1Fragment on UnionType1 {
+    unionType1Field
+}
+
+fragment ObjectResponseFragment on ObjectTypeResponse {
+    intField
+}
+
+fragment EverythingResponseFragment on EverythingResponse {
+    listOfObjects {
+        ...ObjectResponseFragment
+        ... on ObjectTypeResponse {
+            stringField
+        }
+    }
+}
+
+query NestedFragmentQuery {
+    noInputQuery {
+        ...EverythingResponseFragment
+        ... on EverythingResponse {
+            listOfUnions {
+                ...UnionType1Fragment
+                ... on UnionType2 {
+                    unionType2Field
+                }
+            }
+        }
+    }
+}

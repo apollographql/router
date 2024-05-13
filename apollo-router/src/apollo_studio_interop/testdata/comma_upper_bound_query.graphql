@@ -1,0 +1,5 @@
+query TestCommaUpperBound($arg: String, $slightlyTooLongName12345: String) {
+    manyArgsQuery(arg1: $arg, arg2: $arg, arg3: $arg, arg4: $slightlyTooLongName12345) {
+        enumResponse
+    }
+}

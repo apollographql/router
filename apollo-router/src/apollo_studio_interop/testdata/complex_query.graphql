@@ -1,0 +1,48 @@
+query UnusedQuery {
+    noInputQuery {
+        enumResponse
+    }
+}
+
+fragment UnusedFragment on EverythingResponse {
+    enumResponse
+}
+
+fragment Fragment2 on EverythingResponse {
+    basicTypes {
+        nullableFloat
+    }
+}
+
+query        TransformedQuery    {
+
+
+    scalarInputQuery(idInput: "a1", listInput: [], boolInput: true, intInput: 1, stringInput: "x", floatInput: 1.2)      @skip(if: false)   @include(if: true) {
+        ...Fragment2,
+
+
+        objectTypeWithInputField(boolInput: true, secondInput: false) {
+            stringField
+            __typename
+            intField
+        }
+
+        enumResponse
+        interfaceResponse {
+            sharedField
+            ... on InterfaceImplementation2 {
+                implementation2Field
+            }
+            ... on InterfaceImplementation1 {
+                implementation1Field
+            }
+        }
+        ...Fragment1,
+    }
+}
+
+fragment Fragment1 on EverythingResponse {
+    basicTypes {
+        nonNullFloat
+    }
+}
