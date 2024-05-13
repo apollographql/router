@@ -18,6 +18,7 @@ use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::Key;
 use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::connect::models::Connector;
+use crate::sources::source;
 use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilderApi;
 use crate::sources::source::SourceId;
 use crate::ValidFederationSubgraph;
@@ -43,6 +44,21 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
         for (id, connect) in connectors {
             // Inform the builder that every node / edge from here out are part of the current connect directive
             builder.add_and_set_current_source(SourceId::Connect(id.clone()))?;
+
+            // Save the connector to the backing query graph for use later in execution
+            {
+                let source::federated_query_graph::FederatedQueryGraph::Connect(
+                    connect_query_graph,
+                ) = builder.source_query_graph()?
+                else {
+                    return Err(FederationError::internal(
+                        "connect builder called with non-connect query graph",
+                    ));
+                };
+                connect_query_graph
+                    .source_data
+                    .insert(id.clone(), connect.clone());
+            }
 
             let ObjectOrInterfaceFieldDefinitionPosition::Object(field_def_pos) =
                 id.directive.field
@@ -383,11 +399,14 @@ fn process_subselection(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
+    use insta::assert_debug_snapshot;
     use insta::assert_snapshot;
 
     use super::FederatedQueryGraphBuilder;
     use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
     use crate::schema::FederationSchema;
+    use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+    use crate::sources::source;
     use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilderApi;
     use crate::ValidFederationSubgraphs;
 
@@ -404,10 +423,18 @@ mod tests {
         let subgraphs = get_subgraphs(include_str!("../tests/schemas/simple.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
-        // Make sure that the tail data is correct
+        // Make sure that the subgraph processes correctly
         federated_builder
             .process_subgraph_schema(subgraph, &mut mock_builder)
             .unwrap();
+
+        // Make sure that we handled all of the connectors
+        let source::federated_query_graph::FederatedQueryGraph::Connect(connectors) =
+            mock_builder.source_query_graph().unwrap()
+        else {
+            panic!("got back a non-connect source data");
+        };
+        assert_debug_snapshot!(connectors.source_data.values());
 
         // Make sure that our graph makes sense
         let as_dot = mock_builder.into_dot();
@@ -466,10 +493,18 @@ mod tests {
         let subgraphs = get_subgraphs(include_str!("../tests/schemas/aliasing.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
-        // Make sure that the tail data is correct
+        // Make sure that the subgraph processes correctly
         federated_builder
             .process_subgraph_schema(subgraph, &mut mock_builder)
             .unwrap();
+
+        // Make sure that we handled all of the connectors
+        let source::federated_query_graph::FederatedQueryGraph::Connect(connectors) =
+            mock_builder.source_query_graph().unwrap()
+        else {
+            panic!("got back a non-connect source data");
+        };
+        assert_debug_snapshot!(connectors.source_data.values());
 
         // Make sure that our graph makes sense
         let as_dot = mock_builder.into_dot();
@@ -529,10 +564,18 @@ mod tests {
         let subgraphs = get_subgraphs(include_str!("../tests/schemas/cyclical.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
-        // Make sure that the tail data is correct
+        // Make sure that the subgraph processes correctly
         federated_builder
             .process_subgraph_schema(subgraph, &mut mock_builder)
             .unwrap();
+
+        // Make sure that we handled all of the connectors
+        let source::federated_query_graph::FederatedQueryGraph::Connect(connectors) =
+            mock_builder.source_query_graph().unwrap()
+        else {
+            panic!("got back a non-connect source data");
+        };
+        assert_debug_snapshot!(connectors.source_data.values());
 
         // Make sure that our graph makes sense
         let as_dot = mock_builder.into_dot();
@@ -597,10 +640,18 @@ mod tests {
         let subgraphs = get_subgraphs(include_str!("../tests/schemas/nested.graphql"));
         let (_, subgraph) = subgraphs.into_iter().next().unwrap();
 
-        // Make sure that the tail data is correct
+        // Make sure that the subgraph processes correctly
         federated_builder
             .process_subgraph_schema(subgraph, &mut mock_builder)
             .unwrap();
+
+        // Make sure that we handled all of the connectors
+        let source::federated_query_graph::FederatedQueryGraph::Connect(connectors) =
+            mock_builder.source_query_graph().unwrap()
+        else {
+            panic!("got back a non-connect source data");
+        };
+        assert_debug_snapshot!(connectors.source_data.values());
 
         // Make sure that our graph makes sense
         let as_dot = mock_builder.into_dot();
@@ -653,6 +704,7 @@ mod tests {
 
         use apollo_compiler::ast::Name;
         use apollo_compiler::ast::NamedType;
+        use indexmap::IndexMap;
         use indexmap::IndexSet;
         use itertools::Itertools;
         use petgraph::dot::Config;
@@ -667,6 +719,7 @@ mod tests {
         use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
         use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
         use crate::source_aware::federated_query_graph::SelfConditionIndex;
+        use crate::sources::connect;
         use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
         use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
         use crate::sources::connect::json_selection::Key;
@@ -732,6 +785,8 @@ mod tests {
             graph: Graph<MockNode, MockEdge>,
             current_source: Option<SourceId>,
             entering_node: NodeIndex<u32>,
+
+            query_graph: source::federated_query_graph::FederatedQueryGraph,
         }
         impl MockSourceQueryGraphBuilder {
             pub fn new() -> Self {
@@ -757,10 +812,18 @@ mod tests {
                     }),
                 });
 
+                let query_graph = source::federated_query_graph::FederatedQueryGraph::Connect(
+                    connect::federated_query_graph::FederatedQueryGraph {
+                        subgraphs_by_name: IndexMap::new(),
+                        source_data: IndexMap::new(),
+                    },
+                );
+
                 Self {
                     graph,
                     current_source: None,
                     entering_node,
+                    query_graph,
                 }
             }
 
@@ -972,16 +1035,16 @@ mod tests {
                 ))
             }
 
-            // ---------------------------------
-            // -- Everything below is todo!() --
-            // ---------------------------------
-
             fn source_query_graph(
                 &mut self,
             ) -> Result<&mut source::federated_query_graph::FederatedQueryGraph, FederationError>
             {
-                todo!()
+                Ok(&mut self.query_graph)
             }
+
+            // ---------------------------------
+            // -- Everything below is todo!() --
+            // ---------------------------------
 
             fn get_current_source(&self) -> Result<SourceId, FederationError> {
                 todo!()

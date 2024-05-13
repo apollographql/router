@@ -1,0 +1,151 @@
+---
+source: apollo-federation/src/sources/connect/federated_query_graph/builder.rs
+expression: connectors.source_data.values()
+---
+[
+    Connector {
+        id: ConnectId {
+            label: "connectors.json http: Get /users",
+            subgraph_name: "connectors",
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.user),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJson(
+            HttpJsonTransport {
+                base_url: "https://jsonplaceholder.typicode.com/",
+                path_template: URLPathTemplate {
+                    path: [
+                        ParameterValue {
+                            parts: [
+                                Text(
+                                    "users",
+                                ),
+                            ],
+                        },
+                    ],
+                    query: {},
+                },
+                method: Get,
+                headers: {
+                    "X-Auth-Token": Some(
+                        As(
+                            "AuthToken",
+                        ),
+                    ),
+                    "user-agent": Some(
+                        Value(
+                            [
+                                "Firefox",
+                            ],
+                        ),
+                    ),
+                    "X-From-Env": None,
+                },
+                body: None,
+            },
+        ),
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        Some(
+                            Alias {
+                                name: "info",
+                            },
+                        ),
+                        "user_info",
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Quoted(
+                                        Alias {
+                                            name: "name",
+                                        },
+                                        "user full name",
+                                        None,
+                                    ),
+                                    Path(
+                                        Alias {
+                                            name: "address",
+                                        },
+                                        Key(
+                                            Field(
+                                                "addresses",
+                                            ),
+                                            Key(
+                                                Field(
+                                                    "main",
+                                                ),
+                                                Key(
+                                                    Field(
+                                                        "address",
+                                                    ),
+                                                    Selection(
+                                                        SubSelection {
+                                                            selections: [
+                                                                Field(
+                                                                    Some(
+                                                                        Alias {
+                                                                            name: "street",
+                                                                        },
+                                                                    ),
+                                                                    "street_line",
+                                                                    None,
+                                                                ),
+                                                                Field(
+                                                                    None,
+                                                                    "state",
+                                                                    None,
+                                                                ),
+                                                                Field(
+                                                                    None,
+                                                                    "zip",
+                                                                    None,
+                                                                ),
+                                                            ],
+                                                            star: None,
+                                                        },
+                                                    ),
+                                                ),
+                                            ),
+                                        ),
+                                    ),
+                                    Group(
+                                        Alias {
+                                            name: "avatar",
+                                        },
+                                        SubSelection {
+                                            selections: [
+                                                Field(
+                                                    None,
+                                                    "large",
+                                                    None,
+                                                ),
+                                                Field(
+                                                    None,
+                                                    "thumbnail",
+                                                    None,
+                                                ),
+                                            ],
+                                            star: None,
+                                        },
+                                    ),
+                                ],
+                                star: None,
+                            },
+                        ),
+                    ),
+                ],
+                star: None,
+            },
+        ),
+    },
+]

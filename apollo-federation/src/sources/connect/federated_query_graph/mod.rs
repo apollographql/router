@@ -10,6 +10,8 @@ use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::Key;
 use crate::sources::connect::json_selection::PathSelection;
 use crate::sources::connect::json_selection::SubSelection;
+use crate::sources::connect::models;
+use crate::sources::connect::ConnectId;
 use crate::sources::source;
 use crate::sources::source::federated_query_graph::FederatedQueryGraphApi;
 use crate::sources::source::SourceId;
@@ -20,6 +22,7 @@ pub(crate) mod builder;
 #[derive(Debug)]
 pub(crate) struct FederatedQueryGraph {
     subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
+    source_data: IndexMap<ConnectId, models::Connector>,
     // source_directives_by_name: IndexMap<NodeStr, SourceDirectiveArguments>,
     // connect_directives_by_source: IndexMap<ConnectId, ConnectDirectiveArguments>,
 }

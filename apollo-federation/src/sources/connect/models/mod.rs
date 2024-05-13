@@ -19,14 +19,14 @@ use crate::sources::connect::ConnectSpecDefinition;
 
 // --- Connector ---------------------------------------------------------------
 
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug, Clone)]
 pub(crate) struct Connector {
     pub(crate) id: ConnectId,
     transport: Transport,
     pub(crate) selection: JSONSelection,
 }
 
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug, Clone)]
 enum Transport {
     HttpJson(HttpJsonTransport),
 }
@@ -103,7 +103,7 @@ fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Tran
 
 // --- HTTP JSON ---------------------------------------------------------------
 
-#[cfg_attr(test, derive(Debug))]
+#[derive(Debug, Clone)]
 struct HttpJsonTransport {
     base_url: NodeStr,
     path_template: URLPathTemplate,
@@ -159,8 +159,7 @@ impl HttpJsonTransport {
 }
 
 /// The HTTP arguments needed for a connect request
-#[cfg_attr(test, derive(Debug))]
-#[derive(strum_macros::Display)]
+#[derive(Debug, Clone, strum_macros::Display)]
 pub(crate) enum HTTPMethod {
     Get,
     Post,
