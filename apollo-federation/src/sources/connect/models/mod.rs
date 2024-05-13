@@ -2,6 +2,8 @@ mod validation;
 
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
+pub use validation::validate;
+pub use validation::ValidationError;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;

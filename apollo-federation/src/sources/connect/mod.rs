@@ -18,6 +18,8 @@ pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
+pub use models::validate;
+pub use models::ValidationError;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 
