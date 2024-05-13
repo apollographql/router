@@ -54,3 +54,81 @@ fn can_use_same_root_operation_from_multiple_subgraphs_in_parallel() {
         "###
     );
 }
+
+#[test]
+fn handles_root_operation_shareable_in_many_subgraphs() {
+    let planner = planner!(
+        Subgraph1: r#"
+        type User @key(fields: "id") {
+          id: ID!
+          f0: Int
+          f1: Int
+          f2: Int
+          f3: Int
+        }
+        "#,
+        Subgraph2: r#"
+        type Query {
+          me: User! @shareable
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+        Subgraph3: r#"
+        type Query {
+          me: User! @shareable
+        }
+
+        type User @key(fields: "id") {
+          id: ID!
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+          me {
+            f0
+            f1
+            f2
+            f3
+          }
+        }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "Subgraph2") {
+                {
+                  me {
+                    __typename
+                    id
+                  }
+                }
+              },
+              Flatten(path: "me") {
+                Fetch(service: "Subgraph1") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      f0
+                      f1
+                      f2
+                      f3
+                    }
+                  }
+                },
+              },
+            },
+          }
+        "###
+    );
+}
