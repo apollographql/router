@@ -47,6 +47,7 @@ expression: response
             {
               "kind": "Flatten",
               "path": [
+                "",
                 "t",
                 "uList",
                 "@"
@@ -71,9 +72,9 @@ expression: response
                   }
                 ],
                 "variableUsages": [
-                  "Subgraph1_U_field_a"
+                  "contextualArgument_1_0"
                 ],
-                "operation": "query Query__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}",
+                "operation": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String!){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
                 "operationName": "Query__Subgraph1__1",
                 "operationKind": "query",
                 "id": null,
@@ -86,10 +87,10 @@ expression: response
                       "..",
                       "prop"
                     ],
-                    "renameKeyTo": "Subgraph1_U_field_a"
+                    "renameKeyTo": "contextualArgument_1_0"
                   }
                 ],
-                "schemaAwareHash": "2539792d01c83160bdcfaee2e8d371f56aca9083b54befb4c1aa44d011adc662",
+                "schemaAwareHash": "c3941670991c332a40e1b0fc3b6d01a04211e2341f1a36a2c42bee4541d985e4",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
@@ -100,7 +101,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \"t.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            id\n            field(a: $Subgraph1_U_field_a)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".t.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }
