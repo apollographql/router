@@ -770,10 +770,11 @@ impl FetchDependencyGraph {
 
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
     fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+        let mut stack = vec![];
         for start_index in self.children_of(node_index) {
-            let mut stack = self.children_of(start_index).collect::<Vec<_>>();
+            stack.extend(self.children_of(start_index));
             while let Some(v) = stack.pop() {
-                for edge in self.graph.edges_connecting(start_index, v) {
+                for edge in self.graph.edges_connecting(node_index, v) {
                     acc.insert(edge.id());
                 }
 

@@ -759,7 +759,6 @@ type User
     }
 
     #[test]
-    #[ignore]
     fn plan_simple_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
