@@ -228,22 +228,20 @@ mod status_code {
         status_code.as_str().to_string()
     }
 
-    #[rhai_fn(name = "to_number", pure)]
-    pub(crate) fn status_code_to_number(status_code: &mut StatusCode) -> i64 {
-        status_code.as_u16() as i64
-    }
-
     #[rhai_fn(name = "==", pure)]
-    pub(crate) fn status_code_equal_comparator(status_code: &mut StatusCode, other: i64) -> bool {
-        status_code.as_u16() as i64 == other
+    pub(crate) fn status_code_equal_comparator(
+        status_code: &mut StatusCode,
+        other: StatusCode,
+    ) -> bool {
+        status_code == &other
     }
 
     #[rhai_fn(name = "!=", pure)]
     pub(crate) fn status_code_not_equal_comparator(
         status_code: &mut StatusCode,
-        other: i64,
+        other: StatusCode,
     ) -> bool {
-        status_code.as_u16() as i64 != other
+        status_code != &other
     }
 }
 

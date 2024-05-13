@@ -622,14 +622,14 @@ print(`${response.body.errors}`); // logs the response errors
 
 ### `response.status_code.to_string()`
 
-Convert response status code as a string
+Convert response status code to a string.
 
 ### `response.status_code.to_number()`
 
-Convert response status code as a number in order to compare it
+Convert response status code to a number
 
 ```rhai
-if response.status_code.to_number() == 200 {
+if parse_int(response.status_code.to_string()) == 200 {
     print(`ok`);
 }
 ```
