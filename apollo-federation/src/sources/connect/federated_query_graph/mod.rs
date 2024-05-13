@@ -10,13 +10,12 @@ use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::Key;
 use crate::sources::connect::json_selection::PathSelection;
 use crate::sources::connect::json_selection::SubSelection;
+use crate::sources::connect::models;
+use crate::sources::connect::ConnectId;
 use crate::sources::source;
 use crate::sources::source::federated_query_graph::FederatedQueryGraphApi;
 use crate::sources::source::SourceId;
 use crate::ValidFederationSubgraph;
-
-use super::models;
-use super::ConnectId;
 
 pub(crate) mod builder;
 
