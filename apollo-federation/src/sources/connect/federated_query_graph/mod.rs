@@ -6,10 +6,10 @@ use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::ObjectFieldDefinitionPosition;
-use crate::sources::connect::selection_parser::PathSelection;
-use crate::sources::connect::selection_parser::Property;
-use crate::sources::connect::Selection;
-use crate::sources::connect::SubSelection;
+use crate::sources::connect::json_selection::JSONSelection;
+use crate::sources::connect::json_selection::Key;
+use crate::sources::connect::json_selection::PathSelection;
+use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::source;
 use crate::sources::source::federated_query_graph::FederatedQueryGraphApi;
 use crate::sources::source::SourceId;
@@ -42,7 +42,7 @@ pub(crate) enum ConcreteNode {
     },
     SelectionRoot {
         subgraph_type: ObjectTypeDefinitionPosition,
-        property_path: Vec<Property>,
+        property_path: Vec<Key>,
     },
     SelectionChild {
         subgraph_type: ObjectTypeDefinitionPosition,
@@ -53,7 +53,7 @@ pub(crate) enum ConcreteNode {
 pub(crate) enum EnumNode {
     SelectionRoot {
         subgraph_type: EnumTypeDefinitionPosition,
-        property_path: Vec<Property>,
+        property_path: Vec<Key>,
     },
     SelectionChild {
         subgraph_type: EnumTypeDefinitionPosition,
@@ -64,11 +64,11 @@ pub(crate) enum EnumNode {
 pub(crate) enum ScalarNode {
     SelectionRoot {
         subgraph_type: ScalarTypeDefinitionPosition,
-        property_path: Vec<Property>,
+        property_path: Vec<Key>,
     },
     CustomScalarSelectionRoot {
         subgraph_type: ScalarTypeDefinitionPosition,
-        selection: Selection,
+        selection: JSONSelection,
     },
     SelectionChild {
         subgraph_type: ScalarTypeDefinitionPosition,
@@ -86,7 +86,7 @@ pub(crate) enum ConcreteFieldEdge {
     },
     Selection {
         subgraph_field: ObjectFieldDefinitionPosition,
-        property_path: Vec<Property>,
+        property_path: Vec<Key>,
     },
     CustomScalarPathSelection {
         subgraph_field: ObjectFieldDefinitionPosition,
@@ -95,7 +95,7 @@ pub(crate) enum ConcreteFieldEdge {
     CustomScalarStarSelection {
         subgraph_field: ObjectFieldDefinitionPosition,
         star_subselection: Option<SubSelection>,
-        excluded_properties: IndexSet<Property>,
+        excluded_properties: IndexSet<Key>,
     },
 }
 

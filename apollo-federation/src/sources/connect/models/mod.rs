@@ -7,7 +7,7 @@ use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;
 use super::spec::SourceHTTPArguments;
 use super::ConnectId;
-use super::Selection;
+use super::JSONSelection;
 use super::URLPathTemplate;
 use crate::error::FederationError;
 use crate::schema::ValidFederationSchema;
@@ -21,7 +21,7 @@ use crate::sources::connect::ConnectSpecDefinition;
 pub(crate) struct Connector {
     pub(crate) id: ConnectId,
     transport: Transport,
-    pub(crate) selection: Selection,
+    pub(crate) selection: JSONSelection,
 }
 
 #[cfg_attr(test, derive(Debug))]
@@ -107,7 +107,7 @@ struct HttpJsonTransport {
     path_template: URLPathTemplate,
     method: HTTPMethod,
     headers: IndexMap<NodeStr, Option<HTTPHeaderOption>>,
-    body: Option<Selection>,
+    body: Option<JSONSelection>,
 }
 
 impl HttpJsonTransport {

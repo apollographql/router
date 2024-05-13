@@ -4,7 +4,7 @@ use std::sync::Arc;
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::ApplyToError;
-use apollo_federation::sources::connect::Selection as JSONSelection;
+use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::URLPathTemplate;
 use displaydoc::Display;
 use http::header::ACCEPT;

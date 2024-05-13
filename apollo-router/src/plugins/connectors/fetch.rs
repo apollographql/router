@@ -7,7 +7,7 @@ use apollo_federation::schema::ObjectOrInterfaceFieldDefinitionPosition;
 use apollo_federation::schema::ObjectOrInterfaceFieldDirectivePosition;
 use apollo_federation::sources::connect;
 use apollo_federation::sources::connect::ConnectId;
-use apollo_federation::sources::connect::Selection;
+use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::SubSelection;
 use apollo_federation::sources::source;
 use tower::ServiceExt;
@@ -48,7 +48,7 @@ impl From<FetchNode> for source::query_plan::FetchNode {
             },
             field_response_name: name!("Field"),
             field_arguments: Default::default(),
-            selection: Selection::Named(SubSelection {
+            selection: JSONSelection::Named(SubSelection {
                 selections: vec![],
                 star: None,
             }),
