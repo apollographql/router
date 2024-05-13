@@ -10,7 +10,7 @@
         clippy::expect_used,
         clippy::indexing_slicing,
         clippy::unimplemented
-        // TODO: clippy::todo
+        clippy::todo
     )
 )]
 
@@ -54,6 +54,10 @@
 - Missing $args
 - Missing $this
 
+## @link
+
+- Rename imports
+
 */
 
 use std::fmt::Display;
@@ -96,10 +100,6 @@ pub fn validate(schema: Schema) -> Vec<ValidationError> {
         })
         .flatten()
         .collect_vec();
-
-    if source_names.is_empty() && errors.is_empty() {
-        todo!("Check for renamed directives—this code is _only_ called for connectors subgraphs")
-    }
 
     // Check for duplicate source names
     source_names
