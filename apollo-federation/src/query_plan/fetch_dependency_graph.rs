@@ -25,7 +25,6 @@ use petgraph::visit::EdgeRef;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
-use crate::query_graph::graph_path::selection_of_element;
 use crate::query_graph::graph_path::OpGraphPathContext;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::graph_path::OpPath;
@@ -1298,7 +1297,11 @@ impl FetchDependencyGraphNode {
             subgraph_name: self.subgraph_name.clone(),
             id: self.id.get().copied(),
             variable_usages,
-            requires: input_nodes.map(|sel| executable::SelectionSet::from(sel).selections),
+            requires: input_nodes
+                .as_ref()
+                .map(executable::SelectionSet::try_from)
+                .transpose()?
+                .map(|selection_set| selection_set.selections),
             operation_document,
             operation_name,
             operation_kind: self.root_kind.into(),
@@ -1474,7 +1477,7 @@ fn operation_for_entities_fetch(
 
     let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
 
-    let entities_call = selection_of_element(
+    let entities_call = Selection::from_element(
         OpPathElement::Field(Field::new(FieldData {
             schema: subgraph_schema.clone(),
             field_position: entities,
@@ -1606,7 +1609,7 @@ impl FetchSelectionSet {
         path_in_node: &OpPath,
         selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set);
+        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;
@@ -1712,10 +1715,10 @@ impl DeferTracking {
         defer_args: &DeferDirectiveArguments,
         path: FetchDependencyGraphNodePath,
         parent_type: CompositeTypeDefinitionPosition,
-    ) {
+    ) -> Result<(), FederationError> {
         // Having the primary selection undefined means that @defer handling is actually disabled, so there's no need to track anything.
         let Some(primary_selection) = self.primary_selection.as_mut() else {
-            return;
+            return Ok(());
         };
 
         let label = defer_args
@@ -1738,10 +1741,10 @@ impl DeferTracking {
             parent_info.deferred.insert(label.clone());
             parent_info
                 .sub_selection
-                .add_at_path(&defer_context.path_to_defer_parent, None);
+                .add_at_path(&defer_context.path_to_defer_parent, None)
         } else {
             self.top_level_deferred.insert(label.clone());
-            primary_selection.add_at_path(&defer_context.path_to_defer_parent, None);
+            primary_selection.add_at_path(&defer_context.path_to_defer_parent, None)
         }
     }
 
@@ -1749,12 +1752,12 @@ impl DeferTracking {
         &mut self,
         defer_context: &DeferContext,
         selection_set: Option<&Arc<SelectionSet>>,
-    ) {
+    ) -> Result<(), FederationError> {
         if !defer_context.is_part_of_query {
-            return;
+            return Ok(());
         }
         let Some(primary_selection) = &mut self.primary_selection else {
-            return;
+            return Ok(());
         };
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             self.deferred[parent_ref]
@@ -1849,14 +1852,14 @@ pub(crate) fn compute_nodes_for_tree(
                 .add_at_path(&stack_item.node_path.path_in_node, Some(selection_set))?;
             dependency_graph
                 .defer_tracking
-                .update_subselection(&stack_item.defer_context, Some(selection_set));
+                .update_subselection(&stack_item.defer_context, Some(selection_set))?;
         }
         if stack_item.tree.is_leaf() {
             node.selection_set_mut()
                 .add_at_path(&stack_item.node_path.path_in_node, None)?;
             dependency_graph
                 .defer_tracking
-                .update_subselection(&stack_item.defer_context, None);
+                .update_subselection(&stack_item.defer_context, None)?;
             continue;
         }
         // We want to preserve the order of the elements in the child,
@@ -2021,9 +2024,17 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    input_selections.merge_into(std::iter::once(edge_conditions.as_ref()))?;
-    let new_node =
-        &mut FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
+    let edge_conditions = edge_conditions.rebase_on(
+        &input_type,
+        // Conditions do not use named fragments
+        &Default::default(),
+        &dependency_graph.supergraph_schema,
+        super::operation::RebaseErrorHandlingOption::ThrowError,
+    )?;
+
+    input_selections.merge_into(std::iter::once(&edge_conditions))?;
+
+    let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
         &dependency_graph.supergraph_schema,
         &wrap_input_selections(
@@ -2254,7 +2265,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 ..stack_item.defer_context.clone()
             },
             None,
-        )
+        )?
     }
     let Ok((Some(updated_operation), updated_defer_context)) = extract_defer_from_operation(
         dependency_graph,
@@ -2432,7 +2443,7 @@ fn wrap_input_selections(
                }
             */
             let parent_type_position = fragment.data().parent_type_position.clone();
-            let selection = Selection::from_normalized_inline_fragment(fragment, sub_selections);
+            let selection = Selection::from_inline_fragment(fragment, sub_selections);
             SelectionSet::from_selection(parent_type_position, selection)
         },
     )
@@ -2531,7 +2542,7 @@ fn extract_defer_from_operation(
         &defer_args,
         node_path.clone(),
         operation.parent_type_position(),
-    );
+    )?;
 
     let updated_context = DeferContext {
         current_defer_ref: Some(updated_defer_ref.into()),
