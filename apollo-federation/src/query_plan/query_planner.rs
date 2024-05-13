@@ -783,7 +783,7 @@ type User
           Sequence {
             Fetch(service: "reviews") {
               {
-                        bestRatedProducts {
+                bestRatedProducts {
                   ... on Book {
                     id
                     __typename
@@ -799,11 +799,11 @@ type User
               Flatten(path: "bestRatedProducts.*") {
                 Fetch(service: "products") {
                   {
-                                ... on Movie {
+                    ... on Movie {
                       id
                     }
                   } => {
-                                ... on Movie {
+                    ... on Movie {
                       vendor {
                         id
                         __typename
@@ -815,11 +815,11 @@ type User
               Flatten(path: "bestRatedProducts.*") {
                 Fetch(service: "products") {
                   {
-                                ... on Book {
+                    ... on Book {
                       id
                     }
                   } => {
-                                ... on Book {
+                    ... on Book {
                       vendor {
                         id
                         __typename
