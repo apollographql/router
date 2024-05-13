@@ -784,12 +784,12 @@ type User
               {
                 bestRatedProducts {
                   ... on Book {
-                    id
                     __typename
+                    id
                   }
                   ... on Movie {
-                    id
                     __typename
+                    id
                   }
                 }
               }
@@ -807,8 +807,8 @@ type User
                     {
                       ... on Movie {
                         vendor {
-                          id
                           __typename
+                          id
                         }
                       }
                     }
@@ -842,8 +842,8 @@ type User
                     {
                       ... on Book {
                         vendor {
-                          id
                           __typename
+                          id
                         }
                       }
                     }
