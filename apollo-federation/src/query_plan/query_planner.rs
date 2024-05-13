@@ -726,14 +726,12 @@ type User
     "#;
 
     #[test]
-    #[allow(unused)] // remove when build_query_plan() can run without panicking
-    fn it_does_not_crash() {
+    fn plan_simple_query_for_single_subgraph() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
 
         let document = ExecutableDocument::parse_and_validate(
-            api_schema.schema(),
+            planner.api_schema().schema(),
             r#"
             {
                 userById(id: 1) {
@@ -745,7 +743,174 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        // let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+              userById(id: 1) {
+                name
+                email
+              }
+            }
+          }
+        }
+        "###);
+    }
+
+    #[test]
+    fn plan_simple_query_for_multiple_subgraphs() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+            {
+                bestRatedProducts {
+                    vendor { name }
+                }
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        // TODO: This is the current output, but it's wrong: it's not fetching `vendor.name` at all.
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "reviews") {
+              {
+                bestRatedProducts {
+                  ... on Book {
+                    id
+                    __typename
+                  }
+                  ... on Movie {
+                    id
+                    __typename
+                  }
+                }
+              }
+            }
+            Parallel {
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Movie {
+                        id
+                      }
+                    } => {
+                      ... on Movie {
+                        vendor {
+                          id
+                          __typename
+                        }
+                      }
+                    }
+                  }
+                }
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        id
+                      }
+                    } => {
+                      ... on User {
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Book {
+                        id
+                      }
+                    } => {
+                      ... on Book {
+                        vendor {
+                          id
+                          __typename
+                        }
+                      }
+                    }
+                  }
+                }
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        id
+                      }
+                    } => {
+                      ... on User {
+                        name
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        "###);
+    }
+
+    // TODO: This fails with "Subgraph unexpectedly does not use federation spec"
+    // which seems...unusual
+    #[test]
+    #[ignore]
+    fn plan_simple_root_field_query_for_multiple_subgraphs() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    name
+                    email
+                }
+                bestRatedProducts {
+                    id
+                    avg_rating
+                }
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Parallel {
+            Fetch(service: "accounts") {
+              {
+                      userById(id: 1) {
+                  name
+                  email
+                }
+              }
+            }
+            Fetch(service: "products") {
+              {
+                      bestRatedProducts {
+                  id
+                  avg_rating
+                }
+              }
+            }
+          }
+        }
+        "###);
     }
 
     #[test]
@@ -795,7 +960,7 @@ type User
         QueryPlan {
           Fetch(service: "A") {
             {
-                    a {
+              a {
                 b {
                   x
                   y
