@@ -50,10 +50,10 @@ impl JSONSelection {
     }
 }
 
-// NamedSelection       ::= NamedFieldSelection | NamedQuotedSelection | NamedPathSelection | NamedGroupSelection
+// NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
+// NamedPathSelection   ::= Alias PathSelection
 // NamedFieldSelection  ::= Alias? Identifier SubSelection?
 // NamedQuotedSelection ::= Alias StringLiteral SubSelection?
-// NamedPathSelection   ::= Alias PathSelection
 // NamedGroupSelection  ::= Alias SubSelection
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
@@ -67,9 +67,17 @@ pub enum NamedSelection {
 impl NamedSelection {
     fn parse(input: &str) -> IResult<&str, Self> {
         alt((
+            // We must try parsing NamedPathSelection before NamedFieldSelection
+            // and NamedQuotedSelection because a NamedPathSelection without a
+            // leading `.`, such as `alias: some.nested.path` has a prefix that
+            // can be parsed as a NamedFieldSelection: `alias: some`. Parsing
+            // then fails when it finds the remaining `.nested.path` text. Some
+            // parsers would solve this by forbidding `.` in the "lookahead" for
+            // Named{Field,Quoted}Selection, but negative lookahead is tricky in
+            // nom, so instead we greedily parse NamedPathSelection first.
+            Self::parse_path,
             Self::parse_field,
             Self::parse_quoted,
-            Self::parse_path,
             Self::parse_group,
         ))(input)
     }
@@ -737,9 +745,8 @@ mod tests {
             )),
         );
 
-        assert_eq!(
-            selection!("hi: .hello.world"),
-            JSONSelection::Named(SubSelection {
+        {
+            let expected = JSONSelection::Named(SubSelection {
                 selections: vec![NamedSelection::Path(
                     Alias {
                         name: "hi".to_string(),
@@ -749,16 +756,24 @@ mod tests {
                             Key::Field("hello".to_string()),
                             Key::Field("world".to_string()),
                         ],
-                        None
+                        None,
                     ),
                 )],
                 star: None,
-            }),
-        );
+            });
 
-        assert_eq!(
-            selection!("before hi: .hello.world after"),
-            JSONSelection::Named(SubSelection {
+            assert_eq!(selection!("hi: .hello.world"), expected);
+            assert_eq!(selection!("hi: .hello .world"), expected);
+            assert_eq!(selection!("hi: . hello. world"), expected);
+            assert_eq!(selection!("hi: .hello . world"), expected);
+            assert_eq!(selection!("hi: hello.world"), expected);
+            assert_eq!(selection!("hi: hello. world"), expected);
+            assert_eq!(selection!("hi: hello .world"), expected);
+            assert_eq!(selection!("hi: hello . world"), expected);
+        }
+
+        {
+            let expected = JSONSelection::Named(SubSelection {
                 selections: vec![
                     NamedSelection::Field(None, "before".to_string(), None),
                     NamedSelection::Path(
@@ -770,50 +785,72 @@ mod tests {
                                 Key::Field("hello".to_string()),
                                 Key::Field("world".to_string()),
                             ],
-                            None
+                            None,
                         ),
                     ),
                     NamedSelection::Field(None, "after".to_string(), None),
                 ],
                 star: None,
-            }),
-        );
+            });
 
-        let before_path_nested_after_result = JSONSelection::Named(SubSelection {
-            selections: vec![
-                NamedSelection::Field(None, "before".to_string(), None),
-                NamedSelection::Path(
-                    Alias {
-                        name: "hi".to_string(),
-                    },
-                    PathSelection::from_slice(
-                        &[
-                            Key::Field("hello".to_string()),
-                            Key::Field("world".to_string()),
-                        ],
-                        Some(SubSelection {
-                            selections: vec![
-                                NamedSelection::Field(None, "nested".to_string(), None),
-                                NamedSelection::Field(None, "names".to_string(), None),
+            assert_eq!(selection!("before hi: .hello.world after"), expected);
+            assert_eq!(selection!("before hi: .hello .world after"), expected);
+            assert_eq!(selection!("before hi: .hello. world after"), expected);
+            assert_eq!(selection!("before hi: .hello . world after"), expected);
+            assert_eq!(selection!("before hi: . hello.world after"), expected);
+            assert_eq!(selection!("before hi: . hello .world after"), expected);
+            assert_eq!(selection!("before hi: . hello. world after"), expected);
+            assert_eq!(selection!("before hi: . hello . world after"), expected);
+            assert_eq!(selection!("before hi: hello.world after"), expected);
+            assert_eq!(selection!("before hi: hello .world after"), expected);
+            assert_eq!(selection!("before hi: hello. world after"), expected);
+            assert_eq!(selection!("before hi: hello . world after"), expected);
+        }
+
+        {
+            let expected = JSONSelection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Field(None, "before".to_string(), None),
+                    NamedSelection::Path(
+                        Alias {
+                            name: "hi".to_string(),
+                        },
+                        PathSelection::from_slice(
+                            &[
+                                Key::Field("hello".to_string()),
+                                Key::Field("world".to_string()),
                             ],
-                            star: None,
-                        }),
+                            Some(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(None, "nested".to_string(), None),
+                                    NamedSelection::Field(None, "names".to_string(), None),
+                                ],
+                                star: None,
+                            }),
+                        ),
                     ),
-                ),
-                NamedSelection::Field(None, "after".to_string(), None),
-            ],
-            star: None,
-        });
+                    NamedSelection::Field(None, "after".to_string(), None),
+                ],
+                star: None,
+            });
 
-        assert_eq!(
-            selection!("before hi: .hello.world { nested names } after"),
-            before_path_nested_after_result,
-        );
-
-        assert_eq!(
-            selection!("before hi:.hello.world{nested names}after"),
-            before_path_nested_after_result,
-        );
+            assert_eq!(
+                selection!("before hi: .hello.world { nested names } after"),
+                expected
+            );
+            assert_eq!(
+                selection!("before hi:.hello.world{nested names}after"),
+                expected
+            );
+            assert_eq!(
+                selection!("before hi: hello.world { nested names } after"),
+                expected
+            );
+            assert_eq!(
+                selection!("before hi:hello.world{nested names}after"),
+                expected
+            );
+        }
 
         assert_eq!(
             selection!(
@@ -914,20 +951,26 @@ mod tests {
             PathSelection::from_slice(&[Key::Field("hello".to_string())], None),
         );
 
-        check_path_selection(
-            ".hello.world",
-            PathSelection::from_slice(
+        {
+            let expected = PathSelection::from_slice(
                 &[
                     Key::Field("hello".to_string()),
                     Key::Field("world".to_string()),
                 ],
                 None,
-            ),
-        );
+            );
+            check_path_selection(".hello.world", expected.clone());
+            check_path_selection(".hello .world", expected.clone());
+            check_path_selection(".hello. world", expected.clone());
+            check_path_selection(".hello . world", expected.clone());
+            check_path_selection("hello.world", expected.clone());
+            check_path_selection("hello .world", expected.clone());
+            check_path_selection("hello. world", expected.clone());
+            check_path_selection("hello . world", expected.clone());
+        }
 
-        check_path_selection(
-            ".hello.world { hello }",
-            PathSelection::from_slice(
+        {
+            let expected = PathSelection::from_slice(
                 &[
                     Key::Field("hello".to_string()),
                     Key::Field("world".to_string()),
@@ -936,12 +979,23 @@ mod tests {
                     selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
                     star: None,
                 }),
-            ),
-        );
+            );
+            check_path_selection(".hello.world { hello }", expected.clone());
+            check_path_selection(".hello .world { hello }", expected.clone());
+            check_path_selection(".hello. world { hello }", expected.clone());
+            check_path_selection(".hello . world { hello }", expected.clone());
+            check_path_selection(". hello.world { hello }", expected.clone());
+            check_path_selection(". hello .world { hello }", expected.clone());
+            check_path_selection(". hello. world { hello }", expected.clone());
+            check_path_selection(". hello . world { hello }", expected.clone());
+            check_path_selection("hello.world { hello }", expected.clone());
+            check_path_selection("hello .world { hello }", expected.clone());
+            check_path_selection("hello. world { hello }", expected.clone());
+            check_path_selection("hello . world { hello }", expected.clone());
+        }
 
-        check_path_selection(
-            ".nested.'string literal'.\"property\".name",
-            PathSelection::from_slice(
+        {
+            let expected = PathSelection::from_slice(
                 &[
                     Key::Field("nested".to_string()),
                     Key::Quoted("string literal".to_string()),
@@ -949,12 +1003,35 @@ mod tests {
                     Key::Field("name".to_string()),
                 ],
                 None,
-            ),
-        );
+            );
+            check_path_selection(
+                ".nested.'string literal'.\"property\".name",
+                expected.clone(),
+            );
+            check_path_selection(
+                "nested.'string literal'.\"property\".name",
+                expected.clone(),
+            );
+            check_path_selection(
+                "nested. 'string literal'.\"property\".name",
+                expected.clone(),
+            );
+            check_path_selection(
+                "nested.'string literal'. \"property\".name",
+                expected.clone(),
+            );
+            check_path_selection(
+                "nested.'string literal'.\"property\" .name",
+                expected.clone(),
+            );
+            check_path_selection(
+                "nested.'string literal'.\"property\". name",
+                expected.clone(),
+            );
+        }
 
-        check_path_selection(
-            ".nested.'string literal' { leggo: 'my ego' }",
-            PathSelection::from_slice(
+        {
+            let expected = PathSelection::from_slice(
                 &[
                     Key::Field("nested".to_string()),
                     Key::Quoted("string literal".to_string()),
@@ -969,8 +1046,28 @@ mod tests {
                     )],
                     star: None,
                 }),
-            ),
-        );
+            );
+
+            check_path_selection(
+                ".nested.'string literal' { leggo: 'my ego' }",
+                expected.clone(),
+            );
+
+            check_path_selection(
+                "nested.'string literal' { leggo: 'my ego' }",
+                expected.clone(),
+            );
+
+            check_path_selection(
+                "nested. 'string literal' { leggo: 'my ego' }",
+                expected.clone(),
+            );
+
+            check_path_selection(
+                "nested . 'string literal' { leggo: 'my ego' }",
+                expected.clone(),
+            );
+        }
     }
 
     #[test]
