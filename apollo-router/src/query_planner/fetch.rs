@@ -277,7 +277,6 @@ fn query_batching_for_contextual_args(
                 .any(|v| ctx.contains(v.name.as_str()))
             {
                 let new_selection_set: Vec<_> = (0..*times)
-                    .into_iter()
                     .map(|i| {
                         // TODO: Unwrap
                         let mut s = operation.selection_set.first().unwrap().clone();
@@ -380,7 +379,7 @@ fn data_at_path<'v>(data: &'v Value, path: &Path) -> Option<&'v Value> {
                 }
             }
             z
-        },
+        }
         PathElement::Key(v, _) => data.get(v),
         PathElement::Index(idx) => Some(&data[idx]),
         PathElement::Flatten(_) => None,
@@ -401,17 +400,14 @@ fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
     // iterate over the context_path(i), every time we encounter a '..', we want
     // to go up one level in the current_dir(j)
     while i < context_path.len() {
-        match &context_path.0[i] {
-            PathElement::Key(e, _) => {
+        match &context_path.0.get(i) {
+            Some(PathElement::Key(e, _)) => {
                 let mut found = false;
                 if e == ".." {
                     while !found {
                         j -= 1;
-                        match current_dir.0[j] {
-                            PathElement::Key(_, _) => {
-                                found = true;
-                            }
-                            _ => {}
+                        if let Some(PathElement::Key(_, _)) = current_dir.0.get(j) {
+                            found = true;
                         }
                     }
                     i += 1;
@@ -423,7 +419,7 @@ fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
         }
     }
 
-    let mut return_path: Vec<PathElement> = current_dir.iter().take(j).map(|e| e.clone()).collect();
+    let mut return_path: Vec<PathElement> = current_dir.iter().take(j).cloned().collect();
 
     context_path.iter().skip(i).for_each(|e| {
         return_path.push(e.clone());
@@ -462,7 +458,7 @@ impl Variables {
                         match rewrite {
                             DataRewrite::KeyRenamer(item) => {
                                 if !found_rewrites.contains(item.rename_key_to.as_str()) {
-                                    let data_path = merge_context_path(&path, &item.path);
+                                    let data_path = merge_context_path(path, &item.path);
                                     let val = data_at_path(data, &data_path);
                                     if let Some(v) = val {
                                         // add to found
@@ -471,10 +467,10 @@ impl Variables {
                                         // TODO: not great
                                         let mut new_value = v.clone();
                                         if let Some(values) = new_value.as_array_mut() {
-                                            for mut v in values {
+                                            for v in values {
                                                 rewrites::apply_single_rewrite(
                                                     schema,
-                                                    &mut v,
+                                                    v,
                                                     &DataRewrite::KeyRenamer({
                                                         DataKeyRenamer {
                                                             path: data_path.clone(),
