@@ -637,3 +637,11 @@ if parse_int(response.status_code.to_string()) == 200 {
     print(`ok`);
 }
 ```
+
+You can also create your own status code from an integer:
+
+```rhai
+if response.status_code == status_code_from_int(200) {
+    print(`ok`);
+}
+```

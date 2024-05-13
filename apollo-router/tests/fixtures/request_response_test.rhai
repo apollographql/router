@@ -129,6 +129,9 @@ fn process_subgraph_response(response) {
     if parse_int(response.status_code.to_string()) != 200 {
         throw(`status_code: expected: 200, actual: ${response.status_code}`);
     }
+    if response.status_code != status_code_from_int(200) {
+        throw(`status_code: expected: 200, actual: ${response.status_code}`);
+    }
 }
 
 fn process_subgraph_response_om_forbidden(response) {

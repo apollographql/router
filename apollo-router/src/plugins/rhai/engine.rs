@@ -221,7 +221,15 @@ mod router_method {
 
 #[export_module]
 mod status_code {
+    use rhai::INT;
+
     pub(crate) type StatusCode = http::StatusCode;
+
+    #[rhai_fn(name = "status_code_from_int", return_raw)]
+    pub(crate) fn status_code_from_int(number: INT) -> Result<StatusCode, Box<EvalAltResult>> {
+        let code = StatusCode::from_u16(number as u16).map_err(|e| e.to_string())?;
+        Ok(code)
+    }
 
     #[rhai_fn(name = "to_string", pure)]
     pub(crate) fn status_code_to_string(status_code: &mut StatusCode) -> String {
