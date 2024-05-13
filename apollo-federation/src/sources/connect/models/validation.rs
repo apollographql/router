@@ -9,7 +9,7 @@
         clippy::unwrap_used,
         clippy::expect_used,
         clippy::indexing_slicing,
-        clippy::unimplemented
+        clippy::unimplemented,
         clippy::todo
     )
 )]
