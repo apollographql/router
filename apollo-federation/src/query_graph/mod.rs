@@ -467,7 +467,6 @@ impl QueryGraph {
     pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<QueryGraphEdge>> {
         Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
             |edge_ref| {
-                dbg!(edge_ref);
                 !(edge_ref.source() == edge_ref.target()
                     && matches!(
                         edge_ref.weight().transition,
