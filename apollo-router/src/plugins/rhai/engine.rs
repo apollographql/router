@@ -225,7 +225,7 @@ mod status_code {
 
     pub(crate) type StatusCode = http::StatusCode;
 
-    #[rhai_fn(name = "status_code_from_int", return_raw)]
+    #[rhai_fn(return_raw)]
     pub(crate) fn status_code_from_int(number: INT) -> Result<StatusCode, Box<EvalAltResult>> {
         let code = StatusCode::from_u16(number as u16).map_err(|e| e.to_string())?;
         Ok(code)

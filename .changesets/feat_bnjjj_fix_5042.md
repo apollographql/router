@@ -1,6 +1,6 @@
-### Add support of response status_code in rhai ([Issue #5042](https://github.com/apollographql/router/issues/5042))
+### Add support for response status_code to rhai ([Issue #5042](https://github.com/apollographql/router/issues/5042))
 
-Added support of `response.status_code` on `Response` interface in rhai.
+Added support for `response.status_code` on `Response` interface in rhai.
 
 Convert response status code to a string.
 
