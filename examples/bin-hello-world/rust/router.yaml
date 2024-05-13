@@ -1,0 +1,5 @@
+plugins:
+  # this plugin has one piece of configuration,
+  # the name of the entity you'd like to say hello to
+  example.hello_world:
+    name: "Bob"

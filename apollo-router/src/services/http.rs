@@ -20,13 +20,13 @@ pub(crate) type BoxCloneService = tower::util::BoxCloneService<HttpRequest, Http
 pub(crate) type ServiceResult = Result<HttpResponse, BoxError>;
 
 #[non_exhaustive]
-pub(crate) struct HttpRequest {
+pub struct HttpRequest {
     pub(crate) http_request: http::Request<Body>,
     pub(crate) context: Context,
 }
 
 #[non_exhaustive]
-pub(crate) struct HttpResponse {
+pub struct HttpResponse {
     pub(crate) http_response: http::Response<Body>,
     pub(crate) context: Context,
 }

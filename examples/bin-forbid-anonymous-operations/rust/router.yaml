@@ -1,0 +1,4 @@
+plugins:
+  # this plugin doesn't have any configuration
+  # mention it here and you're set!
+  example.forbid_anonymous_operations:

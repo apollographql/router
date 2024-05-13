@@ -274,7 +274,7 @@ impl YamlRouterFactory {
         schema: String,
         previous_supergraph: Option<&'a SupergraphCreator>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
-        extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
+        mut extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<SupergraphCreator, BoxError> {
         let query_planner_span = tracing::info_span!("query_planner_creation");
         // QueryPlannerService takes an UnplannedRequest and outputs PlannedRequest
@@ -334,6 +334,24 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // Process the plugins.
+        // TODO: Let users know if binary plugins can't be scanned. This
+        // is most likely because there are none, so could be handled
+        // better.
+        let bin_plugins = match crate::plugin::binary_plugins::scan_plugins().await {
+            Ok(bp) => bp,
+            Err(e) => {
+                tracing::info!("no binary plugins found: {}", e);
+                vec![]
+            }
+        };
+
+        extra_plugins = match extra_plugins {
+            Some(mut plugins) => {
+                plugins.extend(bin_plugins);
+                Some(plugins)
+            }
+            None => Some(bin_plugins),
+        };
         let plugins: Arc<Plugins> = Arc::new(
             create_plugins(
                 &configuration,
