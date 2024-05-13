@@ -1,4 +1,7 @@
+use std::collections::HashSet;
 use std::io::Read;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
@@ -55,7 +58,7 @@ macro_rules! assert_plan {
 
 #[track_caller]
 pub(crate) fn api_schema_and_planner(
-    function_path: &str,
+    function_path: &'static str,
     config: QueryPlannerConfig,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> (ValidFederationSchema, QueryPlanner) {
@@ -71,7 +74,10 @@ pub(crate) fn api_schema_and_planner(
 }
 
 #[track_caller]
-pub(crate) fn compose(function_path: &str, subgraph_names_and_schemas: &[(&str, &str)]) -> String {
+pub(crate) fn compose(
+    function_path: &'static str,
+    subgraph_names_and_schemas: &[(&str, &str)],
+) -> String {
     let unique_names: std::collections::HashSet<_> = subgraph_names_and_schemas
         .iter()
         .map(|(name, _)| name)
@@ -103,6 +109,16 @@ pub(crate) fn compose(function_path: &str, subgraph_names_and_schemas: &[(&str, 
     let prefix = "# Composed from subgraphs with hash: ";
 
     let test_name = function_path.rsplit("::").next().unwrap();
+    static SEEN_TEST_NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    let new = SEEN_TEST_NAMES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(test_name);
+    assert!(
+        new,
+        "planner!() can only be used once in test(s) named '{test_name}'"
+    );
     let supergraph_path = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("tests")
         .join("query_plan")
