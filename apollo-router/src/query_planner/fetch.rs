@@ -256,7 +256,7 @@ pub(crate) struct Variables {
     pub(crate) contextual_args: Option<(HashSet<String>, usize)>,
 }
 
-fn query_batching_for_contextual_args2(
+fn query_batching_for_contextual_args(
     operation: &str,
     contextual_args: &Option<(HashSet<String>, usize)>,
 ) -> Option<String> {
@@ -363,7 +363,7 @@ fn test_query_batching_for_contextual_args() {
 
     assert_eq!(
         expected,
-        query_batching_for_contextual_args2(old_query, &contextual_args).unwrap()
+        query_batching_for_contextual_args(old_query, &contextual_args).unwrap()
     );
 }
 
@@ -658,7 +658,7 @@ impl FetchNode {
         };
 
         let query_batched_query =
-            query_batching_for_contextual_args2(operation.as_serialized(), &contextual_args);
+            query_batching_for_contextual_args(operation.as_serialized(), &contextual_args);
 
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())

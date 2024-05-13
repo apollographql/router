@@ -208,7 +208,7 @@ impl SubscriptionNode {
             parameters.supergraph_request,
             parameters.schema,
             &self.input_rewrites,
-            &self.input_rewrites, // TODO: Fix me
+            &None,
         ) {
             Some(variables) => variables,
             None => {

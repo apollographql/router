@@ -173,7 +173,6 @@ impl Service<SubgraphRequest> for MockSubgraph {
             }
         }
 
-        dbg!(&body);
         let response = if let Some(response) = self.mocks.get(body) {
             // Build an http Response
             let mut http_response_builder = http::Response::builder().status(StatusCode::OK);
