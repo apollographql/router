@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::ConnectorTransports;
+use apollo_federation::sources::connect::Connectors;
 use async_trait::async_trait;
 use derivative::Derivative;
 use serde::Deserialize;
@@ -82,7 +82,7 @@ pub(crate) enum QueryPlannerContent {
     Plan {
         plan: Arc<QueryPlan>,
         #[serde(default, skip)]
-        connector_transports: ConnectorTransports,
+        connectors: Connectors,
     },
     Response {
         response: Box<graphql::Response>,

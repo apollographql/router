@@ -8,14 +8,14 @@ use apollo_federation::schema::ObjectOrInterfaceFieldDirectivePosition;
 use apollo_federation::sources::connect;
 use apollo_federation::sources::connect::query_plan::FetchNode as ConnectFetchNode;
 use apollo_federation::sources::connect::ConnectId;
+use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::Selection;
 use apollo_federation::sources::connect::SubSelection;
-use apollo_federation::sources::connect::Transport;
 use apollo_federation::sources::source;
+use apollo_federation::sources::source::SourceId;
 use tower::ServiceExt;
 use tracing::Instrument;
 
-use super::Connector;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql::Request;
@@ -63,7 +63,7 @@ impl FetchNode {
     pub(crate) fn update_connector_plan(
         &mut self,
         parent_service_name: &String,
-        connectors: &Arc<HashMap<Arc<String>, Connector>>,
+        connectors: &Arc<HashMap<Arc<String>, super::Connector>>,
     ) {
         let as_fednext_node: source::query_plan::FetchNode = self.clone().into();
 
@@ -238,18 +238,19 @@ async fn process_source_node<'a>(
     _data: &'a Value,
     _current_dir: &'a Path,
 ) -> (Value, Vec<Error>) {
-    let connector_transport = execution_parameters
-        .connector_transports
-        .get(&source_node.source_id)
+    let connector = execution_parameters
+        .connectors
+        // TODO: not elegant at all
+        .get(&SourceId::Connect(source_node.source_id.clone()))
         .unwrap();
-    let requests = create_requests(connector_transport);
+    let requests = create_requests(connector);
 
     let responses = make_requests(requests).await;
 
-    process_responses(connector_transport, responses)
+    process_responses(connector, responses)
 }
 
-fn create_requests(_connector_transport: &Transport) -> Vec<http::Request<hyper::Body>> {
+fn create_requests(_connector: &Connector) -> Vec<http::Request<hyper::Body>> {
     Vec::new()
 }
 
@@ -260,7 +261,7 @@ async fn make_requests(
 }
 
 fn process_responses(
-    _connector_transport: &Transport,
+    _connector_transport: &Connector,
     _responses: Vec<http::Response<hyper::Body>>,
 ) -> (Value, Vec<Error>) {
     (Default::default(), Default::default())
@@ -270,6 +271,7 @@ mod soure_node_tests {
     use apollo_compiler::NodeStr;
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::Transport;
     use indexmap::IndexMap;
 
     use super::*;
@@ -325,17 +327,25 @@ mod soure_node_tests {
         let subscription_handle = Default::default();
         let subscription_config = Default::default();
 
-        let mut connector_transports: IndexMap<ConnectId, Transport> = Default::default();
+        let mut connectors: IndexMap<SourceId, Connector> = Default::default();
+        let id = fake_connect_id();
 
-        connector_transports.insert(
-            fake_connect_id(),
-            Transport::HttpJson(HttpJsonTransport {
-                base_url: NodeStr::new("test"),
-                path_template: Default::default(),
-                method: HTTPMethod::Get,
-                headers: Default::default(),
-                body: Default::default(),
-            }),
+        connectors.insert(
+            SourceId::Connect(id.clone()),
+            Connector {
+                id,
+                transport: Transport::HttpJson(HttpJsonTransport {
+                    base_url: NodeStr::new("test"),
+                    path_template: Default::default(),
+                    method: HTTPMethod::Get,
+                    headers: Default::default(),
+                    body: Default::default(),
+                }),
+                selection: Selection::Named(SubSelection {
+                    selections: vec![],
+                    star: None,
+                }),
+            },
         );
 
         let execution_parameters = ExecutionParameters {
@@ -348,7 +358,7 @@ mod soure_node_tests {
             root_node: &root_node,
             subscription_handle: &subscription_handle,
             subscription_config: &subscription_config,
-            connector_transports: &Arc::new(connector_transports),
+            connectors: &Arc::new(connectors),
         };
         let source_node = fake_source_node();
         let data = Default::default();

@@ -152,7 +152,7 @@ impl ExecutionService {
                 subscription_handle.clone(),
                 &self.subscription_config,
                 req.source_stream_value,
-                &req.connector_transports,
+                &req.connectors,
             )
             .await;
         let query = req.query_plan.query.clone();

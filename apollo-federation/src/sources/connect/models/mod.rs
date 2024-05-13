@@ -17,14 +17,14 @@ use crate::sources::connect::ConnectSpecDefinition;
 
 // --- Connector ---------------------------------------------------------------
 
-#[cfg_attr(test, derive(Debug))]
-pub(crate) struct Connector {
-    pub(crate) id: ConnectId,
-    transport: Transport,
-    pub(crate) selection: Selection,
+#[derive(Debug, Clone)]
+pub struct Connector {
+    pub id: ConnectId,
+    pub transport: Transport,
+    pub selection: Selection,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum Transport {
     HttpJson(HttpJsonTransport),
 }
@@ -101,7 +101,7 @@ fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Tran
 
 // --- HTTP JSON ---------------------------------------------------------------
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct HttpJsonTransport {
     pub base_url: NodeStr,
     pub path_template: URLPathTemplate,
@@ -157,7 +157,7 @@ impl HttpJsonTransport {
 }
 
 /// The HTTP arguments needed for a connect request
-#[derive(Debug, strum_macros::Display)]
+#[derive(Debug, Clone, strum_macros::Display)]
 pub enum HTTPMethod {
     Get,
     Post,

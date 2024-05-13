@@ -717,7 +717,7 @@ mod tests {
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),
-                    connector_transports: Default::default(),
+                    connectors: Default::default(),
                 };
 
                 Ok(QueryPlannerResponse::builder()
