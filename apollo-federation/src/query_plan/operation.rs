@@ -1830,6 +1830,8 @@ pub(crate) use normalized_inline_fragment_selection::InlineFragment;
 pub(crate) use normalized_inline_fragment_selection::InlineFragmentData;
 pub(crate) use normalized_inline_fragment_selection::InlineFragmentSelection;
 
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
+
 // TODO(@goto-bus-stop): merge this with the other Operation impl block.
 impl Operation {
     pub(crate) fn optimize(
@@ -4804,6 +4806,15 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
         let mut flattened = vec![];
         for normalized_selection in val.selections.values() {
             let selection: executable::Selection = normalized_selection.try_into()?;
+            if let executable::Selection::Field(field) = &selection {
+                if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME && field.alias.is_none() {
+                    // Move unaliased __typename to the start of the selection set.
+                    // This looks nicer, and matches existing tests.
+                    // PORT_NOTE: JS does this in `selectionsInPrintOrder`
+                    flattened.insert(0, selection);
+                    continue;
+                }
+            }
             flattened.push(selection);
         }
         Ok(Self {
