@@ -284,8 +284,9 @@ impl Query {
                 return Err(SpecError::ParseError(errors.into()));
             }
         };
-        let schema = schema.api_schema();
-        let executable_document = match ast.to_executable_validate(schema) {
+
+        let api_schema = schema.api_schema();
+        let executable_document = match ast.to_executable_validate(api_schema) {
             Ok(doc) => doc,
             Err(errors) => {
                 return Err(SpecError::ValidationError(errors.into()));
@@ -296,8 +297,14 @@ impl Query {
         let recursion_limit = parser.recursion_reached();
         tracing::trace!(?recursion_limit, "recursion limit data");
 
-        let hash = QueryHashVisitor::hash_query(schema, &executable_document, operation_name)
-            .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+        let hash = QueryHashVisitor::hash_query(
+            schema.supergraph_schema(),
+            &schema.raw_sdl,
+            &executable_document,
+            operation_name,
+        )
+        .map_err(|e| SpecError::QueryHashing(e.to_string()))?;
+
         Ok(Arc::new(ParsedDocumentInner {
             ast,
             executable: Arc::new(executable_document),
@@ -347,7 +354,8 @@ impl Query {
             .map(|operation| Operation::from_hir(operation, schema, &mut defer_stats, &fragments))
             .collect::<Result<Vec<_>, SpecError>>()?;
 
-        let mut visitor = QueryHashVisitor::new(schema.supergraph_schema(), document);
+        let mut visitor =
+            QueryHashVisitor::new(schema.supergraph_schema(), &schema.raw_sdl, document);
         traverse::document(&mut visitor, document, operation_name).map_err(|e| {
             SpecError::QueryHashing(format!("could not calculate the query hash: {e}"))
         })?;
