@@ -7,7 +7,9 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 
-use crate::sources::SourceFetchNode;
+use crate::sources::source;
+
+mod query_planner;
 
 pub type QueryPlanCost = i64;
 
@@ -55,7 +57,7 @@ pub enum PlanNode {
 pub struct FetchNode {
     pub operation_variables: IndexSet<Name>,
     pub input_conditions: SelectionSet,
-    pub source_data: SourceFetchNode,
+    pub source_data: source::query_plan::FetchNode,
 }
 
 #[derive(Debug)]
