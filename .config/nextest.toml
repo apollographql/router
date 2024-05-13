@@ -3,6 +3,9 @@
 # of the run (for easy scrollability).
 failure-output = "immediate-final"
 
+# Repeat non-pass status at the end so they’re easier to find.
+final-status-level = "skip"
+
 # Do not cancel the test run on the first failure.
 fail-fast = false
 
