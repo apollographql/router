@@ -3435,9 +3435,7 @@ impl ClosedBranch {
         }
 
         // Keep track of which options should be kept.
-        let mut keep_options = std::iter::repeat_with(|| true)
-            .take(self.0.len())
-            .collect::<Vec<_>>();
+        let mut keep_options = vec![true; self.0.len()];
         for option_index in 0..(self.0.len()) {
             if !keep_options[option_index] {
                 continue;
