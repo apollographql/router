@@ -753,7 +753,7 @@ type User
                 email
               }
             }
-          }
+          },
         }
         "###);
     }
@@ -784,81 +784,89 @@ type User
               {
                 bestRatedProducts {
                   ... on Book {
-                    id
                     __typename
+                    id
                   }
                   ... on Movie {
-                    id
                     __typename
+                    id
                   }
                 }
               }
-            }
+            },
             Parallel {
               Sequence {
                 Flatten(path: "bestRatedProducts.*") {
                   Fetch(service: "products") {
                     {
                       ... on Movie {
+                        __typename
                         id
                       }
-                    } => {
+                    } =>
+                    {
                       ... on Movie {
                         vendor {
-                          id
                           __typename
+                          id
                         }
                       }
                     }
-                  }
-                }
+                  },
+                },
                 Flatten(path: "bestRatedProducts.*.vendor") {
                   Fetch(service: "accounts") {
                     {
                       ... on User {
+                        __typename
                         id
                       }
-                    } => {
+                    } =>
+                    {
                       ... on User {
                         name
                       }
                     }
-                  }
-                }
-              }
+                  },
+                },
+              },
               Sequence {
                 Flatten(path: "bestRatedProducts.*") {
                   Fetch(service: "products") {
                     {
                       ... on Book {
+                        __typename
                         id
                       }
-                    } => {
+                    } =>
+                    {
                       ... on Book {
                         vendor {
-                          id
                           __typename
+                          id
                         }
                       }
                     }
-                  }
-                }
+                  },
+                },
                 Flatten(path: "bestRatedProducts.*.vendor") {
                   Fetch(service: "accounts") {
                     {
                       ... on User {
+                        __typename
                         id
                       }
-                    } => {
+                    } =>
+                    {
                       ... on User {
                         name
                       }
                     }
-                  }
-                }
-              }
-            }
-          }
+                  },
+                },
+              },
+            },
+          },
         }
         "###);
     }
@@ -967,7 +975,7 @@ type User
                 }
               }
             }
-          }
+          },
         }
         "###);
     }

@@ -24,7 +24,7 @@ use crate::query_plan::operation::SelectionSet;
 // Typescript doesn't have a native way of associating equality/hash functions with types, so they
 // were passed around manually. This isn't the case with Rust, where we instead implement trigger
 // equality via `PartialEq` and `Hash`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct PathTree<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -361,6 +361,27 @@ fn merge_conditions(
     }
 }
 
+impl<TTrigger: std::fmt::Debug, TEdge: std::fmt::Debug> std::fmt::Debug
+    for PathTree<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            graph: _, // skip
+            node,
+            local_selection_sets,
+            childs,
+        } = self;
+        f.debug_struct("PathTree")
+            .field("node", node)
+            .field("local_selection_sets", local_selection_sets)
+            .field("childs", childs)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -418,6 +439,7 @@ mod tests {
             // find the edge that matches `field_name`
             let (edge_ref, field_def) = query_graph
                 .out_edges(curr_node_idx)
+                .into_iter()
                 .find_map(|e_ref| {
                     let edge = e_ref.weight();
                     match &edge.transition {
