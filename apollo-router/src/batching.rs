@@ -425,7 +425,7 @@ pub(crate) async fn assemble_batch(
 ) -> Result<
     (
         String,
-        Context,
+        Vec<Context>,
         http::Request<Body>,
         Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     ),
@@ -441,12 +441,12 @@ pub(crate) async fn assemble_batch(
     // Construct the actual byte body of the batched request
     let bytes = hyper::body::to_bytes(serde_json::to_string(&gql_requests)?).await?;
 
+    // Retain the various contexts for later use
+    let contexts = requests
+        .iter()
+        .map(|x| x.context.clone())
+        .collect::<Vec<Context>>();
     // Grab the common info from the first request
-    let context = requests
-        .first()
-        .ok_or(SubgraphBatchingError::RequestsIsEmpty)?
-        .context
-        .clone();
     let first_request = requests
         .into_iter()
         .next()
@@ -461,7 +461,7 @@ pub(crate) async fn assemble_batch(
 
     // Generate the final request and pass it up
     let request = http::Request::from_parts(parts, Body::from(bytes));
-    Ok((operation_name, context, request, txs))
+    Ok((operation_name, contexts, request, txs))
 }
 
 #[cfg(test)]
