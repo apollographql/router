@@ -57,17 +57,17 @@ impl SubscriptionNode {
 
         state.write("Primary: {")?;
         primary.write_indented(state)?;
-        state.write("}")?;
+        state.write("},")?;
 
         if let Some(rest) = rest {
             state.new_line()?;
             state.write("Rest: {")?;
             rest.write_indented(state)?;
-            state.write("}")?;
+            state.write("},")?;
         }
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -94,13 +94,14 @@ impl FetchNode {
         if let Some(v) = requires.as_ref() {
             if !v.is_empty() {
                 write_selections(state, v)?;
-                state.write(" => ")?;
+                state.write(" =>")?;
+                state.new_line()?;
             }
         }
         write_operation(state, operation_document)?;
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -111,7 +112,7 @@ impl SequenceNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -122,7 +123,7 @@ impl ParallelNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -143,7 +144,7 @@ impl FlattenNode {
         node.write_indented(state)?;
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -163,16 +164,16 @@ impl ConditionNode {
                 state.indent()?;
                 if_clause.write_indented(state)?;
                 state.dedent()?;
-                state.write("}")?;
+                state.write("},")?;
 
                 state.write("Else {")?;
                 state.indent()?;
                 else_clause.write_indented(state)?;
                 state.dedent()?;
-                state.write("}")?;
+                state.write("},")?;
 
                 state.dedent()?;
-                state.write("}")
+                state.write("},")
             }
 
             (Some(if_clause), None) => {
@@ -182,7 +183,7 @@ impl ConditionNode {
                 if_clause.write_indented(state)?;
 
                 state.dedent()?;
-                state.write("}")
+                state.write("},")
             }
 
             (None, Some(else_clause)) => {
@@ -192,7 +193,7 @@ impl ConditionNode {
                 else_clause.write_indented(state)?;
 
                 state.dedent()?;
-                state.write("}")
+                state.write("},")
             }
 
             // Shouldn’t happen?
@@ -217,7 +218,7 @@ impl DeferNode {
         }
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -248,7 +249,7 @@ impl PrimaryDeferBlock {
 
             state.dedent()?;
         }
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -296,7 +297,7 @@ impl DeferredDeferBlock {
 
             state.dedent()?;
         }
-        state.write("}")
+        state.write("},")
     }
 }
 
