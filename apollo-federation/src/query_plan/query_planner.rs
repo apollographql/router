@@ -8,17 +8,18 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
-use petgraph::adj::NodeIndex;
+use petgraph::csr::NodeIndex;
+use petgraph::stable_graph::IndexType;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
-use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
-use crate::query_graph::QueryGraph;
 use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
@@ -37,6 +38,7 @@ use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
 use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
@@ -47,6 +49,8 @@ use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
 use super::fetch_dependency_graph::compute_nodes_for_tree;
+use super::operation::Selection;
+use super::operation::SelectionKey;
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -509,32 +513,34 @@ fn compute_root_serial_dependency_graph(
         config,
         ..
     } = parameters;
-    let root_type = if has_defers {
+    let root_type: Option<CompositeTypeDefinitionPosition> = if has_defers {
         supergraph_schema
             .schema()
             .root_operation(operation.root_kind.into())
+            .and_then(|name| supergraph_schema.get_type(name.clone()).ok())
+            .and_then(|ty| ty.try_into().ok())
     } else {
         None
     };
     // We have to serially compute a plan for each top-level selection.
-    let mut split_roots = split_top_level_fields(&operation.selection_set);
+    let mut split_roots = split_top_level_fields(operation.selection_set.clone());
     let mut digest = Vec::new();
     let mut starting_fetch_id = 0;
-    let selection = split_roots
+    let selection_set = split_roots
         .next()
         .ok_or_else(|| FederationError::internal("Empty top level fields"))?;
     let BestQueryPlanInfo {
         mut fetch_dependency_graph,
         path_tree: mut prev_path,
         ..
-    } = compute_root_parallel_best_plan(parameters, selection, has_defers)?;
+    } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
     let mut prev_subgraph = only_root_subgraph(&fetch_dependency_graph)?;
-    for selection in split_roots {
+    for selection_set in split_roots {
         let BestQueryPlanInfo {
             fetch_dependency_graph: new_dep_graph,
             path_tree: new_path,
             ..
-        } = compute_root_parallel_best_plan(parameters, selection, has_defers)?;
+        } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
         let new_subgraph = only_root_subgraph(&new_dep_graph)?;
         if new_subgraph == prev_subgraph {
             // The new operation (think 'mutation' operation) is on the same subgraph than the previous one, so we can concat them in a single fetch
@@ -546,20 +552,26 @@ fn compute_root_serial_dependency_graph(
             // }
             // then we should _not_ merge the 2 `mut1` fields (contrarily to what happens on queried fields).
 
-            Arc::make_mut(&mut prev_path).concat(&new_path);
-            todo!(); // prevPaths = prevPaths.concat(newPaths);
+            prev_path = OpPathTree::merge(&prev_path, &new_path);
             fetch_dependency_graph = FetchDependencyGraph::new(
                 supergraph_schema.clone(),
                 federated_query_graph.clone(),
-                todo!(),
+                root_type.clone(),
                 starting_fetch_id,
             );
-            compute_root_fetch_groups(operation.root_kind, &mut fetch_dependency_graph, &prev_path)?;
+            compute_root_fetch_groups(
+                operation.root_kind,
+                &mut fetch_dependency_graph,
+                &prev_path,
+            )?;
         } else {
             // TODO(@TylerBloom): Verify that this is correct? It could be the case that we just
             // need to grab `.starting_id_generation`.
             starting_fetch_id = fetch_dependency_graph.next_fetch_id();
-            digest.push(std::mem::replace(&mut fetch_dependency_graph, new_dep_graph));
+            digest.push(std::mem::replace(
+                &mut fetch_dependency_graph,
+                new_dep_graph,
+            ));
             prev_path = new_path;
             prev_subgraph = new_subgraph;
         }
@@ -569,34 +581,48 @@ fn compute_root_serial_dependency_graph(
 }
 
 #[allow(unreachable_code)]
-fn split_top_level_fields(_selection: &SelectionSet) -> impl Iterator<Item = SelectionSet> {
-    /*
-      return selectionSet.selections().flatMap(selection => {
-        if (selection.kind === 'FieldSelection') {
-          return [selectionSetOf(selectionSet.parentType, selection)];
+fn split_top_level_fields(
+    selection_set: SelectionSet,
+) -> Box<dyn 'static + Iterator<Item = SelectionSet>> {
+    let parent_type = selection_set.type_position.clone();
+    let selections: IndexMap<SelectionKey, Selection> = (**selection_set.selections).clone();
+    Box::new(selections.into_values().flat_map(move |sel| {
+        let digest: Box<dyn 'static + Iterator<Item = SelectionSet>> = if sel.is_field() {
+            Box::new(std::iter::once(SelectionSet::from_selection(
+                parent_type.clone(),
+                sel.clone(),
+            )))
         } else {
-          return splitTopLevelFields(selection.selectionSet).map(s => selectionSetOfElement(selection.element, s));
-        }
-      });
-    */
-    todo!();
-    std::iter::once(_selection.clone())
+            Box::new(
+                sel.selection_set()
+                    .ok()
+                    .flatten()
+                    .cloned()
+                    .into_iter()
+                    .flat_map(split_top_level_fields)
+                    .map(|_set| todo!("Port mapping that uses selectionSetOfElement")),
+                    // return splitTopLevelFields(selection.selectionSet).map(s => selectionSetOfElement(selection.element, s));
+            )
+        };
+        digest
+    }))
 }
 
 fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, FederationError> {
     let mut iter = graph.root_node_by_subgraph_iter();
-    let (Some((_, _index)), None) = (iter.next(), iter.next()) else {
-        return Err(FederationError::internal(format!("{graph} should have only one root.")));
+    let (Some((_, index)), None) = (iter.next(), iter.next()) else {
+        return Err(FederationError::internal(format!(
+            "{graph} should have only one root."
+        )));
     };
-    todo!() // Ok(*index)
+    Ok(index.index() as u32)
 }
 
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
     path: &OpPathTree,
-    ) -> Result<(), FederationError>
-{
+) -> Result<(), FederationError> {
     // The root of the pathTree is one of the "fake" root of the subgraphs graph,
     // which belongs to no subgraph but points to each ones.
     // So we "unpack" the first level of the tree to find out our top level groups

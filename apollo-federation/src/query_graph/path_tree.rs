@@ -166,39 +166,6 @@ where
         self.graph.node_weight(self.node).unwrap()
     }
 
-    pub(crate) fn concat(&mut self, other: &Self) -> Result<(), FederationError> {
-        if self.graph != other.graph {
-            // assert(other.graph === this.graph, 'Cannot concat path tree build on another graph');
-            todo!("Return error")
-        }
-        // TODO(TylerBloom): The JS code used the indices of the vertices for this comparision.
-        // Verify that comparing the source NodeStrs is an equivalent (or good enough) comparision.
-        if self.vertex().source != other.vertex().source {
-            // assert(other.vertex.index === this.vertex.index, () => `Cannot concat path tree rooted at vertex ${other.vertex} into tree rooted at other vertex ${this.vertex}`);
-            todo!("Return error")
-        }
-        self.merge_loc
-        todo!()
-        /*
-  concat(other: PathTree<TTrigger, RV, TNullEdge>): PathTree<TTrigger, RV, TNullEdge> {
-    if (!other.childs.length) {
-      return this;
-    }
-    if (!this.childs.length) {
-      return other;
-    }
-
-    const localSelections = this.mergeLocalSelectionsWith(other);
-    // MergeLocalSelectionsWith:
-    // return this.localSelections
-    //   ? (other.localSelections ? this.localSelections.concat(other.localSelections) : this.localSelections)
-    //   : other.localSelections;
-    const newChilds = this.childs.concat(other.childs);
-    return new PathTree(this.graph, this.vertex, localSelections, this.triggerEquality, newChilds);
-  }
-        */
-    }
-
     fn from_paths<'inputs>(
         graph: Arc<QueryGraph>,
         node: NodeIndex,

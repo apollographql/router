@@ -244,7 +244,7 @@ impl Display for QueryGraphEdgeTransition {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct QueryGraph {
     /// The "current" source of the query graph. For query graphs representing a single source
     /// graph, this will only ever be one value, but it will change for "federated" query graphs
