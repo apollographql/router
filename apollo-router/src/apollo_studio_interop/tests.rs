@@ -96,44 +96,7 @@ async fn test_complex_query() {
     assert_generated_report!(generated);
 
     // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
-    let sanitised_query_str = r#"fragment Fragment2 on EverythingResponse {
-            basicTypes {
-              nullableFloat
-            }
-          }
-
-          query        TransformedQuery    {
-
-
-            scalarInputQuery(idInput: "a1", listInput: [], boolInput: true, intInput: 1, stringInput: "x", floatInput: 1.2)      @skip(if: false)   @include(if: true) {
-              ...Fragment2,
-
-
-              objectTypeWithInputField(boolInput: true, secondInput: false) {
-                stringField
-                __typename
-                intField
-              }
-
-              enumResponse
-              interfaceResponse {
-                sharedField
-                ... on InterfaceImplementation2 {
-                  implementation2Field
-                }
-                ... on InterfaceImplementation1 {
-                  implementation1Field
-                }
-              }
-              ...Fragment1,
-            }
-          }
-
-          fragment Fragment1 on EverythingResponse {
-            basicTypes {
-              nonNullFloat
-            }
-          }"#;
+    let sanitised_query_str = include_str!("testdata/complex_query_sanitized.graphql");
 
     assert_bridge_results!(schema_str, sanitised_query_str);
 }
@@ -188,11 +151,7 @@ async fn test_anonymous_query() {
 async fn test_anonymous_mutation() {
     let schema_str = include_str!("testdata/schema_interop.graphql");
 
-    let query_str = r#"mutation {
-            noInputMutation {
-              id
-            }
-          }"#;
+    let query_str = include_str!("testdata/anonymous_mutation.graphql");
 
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
