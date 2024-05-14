@@ -90,7 +90,7 @@ impl TestExecution {
     async fn execute_action(
         &mut self,
         action: &Action,
-        path: &PathBuf,
+        path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
         match action {
@@ -132,7 +132,7 @@ impl TestExecution {
         schema_path: &str,
         configuration_path: &str,
         subgraphs: &HashMap<String, Subgraph>,
-        path: &PathBuf,
+        path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
         let listener = TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], 0))).unwrap();
@@ -150,7 +150,7 @@ impl TestExecution {
 
         for (name, subgraph) in subgraphs {
             for SubgraphRequest { request, response } in &subgraph.requests {
-                Mock::given(body_partial_json(&request))
+                Mock::given(body_partial_json(request))
                     .respond_with(ResponseTemplate::new(200).set_body_json(response))
                     .mount(&subgraphs_server)
                     .await;
@@ -185,7 +185,7 @@ impl TestExecution {
     async fn reload_configuration(
         &mut self,
         configuration_path: &str,
-        path: &PathBuf,
+        path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
         let router = match self.router.as_mut() {
@@ -215,7 +215,7 @@ impl TestExecution {
 
         for (name, subgraph) in &self.subgraphs {
             for SubgraphRequest { request, response } in &subgraph.requests {
-                Mock::given(body_partial_json(&request))
+                Mock::given(body_partial_json(request))
                     .respond_with(ResponseTemplate::new(200).set_body_json(response))
                     .mount(&subgraphs_server)
                     .await;
@@ -238,7 +238,7 @@ impl TestExecution {
     async fn reload_schema(
         &mut self,
         schema_path: &str,
-        path: &PathBuf,
+        path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
         let router = match self.router.as_mut() {
@@ -276,7 +276,7 @@ impl TestExecution {
         mut request: Value,
         query_path: Option<&str>,
         expected_response: &Value,
-        path: &PathBuf,
+        path: &Path,
         out: &mut String,
     ) -> Result<(), Failed> {
         let router = match self.router.as_mut() {

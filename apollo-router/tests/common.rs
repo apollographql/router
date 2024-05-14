@@ -482,7 +482,7 @@ impl IntegrationTest {
 
     #[allow(dead_code)]
     pub async fn update_schema(&self, supergraph_path: &PathBuf) {
-        fs::copy(&supergraph_path, &self.test_schema_location).expect("could not write schema");
+        fs::copy(supergraph_path, &self.test_schema_location).expect("could not write schema");
     }
 
     #[allow(dead_code)]
