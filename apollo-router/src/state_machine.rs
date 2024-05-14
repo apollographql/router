@@ -229,7 +229,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                     .await;
 
                     u64_counter!(
-                        "apollo_router_reload",
+                        "apollo.router.reload",
                         "Amount of times the router reloaded",
                         1,
                         new_schema = schema_reload,
