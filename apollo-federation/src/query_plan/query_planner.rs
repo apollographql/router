@@ -503,7 +503,6 @@ fn compute_root_serial_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<Vec<FetchDependencyGraph>, FederationError> {
-    // FINDME
     let QueryPlanningParameters {
         supergraph_schema,
         federated_query_graph,
@@ -597,7 +596,6 @@ fn split_top_level_fields(
                     .into_iter()
                     .flat_map(split_top_level_fields)
                     .map(|_set| todo!("Port mapping that uses selectionSetOfElement")),
-                // return splitTopLevelFields(selection.selectionSet).map(s => selectionSetOfElement(selection.element, s));
             )
         };
         digest
@@ -653,26 +651,6 @@ pub(crate) fn compute_root_fetch_groups(
     }
     Ok(())
 }
-
-/*
-function computeRootFetchGroups(dependencyGraph: FetchDependencyGraph, pathTree: OpRootPathTree, rootKind: SchemaRootKind, typeConditionedFetching: boolean): FetchDependencyGraph {
-  // The root of the pathTree is one of the "fake" root of the subgraphs graph, which belongs to no subgraph but points to each ones.
-  // So we "unpack" the first level of the tree to find out our top level groups (and initialize our stack).
-  // Note that we can safely ignore the triggers of that first level as it will all be free transition, and we know we cannot have conditions.
-  for (const [edge, _trigger, _conditions, child] of pathTree.childElements()) {
-    assert(edge !== null, `The root edge should not be null`);
-    const subgraphName = edge.tail.source;
-    // The edge tail type is one of the subgraph root type, so it has to be an ObjectType.
-    const rootType = edge.tail.type as ObjectType;
-    const group = dependencyGraph.getOrCreateRootFetchGroup({ subgraphName, rootKind, parentType: rootType });
-    // If a type is in a subgraph, it has to be in the supergraph.
-    // A root type has to be a Composite type.
-    const rootTypeInSupergraph = dependencyGraph.supergraphSchemaType(rootType.name) as CompositeType;
-    computeGroupsForTree(dependencyGraph, child, group, GroupPath.empty(typeConditionedFetching, rootTypeInSupergraph), emptyDeferContext);
-  }
-  return dependencyGraph;
-}
-*/
 
 fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
