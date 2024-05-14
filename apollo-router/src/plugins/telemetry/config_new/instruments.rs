@@ -30,6 +30,9 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::graphql::GraphQLAttributes;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
+use crate::plugins::telemetry::config_new::graphql::GraphQLSelector;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
@@ -59,6 +62,9 @@ pub(crate) struct InstrumentsConfig {
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
     pub(crate) subgraph:
         Extendable<SubgraphInstrumentsConfig, Instrument<SubgraphAttributes, SubgraphSelector>>,
+    /// GraphQL response field instruments.
+    pub(crate) graphql:
+        Extendable<GraphQLInstrumentsConfig, Instrument<GraphQLAttributes, GraphQLSelector>>,
 }
 
 impl InstrumentsConfig {
@@ -70,6 +76,8 @@ impl InstrumentsConfig {
         self.supergraph
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.subgraph
+            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
+        self.graphql
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 

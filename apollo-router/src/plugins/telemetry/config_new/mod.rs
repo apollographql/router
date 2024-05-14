@@ -21,6 +21,7 @@ mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
 pub(crate) mod extendable;
+mod graphql;
 pub(crate) mod instruments;
 pub(crate) mod logging;
 pub(crate) mod selectors;
