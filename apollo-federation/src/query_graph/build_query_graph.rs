@@ -2009,6 +2009,7 @@ struct FederatedQueryGraphBuilderSubgraphData {
     interface_object_directive_definition_name: Name,
 }
 
+#[derive(Debug)]
 struct QueryGraphEdgeData {
     head: NodeIndex,
     tail: NodeIndex,
