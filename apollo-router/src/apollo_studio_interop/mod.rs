@@ -24,6 +24,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
+use serde::{Deserialize, Serialize};
 
 /// This is a parallel enum to Configuration::ApolloSignatureNormalizationAlgorithm.
 // We need to use this because of the import method that the fuzzer uses. The fuzzer can't have apollo-router as
@@ -37,6 +38,7 @@ pub(crate) enum SignatureNormalizationAlgorithm {
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
+#[derive(Deserialize, Serialize, Debug, PartialEq, Eq, Clone)]
 pub(crate) struct ComparableUsageReporting {
     /// The UsageReporting fields
     pub(crate) result: UsageReporting,

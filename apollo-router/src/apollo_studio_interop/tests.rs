@@ -6,6 +6,20 @@ use test_log::test;
 
 use super::*;
 
+macro_rules! assert_expected_results {
+    ($actual:expr, $expected_sig:expr, $expected_refs:expr) => {
+        let expected_result = UsageReporting {
+            stats_report_key: $expected_sig.to_string(),
+            referenced_fields_by_type: $expected_refs.clone(),
+        };
+        assert!(matches!(
+            $actual.compare(&expected_result),
+            UsageReportingComparisonResult::Equal
+        ));
+        insta::assert_yaml_snapshot!($actual);
+    };
+}
+
 // Generate the signature and referenced fields using router-bridge to confirm that the expected value we used is correct.
 // We can remove this when we no longer use the bridge but should keep the rust implementation verifications.
 async fn assert_bridge_results(
@@ -34,22 +48,6 @@ async fn assert_bridge_results(
         UsageReportingComparisonResult::Equal
     ));
 }
-
-fn assert_expected_results(
-    actual: &ComparableUsageReporting,
-    expected_sig: &str,
-    expected_refs: &HashMap<String, ReferencedFieldsForType>,
-) {
-    let expected_result = UsageReporting {
-        stats_report_key: expected_sig.to_string(),
-        referenced_fields_by_type: expected_refs.clone(),
-    };
-    assert!(matches!(
-        actual.compare(&expected_result),
-        UsageReportingComparisonResult::Equal
-    ));
-}
-
 fn assert_expected_signature(actual: &ComparableUsageReporting, expected_sig: &str) {
     assert_eq!(actual.result.stats_report_key, expected_sig);
 }
@@ -152,7 +150,7 @@ async fn test_complex_query() {
             },
         ),
     ]);
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(generated, expected_sig, expected_refs);
 
     // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
     let sanitised_query_str = r#"fragment Fragment2 on EverythingResponse {
@@ -287,7 +285,7 @@ async fn test_complex_references() {
             },
         ),
     ]);
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
 
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
@@ -321,7 +319,7 @@ async fn test_basic_whitespace() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -354,7 +352,7 @@ async fn test_anonymous_query() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -391,7 +389,7 @@ async fn test_anonymous_mutation() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -424,7 +422,7 @@ async fn test_anonymous_subscription() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -463,7 +461,7 @@ async fn test_ordered_fields_and_variables() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -543,7 +541,7 @@ async fn test_fragments() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
 
     // the router-bridge planner will throw errors on unused fragments/queries so we remove them here
     let sanitised_query_str = r#"query FragmentQuery {
@@ -675,7 +673,7 @@ async fn test_directives() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -708,7 +706,7 @@ async fn test_aliases() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -740,7 +738,7 @@ async fn test_inline_values() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -779,7 +777,7 @@ async fn test_root_type_fragment() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -811,7 +809,7 @@ async fn test_directive_arg_spacing() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -844,7 +842,7 @@ async fn test_operation_with_single_variable() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -877,7 +875,7 @@ async fn test_operation_with_multiple_variables() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -920,7 +918,7 @@ async fn test_field_arg_comma_or_space() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -955,7 +953,7 @@ async fn test_operation_arg_always_commas() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -988,7 +986,7 @@ async fn test_comma_separator_always() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -1042,7 +1040,7 @@ async fn test_nested_fragments() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -1075,7 +1073,7 @@ async fn test_mutation_space() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -1108,7 +1106,7 @@ async fn test_mutation_comma() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -1141,7 +1139,7 @@ async fn test_comma_lower_bound() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -1174,7 +1172,7 @@ async fn test_comma_upper_bound() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
@@ -1207,7 +1205,7 @@ async fn test_underscore() {
         ),
     ]);
 
-    assert_expected_results(&generated, expected_sig, &expected_refs);
+    assert_expected_results!(&generated, expected_sig, &expected_refs);
     assert_bridge_results(schema_str, query_str, expected_sig, &expected_refs).await;
 }
 
