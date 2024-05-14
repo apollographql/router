@@ -8,14 +8,17 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use petgraph::adj::NodeIndex;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
+use crate::query_graph::QueryGraphNodeType;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::QueryGraph;
+use crate::query_graph::path_tree::OpPathTree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
@@ -36,11 +39,14 @@ use crate::query_plan::TopLevelPlanNode;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
+
+use super::fetch_dependency_graph::compute_nodes_for_tree;
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -489,12 +495,162 @@ impl QueryPlanner {
     }
 }
 
+#[allow(dead_code, unused, unreachable_code, unconditional_panic)]
 fn compute_root_serial_dependency_graph(
-    _parameters: &QueryPlanningParameters,
-    _has_defers: bool,
+    parameters: &QueryPlanningParameters,
+    has_defers: bool,
 ) -> Result<Vec<FetchDependencyGraph>, FederationError> {
-    todo!("FED-127")
+    // FINDME
+    let QueryPlanningParameters {
+        supergraph_schema,
+        federated_query_graph,
+        operation,
+        head,
+        config,
+        ..
+    } = parameters;
+    let root_type = if has_defers {
+        supergraph_schema
+            .schema()
+            .root_operation(operation.root_kind.into())
+    } else {
+        None
+    };
+    // We have to serially compute a plan for each top-level selection.
+    let mut split_roots = split_top_level_fields(&operation.selection_set);
+    let mut digest = Vec::new();
+    let mut starting_fetch_id = 0;
+    let selection = split_roots
+        .next()
+        .ok_or_else(|| FederationError::internal("Empty top level fields"))?;
+    let BestQueryPlanInfo {
+        mut fetch_dependency_graph,
+        path_tree: mut prev_path,
+        ..
+    } = compute_root_parallel_best_plan(parameters, selection, has_defers)?;
+    let mut prev_subgraph = only_root_subgraph(&fetch_dependency_graph)?;
+    for selection in split_roots {
+        let BestQueryPlanInfo {
+            fetch_dependency_graph: new_dep_graph,
+            path_tree: new_path,
+            ..
+        } = compute_root_parallel_best_plan(parameters, selection, has_defers)?;
+        let new_subgraph = only_root_subgraph(&new_dep_graph)?;
+        if new_subgraph == prev_subgraph {
+            // The new operation (think 'mutation' operation) is on the same subgraph than the previous one, so we can concat them in a single fetch
+            // and rely on the subgraph to enforce seriability. Do note that we need to `concat()` and not `merge()` because if we have
+            // mutation Mut {
+            //    mut1 {...}
+            //    mut2 {...}
+            //    mut1 {...}
+            // }
+            // then we should _not_ merge the 2 `mut1` fields (contrarily to what happens on queried fields).
+
+            Arc::make_mut(&mut prev_path).concat(&new_path);
+            todo!(); // prevPaths = prevPaths.concat(newPaths);
+            fetch_dependency_graph = FetchDependencyGraph::new(
+                supergraph_schema.clone(),
+                federated_query_graph.clone(),
+                todo!(),
+                starting_fetch_id,
+            );
+            compute_root_fetch_groups(operation.root_kind, &mut fetch_dependency_graph, &prev_path)?;
+        } else {
+            // TODO(@TylerBloom): Verify that this is correct? It could be the case that we just
+            // need to grab `.starting_id_generation`.
+            starting_fetch_id = fetch_dependency_graph.next_fetch_id();
+            digest.push(std::mem::replace(&mut fetch_dependency_graph, new_dep_graph));
+            prev_path = new_path;
+            prev_subgraph = new_subgraph;
+        }
+    }
+    digest.push(fetch_dependency_graph);
+    Ok(digest)
 }
+
+#[allow(unreachable_code)]
+fn split_top_level_fields(_selection: &SelectionSet) -> impl Iterator<Item = SelectionSet> {
+    /*
+      return selectionSet.selections().flatMap(selection => {
+        if (selection.kind === 'FieldSelection') {
+          return [selectionSetOf(selectionSet.parentType, selection)];
+        } else {
+          return splitTopLevelFields(selection.selectionSet).map(s => selectionSetOfElement(selection.element, s));
+        }
+      });
+    */
+    todo!();
+    std::iter::once(_selection.clone())
+}
+
+fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, FederationError> {
+    let mut iter = graph.root_node_by_subgraph_iter();
+    let (Some((_, _index)), None) = (iter.next(), iter.next()) else {
+        return Err(FederationError::internal(format!("{graph} should have only one root.")));
+    };
+    todo!() // Ok(*index)
+}
+
+pub(crate) fn compute_root_fetch_groups(
+    root_kind: SchemaRootDefinitionKind,
+    dependency_graph: &mut FetchDependencyGraph,
+    path: &OpPathTree,
+    ) -> Result<(), FederationError>
+{
+    // The root of the pathTree is one of the "fake" root of the subgraphs graph,
+    // which belongs to no subgraph but points to each ones.
+    // So we "unpack" the first level of the tree to find out our top level groups
+    // (and initialize our stack).
+    // Note that we can safely ignore the triggers of that first level
+    // as it will all be free transition, and we know we cannot have conditions.
+    for child in &path.childs {
+        let edge = child.edge.expect("The root edge should not be None");
+        let (_source_node, target_node) = path.graph.edge_endpoints(edge)?;
+        let target_node = path.graph.node_weight(target_node)?;
+        let subgraph_name = &target_node.source;
+        let root_type = match &target_node.type_ {
+            QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(object)) => {
+                object.clone().into()
+            }
+            ty => {
+                return Err(FederationError::internal(format!(
+                    "expected an object type for the root of a subgraph, found {ty}"
+                )))
+            }
+        };
+        let fetch_dependency_node =
+            dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        compute_nodes_for_tree(
+            dependency_graph,
+            &child.tree,
+            fetch_dependency_node,
+            Default::default(),
+            Default::default(),
+            &Default::default(),
+        )?;
+    }
+    Ok(())
+}
+
+/*
+function computeRootFetchGroups(dependencyGraph: FetchDependencyGraph, pathTree: OpRootPathTree, rootKind: SchemaRootKind, typeConditionedFetching: boolean): FetchDependencyGraph {
+  // The root of the pathTree is one of the "fake" root of the subgraphs graph, which belongs to no subgraph but points to each ones.
+  // So we "unpack" the first level of the tree to find out our top level groups (and initialize our stack).
+  // Note that we can safely ignore the triggers of that first level as it will all be free transition, and we know we cannot have conditions.
+  for (const [edge, _trigger, _conditions, child] of pathTree.childElements()) {
+    assert(edge !== null, `The root edge should not be null`);
+    const subgraphName = edge.tail.source;
+    // The edge tail type is one of the subgraph root type, so it has to be an ObjectType.
+    const rootType = edge.tail.type as ObjectType;
+    const group = dependencyGraph.getOrCreateRootFetchGroup({ subgraphName, rootKind, parentType: rootType });
+    // If a type is in a subgraph, it has to be in the supergraph.
+    // A root type has to be a Composite type.
+    const rootTypeInSupergraph = dependencyGraph.supergraphSchemaType(rootType.name) as CompositeType;
+    computeGroupsForTree(dependencyGraph, child, group, GroupPath.empty(typeConditionedFetching, rootTypeInSupergraph), emptyDeferContext);
+  }
+  return dependencyGraph;
+}
+*/
 
 fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,

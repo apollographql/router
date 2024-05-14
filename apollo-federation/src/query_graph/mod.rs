@@ -104,7 +104,7 @@ impl Display for QueryGraphNodeType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct QueryGraphEdge {
     /// Indicates what kind of edge this is and what the edge does/represents. For instance, if the
     /// edge represents a field, the `transition` will be a `FieldCollection` transition and will
@@ -244,7 +244,7 @@ impl Display for QueryGraphEdgeTransition {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub struct QueryGraph {
     /// The "current" source of the query graph. For query graphs representing a single source
     /// graph, this will only ever be one value, but it will change for "federated" query graphs
