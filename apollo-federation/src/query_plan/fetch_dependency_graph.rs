@@ -2016,7 +2016,7 @@ fn compute_nodes_for_key_resolution<'a>(
     // (and so no one subgraph has a type definition with all the proper fields,
     // only the supergraph does).
     let input_type = dependency_graph.type_for_fetch_inputs(source_type.type_name())?;
-    let mut input_selections = SelectionSet::empty(
+    let mut input_selections = SelectionSet::for_composite_type(
         dependency_graph.supergraph_schema.clone(),
         input_type.clone(),
     );
@@ -2057,14 +2057,11 @@ fn compute_nodes_for_key_resolution<'a>(
     // We also ensure to get the __typename of the current type in the "original" node.
     let node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
-    let typename_field = Arc::new(OpPathElement::Field(Field::new(FieldData {
-        schema: dependency_graph.supergraph_schema.clone(),
-        field_position: source_type.introspection_typename_field(),
-        alias: None,
-        arguments: Default::default(),
-        directives: Default::default(),
-        sibling_typename: None,
-    })));
+    let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
+        &dependency_graph.supergraph_schema,
+        &source_type,
+        None,
+    )));
     let typename_path = stack_item
         .node_path
         .path_in_node
@@ -2131,14 +2128,11 @@ fn compute_nodes_for_root_type_resolution<'a>(
     let node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
     if !stack_item.node_path.path_in_node.is_empty() {
-        let typename_field = Arc::new(OpPathElement::Field(Field::new(FieldData {
-            schema: dependency_graph.supergraph_schema.clone(),
-            field_position: source_type.introspection_typename_field().into(),
-            alias: None,
-            arguments: Default::default(),
-            directives: Default::default(),
-            sibling_typename: None,
-        })));
+        let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
+            &dependency_graph.supergraph_schema,
+            &source_type.into(),
+            None,
+        )));
         let typename_path = stack_item
             .node_path
             .path_in_node
@@ -2239,16 +2233,11 @@ fn compute_nodes_for_op_path_element<'a>(
         } else {
             Some(name.clone())
         };
-        let typename_field = Arc::new(OpPathElement::Field(Field::new(FieldData {
-            schema: dependency_graph.supergraph_schema.clone(),
-            field_position: operation
-                .parent_type_position()
-                .introspection_typename_field(),
+        let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
+            &dependency_graph.supergraph_schema,
+            &operation.parent_type_position(),
             alias,
-            arguments: Default::default(),
-            directives: Default::default(),
-            sibling_typename: None,
-        })));
+        )));
         let typename_path = stack_item
             .node_path
             .path_in_node
