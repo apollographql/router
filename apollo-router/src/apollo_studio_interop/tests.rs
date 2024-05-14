@@ -9,12 +9,13 @@ use super::*;
 macro_rules! assert_generated_report {
     ($actual:expr) => {
         // Field names need sorting
-        for ty in $actual.result.referenced_fields_by_type.values_mut() {
+        let mut result = $actual.result;
+        for ty in result.referenced_fields_by_type.values_mut() {
             ty.field_names.sort();
         }
 
         insta::with_settings!({sort_maps => true, snapshot_suffix => "report"}, {
-            insta::assert_yaml_snapshot!($actual);
+            insta::assert_yaml_snapshot!(result);
         });
     };
 }
@@ -29,21 +30,18 @@ macro_rules! assert_bridge_results {
         )
         .await
         .unwrap();
-        let plan = planner
+        let mut plan = planner
             .plan($query_str.to_string(), None, PlanOptions::default())
             .await
             .unwrap();
-        let mut bridge_result = ComparableUsageReporting {
-            result: plan.usage_reporting,
-        };
 
          // Field names need sorting
-        for ty in bridge_result.result.referenced_fields_by_type.values_mut() {
+        for ty in plan.usage_reporting.referenced_fields_by_type.values_mut() {
             ty.field_names.sort();
         }
 
         insta::with_settings!({sort_maps => true, snapshot_suffix => "bridge"}, {
-            insta::assert_yaml_snapshot!(bridge_result);
+            insta::assert_yaml_snapshot!(plan.usage_reporting);
         });
     };
 }
@@ -91,7 +89,7 @@ async fn test_complex_query() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("TransformedQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("TransformedQuery".into()), &schema);
 
     assert_generated_report!(generated);
 
@@ -110,7 +108,7 @@ async fn test_complex_references() {
     let schema: Valid<Schema> = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("Query".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("Query".into()), &schema);
 
     assert_generated_report!(generated);
 
@@ -126,7 +124,7 @@ async fn test_basic_whitespace() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("MyQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("MyQuery".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -141,7 +139,7 @@ async fn test_anonymous_query() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &None, &schema);
+    let generated = generate_legacy(&doc, &None, &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -156,7 +154,7 @@ async fn test_anonymous_mutation() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &None, &schema);
+    let generated = generate_legacy(&doc, &None, &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -171,7 +169,7 @@ async fn test_anonymous_subscription() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &None, &schema);
+    let generated = generate_legacy(&doc, &None, &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -186,7 +184,7 @@ async fn test_ordered_fields_and_variables() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("VariableScalarInputQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("VariableScalarInputQuery".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -201,7 +199,7 @@ async fn test_fragments() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("FragmentQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("FragmentQuery".into()), &schema);
 
     assert_generated_report!(generated);
 
@@ -277,7 +275,7 @@ async fn test_directives() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("DirectiveQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("DirectiveQuery".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -292,7 +290,7 @@ async fn test_aliases() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("AliasQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("AliasQuery".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -306,7 +304,7 @@ async fn test_inline_values() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("InlineInputTypeQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("InlineInputTypeQuery".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -320,7 +318,7 @@ async fn test_root_type_fragment() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &None, &schema);
+    let generated = generate_legacy(&doc, &None, &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -334,7 +332,7 @@ async fn test_directive_arg_spacing() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &None, &schema);
+    let generated = generate_legacy(&doc, &None, &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -349,7 +347,7 @@ async fn test_operation_with_single_variable() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("QueryWithVar".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("QueryWithVar".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -364,7 +362,7 @@ async fn test_operation_with_multiple_variables() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("QueryWithVars".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("QueryWithVars".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -379,7 +377,7 @@ async fn test_field_arg_comma_or_space() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("QueryArgLength".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("QueryArgLength".into()), &schema);
 
     // enumInputQuery has a variable line length of 81, so it should be separated by spaces (which are converted from newlines
     // in the original implementation).
@@ -397,7 +395,7 @@ async fn test_operation_arg_always_commas() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("QueryArgLength".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("QueryArgLength".into()), &schema);
 
     // operation variables shouldn't ever be converted to spaces, since the line length check is only on field variables
     // in the original implementation
@@ -414,7 +412,7 @@ async fn test_comma_separator_always() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("QueryCommaEdgeCase".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("QueryCommaEdgeCase".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -429,7 +427,7 @@ async fn test_nested_fragments() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("NestedFragmentQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("NestedFragmentQuery".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -444,7 +442,7 @@ async fn test_mutation_space() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("Test_Mutation_Space".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("Test_Mutation_Space".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -459,7 +457,7 @@ async fn test_mutation_comma() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("Test_Mutation_Comma".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("Test_Mutation_Comma".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -474,7 +472,7 @@ async fn test_comma_lower_bound() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("TestCommaLowerBound".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("TestCommaLowerBound".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -489,7 +487,7 @@ async fn test_comma_upper_bound() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("TestCommaUpperBound".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("TestCommaUpperBound".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
@@ -504,7 +502,7 @@ async fn test_underscore() {
     let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
     let doc = ExecutableDocument::parse(&schema, query_str, "query.graphql").unwrap();
 
-    let mut generated = generate_legacy(&doc, &Some("UnderscoreQuery".into()), &schema);
+    let generated = generate_legacy(&doc, &Some("UnderscoreQuery".into()), &schema);
 
     assert_generated_report!(generated);
     assert_bridge_results!(schema_str, query_str);
