@@ -1,9 +1,11 @@
 use opentelemetry::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tower::BoxError;
 
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
@@ -176,6 +178,44 @@ where
         }
     }
 
+    pub(crate) fn evaluate_event_response(
+        &self,
+        response: &T::EventResponse,
+        ctx: &Context,
+    ) -> bool {
+        match self {
+            Condition::Eq(eq) => {
+                let left = eq[0].on_response_event(response, ctx);
+                let right = eq[1].on_response_event(response, ctx);
+                left == right
+            }
+            Condition::Gt(gt) => {
+                let left_att = gt[0]
+                    .on_response_event(response, ctx)
+                    .map(AttributeValue::from);
+                let right_att = gt[1]
+                    .on_response_event(response, ctx)
+                    .map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+            }
+            Condition::Lt(gt) => {
+                let left_att = gt[0]
+                    .on_response_event(response, ctx)
+                    .map(AttributeValue::from);
+                let right_att = gt[1]
+                    .on_response_event(response, ctx)
+                    .map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+            }
+            Condition::Exists(exist) => exist.on_response_event(response, ctx).is_some(),
+            Condition::All(all) => all.iter().all(|c| c.evaluate_event_response(response, ctx)),
+            Condition::Any(any) => any.iter().any(|c| c.evaluate_event_response(response, ctx)),
+            Condition::Not(not) => !not.evaluate_event_response(response, ctx),
+            Condition::True => true,
+            Condition::False => false,
+        }
+    }
+
     pub(crate) fn evaluate_response(&self, response: &T::Response) -> bool {
         match self {
             Condition::Eq(eq) => {
@@ -201,6 +241,32 @@ where
             Condition::False => false,
         }
     }
+
+    pub(crate) fn evaluate_error(&self, error: &BoxError) -> bool {
+        match self {
+            Condition::Eq(eq) => {
+                let left = eq[0].on_error(error);
+                let right = eq[1].on_error(error);
+                left == right
+            }
+            Condition::Gt(gt) => {
+                let left_att = gt[0].on_error(error).map(AttributeValue::from);
+                let right_att = gt[1].on_error(error).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+            }
+            Condition::Lt(gt) => {
+                let left_att = gt[0].on_error(error).map(AttributeValue::from);
+                let right_att = gt[1].on_error(error).map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+            }
+            Condition::Exists(exist) => exist.on_error(error).is_some(),
+            Condition::All(all) => all.iter().all(|c| c.evaluate_error(error)),
+            Condition::Any(any) => any.iter().any(|c| c.evaluate_error(error)),
+            Condition::Not(not) => !not.evaluate_error(error),
+            Condition::True => true,
+            Condition::False => false,
+        }
+    }
 }
 
 impl<T> Selector for SelectorOrValue<T>
@@ -209,6 +275,7 @@ where
 {
     type Request = T::Request;
     type Response = T::Response;
+    type EventResponse = T::EventResponse;
 
     fn on_request(&self, request: &T::Request) -> Option<Value> {
         match self {
@@ -223,26 +290,55 @@ where
             SelectorOrValue::Selector(selector) => selector.on_response(response),
         }
     }
+
+    fn on_response_event(&self, response: &T::EventResponse, ctx: &Context) -> Option<Value> {
+        match self {
+            SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Selector(selector) => selector.on_response_event(response, ctx),
+        }
+    }
+
+    fn on_error(&self, error: &BoxError) -> Option<Value> {
+        match self {
+            SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Selector(selector) => selector.on_error(error),
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
     use opentelemetry::Value;
+    use tower::BoxError;
 
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::Context;
 
     struct TestSelector;
     impl Selector for TestSelector {
         type Request = Option<i64>;
         type Response = Option<i64>;
+        type EventResponse = Option<i64>;
 
         fn on_request(&self, request: &Self::Request) -> Option<Value> {
             request.map(Value::I64)
         }
 
         fn on_response(&self, response: &Self::Response) -> Option<Value> {
+            response.map(Value::I64)
+        }
+
+        fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+            Some(error.to_string().into())
+        }
+
+        fn on_response_event(
+            &self,
+            response: &Self::EventResponse,
+            _ctx: &crate::Context,
+        ) -> Option<opentelemetry::Value> {
             response.map(Value::I64)
         }
     }
@@ -255,6 +351,7 @@ mod test {
     impl Selector for TestSelectorReqRes {
         type Request = Option<i64>;
         type Response = Option<i64>;
+        type EventResponse = Option<i64>;
 
         fn on_request(&self, request: &Self::Request) -> Option<Value> {
             match self {
@@ -263,11 +360,26 @@ mod test {
             }
         }
 
+        fn on_response_event(
+            &self,
+            response: &Self::EventResponse,
+            _ctx: &crate::Context,
+        ) -> Option<opentelemetry::Value> {
+            match self {
+                TestSelectorReqRes::Req => None,
+                TestSelectorReqRes::Resp => response.map(Value::I64),
+            }
+        }
+
         fn on_response(&self, response: &Self::Response) -> Option<Value> {
             match self {
                 TestSelectorReqRes::Req => None,
                 TestSelectorReqRes::Resp => response.map(Value::I64),
             }
+        }
+
+        fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+            Some(error.to_string().into())
         }
     }
 
@@ -291,6 +403,10 @@ mod test {
             Condition::<TestSelectorReqRes>::Exists(TestSelectorReqRes::Resp)
                 .evaluate_response(&Some(3i64))
         );
+        assert!(
+            Condition::<TestSelectorReqRes>::Exists(TestSelectorReqRes::Resp)
+                .evaluate_event_response(&Some(3i64), &Context::new())
+        );
     }
 
     #[test]
@@ -313,6 +429,16 @@ mod test {
             SelectorOrValue::Value(2i64.into()),
         ])
         .evaluate_response(&None));
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(1i64.into()),
+        ])
+        .evaluate_event_response(&None, &Context::new()));
+        assert!(!Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(2i64.into()),
+        ])
+        .evaluate_event_response(&None, &Context::new()));
     }
 
     #[test]
@@ -362,6 +488,38 @@ mod test {
             SelectorOrValue::Selector(TestSelector),
         ])
         .evaluate_response(&None));
+
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Selector(TestSelector),
+            SelectorOrValue::Value(2i64.into()),
+        ])
+        .evaluate_event_response(&Some(2i64), &Context::new()));
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(2i64.into()),
+            SelectorOrValue::Selector(TestSelector),
+        ])
+        .evaluate_event_response(&Some(2i64), &Context::new()));
+
+        assert!(!Condition::<TestSelector>::Eq([
+            SelectorOrValue::Selector(TestSelector),
+            SelectorOrValue::Value(3i64.into()),
+        ])
+        .evaluate_event_response(&None, &Context::new()));
+        assert!(!Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value(3i64.into()),
+            SelectorOrValue::Selector(TestSelector),
+        ])
+        .evaluate_event_response(&None, &Context::new()));
+        assert!(Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value("my custom error".to_string().into()),
+            SelectorOrValue::Selector(TestSelector),
+        ])
+        .evaluate_error(&BoxError::from("my custom error")));
+        assert!(!Condition::<TestSelector>::Eq([
+            SelectorOrValue::Value("my custom error".to_string().into()),
+            SelectorOrValue::Selector(TestSelector),
+        ])
+        .evaluate_error(&BoxError::from("my different custom error")));
 
         let mut condition = Condition::<TestSelectorReqRes>::Eq([
             SelectorOrValue::Value(3i64.into()),
@@ -491,6 +649,17 @@ mod test {
             SelectorOrValue::Value(1i64.into()),
         ])))
         .evaluate_response(&None));
+        assert!(Condition::<TestSelector>::Not(Box::new(Condition::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(2i64.into()),
+        ])))
+        .evaluate_event_response(&None, &Context::new()));
+
+        assert!(!Condition::<TestSelector>::Not(Box::new(Condition::Eq([
+            SelectorOrValue::Value(1i64.into()),
+            SelectorOrValue::Value(1i64.into()),
+        ])))
+        .evaluate_event_response(&None, &Context::new()));
     }
 
     #[test]
@@ -506,6 +675,17 @@ mod test {
             ])
         ])
         .evaluate_response(&None));
+        assert!(Condition::<TestSelector>::All(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(1i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(2i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate_event_response(&None, &Context::new()));
 
         let mut condition = Condition::<TestSelectorReqRes>::All(vec![
             Condition::Eq([
@@ -520,6 +700,7 @@ mod test {
 
         assert!(condition.evaluate_request(&Some(1i64)).is_none());
         assert!(condition.evaluate_response(&Some(3i64)));
+        assert!(condition.evaluate_event_response(&Some(3i64), &Context::new()));
 
         let mut condition = Condition::<TestSelectorReqRes>::All(vec![
             Condition::Eq([
@@ -534,6 +715,7 @@ mod test {
 
         assert!(condition.evaluate_request(&Some(1i64)).is_none());
         assert!(!condition.evaluate_response(&Some(2i64)));
+        assert!(!condition.evaluate_event_response(&Some(2i64), &Context::new()));
 
         let mut condition = Condition::<TestSelectorReqRes>::All(vec![
             Condition::Eq([
@@ -548,6 +730,7 @@ mod test {
 
         assert_eq!(Some(false), condition.evaluate_request(&Some(1i64)));
         assert!(!condition.evaluate_response(&Some(2i64)));
+        assert!(!condition.evaluate_event_response(&Some(2i64), &Context::new()));
 
         assert!(!Condition::<TestSelector>::All(vec![
             Condition::Eq([
@@ -560,6 +743,18 @@ mod test {
             ])
         ])
         .evaluate_response(&None));
+
+        assert!(!Condition::<TestSelector>::All(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(1i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate_event_response(&None, &Context::new()));
     }
 
     #[test]
@@ -587,5 +782,28 @@ mod test {
             ])
         ])
         .evaluate_response(&None));
+        assert!(Condition::<TestSelector>::Any(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(1i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate_event_response(&None, &Context::new()));
+
+        assert!(!Condition::<TestSelector>::All(vec![
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ]),
+            Condition::Eq([
+                SelectorOrValue::Value(1i64.into()),
+                SelectorOrValue::Value(2i64.into()),
+            ])
+        ])
+        .evaluate_event_response(&None, &Context::new()));
     }
 }
