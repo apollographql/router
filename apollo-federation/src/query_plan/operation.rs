@@ -21,7 +21,6 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use apollo_compiler::executable;
 use apollo_compiler::executable::Name;
@@ -249,6 +248,7 @@ pub(crate) mod normalized_selection_map {
     use std::iter::Map;
     use std::ops::Deref;
     use std::sync::Arc;
+    use std::sync::OnceLock;
 
     use apollo_compiler::ast::Name;
     use indexmap::IndexMap;
@@ -258,10 +258,13 @@ pub(crate) mod normalized_selection_map {
     use crate::query_plan::operation::normalized_field_selection::FieldSelection;
     use crate::query_plan::operation::normalized_fragment_spread_selection::FragmentSpreadSelection;
     use crate::query_plan::operation::normalized_inline_fragment_selection::InlineFragmentSelection;
+    use crate::query_plan::operation::Containment;
+    use crate::query_plan::operation::ContainmentOptions;
     use crate::query_plan::operation::HasSelectionKey;
     use crate::query_plan::operation::Selection;
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
+    use crate::query_plan::operation::TYPENAME_FIELD;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -418,6 +421,68 @@ pub(crate) mod normalized_selection_map {
                 }
             }
             Ok(Cow::Owned(Self(new_map)))
+        }
+
+        pub(crate) fn has_top_level_typename_field(&self) -> bool {
+            // Needs to be behind a OnceLock because `Arc::new` is non-const.
+            // XXX(@goto-bus-stop): Note this does *not* count `__typename @include(if: true)`.
+            // This seems wrong? But it's what JS does, too.
+            static TYPENAME_KEY: OnceLock<SelectionKey> = OnceLock::new();
+            let key = TYPENAME_KEY.get_or_init(|| SelectionKey::Field {
+                response_name: TYPENAME_FIELD,
+                directives: Arc::new(Default::default()),
+            });
+
+            self.contains_key(key)
+        }
+
+        pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
+            if other.len() > self.len() {
+                // If `other` has more selections but we're ignoring missing __typename, then in the case where
+                // `other` has a __typename but `self` does not, then we need the length of `other` to be at
+                // least 2 more than other of `self` to be able to conclude there is no contains.
+                if !options.ignore_missing_typename
+                    || other.len() > self.len() + 1
+                    || self.has_top_level_typename_field()
+                    || !other.has_top_level_typename_field()
+                {
+                    return Containment::NotContained;
+                }
+            }
+
+            let mut is_equal = true;
+            let mut did_ignore_typename = false;
+
+            for (key, other_selection) in other.iter() {
+                if key.is_typename_field() && options.ignore_missing_typename {
+                    if !self.has_top_level_typename_field() {
+                        did_ignore_typename = true;
+                    }
+                    continue;
+                }
+
+                let Some(self_selection) = self.get(key) else {
+                    return Containment::NotContained;
+                };
+
+                match self_selection.containment(other_selection, options) {
+                    Containment::NotContained => return Containment::NotContained,
+                    Containment::StrictlyContained if is_equal => is_equal = false,
+                    Containment::StrictlyContained | Containment::Equal => {}
+                }
+            }
+
+            let expected_len = if did_ignore_typename {
+                self.len() + 1
+            } else {
+                self.len()
+            };
+
+            if is_equal && other.len() == expected_len {
+                Containment::Equal
+            } else {
+                Containment::StrictlyContained
+            }
         }
     }
 
@@ -2718,16 +2783,7 @@ impl SelectionSet {
     }
 
     fn has_top_level_typename_field(&self) -> bool {
-        // Needs to be behind a OnceLock because `Arc::new` is non-const.
-        // XXX(@goto-bus-stop): Note this does *not* count `__typename @include(if: true)`.
-        // This seems wrong? But it's what JS does, too.
-        static TYPENAME_KEY: OnceLock<SelectionKey> = OnceLock::new();
-        let key = TYPENAME_KEY.get_or_init(|| SelectionKey::Field {
-            response_name: TYPENAME_FIELD,
-            directives: Arc::new(Default::default()),
-        });
-
-        self.selections.contains_key(key)
+        self.selections.has_top_level_typename_field()
     }
 
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
@@ -3179,52 +3235,7 @@ impl SelectionSet {
     }
 
     pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
-        if other.selections.len() > self.selections.len() {
-            // If `other` has more selections but we're ignoring missing __typename, then in the case where
-            // `other` has a __typename but `self` does not, then we need the length of `other` to be at
-            // least 2 more than other of `self` to be able to conclude there is no contains.
-            if !options.ignore_missing_typename
-                || other.selections.len() > self.selections.len() + 1
-                || self.has_top_level_typename_field()
-                || !other.has_top_level_typename_field()
-            {
-                return Containment::NotContained;
-            }
-        }
-
-        let mut is_equal = true;
-        let mut did_ignore_typename = false;
-
-        for (key, other_selection) in other.selections.iter() {
-            if key.is_typename_field() && options.ignore_missing_typename {
-                if !self.has_top_level_typename_field() {
-                    did_ignore_typename = true;
-                }
-                continue;
-            }
-
-            let Some(self_selection) = self.selections.get(key) else {
-                return Containment::NotContained;
-            };
-
-            match self_selection.containment(other_selection, options) {
-                Containment::NotContained => return Containment::NotContained,
-                Containment::StrictlyContained if is_equal => is_equal = false,
-                Containment::StrictlyContained | Containment::Equal => {}
-            }
-        }
-
-        let expected_len = if did_ignore_typename {
-            self.selections.len() + 1
-        } else {
-            self.selections.len()
-        };
-
-        if is_equal && other.selections.len() == expected_len {
-            Containment::Equal
-        } else {
-            Containment::StrictlyContained
-        }
+        self.selections.containment(&other.selections, options)
     }
 
     /// Returns true if this selection is a superset of the other selection.

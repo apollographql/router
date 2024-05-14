@@ -24,13 +24,13 @@ struct FieldsConflictMultiBranchValidator {}
 
 #[derive(Clone)]
 struct FragmentRestrictionAtType {
-    selection_set: SelectionSet,
+    selections: SelectionMap,
     //validator: Option<FieldsConflictValidator>,
 }
 
 impl FragmentRestrictionAtType {
-    fn new(selection_set: SelectionSet) -> Self {
-        Self { selection_set }
+    fn new(selections: SelectionMap) -> Self {
+        Self { selections }
     }
 
     // It's possible that while the fragment technically applies at `parent_type`, it's "rebasing" on
@@ -52,7 +52,7 @@ impl FragmentRestrictionAtType {
     // Using `F` in those cases is, while not 100% incorrect, at least not productive, and so we
     // skip it that case. This is essentially an optimization.
     fn is_useless(&self) -> bool {
-        match self.selection_set.selections.as_slice().split_first() {
+        match self.selections.as_slice().split_first() {
             None => true,
 
             Some((first, rest)) => rest.is_empty() && first.0.is_typename_field(),
@@ -85,7 +85,9 @@ impl Fragment {
             // Thus, we have to use the full validator in this case. (see
             // https://github.com/graphql/graphql-spec/issues/1085 for details.)
             // TODO: add validator
-            return Ok(FragmentRestrictionAtType::new(expanded_selection_set));
+            return Ok(FragmentRestrictionAtType::new(
+                expanded_selection_set.selections.as_ref().clone(),
+            ));
         }
 
         // Use a smaller validator for efficiency.
@@ -97,7 +99,9 @@ impl Fragment {
         // validator because we know the non-trimmed parts cannot create field conflict issues so
         // we're trying to build a smaller validator, but it's ok if trimmed is not as small as it
         // theoretically can be.
-        let trimmed = expanded_selection_set.minus(&normalized_selection_set);
+        let trimmed = expanded_selection_set
+            .selections
+            .minus(&normalized_selection_set.selections);
         // TODO: add validator
         Ok(FragmentRestrictionAtType::new(trimmed))
     }
@@ -148,18 +152,6 @@ impl SelectionMap {
 }
 
 impl SelectionSet {
-    /// Performs set-subtraction (self - other) and returns the result (the difference between self
-    /// and other).
-    /// - Assumes that `self` and `other` have the same type.
-    fn minus(&self, other: &SelectionSet) -> SelectionSet {
-        let sub_selections = self.selections.minus(&other.selections);
-        SelectionSet::from_raw_selections(
-            self.schema.clone(),
-            self.type_position.clone(),
-            sub_selections.into_iter().map(|(_k, v)| v),
-        )
-    }
-
     /// Reduce the list of applicable fragments by eliminating ones that are subsumed by another.
     //
     // We have found the list of fragments that applies to some subset of sub-selection. In
@@ -273,8 +265,8 @@ impl SelectionSet {
             // all interfaces), but the selection itself, which only deals with object type,
             // may not have __typename requested; using the fragment might still be a good
             // idea, and querying __typename needlessly is a very small price to pay for that).
-            let res = self.containment(
-                &at_type.selection_set,
+            let res = self.selections.containment(
+                &at_type.selections,
                 ContainmentOptions {
                     ignore_missing_typename: true,
                 },
@@ -315,7 +307,7 @@ impl SelectionSet {
             // TODO: add validator check
             // if !validator.check_can_reuse_fragment_and_track_it(at_type) { continue; }
 
-            let not_covered = self.selections.minus(&at_type.selection_set.selections);
+            let not_covered = self.selections.minus(&at_type.selections);
             not_covered_so_far = not_covered_so_far.intersection(&not_covered);
             // PORT_NOTE: JS version doesn't do this, but shouldn't we skip such fragments that
             //            don't cover any selections (thus, not reducing `not_covered_so_far`)?
