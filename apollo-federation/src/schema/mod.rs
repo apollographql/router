@@ -221,7 +221,7 @@ impl FederationSchema {
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ValidFederationSchema {
     schema: Arc<Valid<FederationSchema>>,
 }
@@ -307,5 +307,11 @@ impl PartialEq for ValidFederationSchema {
 impl Hash for ValidFederationSchema {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Arc::as_ptr(&self.schema).hash(state);
+    }
+}
+
+impl std::fmt::Debug for ValidFederationSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ValidFederationSchema @ {:?}", Arc::as_ptr(&self.schema))
     }
 }

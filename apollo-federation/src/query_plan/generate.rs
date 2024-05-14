@@ -107,6 +107,7 @@ where
     Element: Clone,
     // Uncomment to use `dbg!()`
     // Element: std::fmt::Debug,
+    // Plan: std::fmt::Debug,
 {
     if to_add.is_empty() {
         let cost = plan_builder.compute_plan_cost(&mut initial)?;
