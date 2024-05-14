@@ -511,10 +511,22 @@ mod tests {
             })
             .unzip();
 
+        // Create a vector of the input request context IDs for comparison
+        let input_context_ids = requests
+            .iter()
+            .map(|r| r.request.context.id.clone())
+            .collect::<Vec<String>>();
         // Assemble them
-        let (op_name, _context, request, txs) = assemble_batch(requests)
+        let (op_name, contexts, request, txs) = assemble_batch(requests)
             .await
             .expect("it can assemble a batch");
+
+        let output_context_ids = contexts
+            .iter()
+            .map(|r| r.id.clone())
+            .collect::<Vec<String>>();
+        // Make sure all of our contexts are preserved during assembly
+        assert_eq!(input_context_ids, output_context_ids);
 
         // Make sure that the name of the entire batch is that of the first
         assert_eq!(op_name, "batch_test_0");
