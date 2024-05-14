@@ -623,13 +623,13 @@ pub(crate) enum Standard {
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Event<T> {
-    /// For every chunk sent through http multipart connection
+    /// For every supergraph response payload (including subscription events and defer events)
     #[serde(rename = "event_duration")]
     Duration,
-    /// For every chunk sent through http multipart connection
+    /// For every supergraph response payload (including subscription events and defer events)
     #[serde(rename = "event_unit")]
     Unit,
-    /// For every chunk sent through http multipart connection
+    /// For every supergraph response payload (including subscription events and defer events)
     #[serde(rename = "event_custom")]
     Custom(T),
 }

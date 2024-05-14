@@ -1989,14 +1989,14 @@ expression: "&schema"
     "Event_for_RouterSelector": {
       "oneOf": [
         {
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "enum": [
             "event_duration"
           ],
           "type": "string"
         },
         {
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "enum": [
             "event_unit"
           ],
@@ -2004,7 +2004,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "properties": {
             "event_custom": {
               "$ref": "#/definitions/RouterSelector",
@@ -2052,14 +2052,14 @@ expression: "&schema"
     "Event_for_SubgraphSelector": {
       "oneOf": [
         {
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "enum": [
             "event_duration"
           ],
           "type": "string"
         },
         {
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "enum": [
             "event_unit"
           ],
@@ -2067,7 +2067,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "properties": {
             "event_custom": {
               "$ref": "#/definitions/SubgraphSelector",
@@ -2115,14 +2115,14 @@ expression: "&schema"
     "Event_for_SupergraphSelector": {
       "oneOf": [
         {
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "enum": [
             "event_duration"
           ],
           "type": "string"
         },
         {
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "enum": [
             "event_unit"
           ],
@@ -2130,7 +2130,7 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
-          "description": "For every chunk sent through http multipart connection",
+          "description": "For every supergraph response payload (including subscription events and defer events)",
           "properties": {
             "event_custom": {
               "$ref": "#/definitions/SupergraphSelector",
