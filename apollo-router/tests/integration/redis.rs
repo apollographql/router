@@ -1,162 +1,47 @@
-#[cfg(all(target_os = "linux", target_arch = "x86_64", test))]
-mod test {
-    use apollo_router::plugin::test::MockSubgraph;
-    use apollo_router::services::execution::QueryPlan;
-    use apollo_router::services::router;
-    use apollo_router::services::supergraph;
-    use apollo_router::Context;
-    use apollo_router::MockedSubgraphs;
-    use fred::cmd;
-    use fred::prelude::*;
-    use fred::types::ScanType;
-    use fred::types::Scanner;
-    use futures::StreamExt;
-    use http::header::CACHE_CONTROL;
-    use http::HeaderValue;
-    use http::Method;
-    use serde::Deserialize;
-    use serde::Serialize;
-    use serde_json::json;
-    use serde_json::Value;
-    use tower::BoxError;
-    use tower::ServiceExt;
+use apollo_router::plugin::test::MockSubgraph;
+use apollo_router::services::execution::QueryPlan;
+use apollo_router::services::router;
+use apollo_router::services::supergraph;
+use apollo_router::Context;
+use apollo_router::MockedSubgraphs;
+use fred::cmd;
+use fred::prelude::*;
+use fred::types::ScanType;
+use fred::types::Scanner;
+use futures::StreamExt;
+use http::header::CACHE_CONTROL;
+use http::HeaderValue;
+use http::Method;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json::json;
+use serde_json::Value;
+use tower::BoxError;
+use tower::ServiceExt;
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn query_planner() -> Result<(), BoxError> {
-        // If this test fails and the cache key format changed you'll need to update the key here.
-        // 1. Force this test to run locally by removing the cfg() line at the top of this file.
-        // 2. run `docker compose up -d` and connect to the redis container by running `docker exec -ti <container_id> /bin/bash`.
-        // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
-        // 4. Run this test and yank the updated cache key from the redis logs.
-        let known_cache_key = "plan:v2.7.5:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:5c7a72fa35639949328548d77b56dba2e77d0dfa90c19b69978da119e996bb92";
+use crate::integration::IntegrationTest;
 
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None, None);
-        let connection_task = client.connect();
-        client.wait_for_connect().await?;
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner() -> Result<(), BoxError> {
+    // If this test fails and the cache key format changed you'll need to update the key here.
+    // 1. Force this test to run locally by removing the cfg() line at the top of this file.
+    // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
+    // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
+    // 4. Run this test and yank the updated cache key from the redis logs.
+    let known_cache_key = "plan:0:v2.7.5:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:9c26cb1f820a78848ba3d5d3295c16aa971368c5295422fd33cc19d4a6006a9c";
 
-        client.del::<String, _>(known_cache_key).await.unwrap();
+    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let client = RedisClient::new(config, None, None, None);
+    let connection_task = client.connect();
+    client.wait_for_connect().await.unwrap();
 
-        let supergraph = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(json!({
-                "supergraph": {
-                    "query_planning": {
-                        "cache": {
-                            "in_memory": {
-                                "limit": 2
-                            },
-                            "redis": {
-                                "urls": ["redis://127.0.0.1:6379"],
-                                "ttl": "10s"
-                            }
-                        }
-                    }
-                }
-            }))?
-            .schema(include_str!("../fixtures/supergraph.graphql"))
-            .build_supergraph()
-            .await?;
+    client.del::<String, _>(known_cache_key).await.unwrap();
 
-        let request = supergraph::Request::fake_builder()
-            .query(r#"{ topProducts { name name2:name } }"#)
-            .method(Method::POST)
-            .build()?;
-
-        let _ = supergraph.oneshot(request).await?.next_response().await;
-
-        let s: String = match client.get(known_cache_key).await {
-            Ok(s) => s,
-            Err(e) => {
-                println!("keys in Redis server:");
-                let mut scan = client.scan("plan:*", None, Some(ScanType::String));
-                while let Some(key) = scan.next().await {
-                    let key = key.as_ref().unwrap().results();
-                    println!("\t{key:?}");
-                }
-                panic!("key {known_cache_key} not found: {e}");
-            }
-        };
-        let exp: i64 = client
-            .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
-            .await
-            .and_then(|frame| frame.try_into())
-            .and_then(|value: RedisValue| value.convert())
-            .unwrap();
-        let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
-        // ignore the usage reporting field for which the order of elements in `referenced_fields_by_type` can change
-        let query_plan = query_plan_res
-            .as_object()
-            .unwrap()
-            .get("Ok")
-            .unwrap()
-            .get("Plan")
-            .unwrap()
-            .get("plan")
-            .unwrap()
-            .get("root");
-
-        insta::assert_json_snapshot!(query_plan);
-
-        // test expiration refresh
-        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-        let supergraph = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(json!({
-                "supergraph": {
-                    "query_planning": {
-                        "cache": {
-                            "in_memory": {
-                                "limit": 2
-                            },
-                            "redis": {
-                                "urls": ["redis://127.0.0.1:6379"],
-                                "ttl": "10s"
-                            }
-                        }
-                    }
-                }
-            }))?
-            .schema(include_str!("../fixtures/supergraph.graphql"))
-            .build_supergraph()
-            .await?;
-
-        let request = supergraph::Request::fake_builder()
-            .query(r#"{ topProducts { name name2:name } }"#)
-            .method(Method::POST)
-            .build()?;
-        let _ = supergraph.oneshot(request).await?.next_response().await;
-        let new_exp: i64 = client
-            .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
-            .await
-            .and_then(|frame| frame.try_into())
-            .and_then(|value: RedisValue| value.convert())
-            .unwrap();
-
-        assert!(exp < new_exp);
-
-        client.quit().await?;
-        // calling quit ends the connection and event listener tasks
-        let _ = connection_task.await;
-        Ok(())
-    }
-
-    #[derive(Deserialize, Serialize)]
-
-    struct QueryPlannerContent {
-        plan: QueryPlan,
-    }
-
-    #[tokio::test(flavor = "multi_thread")]
-    async fn apq() -> Result<(), BoxError> {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None, None);
-        let connection_task = client.connect();
-        client.wait_for_connect().await?;
-
-        let config = json!({
-            "apq": {
-                "router": {
+    let supergraph = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "supergraph": {
+                "query_planning": {
                     "cache": {
                         "in_memory": {
                             "limit": 2
@@ -168,142 +53,286 @@ mod test {
                     }
                 }
             }
-        });
+        }))
+        .unwrap()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_supergraph()
+        .await
+        .unwrap();
 
-        let router = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(config.clone())?
-            .schema(include_str!("../fixtures/supergraph.graphql"))
-            .build_router()
-            .await?;
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts { name name2:name } }"#)
+        .method(Method::POST)
+        .build()
+        .unwrap();
 
-        let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
+    let _ = supergraph
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await;
 
-        client
-            .del::<String, _>(&format!("apq:{query_hash}"))
-            .await
-            .unwrap();
+    let s: String = match client.get(known_cache_key).await {
+        Ok(s) => s,
+        Err(e) => {
+            println!("keys in Redis server:");
+            let mut scan = client.scan("plan:*", Some(u32::MAX), Some(ScanType::String));
+            while let Some(key) = scan.next().await {
+                let key = key.as_ref().unwrap().results();
+                println!("\t{key:?}");
+            }
+            panic!("key {known_cache_key} not found: {e}\nIf you see this error, make sure the federation version you use matches the redis key.");
+        }
+    };
+    let exp: i64 = client
+        .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
+        .await
+        .and_then(|frame| frame.try_into())
+        .and_then(|value: RedisValue| value.convert())
+        .unwrap();
+    let query_plan_res: serde_json::Value = serde_json::from_str(&s).unwrap();
+    // ignore the usage reporting field for which the order of elements in `referenced_fields_by_type` can change
+    let query_plan = query_plan_res
+        .as_object()
+        .unwrap()
+        .get("Ok")
+        .unwrap()
+        .get("Plan")
+        .unwrap()
+        .get("plan")
+        .unwrap()
+        .get("root");
 
-        let persisted = json!({
-            "version" : 1,
-            "sha256Hash" : query_hash
-        });
+    insta::assert_json_snapshot!(query_plan);
 
-        // an APQ should fail if we do not know about the hash
-        // it should not set a value in Redis
-        let request: router::Request = supergraph::Request::fake_builder()
-            .extension("persistedQuery", persisted.clone())
-            .method(Method::POST)
-            .build()?
-            .try_into()
-            .unwrap();
+    // test expiration refresh
+    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    let supergraph = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "supergraph": {
+                "query_planning": {
+                    "cache": {
+                        "in_memory": {
+                            "limit": 2
+                        },
+                        "redis": {
+                            "urls": ["redis://127.0.0.1:6379"],
+                            "ttl": "10s"
+                        }
+                    }
+                }
+            }
+        }))
+        .unwrap()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_supergraph()
+        .await
+        .unwrap();
 
-        let res = router
-            .clone()
-            .oneshot(request)
-            .await?
-            .into_graphql_response_stream()
-            .await
-            .next()
-            .await
-            .unwrap()?;
-        assert_eq!(
-            res.errors.first().unwrap().message,
-            "PersistedQueryNotFound"
-        );
-        let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
-        assert!(r.is_none());
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts { name name2:name } }"#)
+        .method(Method::POST)
+        .build()
+        .unwrap();
+    let _ = supergraph
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await;
+    let new_exp: i64 = client
+        .custom_raw(cmd!("EXPIRETIME"), vec![known_cache_key.to_string()])
+        .await
+        .and_then(|frame| frame.try_into())
+        .and_then(|value: RedisValue| value.convert())
+        .unwrap();
 
-        // Now we register the query
-        // it should set a value in Redis
-        let request: router::Request = supergraph::Request::fake_builder()
-            .query(r#"{ topProducts { name name2:name } }"#)
-            .extension("persistedQuery", persisted.clone())
-            .method(Method::POST)
-            .build()?
-            .try_into()
-            .unwrap();
+    assert!(exp < new_exp);
 
-        let res = router
-            .clone()
-            .oneshot(request)
-            .await?
-            .into_graphql_response_stream()
-            .await
-            .next()
-            .await
-            .unwrap()?;
-        assert!(res.data.is_some());
-        assert!(res.errors.is_empty());
+    client.quit().await.unwrap();
+    // calling quit ends the connection and event listener tasks
+    let _ = connection_task.await;
+    Ok(())
+}
 
-        let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
-        insta::assert_display_snapshot!(s.unwrap());
+#[derive(Deserialize, Serialize)]
 
-        // we start a new router with the same config
-        // it should have the same connection to Redis, but the in memory cache has been reset
-        let router = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(config.clone())?
-            .schema(include_str!("../fixtures/supergraph.graphql"))
-            .build_router()
-            .await?;
+struct QueryPlannerContent {
+    plan: QueryPlan,
+}
 
-        // a request with only the hash should succeed because it is stored in Redis
-        let request: router::Request = supergraph::Request::fake_builder()
-            .extension("persistedQuery", persisted.clone())
-            .method(Method::POST)
-            .build()?
-            .try_into()
-            .unwrap();
+#[tokio::test(flavor = "multi_thread")]
+async fn apq() -> Result<(), BoxError> {
+    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let client = RedisClient::new(config, None, None, None);
+    let connection_task = client.connect();
+    client.wait_for_connect().await.unwrap();
 
-        let res = router
-            .clone()
-            .oneshot(request)
-            .await?
-            .into_graphql_response_stream()
-            .await
-            .next()
-            .await
-            .unwrap()?;
-        assert!(res.data.is_some());
-        assert!(res.errors.is_empty());
+    let config = json!({
+        "apq": {
+            "router": {
+                "cache": {
+                    "in_memory": {
+                        "limit": 2
+                    },
+                    "redis": {
+                        "urls": ["redis://127.0.0.1:6379"],
+                        "ttl": "10s"
+                    }
+                }
+            }
+        }
+    });
 
-        client.quit().await?;
-        // calling quit ends the connection and event listener tasks
-        let _ = connection_task.await;
-        Ok(())
-    }
+    let router = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(config.clone())
+        .unwrap()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_router()
+        .await
+        .unwrap();
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn entity_cache() -> Result<(), BoxError> {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None, None);
-        let connection_task = client.connect();
-        client.wait_for_connect().await?;
+    let query_hash = "4c45433039407593557f8a982dafd316a66ec03f0e1ed5fa1b7ef8060d76e8ec";
 
-        let mut subgraphs = MockedSubgraphs::default();
-        subgraphs.insert(
-            "products",
-            MockSubgraph::builder()
-                .with_json(
-                    serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
-                    serde_json::json! {{"data": {
-                            "topProducts": [{
-                                "__typename": "Product",
-                                "upc": "1",
-                                "name": "chair"
-                            },
-                            {
-                                "__typename": "Product",
-                                "upc": "2",
-                                "name": "table"
-                            }]
-                    }}},
-                )
-                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
-                .build(),
-        );
-        subgraphs.insert("reviews", MockSubgraph::builder().with_json(
+    client
+        .del::<String, _>(&format!("apq:{query_hash}"))
+        .await
+        .unwrap();
+
+    let persisted = json!({
+        "version" : 1,
+        "sha256Hash" : query_hash
+    });
+
+    // an APQ should fail if we do not know about the hash
+    // it should not set a value in Redis
+    let request: router::Request = supergraph::Request::fake_builder()
+        .extension("persistedQuery", persisted.clone())
+        .method(Method::POST)
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    let res = router
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        res.errors.first().unwrap().message,
+        "PersistedQueryNotFound"
+    );
+    let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    assert!(r.is_none());
+
+    // Now we register the query
+    // it should set a value in Redis
+    let request: router::Request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts { name name2:name } }"#)
+        .extension("persistedQuery", persisted.clone())
+        .method(Method::POST)
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    let res = router
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(res.data.is_some());
+    assert!(res.errors.is_empty());
+
+    let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    insta::assert_snapshot!(s.unwrap());
+
+    // we start a new router with the same config
+    // it should have the same connection to Redis, but the in memory cache has been reset
+    let router = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(config.clone())
+        .unwrap()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_router()
+        .await
+        .unwrap();
+
+    // a request with only the hash should succeed because it is stored in Redis
+    let request: router::Request = supergraph::Request::fake_builder()
+        .extension("persistedQuery", persisted.clone())
+        .method(Method::POST)
+        .build()
+        .unwrap()
+        .try_into()
+        .unwrap();
+
+    let res = router
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .into_graphql_response_stream()
+        .await
+        .next()
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(res.data.is_some());
+    assert!(res.errors.is_empty());
+
+    client.quit().await.unwrap();
+    // calling quit ends the connection and event listener tasks
+    let _ = connection_task.await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn entity_cache() -> Result<(), BoxError> {
+    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let client = RedisClient::new(config, None, None, None);
+    let connection_task = client.connect();
+    client.wait_for_connect().await.unwrap();
+
+    let mut subgraphs = MockedSubgraphs::default();
+    subgraphs.insert(
+        "products",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
+                serde_json::json! {{"data": {
+                        "topProducts": [{
+                            "__typename": "Product",
+                            "upc": "1",
+                            "name": "chair"
+                        },
+                        {
+                            "__typename": "Product",
+                            "upc": "2",
+                            "name": "table"
+                        }]
+                }}},
+            )
+            .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
+            .build(),
+    );
+    subgraphs.insert("reviews", MockSubgraph::builder().with_json(
             serde_json::json!{{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
                 "variables": {
@@ -334,87 +363,90 @@ mod test {
             }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build());
 
-        let supergraph = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(json!({
-                "preview_entity_cache": {
-                    "redis": {
-                        "urls": ["redis://127.0.0.1:6379"],
-                        "ttl": "2s"
-                    },
-                    "enabled": false,
-                    "subgraphs": {
-                        "products": {
-                            "enabled": true,
-                            "ttl": "60s"
-                        },
-                        "reviews": {
-                            "enabled": true,
-                            "ttl": "10s"
-                        }
-                    }
+    let supergraph = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "preview_entity_cache": {
+                "redis": {
+                    "urls": ["redis://127.0.0.1:6379"],
+                    "ttl": "2s"
                 },
-                "include_subgraph_errors": {
-                    "all": true
+                "enabled": false,
+                "subgraphs": {
+                    "products": {
+                        "enabled": true,
+                        "ttl": "60s"
+                    },
+                    "reviews": {
+                        "enabled": true,
+                        "ttl": "10s"
+                    }
                 }
-            }))?
-            .extra_plugin(subgraphs)
-            .schema(include_str!("../fixtures/supergraph-auth.graphql"))
-            .build_supergraph()
-            .await
-            .unwrap();
+            },
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }))
+        .unwrap()
+        .extra_plugin(subgraphs)
+        .schema(include_str!("../fixtures/supergraph-auth.graphql"))
+        .build_supergraph()
+        .await
+        .unwrap();
 
-        let request = supergraph::Request::fake_builder()
-            .query(r#"{ topProducts { name reviews { body } } }"#)
-            .method(Method::POST)
-            .build()?;
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts { name reviews { body } } }"#)
+        .method(Method::POST)
+        .build()
+        .unwrap();
 
-        let response = supergraph
-            .oneshot(request)
-            .await?
-            .next_response()
-            .await
-            .unwrap();
-        insta::assert_json_snapshot!(response);
+    let response = supergraph
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response);
 
-        let s:String = client
-          .get("subgraph:products:Query:07bd08ba4eb8b85451edd3b3aae3c3ad3dc0892d86deedde6e6d53f6415f807f:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+    let s:String = client
+          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
-        let v: Value = serde_json::from_str(&s).unwrap();
-        insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+    let v: Value = serde_json::from_str(&s).unwrap();
+    insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-        let s: String = client.get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
-        let v: Value = serde_json::from_str(&s).unwrap();
-        insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+    let s: String = client.get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c").await.unwrap();
+    let v: Value = serde_json::from_str(&s).unwrap();
+    insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-        // we abuse the query shape to return a response with a different but overlapping set of entities
-        let mut subgraphs = MockedSubgraphs::default();
-        subgraphs.insert(
-            "products",
-            MockSubgraph::builder()
-                .with_json(
-                    serde_json::json! {{"query":"{topProducts(first:2){__typename upc name}}"}},
-                    serde_json::json! {{"data": {
-                            "topProducts": [{
-                                "__typename": "Product",
-                                "upc": "1",
-                                "name": "chair"
-                            },
-                            {
-                                "__typename": "Product",
-                                "upc": "3",
-                                "name": "plate"
-                            }]
-                    }}},
-                )
-                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
-                .build(),
-        );
+    // we abuse the query shape to return a response with a different but overlapping set of entities
+    let mut subgraphs = MockedSubgraphs::default();
+    subgraphs.insert(
+        "products",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json! {{"query":"{topProducts(first:2){__typename upc name}}"}},
+                serde_json::json! {{"data": {
+                        "topProducts": [{
+                            "__typename": "Product",
+                            "upc": "1",
+                            "name": "chair"
+                        },
+                        {
+                            "__typename": "Product",
+                            "upc": "3",
+                            "name": "plate"
+                        }]
+                }}},
+            )
+            .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
+            .build(),
+    );
 
-        // even though the root operation returned 2 entities, we only need to get one entity from the subgraph here because
-        // we already have it in cache
-        subgraphs.insert("reviews", MockSubgraph::builder().with_json(
+    // even though the root operation returned 2 entities, we only need to get one entity from the subgraph here because
+    // we already have it in cache
+    subgraphs.insert("reviews", MockSubgraph::builder().with_json(
             serde_json::json!{{
                 "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Product{reviews{body}}}}",
                 "variables": {
@@ -436,71 +468,74 @@ mod test {
             }},
         ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build());
 
-        let supergraph = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(json!({
-                "preview_entity_cache": {
-                    "redis": {
-                        "urls": ["redis://127.0.0.1:6379"],
-                        "ttl": "2s"
-                    },
-                    "enabled": false,
-                    "subgraphs": {
-                        "products": {
-                            "enabled": true,
-                            "ttl": "60s"
-                        },
-                        "reviews": {
-                            "enabled": true,
-                            "ttl": "10s"
-                        }
-                    }
+    let supergraph = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "preview_entity_cache": {
+                "redis": {
+                    "urls": ["redis://127.0.0.1:6379"],
+                    "ttl": "2s"
                 },
-                "include_subgraph_errors": {
-                    "all": true
+                "enabled": false,
+                "subgraphs": {
+                    "products": {
+                        "enabled": true,
+                        "ttl": "60s"
+                    },
+                    "reviews": {
+                        "enabled": true,
+                        "ttl": "10s"
+                    }
                 }
-            }))?
-            .extra_plugin(subgraphs)
-            .schema(include_str!("../fixtures/supergraph-auth.graphql"))
-            .build_supergraph()
-            .await
-            .unwrap();
-
-        let request = supergraph::Request::fake_builder()
-            .query(r#"{ topProducts(first: 2) { name reviews { body } } }"#)
-            .method(Method::POST)
-            .build()?;
-
-        let response = supergraph
-            .oneshot(request)
-            .await?
-            .next_response()
-            .await
-            .unwrap();
-        insta::assert_json_snapshot!(response);
-
-        let s:String = client
-        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+            },
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }))
+        .unwrap()
+        .extra_plugin(subgraphs)
+        .schema(include_str!("../fixtures/supergraph-auth.graphql"))
+        .build_supergraph()
         .await
         .unwrap();
-        let v: Value = serde_json::from_str(&s).unwrap();
-        insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
 
-        client.quit().await?;
-        // calling quit ends the connection and event listener tasks
-        let _ = connection_task.await;
-        Ok(())
-    }
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ topProducts(first: 2) { name reviews { body } } }"#)
+        .method(Method::POST)
+        .build()
+        .unwrap();
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn entity_cache_authorization() -> Result<(), BoxError> {
-        let config = RedisConfig::from_url("redis://127.0.0.1:6379")?;
-        let client = RedisClient::new(config, None, None, None);
-        let connection_task = client.connect();
-        client.wait_for_connect().await?;
+    let response = supergraph
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response);
 
-        let mut subgraphs = MockedSubgraphs::default();
-        subgraphs.insert(
+    let s:String = client
+        .get("subgraph:reviews:Product:d9a4cd73308dd13ca136390c10340823f94c335b9da198d2339c886c738abf0d:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_str(&s).unwrap();
+    insta::assert_json_snapshot!(v.as_object().unwrap().get("data").unwrap());
+
+    client.quit().await.unwrap();
+    // calling quit ends the connection and event listener tasks
+    let _ = connection_task.await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn entity_cache_authorization() -> Result<(), BoxError> {
+    let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
+    let client = RedisClient::new(config, None, None, None);
+    let connection_task = client.connect();
+    client.wait_for_connect().await.unwrap();
+
+    let mut subgraphs = MockedSubgraphs::default();
+    subgraphs.insert(
             "accounts",
             MockSubgraph::builder().with_json(
                 serde_json::json!{{
@@ -534,28 +569,28 @@ mod test {
             ).with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
             .build(),
         );
-        subgraphs.insert(
-            "products",
-            MockSubgraph::builder()
-                .with_json(
-                    serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
-                    serde_json::json! {{"data": {
-                            "topProducts": [{
-                                "__typename": "Product",
-                                "upc": "1",
-                                "name": "chair"
-                            },
-                            {
-                                "__typename": "Product",
-                                "upc": "2",
-                                "name": "table"
-                            }]
-                    }}},
-                )
-                .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
-                .build(),
-        );
-        subgraphs.insert(
+    subgraphs.insert(
+        "products",
+        MockSubgraph::builder()
+            .with_json(
+                serde_json::json! {{"query":"{topProducts{__typename upc name}}"}},
+                serde_json::json! {{"data": {
+                        "topProducts": [{
+                            "__typename": "Product",
+                            "upc": "1",
+                            "name": "chair"
+                        },
+                        {
+                            "__typename": "Product",
+                            "upc": "2",
+                            "name": "table"
+                        }]
+                }}},
+            )
+            .with_header(CACHE_CONTROL, HeaderValue::from_static("public"))
+            .build(),
+    );
+    subgraphs.insert(
             "reviews",
             MockSubgraph::builder().with_json(
                     serde_json::json!{{
@@ -631,232 +666,319 @@ mod test {
                 .build(),
         );
 
-        let supergraph = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(json!({
-                "preview_entity_cache": {
-                    "redis": {
-                        "urls": ["redis://127.0.0.1:6379"],
-                        "ttl": "2s"
+    let supergraph = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "preview_entity_cache": {
+                "redis": {
+                    "urls": ["redis://127.0.0.1:6379"],
+                    "ttl": "2s"
+                },
+                "enabled": false,
+                "subgraphs": {
+                    "products": {
+                        "enabled": true,
+                        "ttl": "60s"
                     },
-                    "enabled": false,
-                    "subgraphs": {
-                        "products": {
-                            "enabled": true,
-                            "ttl": "60s"
-                        },
-                        "reviews": {
-                            "enabled": true,
-                            "ttl": "10s"
-                        }
+                    "reviews": {
+                        "enabled": true,
+                        "ttl": "10s"
                     }
-                },
-                "authorization": {
-                    "preview_directives": {
-                        "enabled": true
-                    }
-                },
-                "include_subgraph_errors": {
-                    "all": true
                 }
-            }))?
-            .extra_plugin(subgraphs)
-            .schema(include_str!("../fixtures/supergraph-auth.graphql"))
-            .build_supergraph()
-            .await
-            .unwrap();
-
-        let context = Context::new();
-        context
-            .insert(
-                "apollo_authorization::scopes::required",
-                json! {["profile", "read:user", "read:name"]},
-            )
-            .unwrap();
-        let request = supergraph::Request::fake_builder()
-            .query(
-                r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#,
-            )
-            .context(context)
-            .method(Method::POST)
-            .build()?;
-
-        let response = supergraph
-            .clone()
-            .oneshot(request)
-            .await?
-            .next_response()
-            .await
-            .unwrap();
-        insta::assert_json_snapshot!(response);
-
-        let s:String = client
-          .get("subgraph:products:Query:07bd08ba4eb8b85451edd3b3aae3c3ad3dc0892d86deedde6e6d53f6415f807f:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
-          .await
-          .unwrap();
-        let v: Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(
-            v.as_object().unwrap().get("data").unwrap(),
-            &json! {{
-                "topProducts": [{
-                    "__typename": "Product",
-                    "upc": "1",
-                    "name": "chair"
-                },
-                {
-                    "__typename": "Product",
-                    "upc": "2",
-                    "name": "table"
-                }]
-            }}
-        );
-
-        let s: String = client
-        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:826d5cf03645266e30655c7475530e2d40e0d5978595b0ab16318b1ce87c0fe1:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+            },
+            "authorization": {
+                "preview_directives": {
+                    "enabled": true
+                }
+            },
+            "include_subgraph_errors": {
+                "all": true
+            }
+        }))
+        .unwrap()
+        .extra_plugin(subgraphs)
+        .schema(include_str!("../fixtures/supergraph-auth.graphql"))
+        .build_supergraph()
         .await
         .unwrap();
-        let v: Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(
-            v.as_object().unwrap().get("data").unwrap(),
-            &json! {{
-                "reviews": [
-                    {"body": "I can sit on it"}
-                ]
-            }}
-        );
 
-        let context = Context::new();
-        context
-            .insert(
-                "apollo_authorization::scopes::required",
-                json! {["profile", "read:user", "read:name"]},
-            )
-            .unwrap();
-        context
-            .insert(
-                "apollo_authentication::JWT::claims",
-                json! {{ "scope": "read:user read:name" }},
-            )
-            .unwrap();
-        let request = supergraph::Request::fake_builder()
-            .query(
-                r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#,
-            )
-            .context(context)
-            .method(Method::POST)
-            .build()?;
+    let context = Context::new();
+    context
+        .insert(
+            "apollo_authorization::scopes::required",
+            json! {["profile", "read:user", "read:name"]},
+        )
+        .unwrap();
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#)
+        .context(context)
+        .method(Method::POST)
+        .build()
+        .unwrap();
 
-        let response = supergraph
-            .clone()
-            .oneshot(request)
-            .await?
-            .next_response()
-            .await
-            .unwrap();
-        insta::assert_json_snapshot!(response);
+    let response = supergraph
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response);
 
-        let s:String = client
-          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:c75297b98da101021e30020db99a3a11c2f9ac2008de94ce410c47940162e304:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+    let s:String = client
+          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
-        let v: Value = serde_json::from_str(&s).unwrap();
-        assert_eq!(
-            v.as_object().unwrap().get("data").unwrap(),
-            &json! {{
-                "reviews": [{
-                    "body": "I can sit on it",
-                    "author": {"__typename": "User", "id": "1"}
-                }]
-            }}
-        );
+    let v: Value = serde_json::from_str(&s).unwrap();
+    assert_eq!(
+        v.as_object().unwrap().get("data").unwrap(),
+        &json! {{
+            "topProducts": [{
+                "__typename": "Product",
+                "upc": "1",
+                "name": "chair"
+            },
+            {
+                "__typename": "Product",
+                "upc": "2",
+                "name": "table"
+            }]
+        }}
+    );
 
-        let context = Context::new();
-        context
-            .insert(
-                "apollo_authorization::scopes::required",
-                json! {["profile", "read:user", "read:name"]},
-            )
-            .unwrap();
-        context
-            .insert(
-                "apollo_authentication::JWT::claims",
-                json! {{ "scope": "read:user profile" }},
-            )
-            .unwrap();
-        let request = supergraph::Request::fake_builder()
-            .query(
-                r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#,
-            )
-            .context(context)
-            .method(Method::POST)
-            .build()?;
+    let s: String = client
+        .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:1de543dab57fde0f00247922ccc4f76d4c916ae26a89dd83cd1a62300d0cda20:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+        .await
+        .unwrap();
+    let v: Value = serde_json::from_str(&s).unwrap();
+    assert_eq!(
+        v.as_object().unwrap().get("data").unwrap(),
+        &json! {{
+            "reviews": [
+                {"body": "I can sit on it"}
+            ]
+        }}
+    );
 
-        let response = supergraph
-            .clone()
-            .oneshot(request)
-            .await?
-            .next_response()
-            .await
-            .unwrap();
-        insta::assert_json_snapshot!(response);
+    let context = Context::new();
+    context
+        .insert(
+            "apollo_authorization::scopes::required",
+            json! {["profile", "read:user", "read:name"]},
+        )
+        .unwrap();
+    context
+        .insert(
+            "apollo_authentication::JWT::claims",
+            json! {{ "scope": "read:user read:name" }},
+        )
+        .unwrap();
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#)
+        .context(context)
+        .method(Method::POST)
+        .build()
+        .unwrap();
 
-        client.quit().await?;
-        // calling quit ends the connection and event listener tasks
-        let _ = connection_task.await;
-        Ok(())
-    }
+    let response = supergraph
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response);
 
-    #[tokio::test(flavor = "multi_thread")]
-    async fn connection_failure_blocks_startup() {
-        let _ = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(json!({
-                "supergraph": {
-                    "query_planning": {
-                        "cache": {
-                            "in_memory": {
-                                "limit": 2
-                            },
-                            "redis": {
-                                // invalid port
-                                "urls": ["redis://127.0.0.1:6378"]
-                            }
+    let s:String = client
+          .get("subgraph:reviews:Product:4911f7a9dbad8a47b8900d65547503a2f3c0359f65c0bc5652ad9b9843281f66:3b6ef3c8fd34c469d59f513942c5f4c8f91135e828712de2024e2cd4613c50ae:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .await
+          .unwrap();
+    let v: Value = serde_json::from_str(&s).unwrap();
+    assert_eq!(
+        v.as_object().unwrap().get("data").unwrap(),
+        &json! {{
+            "reviews": [{
+                "body": "I can sit on it",
+                "author": {"__typename": "User", "id": "1"}
+            }]
+        }}
+    );
+
+    let context = Context::new();
+    context
+        .insert(
+            "apollo_authorization::scopes::required",
+            json! {["profile", "read:user", "read:name"]},
+        )
+        .unwrap();
+    context
+        .insert(
+            "apollo_authentication::JWT::claims",
+            json! {{ "scope": "read:user profile" }},
+        )
+        .unwrap();
+    let request = supergraph::Request::fake_builder()
+        .query(r#"{ me { id name } topProducts { name reviews { body author { username } } } }"#)
+        .context(context)
+        .method(Method::POST)
+        .build()
+        .unwrap();
+
+    let response = supergraph
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+    insta::assert_json_snapshot!(response);
+
+    client.quit().await.unwrap();
+    // calling quit ends the connection and event listener tasks
+    let _ = connection_task.await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn connection_failure_blocks_startup() {
+    let _ = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "supergraph": {
+                "query_planning": {
+                    "cache": {
+                        "in_memory": {
+                            "limit": 2
+                        },
+                        "redis": {
+                            // invalid port
+                            "urls": ["redis://127.0.0.1:6378"]
                         }
                     }
                 }
-            }))
-            .unwrap()
-            .schema(include_str!("../fixtures/supergraph.graphql"))
-            .build_supergraph()
-            .await
-            .unwrap();
+            }
+        }))
+        .unwrap()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_supergraph()
+        .await
+        .unwrap();
 
-        let e = apollo_router::TestHarness::builder()
-            .with_subgraph_network_requests()
-            .configuration_json(json!({
-                "supergraph": {
-                    "query_planning": {
-                        "cache": {
-                            "in_memory": {
-                                "limit": 2
-                            },
-                            "redis": {
-                                // invalid port
-                                "urls": ["redis://127.0.0.1:6378"],
-                                "required_to_start": true
-                            }
+    let e = apollo_router::TestHarness::builder()
+        .with_subgraph_network_requests()
+        .configuration_json(json!({
+            "supergraph": {
+                "query_planning": {
+                    "cache": {
+                        "in_memory": {
+                            "limit": 2
+                        },
+                        "redis": {
+                            // invalid port
+                            "urls": ["redis://127.0.0.1:6378"],
+                            "required_to_start": true
                         }
                     }
                 }
-            }))
-            .unwrap()
-            .schema(include_str!("../fixtures/supergraph.graphql"))
-            .build_supergraph()
-            .await
-            .unwrap_err();
-        assert_eq!(
-            e.to_string(),
+            }
+        }))
+        .unwrap()
+        .schema(include_str!("../fixtures/supergraph.graphql"))
+        .build_supergraph()
+        .await
+        .unwrap_err();
+    //OSX has a different error code for connection refused
+    let e = e.to_string().replace("61", "111"); //
+    assert_eq!(
+            e,
             "couldn't build Router service: IO Error: Os { code: 111, kind: ConnectionRefused, message: \"Connection refused\" }"
         );
-    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_query_fragments() {
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:ae8b525534cb7446a34715fc80edd41d4d29aa65c5f39f9237d4ed8459e3fe82",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+#[ignore = "extraction of subgraphs from supergraph is not yet implemented"]
+async fn query_planner_redis_update_planner_mode() {
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_query_planner_mode.router.yaml"),
+        "",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_introspection() {
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_defer() {
+    test_redis_query_plan_config_update(
+        include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8a17c5b196af5e3a18d24596424e9849d198f456dd48297b852a5f2ca847169b",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_type_conditional_fetching() {
+    test_redis_query_plan_config_update(
+        include_str!(
+            "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
+        ),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:275f78612ed3d45cdf6bf328ef83e368b5a44393bd8c944d4a7d694aed61f017",
+    )
+    .await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn query_planner_redis_update_reuse_query_fragments() {
+    test_redis_query_plan_config_update(
+        include_str!(
+            "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
+        ),
+        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:15fbb62c94e8da6ea78f28a6eb86a615dcaf27ff6fd0748fac4eb614b0b17662",
+    )
+    .await;
+}
+
+async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key: &str) {
+    // This test shows that the redis key changes when the query planner config changes.
+    // The test starts a router with a specific config, executes a query, and checks the redis cache key.
+    // Then it updates the config, executes the query again, and checks the redis cache key.
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/query_planner_redis_config_update.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.clear_redis_cache().await;
+
+    let starting_key = "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c";
+    router.execute_default_query().await;
+    router.assert_redis_cache_contains(starting_key, None).await;
+    router.update_config(updated_config).await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_redis_cache_contains(new_cache_key, Some(starting_key))
+        .await;
 }

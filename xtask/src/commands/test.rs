@@ -21,6 +21,10 @@ pub struct Test {
     /// Pass --workspace to cargo test
     #[clap(long)]
     workspace: bool,
+
+    /// Pass --features to cargo test
+    #[clap(long)]
+    features: Option<String>,
 }
 
 impl Test {
@@ -45,6 +49,11 @@ impl Test {
 
             if self.workspace {
                 args.push("--workspace".to_string());
+            }
+
+            if let Some(features) = &self.features {
+                args.push("--features".to_string());
+                args.push(features.to_owned());
             }
 
             cargo!(args);

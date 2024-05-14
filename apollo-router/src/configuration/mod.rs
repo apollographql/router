@@ -405,6 +405,27 @@ impl Configuration {
                 .build()
             ).build())
     }
+
+    pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
+        router_bridge::planner::QueryPlannerConfig {
+            reuse_query_fragments: self.supergraph.reuse_query_fragments,
+            generate_query_fragments: Some(self.supergraph.generate_query_fragments),
+            incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
+                enable_defer: Some(self.supergraph.defer_support),
+            }),
+            graphql_validation: false,
+            debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
+                bypass_planner_for_single_subgraph: None,
+                max_evaluated_plans: self
+                    .supergraph
+                    .query_planning
+                    .experimental_plans_limit
+                    .or(Some(10000)),
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            }),
+            type_conditioned_fetching: false,
+        }
+    }
 }
 
 impl Default for Configuration {

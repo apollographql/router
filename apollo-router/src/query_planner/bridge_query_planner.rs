@@ -13,12 +13,9 @@ use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
-use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
-use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -170,31 +167,16 @@ impl PlannerMode {
         sdl: &str,
         configuration: &Configuration,
     ) -> Result<Arc<Planner<QueryPlanResult>>, ServiceBuildError> {
-        let planner = Planner::new(
-            sdl.to_owned(),
-            QueryPlannerConfig {
-                reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-                generate_query_fragments: Some(configuration.supergraph.generate_query_fragments),
-                incremental_delivery: Some(IncrementalDeliverySupport {
-                    enable_defer: Some(configuration.supergraph.defer_support),
-                }),
-                graphql_validation: false,
-                debug: Some(QueryPlannerDebugConfig {
-                    bypass_planner_for_single_subgraph: None,
-                    max_evaluated_plans: configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_plans_limit
-                        .or(Some(10000)),
-                    paths_limit: configuration
-                        .supergraph
-                        .query_planning
-                        .experimental_paths_limit,
-                }),
-                type_conditioned_fetching: false,
-            },
-        )
-        .await?;
+        let query_planner_configuration = configuration.js_query_planner_config();
+        /*let planner = match old_planner {
+            None => Planner::new(sdl.to_owned(), query_planner_configuration).await?,
+            Some(old_planner) => {
+                old_planner
+                    .update(sdl.to_owned(), query_planner_configuration)
+                    .await?
+            }
+        };*/
+        let planner = Planner::new(sdl.to_owned(), query_planner_configuration).await?;
         Ok(Arc::new(planner))
     }
 
@@ -476,16 +458,18 @@ impl BridgeQueryPlanner {
             old_planner
                 .update(
                     schema.clone(),
-                    QueryPlannerConfig {
-                        incremental_delivery: Some(IncrementalDeliverySupport {
-                            enable_defer: Some(configuration.supergraph.defer_support),
-                        }),
+                    router_bridge::planner::QueryPlannerConfig {
+                        incremental_delivery: Some(
+                            router_bridge::planner::IncrementalDeliverySupport {
+                                enable_defer: Some(configuration.supergraph.defer_support),
+                            },
+                        ),
                         graphql_validation: false,
                         reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
                         generate_query_fragments: Some(
                             configuration.supergraph.generate_query_fragments,
                         ),
-                        debug: Some(QueryPlannerDebugConfig {
+                        debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
                             bypass_planner_for_single_subgraph: None,
                             max_evaluated_plans: configuration
                                 .supergraph

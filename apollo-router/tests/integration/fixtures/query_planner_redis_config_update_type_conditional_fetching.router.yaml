@@ -1,0 +1,11 @@
+# This config updates the query plan options so that we can see if there is a different redis cache entry generted for query plans
+supergraph:
+  query_planning:
+    cache:
+      redis:
+        required_to_start: true
+        urls:
+          - redis://localhost:6379
+        ttl: 10s
+#experimental_type_conditioned_fetching: true
+
