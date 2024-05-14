@@ -31,16 +31,35 @@ fn main() -> Result<ExitCode, Box<dyn Error>> {
     let mut tests = Vec::new();
     let path = env::current_dir()?.join("tests/samples");
 
+    lookup_dir(&path, "", &mut tests)?;
+
+    Ok(libtest_mimic::run(&args, tests).exit_code())
+}
+
+fn lookup_dir(
+    path: &Path,
+    name_prefix: &str,
+    tests: &mut Vec<Trial>,
+) -> Result<(), Box<dyn Error>> {
     for entry in fs::read_dir(path)? {
         let entry = entry?;
 
-        // Handle files
-        let path = entry.path();
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        tests.push(Trial::test(name, move || test(&path)));
+        if entry.file_type()?.is_dir() {
+            let path = entry.path();
+            let name = format!(
+                "{name_prefix}/{}",
+                path.file_name().unwrap().to_str().unwrap()
+            );
+
+            if path.join("plan.json").exists() {
+                tests.push(Trial::test(name, move || test(&path)));
+            } else {
+                lookup_dir(&path, &name, tests)?;
+            }
+        }
     }
 
-    Ok(libtest_mimic::run(&args, tests).exit_code())
+    Ok(())
 }
 
 fn test(path: &PathBuf) -> Result<(), Failed> {
