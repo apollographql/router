@@ -31,6 +31,7 @@ fn some_name() {
 }
 */
 
+mod fetch_operation_names;
 mod provides;
 mod requires;
 mod shareable_root_fields;
