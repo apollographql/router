@@ -356,7 +356,7 @@ path = "tests/integration_tests.rs"
 
 [[test]]
 name = "samples"
-path = "tests/samples_test.rs"
+path = "tests/samples_tests.rs"
 harness = false
 
 [[bench]]
