@@ -1,15 +1,15 @@
 ---
 source: apollo-router/src/apollo_studio_interop/tests.rs
-expression: "&generated"
+expression: generated
 ---
 result:
-  statsReportKey: "# -\nmutation{noInputMutation{id}}"
+  statsReportKey: "# -\n{noInputQuery{id}}"
   referencedFieldsByType:
     EverythingResponse:
       fieldNames:
         - id
       isInterface: false
-    Mutation:
+    Query:
       fieldNames:
-        - noInputMutation
+        - noInputQuery
       isInterface: false
