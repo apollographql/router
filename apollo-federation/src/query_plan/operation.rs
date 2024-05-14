@@ -2370,12 +2370,12 @@ impl SelectionSet {
                 }
                 SelectionValue::FragmentSpread(fragment_spread) => {
                     // at this point in time all fragment spreads should have been converted into inline fragments
-                    return Err(FederationError::SingleFederationError(Internal {
-                        message: format!(
+                    return Err(FederationError::internal(
+                        format!(
                             "Error while optimizing sibling typename information, selection set contains {} named fragment",
                             fragment_spread.get().spread.data().fragment_name
-                        ),
-                    }));
+                        )
+                    ));
                 }
             }
         }
@@ -3389,11 +3389,9 @@ pub(crate) fn subselection_type_if_abstract(
                     r.original_fragments
                         .get(&fragment_spread.spread.data().fragment_name)
                 })
-                .ok_or(FederationError::SingleFederationError(
-                    crate::error::SingleFederationError::InvalidGraphQL {
-                        message: "missing fragment".to_string(),
-                    },
-                ))
+                .ok_or(crate::error::SingleFederationError::InvalidGraphQL {
+                    message: "missing fragment".to_string(),
+                })
                 //FIXME: return error
                 .ok()?;
             match fragment.type_condition_position.clone() {
