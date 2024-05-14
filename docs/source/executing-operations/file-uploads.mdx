@@ -81,9 +81,15 @@ By default, receiving client file uploads isn't enabled in the Apollo Router.
 To enable file upload support, set the following fields in your `router.yaml` configuration file:
 
 ```yaml title="router.yaml"
-batching:
+preview_file_uploads:
   enabled: true
-  mode: batch_http_link
+  protocols:
+    multipart:
+      enabled: true
+      mode: stream
+      limits:
+        max_file_size: 1mb
+        max_files: 10
 ```
 
 #### Mode
