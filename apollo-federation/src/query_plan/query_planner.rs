@@ -499,7 +499,6 @@ impl QueryPlanner {
     }
 }
 
-#[allow(dead_code, unused, unreachable_code, unconditional_panic)]
 fn compute_root_serial_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
@@ -509,8 +508,6 @@ fn compute_root_serial_dependency_graph(
         supergraph_schema,
         federated_query_graph,
         operation,
-        head,
-        config,
         ..
     } = parameters;
     let root_type: Option<CompositeTypeDefinitionPosition> = if has_defers {
@@ -580,7 +577,6 @@ fn compute_root_serial_dependency_graph(
     Ok(digest)
 }
 
-#[allow(unreachable_code)]
 fn split_top_level_fields(
     selection_set: SelectionSet,
 ) -> Box<dyn 'static + Iterator<Item = SelectionSet>> {
@@ -601,7 +597,7 @@ fn split_top_level_fields(
                     .into_iter()
                     .flat_map(split_top_level_fields)
                     .map(|_set| todo!("Port mapping that uses selectionSetOfElement")),
-                    // return splitTopLevelFields(selection.selectionSet).map(s => selectionSetOfElement(selection.element, s));
+                // return splitTopLevelFields(selection.selectionSet).map(s => selectionSetOfElement(selection.element, s));
             )
         };
         digest

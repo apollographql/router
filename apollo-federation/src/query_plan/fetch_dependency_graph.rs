@@ -492,7 +492,9 @@ impl FetchDependencyGraph {
         self.fetch_id_generation.next_id()
     }
 
-    pub(crate) fn root_node_by_subgraph_iter(&self) -> impl Iterator<Item = (&NodeStr, &NodeIndex)> {
+    pub(crate) fn root_node_by_subgraph_iter(
+        &self,
+    ) -> impl Iterator<Item = (&NodeStr, &NodeIndex)> {
         self.root_nodes_by_subgraph.iter()
     }
 
