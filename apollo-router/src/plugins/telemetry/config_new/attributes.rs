@@ -904,13 +904,13 @@ impl Selectors for SupergraphAttributes {
         attrs
     }
 
-    fn on_event_response(
+    fn on_response_event(
         &self,
         response: &Self::EventResponse,
         context: &Context,
     ) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
-        attrs.append(&mut self.cost.on_event_response(response, context));
+        attrs.append(&mut self.cost.on_response_event(response, context));
         attrs
     }
 

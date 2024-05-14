@@ -471,10 +471,10 @@ where
         }
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
-            Self::Extendable { attributes } => attributes.on_event_response(response, ctx),
+            Self::Extendable { attributes } => attributes.on_response_event(response, ctx),
         }
     }
 }
@@ -577,12 +577,12 @@ where
         self.attributes.on_response(response)
     }
 
-    fn on_event_response(
+    fn on_response_event(
         &self,
         response: &Self::EventResponse,
         ctx: &Context,
     ) -> Vec<opentelemetry_api::KeyValue> {
-        self.attributes.on_event_response(response, ctx)
+        self.attributes.on_response_event(response, ctx)
     }
 
     fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
@@ -641,7 +641,7 @@ pub(crate) trait Instrumented {
 
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
-    fn on_event_response(&self, _response: &Self::EventResponse, _ctx: &Context) {}
+    fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
@@ -666,8 +666,8 @@ where
         self.attributes.on_response(response);
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
-        self.attributes.on_event_response(response, ctx);
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        self.attributes.on_response_event(response, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -856,12 +856,12 @@ where
         }
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         for counter in &self.counters {
-            counter.on_event_response(response, ctx);
+            counter.on_response_event(response, ctx);
         }
         for histogram in &self.histograms {
-            histogram.on_event_response(response, ctx);
+            histogram.on_response_event(response, ctx);
         }
     }
 }
@@ -959,9 +959,9 @@ impl Instrumented for SupergraphInstruments {
         self.custom.on_error(error, ctx);
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
-        self.cost.on_event_response(response, ctx);
-        self.custom.on_event_response(response, ctx);
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        self.cost.on_response_event(response, ctx);
+        self.custom.on_response_event(response, ctx);
     }
 }
 
@@ -1175,14 +1175,14 @@ where
         }
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
         let attrs: Vec<KeyValue> = inner
             .selectors
-            .on_event_response(response, ctx)
+            .on_response_event(response, ctx)
             .into_iter()
             .collect();
         inner.attributes.extend(attrs);
@@ -1190,7 +1190,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_event_response(response, ctx))
+            .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
@@ -1479,7 +1479,7 @@ where
         }
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
@@ -1487,13 +1487,13 @@ where
         let mut attrs: Vec<KeyValue> = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_event_response(response, ctx).into_iter().collect())
+            .map(|s| s.on_response_event(response, ctx).into_iter().collect())
             .unwrap_or_default();
         attrs.extend(inner.attributes.clone());
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_event_response(response, ctx))
+            .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
@@ -1919,7 +1919,7 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_event_response(
+            custom_instruments.on_response_event(
                 &graphql::Response::builder()
                     .data(json!({
                         "price": 500
@@ -1963,7 +1963,7 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_event_response(
+            custom_instruments.on_response_event(
                 &graphql::Response::builder()
                     .data(json!({
                         "price": 500
@@ -2003,7 +2003,7 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_event_response(
+            custom_instruments.on_response_event(
                 &graphql::Response::builder()
                     .data(serde_json_bytes::json!({"foo": "bar"}))
                     .build(),

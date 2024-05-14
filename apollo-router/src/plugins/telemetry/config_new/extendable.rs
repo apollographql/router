@@ -217,11 +217,11 @@ where
         self.attributes.on_error(error)
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
-        let mut attrs = self.attributes.on_event_response(response, ctx);
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_response_event(response, ctx);
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
-                .on_event_response(response, ctx)
+                .on_response_event(response, ctx)
                 .map(|v| KeyValue::new(key.clone(), v))
         });
         attrs.extend(custom_attributes);

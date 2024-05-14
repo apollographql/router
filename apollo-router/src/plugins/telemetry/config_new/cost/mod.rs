@@ -63,7 +63,7 @@ impl Selectors for SupergraphCostAttributes {
         Vec::default()
     }
 
-    fn on_event_response(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_event(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
         let cost_result = ctx.extensions().lock().get::<CostContext>().cloned();
         if let Some(cost_result) = cost_result {
@@ -243,15 +243,15 @@ impl Instrumented for CostInstruments {
         }
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         if let Some(cost_estimated) = &self.cost_estimated {
-            cost_estimated.on_event_response(response, ctx);
+            cost_estimated.on_response_event(response, ctx);
         }
         if let Some(cost_actual) = &self.cost_actual {
-            cost_actual.on_event_response(response, ctx);
+            cost_actual.on_response_event(response, ctx);
         }
         if let Some(cost_delta) = &self.cost_delta {
-            cost_delta.on_event_response(response, ctx);
+            cost_delta.on_response_event(response, ctx);
         }
     }
 }
@@ -399,6 +399,6 @@ mod test {
                 .expect("response"),
         );
 
-        instruments.on_event_response(&crate::graphql::Response::default(), &context);
+        instruments.on_response_event(&crate::graphql::Response::default(), &context);
     }
 }

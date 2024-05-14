@@ -198,7 +198,7 @@ where
         }
     }
 
-    fn on_event_response(
+    fn on_response_event(
         &self,
         response: &Self::EventResponse,
         ctx: &Context,
@@ -219,14 +219,14 @@ where
             (State::Pending | State::Returned, Some(condition)) => {
                 // We don't have a value already, let's try to get it from the response if the condition was evaluated to true.
                 if condition.lock().evaluate_event_response(response, ctx) {
-                    self.selector.on_event_response(response, ctx)
+                    self.selector.on_response_event(response, ctx)
                 } else {
                     None
                 }
             }
             (State::Pending, None) => {
                 // We don't have a value already, and there is no condition.
-                self.selector.on_event_response(response, ctx)
+                self.selector.on_response_event(response, ctx)
             }
             _ => None,
         }

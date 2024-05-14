@@ -756,7 +756,7 @@ impl Selector for SupergraphSelector {
         }
     }
 
-    fn on_event_response(
+    fn on_response_event(
         &self,
         response: &Self::EventResponse,
         ctx: &Context,

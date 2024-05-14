@@ -306,9 +306,9 @@ impl Instrumented
         }
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         for custom_event in &self.custom {
-            custom_event.on_event_response(response, ctx);
+            custom_event.on_response_event(response, ctx);
         }
     }
 
@@ -529,7 +529,7 @@ where
         inner.send_event();
     }
 
-    fn on_event_response(&self, response: &Self::EventResponse, ctx: &Context) {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         let mut inner = self.inner.lock();
         if inner.event_on != EventOn::EventResponse {
             return;
@@ -539,7 +539,7 @@ where
             return;
         }
         if let Some(selectors) = &inner.selectors {
-            let mut new_attributes = selectors.on_event_response(response, ctx);
+            let mut new_attributes = selectors.on_response_event(response, ctx);
             inner.attributes.append(&mut new_attributes);
         }
 

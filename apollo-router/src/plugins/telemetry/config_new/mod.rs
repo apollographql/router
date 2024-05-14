@@ -33,7 +33,7 @@ pub(crate) trait Selectors {
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue>;
     fn on_response(&self, response: &Self::Response) -> Vec<KeyValue>;
-    fn on_event_response(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
         Vec::with_capacity(0)
     }
     fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
@@ -46,7 +46,7 @@ pub(crate) trait Selector {
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value>;
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value>;
-    fn on_event_response(
+    fn on_response_event(
         &self,
         _response: &Self::EventResponse,
         _ctx: &Context,

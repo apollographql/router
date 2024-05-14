@@ -952,8 +952,8 @@ impl Telemetry {
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
                 let stream = stream.inspect(move |resp| {
-                    custom_instruments.on_event_response(resp, &ctx);
-                    custom_events.on_event_response(resp, &ctx);
+                    custom_instruments.on_response_event(resp, &ctx);
+                    custom_events.on_response_event(resp, &ctx);
                 });
                 let (first_response, rest) = stream.into_future().await;
 

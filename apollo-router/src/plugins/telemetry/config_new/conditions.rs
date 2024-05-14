@@ -185,29 +185,29 @@ where
     ) -> bool {
         match self {
             Condition::Eq(eq) => {
-                let left = eq[0].on_event_response(response, ctx);
-                let right = eq[1].on_event_response(response, ctx);
+                let left = eq[0].on_response_event(response, ctx);
+                let right = eq[1].on_response_event(response, ctx);
                 left == right
             }
             Condition::Gt(gt) => {
                 let left_att = gt[0]
-                    .on_event_response(response, ctx)
+                    .on_response_event(response, ctx)
                     .map(AttributeValue::from);
                 let right_att = gt[1]
-                    .on_event_response(response, ctx)
+                    .on_response_event(response, ctx)
                     .map(AttributeValue::from);
                 left_att.zip(right_att).map_or(false, |(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0]
-                    .on_event_response(response, ctx)
+                    .on_response_event(response, ctx)
                     .map(AttributeValue::from);
                 let right_att = gt[1]
-                    .on_event_response(response, ctx)
+                    .on_response_event(response, ctx)
                     .map(AttributeValue::from);
                 left_att.zip(right_att).map_or(false, |(l, r)| l < r)
             }
-            Condition::Exists(exist) => exist.on_event_response(response, ctx).is_some(),
+            Condition::Exists(exist) => exist.on_response_event(response, ctx).is_some(),
             Condition::All(all) => all.iter().all(|c| c.evaluate_event_response(response, ctx)),
             Condition::Any(any) => any.iter().any(|c| c.evaluate_event_response(response, ctx)),
             Condition::Not(not) => !not.evaluate_event_response(response, ctx),
@@ -291,10 +291,10 @@ where
         }
     }
 
-    fn on_event_response(&self, response: &T::EventResponse, ctx: &Context) -> Option<Value> {
+    fn on_response_event(&self, response: &T::EventResponse, ctx: &Context) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
-            SelectorOrValue::Selector(selector) => selector.on_event_response(response, ctx),
+            SelectorOrValue::Selector(selector) => selector.on_response_event(response, ctx),
         }
     }
 
@@ -334,7 +334,7 @@ mod test {
             Some(error.to_string().into())
         }
 
-        fn on_event_response(
+        fn on_response_event(
             &self,
             response: &Self::EventResponse,
             _ctx: &crate::Context,
@@ -360,7 +360,7 @@ mod test {
             }
         }
 
-        fn on_event_response(
+        fn on_response_event(
             &self,
             response: &Self::EventResponse,
             _ctx: &crate::Context,
