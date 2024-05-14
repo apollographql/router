@@ -796,7 +796,7 @@ type User
             },
             Parallel {
               Sequence {
-                Flatten(path: "bestRatedProducts.*") {
+                Flatten(path: "bestRatedProducts.@") {
                   Fetch(service: "products") {
                     {
                       ... on Movie {
@@ -814,7 +814,7 @@ type User
                     }
                   },
                 },
-                Flatten(path: "bestRatedProducts.*.vendor") {
+                Flatten(path: "bestRatedProducts.@.vendor") {
                   Fetch(service: "accounts") {
                     {
                       ... on User {
@@ -831,7 +831,7 @@ type User
                 },
               },
               Sequence {
-                Flatten(path: "bestRatedProducts.*") {
+                Flatten(path: "bestRatedProducts.@") {
                   Fetch(service: "products") {
                     {
                       ... on Book {
@@ -849,7 +849,7 @@ type User
                     }
                   },
                 },
-                Flatten(path: "bestRatedProducts.*.vendor") {
+                Flatten(path: "bestRatedProducts.@.vendor") {
                   Fetch(service: "accounts") {
                     {
                       ... on User {
