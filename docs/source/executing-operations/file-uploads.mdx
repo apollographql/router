@@ -88,13 +88,13 @@ preview_file_uploads:
       enabled: true
       mode: stream
       limits:
-        max_file_size: 5mb # default 1mb
-        max_files: 2 # default 10
+        max_file_size: 1mb
+        max_files: 10
 ```
 
 #### Mode
 
-The only supported `mode` is `streaming`.
+The only supported `mode` is `stream`.
 That means the router doesn't retain uploaded files in memory during a request.
 Streaming file uploads can be more memory-efficient, especially for large files, since it avoids loading the entire file into memory.
 
@@ -181,12 +181,12 @@ Supported file upload mode
 </td>
 <td>
 
-`streaming`
+`stream`
 
 </td>
 <td> 
 
-`streaming`
+`stream`
 
 </td>
 </tr>
@@ -201,7 +201,7 @@ If this limit is exceeded, the router rejects the entire request.
 </td>
 <td>
 
-`1mb`
+`512kb`
 
 </td>
 <td>
@@ -221,7 +221,7 @@ If this limit is exceeded, the router rejects the entire request.
 </td>
 <td>
 
-`4`
+`5`
 
 </td>
 <td>integer</td>
