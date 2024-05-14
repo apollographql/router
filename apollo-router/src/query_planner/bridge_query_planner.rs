@@ -6,19 +6,18 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
-use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
-use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde_json_bytes::Map;
@@ -35,6 +34,7 @@ use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
+use crate::error::ValidationErrors;
 use crate::executable::USING_CATCH_UNWIND;
 use crate::graphql;
 use crate::introspection::Introspection;
@@ -156,27 +156,7 @@ impl PlannerMode {
         configuration: &Configuration,
         old_planner: Option<Arc<Planner<QueryPlanResult>>>,
     ) -> Result<Arc<Planner<QueryPlanResult>>, ServiceBuildError> {
-        let query_planner_configuration = QueryPlannerConfig {
-            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-            generate_query_fragments: Some(configuration.supergraph.generate_query_fragments),
-            incremental_delivery: Some(IncrementalDeliverySupport {
-                enable_defer: Some(configuration.supergraph.defer_support),
-            }),
-            graphql_validation: false,
-            debug: Some(QueryPlannerDebugConfig {
-                bypass_planner_for_single_subgraph: None,
-                max_evaluated_plans: configuration
-                    .supergraph
-                    .query_planning
-                    .experimental_plans_limit
-                    .or(Some(10000)),
-                paths_limit: configuration
-                    .supergraph
-                    .query_planning
-                    .experimental_paths_limit,
-            }),
-            type_conditioned_fetching: configuration.experimental_type_conditioned_fetching,
-        };
+        let query_planner_configuration = configuration.js_query_planner_config();
         let planner = match old_planner {
             None => Planner::new(sdl.to_owned(), query_planner_configuration).await?,
             Some(old_planner) => {
@@ -224,8 +204,11 @@ impl PlannerMode {
                 )
                 .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
 
-                let plan = rust
-                    .build_query_plan(&document, operation.as_deref())
+                let plan = operation
+                    .as_deref()
+                    .map(|n| Name::new(n).map_err(FederationError::from))
+                    .transpose()
+                    .and_then(|operation| rust.build_query_plan(&document, operation))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()))?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
@@ -257,7 +240,8 @@ impl PlannerMode {
                 // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
                 let rust_result = std::panic::catch_unwind(|| {
                     USING_CATCH_UNWIND.set(true);
-                    let result = rust.build_query_plan(&document, operation.as_deref());
+                    let operation = operation.as_deref().map(Name::new).transpose()?;
+                    let result = rust.build_query_plan(&document, operation);
                     USING_CATCH_UNWIND.set(false);
                     result
                 })
@@ -302,8 +286,16 @@ impl PlannerMode {
 
                     (Ok(js_plan), Ok(rust_plan)) => {
                         is_matched = js_plan.data.query_plan == rust_plan.into();
-                        if !is_matched {
-                            // TODO: tracing::debug!(diff)
+                        if is_matched {
+                            tracing::debug!("JS and Rust query plans match! 🎉");
+                        } else {
+                            tracing::warn!("JS v.s. Rust query plan mismatch");
+                            if let Some(formatted) = &js_plan.data.formatted_query_plan {
+                                tracing::debug!(
+                                    "Diff:\n{}",
+                                    render_diff(&diff::lines(formatted, &rust_plan.to_string()))
+                                );
+                            }
                         }
                     }
                 }
@@ -553,7 +545,7 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl);
+            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl)?;
         plan_success
             .data
             .query_plan
@@ -985,10 +977,11 @@ impl QueryPlan {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
-    ) {
+    ) -> Result<(), ValidationErrors> {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash);
+            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
         }
+        Ok(())
     }
 
     fn extract_authorization_metadata(

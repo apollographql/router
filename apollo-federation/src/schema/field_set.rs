@@ -1,22 +1,31 @@
-use crate::error::{FederationError, MultipleFederationErrors, SingleFederationError};
-use crate::query_plan::operation::{NamedFragments, NormalizedSelectionSet};
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, InterfaceTypeDefinitionPosition,
-    ObjectTypeDefinitionPosition, UnionTypeDefinitionPosition,
-};
-use crate::schema::{FederationSchema, ValidFederationSchema};
-use apollo_compiler::executable::{FieldSet, Selection, SelectionSet};
-use apollo_compiler::schema::{ExtendedType, NamedType};
+use apollo_compiler::executable;
+use apollo_compiler::executable::FieldSet;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::{NodeStr, Schema};
+use apollo_compiler::NodeStr;
+use apollo_compiler::Schema;
 use indexmap::IndexMap;
+
+use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
+use crate::query_plan::operation::NamedFragments;
+use crate::query_plan::operation::SelectionSet;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::FederationSchema;
+use crate::schema::ValidFederationSchema;
 
 // Federation spec does not allow the alias syntax in field set strings.
 // However, since `parse_field_set` uses the standard GraphQL parser, which allows aliases,
 // we need this secondary check to ensure that aliases are not used.
 fn check_absence_of_aliases(
     field_set: &Valid<FieldSet>,
-    code_str: &NodeStr,
+    code_str: &str,
 ) -> Result<(), FederationError> {
     let aliases = field_set.selection_set.fields().filter_map(|field| {
         field.alias.as_ref().map(|alias|
@@ -36,23 +45,23 @@ fn check_absence_of_aliases(
 pub(crate) fn parse_field_set(
     schema: &ValidFederationSchema,
     parent_type_name: NamedType,
-    value: NodeStr,
-) -> Result<NormalizedSelectionSet, FederationError> {
+    value: &str,
+) -> Result<SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set = FieldSet::parse_and_validate(
         schema.schema(),
         parent_type_name,
-        value.as_str(),
+        value,
         "field_set.graphql",
     )?;
 
     // Validate the field set has no aliases.
-    check_absence_of_aliases(&field_set, &value)?;
+    check_absence_of_aliases(&field_set, value)?;
 
     // field set should not contain any named fragments
     let named_fragments = NamedFragments::new(&IndexMap::new(), schema);
-    NormalizedSelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)
+    SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)
 }
 
 /// This exists because there's a single callsite in extract_subgraphs_from_supergraph() that needs
@@ -63,16 +72,12 @@ pub(crate) fn parse_field_set(
 pub(crate) fn parse_field_set_without_normalization(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
-    value: NodeStr,
-) -> Result<SelectionSet, FederationError> {
+    value: &str,
+) -> Result<executable::SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
-    let field_set = FieldSet::parse_and_validate(
-        schema,
-        parent_type_name,
-        value.as_str(),
-        "field_set.graphql",
-    )?;
+    let field_set =
+        FieldSet::parse_and_validate(schema, parent_type_name, value, "field_set.graphql")?;
     Ok(field_set.into_inner().selection_set)
 }
 
@@ -124,18 +129,18 @@ pub(crate) fn collect_target_fields_from_field_set(
         // selections in reverse order to fix it.
         for selection in selection_set.selections.iter().rev() {
             match selection {
-                Selection::Field(field) => {
+                executable::Selection::Field(field) => {
                     fields.push(parent_type_position.field(field.name.clone())?);
                     if !field.selection_set.selections.is_empty() {
                         stack.push(&field.selection_set);
                     }
                 }
-                Selection::FragmentSpread(_) => {
+                executable::Selection::FragmentSpread(_) => {
                     return Err(FederationError::internal(
                         "Unexpectedly encountered fragment spread in FieldSet.",
                     ));
                 }
-                Selection::InlineFragment(inline_fragment) => {
+                executable::Selection::InlineFragment(inline_fragment) => {
                     stack.push(&inline_fragment.selection_set);
                 }
             }
@@ -177,11 +182,12 @@ pub(crate) fn add_interface_field_implementations(
 
 #[cfg(test)]
 mod tests {
-    use crate::{
-        error::FederationError, query_graph::build_federated_query_graph, subgraph::Subgraph,
-        Supergraph,
-    };
     use apollo_compiler::schema::Name;
+
+    use crate::error::FederationError;
+    use crate::query_graph::build_federated_query_graph;
+    use crate::subgraph::Subgraph;
+    use crate::Supergraph;
 
     #[test]
     fn test_aliases_in_field_set() -> Result<(), FederationError> {
@@ -194,13 +200,9 @@ mod tests {
 
         let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
         let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
-        let err = super::parse_field_set(
-            &supergraph.schema,
-            Name::new("Query").unwrap(),
-            "r1: r".into(),
-        )
-        .map(|_| "Unexpected success") // ignore the Ok value
-        .expect_err("Expected alias error");
+        let err = super::parse_field_set(&supergraph.schema, Name::new("Query").unwrap(), "r1: r")
+            .map(|_| "Unexpected success") // ignore the Ok value
+            .expect_err("Expected alias error");
         assert_eq!(
             err.to_string(),
             r#"Cannot use alias "r1" in "r1: r": aliases are not currently supported in the used directive"#

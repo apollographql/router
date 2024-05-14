@@ -1,12 +1,17 @@
-use crate::error::FederationError;
-use crate::query_graph::graph_path::{
-    ExcludedConditions, ExcludedDestinations, OpGraphPathContext,
-};
-use crate::query_graph::path_tree::OpPathTree;
-use crate::query_plan::QueryPlanCost;
+// PORT_NOTE: Unlike in JS version, `QueryPlanningTraversal` does not have a
+//            `CachingConditionResolver` as a field, but instead implements the `ConditionResolver`
+//            trait directly using `ConditionResolverCache`.
+use std::sync::Arc;
+
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
-use std::sync::Arc;
+
+use crate::error::FederationError;
+use crate::query_graph::graph_path::ExcludedConditions;
+use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::path_tree::OpPathTree;
+use crate::query_plan::QueryPlanCost;
 
 /// Note that `ConditionResolver`s are guaranteed to be only called for edge with conditions.
 pub(crate) trait ConditionResolver {
@@ -45,24 +50,6 @@ impl ConditionResolution {
 
     pub(crate) fn unsatisfied_conditions() -> Self {
         Self::Unsatisfied { reason: None }
-    }
-}
-
-// PORT_NOTE: In JS version, `QueryPlanningTraversal` has a caching condition resolver as a field.
-//            But in Rust, `QueryPlanningTraversal` implements `ConditionResolver` trait itself,
-//            using `ConditionResolverCache` struct below.
-//            However, `CachingConditionResolver` may still be used in the composition in the future.
-pub(crate) struct CachingConditionResolver;
-
-impl ConditionResolver for CachingConditionResolver {
-    fn resolve(
-        &mut self,
-        _edge: EdgeIndex,
-        _context: &OpGraphPathContext,
-        _excluded_destinations: &ExcludedDestinations,
-        _excluded_conditions: &ExcludedConditions,
-    ) -> Result<ConditionResolution, FederationError> {
-        todo!()
     }
 }
 

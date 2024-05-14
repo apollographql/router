@@ -1,23 +1,30 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::link::federation_spec_definition::{
-    get_federation_spec_definition_from_subgraph, FEDERATION_ENTITY_TYPE_NAME_IN_SPEC,
-};
-use crate::link::LinksMetadata;
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, DirectiveDefinitionPosition, EnumTypeDefinitionPosition,
-    InputObjectTypeDefinitionPosition, InterfaceTypeDefinitionPosition,
-    ObjectTypeDefinitionPosition, ScalarTypeDefinitionPosition, TypeDefinitionPosition,
-    UnionTypeDefinitionPosition,
-};
-use crate::schema::subgraph_metadata::SubgraphMetadata;
-use apollo_compiler::schema::{ExtendedType, Name};
+use std::hash::Hash;
+use std::hash::Hasher;
+use std::ops::Deref;
+use std::sync::Arc;
+
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use indexmap::IndexSet;
 use referencer::Referencers;
-use std::hash::{Hash, Hasher};
-use std::ops::Deref;
-use std::sync::Arc;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::federation_spec_definition::FEDERATION_ENTITY_TYPE_NAME_IN_SPEC;
+use crate::link::LinksMetadata;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::subgraph_metadata::SubgraphMetadata;
 
 pub(crate) mod argument_composition_strategies;
 pub(crate) mod definitions;
@@ -211,7 +218,7 @@ impl FederationSchema {
 }
 
 /// A GraphQL schema with federation data that is known to be valid, and cheap to clone.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct ValidFederationSchema {
     schema: Arc<Valid<FederationSchema>>,
 }
@@ -297,5 +304,11 @@ impl PartialEq for ValidFederationSchema {
 impl Hash for ValidFederationSchema {
     fn hash<H: Hasher>(&self, state: &mut H) {
         Arc::as_ptr(&self.schema).hash(state);
+    }
+}
+
+impl std::fmt::Debug for ValidFederationSchema {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "ValidFederationSchema @ {:?}", Arc::as_ptr(&self.schema))
     }
 }

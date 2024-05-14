@@ -1,40 +1,60 @@
-use crate::error::FederationError;
-use crate::indented_display::{write_indented_lines, State as IndentedFormatter};
-use crate::is_leaf_type;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::link::graphql_definition::{
-    BooleanOrVariable, DeferDirectiveArguments, OperationConditional, OperationConditionalKind,
-};
-use crate::query_graph::condition_resolver::{
-    ConditionResolution, ConditionResolver, UnsatisfiedConditionReason,
-};
-use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition, QueryGraphNodeType};
-use crate::query_plan::operation::{
-    NormalizedField, NormalizedFieldData, NormalizedFieldSelection, NormalizedInlineFragment,
-    NormalizedInlineFragmentData, NormalizedInlineFragmentSelection, NormalizedSelection,
-    NormalizedSelectionSet, SelectionId,
-};
-use crate::query_plan::{FetchDataPathElement, QueryPathElement, QueryPlanCost};
-use crate::schema::position::{
-    AbstractTypeDefinitionPosition, CompositeTypeDefinitionPosition,
-    InterfaceFieldDefinitionPosition, ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition,
-    TypeDefinitionPosition,
-};
-use crate::schema::ValidFederationSchema;
-use apollo_compiler::ast::Value;
-use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::schema::{ExtendedType, Name};
-use apollo_compiler::NodeStr;
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use petgraph::visit::EdgeRef;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashSet};
-use std::fmt::{Display, Formatter, Write};
+use std::collections::BinaryHeap;
+use std::collections::HashSet;
+use std::fmt::Display;
+use std::fmt::Formatter;
+use std::fmt::Write;
 use std::hash::Hash;
 use std::ops::Deref;
-use std::sync::{atomic, Arc};
+use std::sync::atomic;
+use std::sync::Arc;
+
+use apollo_compiler::ast::Value;
+use apollo_compiler::executable::DirectiveList;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
+
+use crate::error::FederationError;
+use crate::indented_display::write_indented_lines;
+use crate::indented_display::State as IndentedFormatter;
+use crate::is_leaf_type;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::link::graphql_definition::BooleanOrVariable;
+use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::link::graphql_definition::OperationConditional;
+use crate::link::graphql_definition::OperationConditionalKind;
+use crate::query_graph::condition_resolver::ConditionResolution;
+use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
+use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::operation::Field;
+use crate::query_plan::operation::FieldData;
+use crate::query_plan::operation::HasSelectionKey;
+use crate::query_plan::operation::InlineFragment;
+use crate::query_plan::operation::InlineFragmentData;
+use crate::query_plan::operation::RebaseErrorHandlingOption;
+use crate::query_plan::operation::SelectionId;
+use crate::query_plan::operation::SelectionKey;
+use crate::query_plan::operation::SelectionSet;
+use crate::query_plan::FetchDataPathElement;
+use crate::query_plan::QueryPathElement;
+use crate::query_plan::QueryPlanCost;
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::ValidFederationSchema;
 
 /// An immutable path in a query graph.
 ///
@@ -240,11 +260,18 @@ impl Display for OpGraphPathTrigger {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
+impl Deref for OpPath {
+    type Target = [Arc<OpPathElement>];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl std::fmt::Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
             if i > 0 {
-                write!(f, ", ")?;
+                write!(f, "::")?;
             }
             match element.deref() {
                 OpPathElement::Field(field) => write!(f, "{field}")?,
@@ -257,8 +284,17 @@ impl std::fmt::Display for OpPath {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
 pub(crate) enum OpPathElement {
-    Field(NormalizedField),
-    InlineFragment(NormalizedInlineFragment),
+    Field(Field),
+    InlineFragment(InlineFragment),
+}
+
+impl HasSelectionKey for OpPathElement {
+    fn key(&self) -> SelectionKey {
+        match self {
+            OpPathElement::Field(field) => field.key(),
+            OpPathElement::InlineFragment(fragment) => fragment.key(),
+        }
+    }
 }
 
 impl OpPathElement {
@@ -266,6 +302,13 @@ impl OpPathElement {
         match self {
             OpPathElement::Field(field) => &field.data().directives,
             OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.data().directives,
+        }
+    }
+
+    pub(crate) fn schema(&self) -> &ValidFederationSchema {
+        match self {
+            OpPathElement::Field(field) => field.schema(),
+            OpPathElement::InlineFragment(fragment) => fragment.schema(),
         }
     }
 
@@ -387,29 +430,22 @@ impl OpPathElement {
             }
         }
     }
-}
 
-pub(crate) fn selection_of_element(
-    element: OpPathElement,
-    sub_selection: Option<NormalizedSelectionSet>,
-) -> Result<NormalizedSelection, FederationError> {
-    // TODO: validate that the subSelection is ok for the element
-    Ok(match element {
-        OpPathElement::Field(field) => {
-            NormalizedSelection::Field(Arc::new(NormalizedFieldSelection {
-                field,
-                selection_set: sub_selection,
-            }))
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        error_handling: RebaseErrorHandlingOption,
+    ) -> Result<Option<OpPathElement>, FederationError> {
+        match self {
+            OpPathElement::Field(field) => field
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
+            OpPathElement::InlineFragment(inline) => inline
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
         }
-        OpPathElement::InlineFragment(inline_fragment) => {
-            NormalizedSelection::InlineFragment(Arc::new(NormalizedInlineFragmentSelection {
-                inline_fragment,
-                selection_set: sub_selection.ok_or_else(|| {
-                    FederationError::internal("Expected a selection set for an inline fragment")
-                })?,
-            }))
-        }
-    })
+    }
 }
 
 impl Display for OpPathElement {
@@ -421,14 +457,14 @@ impl Display for OpPathElement {
     }
 }
 
-impl From<NormalizedField> for OpGraphPathTrigger {
-    fn from(value: NormalizedField) -> Self {
+impl From<Field> for OpGraphPathTrigger {
+    fn from(value: Field) -> Self {
         OpPathElement::from(value).into()
     }
 }
 
-impl From<NormalizedInlineFragment> for OpGraphPathTrigger {
-    fn from(value: NormalizedInlineFragment) -> Self {
+impl From<InlineFragment> for OpGraphPathTrigger {
+    fn from(value: InlineFragment) -> Self {
         OpPathElement::from(value).into()
     }
 }
@@ -574,14 +610,14 @@ impl Default for ExcludedDestinations {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ExcludedConditions(Arc<Vec<Arc<NormalizedSelectionSet>>>);
+pub(crate) struct ExcludedConditions(Arc<Vec<Arc<SelectionSet>>>);
 
 impl ExcludedConditions {
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
-    fn is_excluded(&self, condition: Option<&Arc<NormalizedSelectionSet>>) -> bool {
+    fn is_excluded(&self, condition: Option<&Arc<SelectionSet>>) -> bool {
         let Some(condition) = condition else {
             return false;
         };
@@ -589,7 +625,7 @@ impl ExcludedConditions {
     }
 
     /// Immutable version of `push`.
-    pub(crate) fn add_item(&self, value: &NormalizedSelectionSet) -> ExcludedConditions {
+    pub(crate) fn add_item(&self, value: &SelectionSet) -> ExcludedConditions {
         let mut result = self.0.as_ref().clone();
         result.push(value.clone().into());
         ExcludedConditions(Arc::new(result))
@@ -642,7 +678,7 @@ impl OpIndirectPaths {
     /// path because this implies that there is a way to fetch `id` "some other way".
     pub(crate) fn filter_non_collecting_paths_for_field(
         &self,
-        field: &NormalizedField,
+        field: &Field,
     ) -> Result<OpIndirectPaths, FederationError> {
         // We only handle leaves; Things are more complex for non-leaves.
         if !field.data().is_leaf()? {
@@ -732,13 +768,13 @@ enum UnadvanceableReason {
 #[derive(Debug)]
 pub(crate) struct ClosedPath {
     pub(crate) paths: SimultaneousPaths,
-    pub(crate) selection_set: Option<Arc<NormalizedSelectionSet>>,
+    pub(crate) selection_set: Option<Arc<SelectionSet>>,
 }
 
 impl ClosedPath {
     pub(crate) fn flatten(
         &self,
-    ) -> impl Iterator<Item = (&OpGraphPath, Option<&Arc<NormalizedSelectionSet>>)> {
+    ) -> impl Iterator<Item = (&OpGraphPath, Option<&Arc<SelectionSet>>)> {
         self.paths
             .0
             .iter()
@@ -758,10 +794,12 @@ impl std::fmt::Display for ClosedPath {
 
 /// A list of the options generated during query planning for a specific "closed branch", which is a
 /// full/closed path in a GraphQL operation (i.e. one that ends in a leaf field).
+#[derive(Debug)]
 pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
+#[derive(Debug)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
@@ -1133,6 +1171,7 @@ where
             return Ok(Box::new(
                 self.graph
                     .out_edges_with_federation_self_edges(self.tail)
+                    .into_iter()
                     .map(|edge_ref| edge_ref.id()),
             ));
         }
@@ -1158,6 +1197,7 @@ where
         Ok(Box::new(
             self.graph
                 .out_edges(self.tail)
+                .into_iter()
                 .map(|edge_ref| edge_ref.id()),
         ))
     }
@@ -1783,21 +1823,18 @@ where
 }
 
 impl OpGraphPath {
-    fn next_edge_for_field(&self, field: &NormalizedField) -> Option<EdgeIndex> {
+    fn next_edge_for_field(&self, field: &Field) -> Option<EdgeIndex> {
         self.graph.edge_for_field(self.tail, field)
     }
 
-    fn next_edge_for_inline_fragment(
-        &self,
-        inline_fragment: &NormalizedInlineFragment,
-    ) -> Option<EdgeIndex> {
+    fn next_edge_for_inline_fragment(&self, inline_fragment: &InlineFragment) -> Option<EdgeIndex> {
         self.graph
             .edge_for_inline_fragment(self.tail, inline_fragment)
     }
 
     fn add_field_edge(
         &self,
-        operation_field: NormalizedField,
+        operation_field: Field,
         edge: EdgeIndex,
         condition_resolver: &mut impl ConditionResolver,
         context: &OpGraphPathContext,
@@ -1955,14 +1992,11 @@ impl OpGraphPath {
         else {
             return Ok(path);
         };
-        let typename_field = NormalizedField::new(NormalizedFieldData {
-            schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
-            field_position: tail_type_pos.introspection_typename_field(),
-            alias: None,
-            arguments: Arc::new(vec![]),
-            directives: Arc::new(Default::default()),
-            sibling_typename: None,
-        });
+        let typename_field = Field::new_introspection_typename(
+            self.graph.schema_by_source(&tail_weight.source)?,
+            &tail_type_pos,
+            None,
+        );
         let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
@@ -2327,7 +2361,7 @@ impl OpGraphPath {
                                     operation_field, edge_weight, self,
                                 )));
                             }
-                            operation_field = NormalizedField::new(NormalizedFieldData {
+                            operation_field = Field::new(FieldData {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
                                 field_position: field_on_tail_type.into(),
                                 alias: operation_field.data().alias.clone(),
@@ -2514,7 +2548,7 @@ impl OpGraphPath {
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in implementations.as_ref() {
                             let implementation_inline_fragment =
-                                NormalizedInlineFragment::new(NormalizedInlineFragmentData {
+                                InlineFragment::new(InlineFragmentData {
                                     schema: self
                                         .graph
                                         .schema_by_source(&tail_weight.source)?
@@ -2703,7 +2737,7 @@ impl OpGraphPath {
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in intersection {
                             let implementation_inline_fragment =
-                                NormalizedInlineFragment::new(NormalizedInlineFragmentData {
+                                InlineFragment::new(InlineFragmentData {
                                     schema: self
                                         .graph
                                         .schema_by_source(&tail_weight.source)?
@@ -2782,7 +2816,7 @@ impl OpGraphPath {
                                     return Ok((Some(vec![self.clone().into()]), None));
                                 }
                                 let operation_inline_fragment =
-                                    NormalizedInlineFragment::new(NormalizedInlineFragmentData {
+                                    InlineFragment::new(InlineFragmentData {
                                         schema: self
                                             .graph
                                             .schema_by_source(&tail_weight.source)?
@@ -3405,9 +3439,7 @@ impl ClosedBranch {
         }
 
         // Keep track of which options should be kept.
-        let mut keep_options = std::iter::repeat_with(|| true)
-            .take(self.0.len())
-            .collect::<Vec<_>>();
+        let mut keep_options = vec![true; self.0.len()];
         for option_index in 0..(self.0.len()) {
             if !keep_options[option_index] {
                 continue;
@@ -3458,6 +3490,10 @@ impl ClosedBranch {
 }
 
 impl OpPath {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -3498,21 +3534,23 @@ impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
 mod tests {
     use std::sync::Arc;
 
-    use apollo_compiler::{executable::DirectiveList, schema::Name, NodeStr, Schema};
-    use petgraph::stable_graph::{EdgeIndex, NodeIndex};
+    use apollo_compiler::executable::DirectiveList;
+    use apollo_compiler::schema::Name;
+    use apollo_compiler::NodeStr;
+    use apollo_compiler::Schema;
+    use petgraph::stable_graph::EdgeIndex;
+    use petgraph::stable_graph::NodeIndex;
 
-    use crate::{
-        query_graph::{
-            build_query_graph::build_query_graph,
-            condition_resolver::ConditionResolution,
-            graph_path::{OpGraphPath, OpGraphPathTrigger, OpPathElement},
-        },
-        query_plan::operation::{NormalizedField, NormalizedFieldData},
-        schema::{
-            position::{FieldDefinitionPosition, ObjectFieldDefinitionPosition},
-            ValidFederationSchema,
-        },
-    };
+    use crate::query_graph::build_query_graph::build_query_graph;
+    use crate::query_graph::condition_resolver::ConditionResolution;
+    use crate::query_graph::graph_path::OpGraphPath;
+    use crate::query_graph::graph_path::OpGraphPathTrigger;
+    use crate::query_graph::graph_path::OpPathElement;
+    use crate::query_plan::operation::Field;
+    use crate::query_plan::operation::FieldData;
+    use crate::schema::position::FieldDefinitionPosition;
+    use crate::schema::position::ObjectFieldDefinitionPosition;
+    use crate::schema::ValidFederationSchema;
 
     #[test]
     fn path_display() {
@@ -3538,7 +3576,7 @@ mod tests {
             type_name: Name::new("T").unwrap(),
             field_name: Name::new("t").unwrap(),
         };
-        let data = NormalizedFieldData {
+        let data = FieldData {
             schema: schema.clone(),
             field_position: FieldDefinitionPosition::Object(pos),
             alias: None,
@@ -3546,8 +3584,7 @@ mod tests {
             directives: Arc::new(DirectiveList::new()),
             sibling_typename: None,
         };
-        let trigger =
-            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(NormalizedField::new(data)));
+        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(
                 trigger,
@@ -3564,7 +3601,7 @@ mod tests {
             type_name: Name::new("ID").unwrap(),
             field_name: Name::new("id").unwrap(),
         };
-        let data = NormalizedFieldData {
+        let data = FieldData {
             schema,
             field_position: FieldDefinitionPosition::Object(pos),
             alias: None,
@@ -3572,8 +3609,7 @@ mod tests {
             directives: Arc::new(DirectiveList::new()),
             sibling_typename: None,
         };
-        let trigger =
-            OpGraphPathTrigger::OpPathElement(OpPathElement::Field(NormalizedField::new(data)));
+        let trigger = OpGraphPathTrigger::OpPathElement(OpPathElement::Field(Field::new(data)));
         let path = path
             .add(
                 trigger,

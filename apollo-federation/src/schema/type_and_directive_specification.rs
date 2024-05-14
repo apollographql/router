@@ -1,20 +1,34 @@
-use indexmap::{IndexMap, IndexSet};
-
-use apollo_compiler::ast::{DirectiveLocation, FieldDefinition, Value};
-use apollo_compiler::schema::{
-    Component, ComponentName, DirectiveDefinition, EnumType, EnumValueDefinition, ExtendedType,
-    InputValueDefinition, Name, ObjectType, ScalarType, Type, UnionType,
-};
+use apollo_compiler::ast::DirectiveLocation;
+use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::ast::Value;
+use apollo_compiler::schema::Component;
+use apollo_compiler::schema::ComponentName;
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::EnumValueDefinition;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::InputValueDefinition;
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::ObjectType;
+use apollo_compiler::schema::ScalarType;
+use apollo_compiler::schema::Type;
+use apollo_compiler::schema::UnionType;
 use apollo_compiler::Node;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
 
-use crate::error::{FederationError, MultipleFederationErrors, SingleFederationError};
+use crate::error::FederationError;
+use crate::error::MultipleFederationErrors;
+use crate::error::SingleFederationError;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
-use crate::schema::position::{
-    DirectiveDefinitionPosition, EnumTypeDefinitionPosition, ObjectTypeDefinitionPosition,
-    ScalarTypeDefinitionPosition, TypeDefinitionPosition, UnionTypeDefinitionPosition,
-};
+use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::position::TypeDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::FederationSchema;
 
 //////////////////////////////////////////////////////////////////////////////
@@ -749,25 +763,20 @@ fn ensure_same_directive_structure(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::{
-        ast::{DirectiveLocation, Type},
-        name,
-    };
+    use apollo_compiler::ast::DirectiveLocation;
+    use apollo_compiler::ast::Type;
+    use apollo_compiler::name;
 
-    use crate::{
-        error::SingleFederationError,
-        link::{
-            link_spec_definition::LinkSpecDefinition,
-            spec::{Identity, Version},
-            spec_definition::SpecDefinition,
-        },
-        schema::{
-            argument_composition_strategies::ArgumentCompositionStrategy,
-            type_and_directive_specification::DirectiveSpecification, FederationSchema,
-        },
-    };
-
-    use super::{ArgumentSpecification, DirectiveArgumentSpecification};
+    use super::ArgumentSpecification;
+    use super::DirectiveArgumentSpecification;
+    use crate::error::SingleFederationError;
+    use crate::link::link_spec_definition::LinkSpecDefinition;
+    use crate::link::spec::Identity;
+    use crate::link::spec::Version;
+    use crate::link::spec_definition::SpecDefinition;
+    use crate::schema::argument_composition_strategies::ArgumentCompositionStrategy;
+    use crate::schema::type_and_directive_specification::DirectiveSpecification;
+    use crate::schema::FederationSchema;
 
     #[test]
     #[should_panic(

@@ -1,3 +1,14 @@
+use std::num::NonZeroU32;
+use std::sync::Arc;
+
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -10,9 +21,10 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphPro
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::operation::normalize_operation;
+use crate::query_plan::operation::NamedFragments;
 use crate::query_plan::operation::NormalizedDefer;
-use crate::query_plan::operation::NormalizedSelectionSet;
 use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -29,17 +41,8 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
-use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
-use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
-use std::num::NonZeroU32;
-use std::sync::Arc;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
     /// Whether the query planner should try to reused the named fragments of the planned query in
     /// subgraph fetches.
@@ -86,7 +89,7 @@ impl Default for QueryPlannerConfig {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Hash)]
 pub struct QueryPlanIncrementalDeliveryConfig {
     /// Enables @defer support by the query planner.
     ///
@@ -97,7 +100,7 @@ pub struct QueryPlanIncrementalDeliveryConfig {
     pub enable_defer: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerDebugConfig {
     /// If used and the supergraph is built from a single subgraph, then user queries do not go
     /// through the normal query planning and instead a fetch to the one subgraph is built directly
@@ -150,8 +153,8 @@ impl Default for QueryPlannerDebugConfig {
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
 #[derive(Debug, Default, Clone)]
-pub(crate) struct QueryPlanningStatistics {
-    pub(crate) evaluated_plan_count: usize,
+pub struct QueryPlanningStatistics {
+    pub evaluated_plan_count: usize,
 }
 
 impl QueryPlannerConfig {
@@ -346,19 +349,19 @@ impl QueryPlanner {
         }
 
         let reuse_query_fragments = self.config.reuse_query_fragments;
-        if reuse_query_fragments && !document.fragments.is_empty() {
-            // For all subgraph fetches we query `__typename` on every abstract types (see `FetchDependencyGraphNode::to_plan_node`)
-            // so if we want to have a chance to reuse fragments, we should make sure those fragments also query `__typename` for
-            // every abstract type.
-            //
-            // TODO: FED-165
-            //
-            // JS: fragments = addTypenameFieldForAbstractTypesInNamedFragments(fragments);
+        let mut named_fragments = NamedFragments::new(&document.fragments, &self.api_schema);
+        if reuse_query_fragments {
+            // For all subgraph fetches we query `__typename` on every abstract types (see
+            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
+            // fragments, we should make sure those fragments also query `__typename` for every
+            // abstract type.
+            named_fragments =
+                named_fragments.add_typename_field_for_abstract_types_in_named_fragments()?;
         }
 
         let normalized_operation = normalize_operation(
             operation,
-            &document.fragments,
+            named_fragments,
             &self.api_schema,
             &self.interface_types_with_interface_objects,
         )?;
@@ -479,6 +482,11 @@ impl QueryPlanner {
             statistics: parameters.statistics,
         })
     }
+
+    /// Get Query Planner's API Schema.
+    pub fn api_schema(&self) -> &ValidFederationSchema {
+        &self.api_schema
+    }
 }
 
 fn compute_root_serial_dependency_graph(
@@ -499,7 +507,7 @@ fn compute_root_parallel_dependency_graph(
 
 fn compute_root_parallel_best_plan(
     parameters: &QueryPlanningParameters,
-    selection: NormalizedSelectionSet,
+    selection: SelectionSet,
     has_defers: bool,
 ) -> Result<BestQueryPlanInfo, FederationError> {
     let planning_traversal = QueryPlanningTraversal::new(
@@ -527,7 +535,7 @@ fn compute_plan_internal(
         let dependency_graphs = compute_root_serial_dependency_graph(parameters, has_defers)?;
         let mut main = None;
         let mut deferred = vec![];
-        let mut primary_selection = None::<NormalizedSelectionSet>;
+        let mut primary_selection = None::<SelectionSet>;
         for mut dependency_graph in dependency_graphs {
             let (local_main, local_deferred) =
                 dependency_graph.process(&mut parameters.processor, root_kind)?;
@@ -576,9 +584,8 @@ fn compute_plan_for_defer_conditionals(
 
 #[cfg(test)]
 mod tests {
-    use crate::subgraph::Subgraph;
-
     use super::*;
+    use crate::subgraph::Subgraph;
 
     const TEST_SUPERGRAPH: &str = r#"
 schema
@@ -719,14 +726,12 @@ type User
     "#;
 
     #[test]
-    #[allow(unused)] // remove when build_query_plan() can run without panicking
-    fn it_does_not_crash() {
+    fn plan_simple_query_for_single_subgraph() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
-        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
 
         let document = ExecutableDocument::parse_and_validate(
-            api_schema.schema(),
+            planner.api_schema().schema(),
             r#"
             {
                 userById(id: 1) {
@@ -738,7 +743,182 @@ type User
             "operation.graphql",
         )
         .unwrap();
-        // let plan = planner.build_query_plan(&document, None).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+              userById(id: 1) {
+                name
+                email
+              }
+            }
+          },
+        }
+        "###);
+    }
+
+    #[test]
+    fn plan_simple_query_for_multiple_subgraphs() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+            {
+                bestRatedProducts {
+                    vendor { name }
+                }
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        // TODO: This is the current output, but it's wrong: it's not fetching `vendor.name` at all.
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "reviews") {
+              {
+                bestRatedProducts {
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                  ... on Movie {
+                    __typename
+                    id
+                  }
+                }
+              }
+            },
+            Parallel {
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Movie {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Movie {
+                        vendor {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on User {
+                        name
+                      }
+                    }
+                  },
+                },
+              },
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Book {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Book {
+                        vendor {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on User {
+                        name
+                      }
+                    }
+                  },
+                },
+              },
+            },
+          },
+        }
+        "###);
+    }
+
+    // TODO: This fails with "Subgraph unexpectedly does not use federation spec"
+    // which seems...unusual
+    #[test]
+    #[ignore]
+    fn plan_simple_root_field_query_for_multiple_subgraphs() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    name
+                    email
+                }
+                bestRatedProducts {
+                    id
+                    avg_rating
+                }
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Parallel {
+            Fetch(service: "accounts") {
+              {
+                      userById(id: 1) {
+                  name
+                  email
+                }
+              }
+            }
+            Fetch(service: "products") {
+              {
+                      bestRatedProducts {
+                  id
+                  avg_rating
+                }
+              }
+            }
+          }
+        }
+        "###);
     }
 
     #[test]
@@ -788,14 +968,14 @@ type User
         QueryPlan {
           Fetch(service: "A") {
             {
-                    a {
+              a {
                 b {
                   x
                   y
                 }
               }
             }
-          }
+          },
         }
         "###);
     }

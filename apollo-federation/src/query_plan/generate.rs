@@ -1,5 +1,7 @@
-use crate::{error::FederationError, query_plan::QueryPlanCost};
 use std::collections::VecDeque;
+
+use crate::error::FederationError;
+use crate::query_plan::QueryPlanCost;
 
 type Choices<T> = Vec<Option<T>>;
 
@@ -105,6 +107,7 @@ where
     Element: Clone,
     // Uncomment to use `dbg!()`
     // Element: std::fmt::Debug,
+    // Plan: std::fmt::Debug,
 {
     if to_add.is_empty() {
         let cost = plan_builder.compute_plan_cost(&mut initial)?;

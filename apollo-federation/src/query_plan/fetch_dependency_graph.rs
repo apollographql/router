@@ -1,36 +1,63 @@
+use std::collections::HashSet;
+use std::fmt::Write as _;
+use std::sync::atomic::AtomicU64;
+use std::sync::Arc;
+use std::sync::OnceLock;
+
+use apollo_compiler::ast::Argument;
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::OperationType;
+use apollo_compiler::ast::Type;
+use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::executable::{self};
+use apollo_compiler::name;
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::{self};
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::stable_graph::EdgeIndex;
+use petgraph::stable_graph::NodeIndex;
+use petgraph::stable_graph::StableDiGraph;
+use petgraph::visit::EdgeRef;
+
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
-use crate::query_graph::graph_path::{
-    selection_of_element, OpGraphPathContext, OpGraphPathTrigger, OpPath, OpPathElement,
-};
-use crate::query_graph::path_tree::{OpPathTree, PathTreeChild};
-use crate::query_graph::{QueryGraph, QueryGraphEdgeTransition};
-use crate::query_plan::conditions::{remove_conditions_from_selection_set, Conditions};
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::OpGraphPathTrigger;
+use crate::query_graph::graph_path::OpPath;
+use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::path_tree::OpPathTree;
+use crate::query_graph::path_tree::PathTreeChild;
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphEdgeTransition;
+use crate::query_plan::conditions::remove_conditions_from_selection_set;
+use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
-use crate::query_plan::operation::{
-    NormalizedField, NormalizedFieldData, NormalizedInlineFragment, NormalizedInlineFragmentData,
-    NormalizedOperation, NormalizedSelection, NormalizedSelectionMap, NormalizedSelectionSet,
-    RebasedFragments, SelectionId, TYPENAME_FIELD,
-};
+use crate::query_plan::operation::Field;
+use crate::query_plan::operation::FieldData;
+use crate::query_plan::operation::InlineFragment;
+use crate::query_plan::operation::InlineFragmentData;
+use crate::query_plan::operation::Operation;
+use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::SelectionId;
+use crate::query_plan::operation::SelectionMap;
+use crate::query_plan::operation::SelectionSet;
+use crate::query_plan::operation::TYPENAME_FIELD;
 use crate::query_plan::FetchDataPathElement;
-use crate::query_plan::{FetchDataRewrite, FetchDataValueSetter, QueryPlanCost};
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, ObjectTypeDefinitionPosition,
-    SchemaRootDefinitionKind,
-};
+use crate::query_plan::FetchDataRewrite;
+use crate::query_plan::FetchDataValueSetter;
+use crate::query_plan::QueryPlanCost;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-use crate::subgraph::spec::{ANY_SCALAR_NAME, ENTITIES_QUERY};
-use apollo_compiler::ast::{Argument, Directive, OperationType, Type};
-use apollo_compiler::executable::{self, VariableDefinition};
-use apollo_compiler::schema::{self, Name};
-use apollo_compiler::{name, Node, NodeStr};
-use indexmap::{IndexMap, IndexSet};
-use petgraph::stable_graph::{EdgeIndex, NodeIndex, StableDiGraph};
-use petgraph::visit::EdgeRef;
-use std::collections::HashSet;
-use std::fmt::Write as _;
-use std::sync::{atomic::AtomicU64, Arc, OnceLock};
+use crate::subgraph::spec::ANY_SCALAR_NAME;
+use crate::subgraph::spec::ENTITIES_QUERY;
 
 /// Represents the value of a `@defer(label:)` argument.
 type DeferRef = NodeStr;
@@ -115,7 +142,7 @@ impl Clone for FetchIdGenerator {
 #[derive(Debug, Clone)]
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
-    pub(crate) selection_set: Arc<NormalizedSelectionSet>,
+    pub(crate) selection_set: Arc<SelectionSet>,
     /// The conditions determining whether the fetch should be executed (which must be recomputed
     /// from the selection set when it changes).
     pub(crate) conditions: Conditions,
@@ -127,8 +154,7 @@ pub(crate) struct FetchSelectionSet {
 #[derive(Debug, Clone)]
 pub(crate) struct FetchInputs {
     /// The selection sets to be used as input to `_entities`, separated per parent type.
-    selection_sets_per_parent_type:
-        IndexMap<CompositeTypeDefinitionPosition, Arc<NormalizedSelectionSet>>,
+    selection_sets_per_parent_type: IndexMap<CompositeTypeDefinitionPosition, Arc<SelectionSet>>,
     /// The supergraph schema (primarily used for validation of added selection sets).
     supergraph_schema: ValidFederationSchema,
 }
@@ -187,7 +213,7 @@ pub(crate) struct FetchDependencyGraph {
 pub(crate) struct DeferTracking {
     pub(crate) top_level_deferred: IndexSet<DeferRef>,
     pub(crate) deferred: IndexMap<DeferRef, DeferredInfo>,
-    pub(crate) primary_selection: Option<NormalizedSelectionSet>,
+    pub(crate) primary_selection: Option<SelectionSet>,
 }
 
 // TODO: Write docstrings
@@ -196,7 +222,7 @@ pub(crate) struct DeferTracking {
 pub(crate) struct DeferredInfo {
     pub(crate) label: DeferRef,
     pub(crate) path: FetchDependencyGraphNodePath,
-    pub(crate) sub_selection: NormalizedSelectionSet,
+    pub(crate) sub_selection: SelectionSet,
     pub(crate) deferred: IndexSet<DeferRef>,
     pub(crate) dependencies: IndexSet<DeferRef>,
 }
@@ -422,7 +448,7 @@ impl FetchDependencyGraphNodePath {
             new_path.push(FetchDataPathElement::Key(
                 field.data().response_name().into(),
             ));
-            // TODO: is there a simpler we to find a field’s type from `&NormalizedField`?
+            // TODO: is there a simpler we to find a field’s type from `&Field`?
             let mut type_ = &field
                 .data()
                 .field_position
@@ -616,7 +642,7 @@ impl FetchDependencyGraph {
                     .all(|selection| {
                         matches!(
                             selection,
-                            NormalizedSelection::InlineFragment(fragment)
+                            Selection::InlineFragment(fragment)
                             if fragment.casted_type() == type_
                         )
                     })
@@ -744,10 +770,11 @@ impl FetchDependencyGraph {
 
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
     fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
+        let mut stack = vec![];
         for start_index in self.children_of(node_index) {
-            let mut stack = self.children_of(start_index).collect::<Vec<_>>();
+            stack.extend(self.children_of(start_index));
             while let Some(v) = stack.pop() {
-                for edge in self.graph.edges_connecting(start_index, v) {
+                for edge in self.graph.edges_connecting(node_index, v) {
                     acc.insert(edge.id());
                 }
 
@@ -1147,14 +1174,16 @@ impl std::fmt::Display for FetchDependencyGraph {
                 let Ok(child) = g.node_weight(child_id) else {
                     continue;
                 };
-                write!(f, "{}", child.display(child_id))?;
+                write!(f, "{}", child.subgraph_name)?;
+            }
+
+            if g.children_of(node_id).next().is_some() {
+                f.write_char('\n')?;
             }
 
             for child_id in g.children_of(node_id) {
-                if g.children_of(child_id).next().is_some() {
-                    f.write_char('\n')?;
-                    fmt_node(g, child_id, f, indent + 1)?;
-                }
+                fmt_node(g, child_id, f, indent + 1)?;
+                f.write_char('\n')?;
             }
             Ok(())
         }
@@ -1178,7 +1207,7 @@ impl FetchDependencyGraphNode {
     fn add_inputs(
         &mut self,
         supergraph_schema: &ValidFederationSchema,
-        selection: &NormalizedSelectionSet,
+        selection: &SelectionSet,
         rewrites: impl IntoIterator<Item = Arc<FetchDataRewrite>>,
     ) -> Result<(), FederationError> {
         let inputs = self.inputs.get_or_insert_with(|| {
@@ -1271,7 +1300,11 @@ impl FetchDependencyGraphNode {
             subgraph_name: self.subgraph_name.clone(),
             id: self.id.get().copied(),
             variable_usages,
-            requires: input_nodes.map(|sel| executable::SelectionSet::from(sel).selections),
+            requires: input_nodes
+                .as_ref()
+                .map(executable::SelectionSet::try_from)
+                .transpose()?
+                .map(|selection_set| selection_set.selections),
             operation_document,
             operation_name,
             operation_kind: self.root_kind.into(),
@@ -1294,7 +1327,7 @@ impl FetchDependencyGraphNode {
         variable_definitions: &[Node<VariableDefinition>],
         handled_conditions: &Conditions,
         fragments: &Option<&mut RebasedFragments>,
-    ) -> Result<(NormalizedSelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
+    ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         // Finalizing the selection involves the following:
         // 1. removing any @include/@skip that are not necessary
         //    because they are already handled earlier in the query plan
@@ -1341,7 +1374,7 @@ impl FetchDependencyGraphNode {
                     write!(f, "{x}")?;
                 }
                 for x in iter {
-                    write!(f, ",{x}")?;
+                    write!(f, "::{x}")?;
                 }
                 Ok(())
             }
@@ -1368,7 +1401,7 @@ impl FetchDependencyGraphNode {
                     (Some(merge_at), Some(inputs)) => {
                         write!(
                             f,
-                            // @(path,to,*,field)[{input1,input2} => { id }]
+                            // @(path::to::*::field)[{input1,input2} => { id }]
                             "@({})[{} => {}]",
                             DisplayList(merge_at),
                             inputs,
@@ -1378,7 +1411,7 @@ impl FetchDependencyGraphNode {
                     (Some(merge_at), None) => {
                         write!(
                             f,
-                            // @(path,to,*,field)[{} => { id }]
+                            // @(path::to::*::field)[{} => { id }]
                             "@({})[{{}} => {}]",
                             DisplayList(merge_at),
                             self.node.selection_set.selection_set
@@ -1400,10 +1433,10 @@ impl FetchDependencyGraphNode {
 
 fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
-    selection_set: NormalizedSelectionSet,
+    selection_set: SelectionSet,
     all_variable_definitions: &[Node<VariableDefinition>],
     operation_name: &Option<NodeStr>,
-) -> Result<NormalizedOperation, FederationError> {
+) -> Result<Operation, FederationError> {
     let mut variable_definitions: Vec<Node<VariableDefinition>> =
         Vec::with_capacity(all_variable_definitions.len() + 1);
     variable_definitions.push(representations_variable_definition(subgraph_schema)?);
@@ -1446,8 +1479,8 @@ fn operation_for_entities_fetch(
 
     let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));
 
-    let entities_call = selection_of_element(
-        OpPathElement::Field(NormalizedField::new(NormalizedFieldData {
+    let entities_call = Selection::from_element(
+        OpPathElement::Field(Field::new(FieldData {
             schema: subgraph_schema.clone(),
             field_position: entities,
             alias: None,
@@ -1466,16 +1499,16 @@ fn operation_for_entities_fetch(
         .get_type(query_type_name.clone())?
         .try_into()?;
 
-    let mut map = NormalizedSelectionMap::new();
+    let mut map = SelectionMap::new();
     map.insert(entities_call);
 
-    let selection_set = NormalizedSelectionSet {
+    let selection_set = SelectionSet {
         schema: subgraph_schema.clone(),
         type_position,
         selections: Arc::new(map),
     };
 
-    Ok(NormalizedOperation {
+    Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind: SchemaRootDefinitionKind::Query,
         name: operation_name.clone().map(|n| n.try_into()).transpose()?,
@@ -1489,10 +1522,10 @@ fn operation_for_entities_fetch(
 fn operation_for_query_fetch(
     subgraph_schema: &ValidFederationSchema,
     root_kind: SchemaRootDefinitionKind,
-    selection_set: NormalizedSelectionSet,
+    selection_set: SelectionSet,
     variable_definitions: &[Node<VariableDefinition>],
     operation_name: &Option<NodeStr>,
-) -> Result<NormalizedOperation, FederationError> {
+) -> Result<Operation, FederationError> {
     let mut used_variables = HashSet::new();
     selection_set.collect_variables(&mut used_variables)?;
     let variable_definitions = variable_definitions
@@ -1501,7 +1534,7 @@ fn operation_for_query_fetch(
         .cloned()
         .collect();
 
-    Ok(NormalizedOperation {
+    Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind,
         name: operation_name.clone().map(|n| n.try_into()).transpose()?,
@@ -1530,7 +1563,7 @@ fn representations_variable_definition(
     .into())
 }
 
-impl NormalizedSelectionSet {
+impl SelectionSet {
     pub(crate) fn cost(&self, depth: QueryPlanCost) -> Result<QueryPlanCost, FederationError> {
         // The cost is essentially the number of elements in the selection,
         // but we make deep element cost a tiny bit more,
@@ -1542,9 +1575,9 @@ impl NormalizedSelectionSet {
         // by favoring lesser depth in that case, we favor not type-exploding).
         self.selections.values().try_fold(0, |sum, selection| {
             let subselections = match selection {
-                NormalizedSelection::Field(field) => field.selection_set.as_ref(),
-                NormalizedSelection::InlineFragment(inline) => Some(&inline.selection_set),
-                NormalizedSelection::FragmentSpread(_) => {
+                Selection::Field(field) => field.selection_set.as_ref(),
+                Selection::InlineFragment(inline) => Some(&inline.selection_set),
+                Selection::FragmentSpread(_) => {
                     return Err(FederationError::internal(
                         "unexpected fragment spread in FetchDependencyGraphNode",
                     ))
@@ -1565,7 +1598,7 @@ impl FetchSelectionSet {
         schema: ValidFederationSchema,
         type_position: CompositeTypeDefinitionPosition,
     ) -> Result<Self, FederationError> {
-        let selection_set = Arc::new(NormalizedSelectionSet::empty(schema, type_position));
+        let selection_set = Arc::new(SelectionSet::empty(schema, type_position));
         let conditions = selection_set.conditions()?;
         Ok(Self {
             conditions,
@@ -1576,9 +1609,9 @@ impl FetchSelectionSet {
     fn add_at_path(
         &mut self,
         path_in_node: &OpPath,
-        selection_set: Option<&Arc<NormalizedSelectionSet>>,
+        selection_set: Option<&Arc<SelectionSet>>,
     ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set);
+        Arc::make_mut(&mut self.selection_set).add_at_path(path_in_node, selection_set)?;
         // TODO: when calling this multiple times, maybe only re-compute conditions at the end?
         // Or make it lazily-initialized and computed on demand?
         self.conditions = self.selection_set.conditions()?;
@@ -1594,7 +1627,7 @@ impl FetchInputs {
         }
     }
 
-    fn add(&mut self, selection: &NormalizedSelectionSet) -> Result<(), FederationError> {
+    fn add(&mut self, selection: &SelectionSet) -> Result<(), FederationError> {
         assert_eq!(
             selection.schema, self.supergraph_schema,
             "Inputs selections must be based on the supergraph schema"
@@ -1603,7 +1636,7 @@ impl FetchInputs {
             .selection_sets_per_parent_type
             .entry(selection.type_position.clone())
             .or_insert_with(|| {
-                Arc::new(NormalizedSelectionSet::empty(
+                Arc::new(SelectionSet::empty(
                     selection.schema.clone(),
                     selection.type_position.clone(),
                 ))
@@ -1624,8 +1657,8 @@ impl FetchInputs {
         variable_definitions: &[Node<VariableDefinition>],
         handled_conditions: &Conditions,
         type_position: &CompositeTypeDefinitionPosition,
-    ) -> Result<NormalizedSelectionSet, FederationError> {
-        let mut selections = NormalizedSelectionMap::new();
+    ) -> Result<SelectionSet, FederationError> {
+        let mut selections = SelectionMap::new();
         for selection_set in self.selection_sets_per_parent_type.values() {
             let selection_set =
                 remove_conditions_from_selection_set(selection_set, handled_conditions)?;
@@ -1633,7 +1666,7 @@ impl FetchInputs {
             selection_set.validate(variable_definitions)?;
             selections.extend_ref(&selection_set.selections)
         }
-        Ok(NormalizedSelectionSet {
+        Ok(SelectionSet {
             schema: self.supergraph_schema.clone(),
             type_position: type_position.clone(),
             selections: Arc::new(selections),
@@ -1674,7 +1707,7 @@ impl DeferTracking {
             top_level_deferred: Default::default(),
             deferred: Default::default(),
             primary_selection: root_type_for_defer
-                .map(|type_position| NormalizedSelectionSet::empty(schema.clone(), type_position)),
+                .map(|type_position| SelectionSet::empty(schema.clone(), type_position)),
         }
     }
 
@@ -1684,10 +1717,10 @@ impl DeferTracking {
         defer_args: &DeferDirectiveArguments,
         path: FetchDependencyGraphNodePath,
         parent_type: CompositeTypeDefinitionPosition,
-    ) {
+    ) -> Result<(), FederationError> {
         // Having the primary selection undefined means that @defer handling is actually disabled, so there's no need to track anything.
         let Some(primary_selection) = self.primary_selection.as_mut() else {
-            return;
+            return Ok(());
         };
 
         let label = defer_args
@@ -1710,23 +1743,23 @@ impl DeferTracking {
             parent_info.deferred.insert(label.clone());
             parent_info
                 .sub_selection
-                .add_at_path(&defer_context.path_to_defer_parent, None);
+                .add_at_path(&defer_context.path_to_defer_parent, None)
         } else {
             self.top_level_deferred.insert(label.clone());
-            primary_selection.add_at_path(&defer_context.path_to_defer_parent, None);
+            primary_selection.add_at_path(&defer_context.path_to_defer_parent, None)
         }
     }
 
     fn update_subselection(
         &mut self,
         defer_context: &DeferContext,
-        selection_set: Option<&Arc<NormalizedSelectionSet>>,
-    ) {
+        selection_set: Option<&Arc<SelectionSet>>,
+    ) -> Result<(), FederationError> {
         if !defer_context.is_part_of_query {
-            return;
+            return Ok(());
         }
         let Some(primary_selection) = &mut self.primary_selection else {
-            return;
+            return Ok(());
         };
         if let Some(parent_ref) = &defer_context.current_defer_ref {
             self.deferred[parent_ref]
@@ -1782,7 +1815,7 @@ impl DeferredInfo {
         Self {
             label,
             path,
-            sub_selection: NormalizedSelectionSet::empty(schema, parent_type),
+            sub_selection: SelectionSet::empty(schema, parent_type),
             deferred: Default::default(),
             dependencies: Default::default(),
         }
@@ -1821,14 +1854,14 @@ pub(crate) fn compute_nodes_for_tree(
                 .add_at_path(&stack_item.node_path.path_in_node, Some(selection_set))?;
             dependency_graph
                 .defer_tracking
-                .update_subselection(&stack_item.defer_context, Some(selection_set));
+                .update_subselection(&stack_item.defer_context, Some(selection_set))?;
         }
         if stack_item.tree.is_leaf() {
             node.selection_set_mut()
                 .add_at_path(&stack_item.node_path.path_in_node, None)?;
             dependency_graph
                 .defer_tracking
-                .update_subselection(&stack_item.defer_context, None);
+                .update_subselection(&stack_item.defer_context, None)?;
             continue;
         }
         // We want to preserve the order of the elements in the child,
@@ -1983,7 +2016,7 @@ fn compute_nodes_for_key_resolution<'a>(
     // (and so no one subgraph has a type definition with all the proper fields,
     // only the supergraph does).
     let input_type = dependency_graph.type_for_fetch_inputs(source_type.type_name())?;
-    let mut input_selections = NormalizedSelectionSet::empty(
+    let mut input_selections = SelectionSet::for_composite_type(
         dependency_graph.supergraph_schema.clone(),
         input_type.clone(),
     );
@@ -1993,9 +2026,17 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    input_selections.merge_into(std::iter::once(edge_conditions.as_ref()))?;
-    let new_node =
-        &mut FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
+    let edge_conditions = edge_conditions.rebase_on(
+        &input_type,
+        // Conditions do not use named fragments
+        &Default::default(),
+        &dependency_graph.supergraph_schema,
+        super::operation::RebaseErrorHandlingOption::ThrowError,
+    )?;
+
+    input_selections.merge_into(std::iter::once(&edge_conditions))?;
+
+    let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
         &dependency_graph.supergraph_schema,
         &wrap_input_selections(
@@ -2016,15 +2057,10 @@ fn compute_nodes_for_key_resolution<'a>(
     // We also ensure to get the __typename of the current type in the "original" node.
     let node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
-    let typename_field = Arc::new(OpPathElement::Field(NormalizedField::new(
-        NormalizedFieldData {
-            schema: dependency_graph.supergraph_schema.clone(),
-            field_position: source_type.introspection_typename_field(),
-            alias: None,
-            arguments: Default::default(),
-            directives: Default::default(),
-            sibling_typename: None,
-        },
+    let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
+        &dependency_graph.supergraph_schema,
+        &source_type,
+        None,
     )));
     let typename_path = stack_item
         .node_path
@@ -2092,15 +2128,10 @@ fn compute_nodes_for_root_type_resolution<'a>(
     let node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
     if !stack_item.node_path.path_in_node.is_empty() {
-        let typename_field = Arc::new(OpPathElement::Field(NormalizedField::new(
-            NormalizedFieldData {
-                schema: dependency_graph.supergraph_schema.clone(),
-                field_position: source_type.introspection_typename_field().into(),
-                alias: None,
-                arguments: Default::default(),
-                directives: Default::default(),
-                sibling_typename: None,
-            },
+        let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
+            &dependency_graph.supergraph_schema,
+            &source_type.into(),
+            None,
         )));
         let typename_path = stack_item
             .node_path
@@ -2202,17 +2233,10 @@ fn compute_nodes_for_op_path_element<'a>(
         } else {
             Some(name.clone())
         };
-        let typename_field = Arc::new(OpPathElement::Field(NormalizedField::new(
-            NormalizedFieldData {
-                schema: dependency_graph.supergraph_schema.clone(),
-                field_position: operation
-                    .parent_type_position()
-                    .introspection_typename_field(),
-                alias,
-                arguments: Default::default(),
-                directives: Default::default(),
-                sibling_typename: None,
-            },
+        let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
+            &dependency_graph.supergraph_schema,
+            &operation.parent_type_position(),
+            alias,
         )));
         let typename_path = stack_item
             .node_path
@@ -2232,7 +2256,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 ..stack_item.defer_context.clone()
             },
             None,
-        )
+        )?
     }
     let Ok((Some(updated_operation), updated_defer_context)) = extract_defer_from_operation(
         dependency_graph,
@@ -2335,7 +2359,7 @@ fn wrap_selection_with_type_and_conditions<T>(
     wrapping_type: &CompositeTypeDefinitionPosition,
     context: &OpGraphPathContext,
     initial: T,
-    mut wrap_in_fragment: impl FnMut(NormalizedInlineFragment, T) -> T,
+    mut wrap_in_fragment: impl FnMut(InlineFragment, T) -> T,
 ) -> T {
     // PORT_NOTE: `unwrap` is used below, but the JS version asserts in `FragmentElement`'s constructor
     // as well. However, there was a comment that we should add some validation, which is restated below.
@@ -2351,7 +2375,7 @@ fn wrap_selection_with_type_and_conditions<T>(
         // PORT_NOTE: JS code looks for type condition in the wrapping type's schema based on
         // the name of wrapping type. Not sure why.
         return wrap_in_fragment(
-            NormalizedInlineFragment::new(NormalizedInlineFragmentData {
+            InlineFragment::new(InlineFragmentData {
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
@@ -2378,7 +2402,7 @@ fn wrap_selection_with_type_and_conditions<T>(
             .into()],
         };
         wrap_in_fragment(
-            NormalizedInlineFragment::new(NormalizedInlineFragmentData {
+            InlineFragment::new(InlineFragmentData {
                 schema: supergraph_schema.clone(),
                 parent_type_position: wrapping_type.clone(),
                 type_condition_position: Some(type_condition.clone()),
@@ -2393,9 +2417,9 @@ fn wrap_selection_with_type_and_conditions<T>(
 fn wrap_input_selections(
     supergraph_schema: &ValidFederationSchema,
     wrapping_type: &CompositeTypeDefinitionPosition,
-    selections: NormalizedSelectionSet,
+    selections: SelectionSet,
     context: &OpGraphPathContext,
-) -> NormalizedSelectionSet {
+) -> SelectionSet {
     wrap_selection_with_type_and_conditions(
         supergraph_schema,
         wrapping_type,
@@ -2410,9 +2434,8 @@ fn wrap_input_selections(
                }
             */
             let parent_type_position = fragment.data().parent_type_position.clone();
-            let selection =
-                NormalizedSelection::from_normalized_inline_fragment(fragment, sub_selections);
-            NormalizedSelectionSet::from_selection(parent_type_position, selection)
+            let selection = Selection::from_inline_fragment(fragment, sub_selections);
+            SelectionSet::from_selection(parent_type_position, selection)
         },
     )
 }
@@ -2510,7 +2533,7 @@ fn extract_defer_from_operation(
         &defer_args,
         node_path.clone(),
         operation.parent_type_position(),
-    );
+    )?;
 
     let updated_context = DeferContext {
         current_defer_ref: Some(updated_defer_ref.into()),

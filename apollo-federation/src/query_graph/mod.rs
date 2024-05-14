@@ -1,22 +1,33 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::query_plan::operation::{
-    NormalizedField, NormalizedInlineFragment, NormalizedSelectionSet,
-};
-use crate::schema::field_set::parse_field_set;
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition, InterfaceFieldDefinitionPosition,
-    ObjectTypeDefinitionPosition, OutputTypeDefinitionPosition, SchemaRootDefinitionKind,
-};
-use crate::schema::ValidFederationSchema;
-use apollo_compiler::schema::{Name, NamedType};
-use apollo_compiler::NodeStr;
-use indexmap::{IndexMap, IndexSet};
-use petgraph::graph::{DiGraph, EdgeIndex, EdgeReference, NodeIndex};
-use petgraph::visit::EdgeRef;
-use petgraph::Direction;
-use std::fmt::{Display, Formatter};
+use std::fmt::Display;
+use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
+
+use apollo_compiler::schema::Name;
+use apollo_compiler::schema::NamedType;
+use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+use petgraph::graph::DiGraph;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::EdgeReference;
+use petgraph::graph::NodeIndex;
+use petgraph::visit::EdgeRef;
+use petgraph::Direction;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::query_plan::operation::Field;
+use crate::query_plan::operation::InlineFragment;
+use crate::query_plan::operation::SelectionSet;
+use crate::schema::field_set::parse_field_set;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::ValidFederationSchema;
 
 pub mod build_query_graph;
 pub(crate) mod condition_resolver;
@@ -25,12 +36,16 @@ pub(crate) mod graph_path;
 pub mod output;
 pub(crate) mod path_tree;
 
-use crate::query_graph::condition_resolver::{ConditionResolution, ConditionResolver};
-use crate::query_graph::graph_path::{
-    ExcludedConditions, ExcludedDestinations, OpGraphPathContext, OpGraphPathTrigger, OpPathElement,
-};
-use crate::query_plan::QueryPlanCost;
 pub use build_query_graph::build_federated_query_graph;
+
+use crate::query_graph::condition_resolver::ConditionResolution;
+use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::graph_path::ExcludedConditions;
+use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::OpGraphPathTrigger;
+use crate::query_graph::graph_path::OpPathElement;
+use crate::query_plan::QueryPlanCost;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct QueryGraphNode {
@@ -106,7 +121,7 @@ pub(crate) struct QueryGraphEdge {
     /// represent the fact that you need the key to be able to use an @key edge.
     ///
     /// Outside of keys, @requires edges also rely on conditions.
-    pub(crate) conditions: Option<Arc<NormalizedSelectionSet>>,
+    pub(crate) conditions: Option<Arc<SelectionSet>>,
 }
 
 impl Display for QueryGraphEdge {
@@ -443,26 +458,42 @@ impl QueryGraph {
     pub(crate) fn out_edges_with_federation_self_edges(
         &self,
         node: NodeIndex,
-    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
-        self.graph.edges_directed(node, Direction::Outgoing)
+    ) -> Vec<EdgeReference<QueryGraphEdge>> {
+        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing))
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
     /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(
-        &self,
-        node: NodeIndex,
-    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
-        self.graph
-            .edges_directed(node, Direction::Outgoing)
-            .filter(|edge_ref| {
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<QueryGraphEdge>> {
+        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
+            |edge_ref| {
                 !(edge_ref.source() == edge_ref.target()
                     && matches!(
                         edge_ref.weight().transition,
                         QueryGraphEdgeTransition::KeyResolution
                             | QueryGraphEdgeTransition::RootTypeResolution { .. }
                     ))
-            })
+            },
+        ))
+    }
+
+    /// Edge iteration order is unspecified in petgraph, but appears to be
+    /// *reverse* insertion order in practice.
+    /// This can affect generated query plans, such as when two options have the same cost.
+    /// To match the JS code base, we want to iterate in insertion order.
+    ///
+    /// Sorting by edge indices relies on documented behavior:
+    /// <https://docs.rs/petgraph/latest/petgraph/graph/struct.Graph.html#graph-indices>
+    ///
+    /// As of this writing, edges of the query graph are removed
+    /// in `FederatedQueryGraphBuilder::update_edge_tail` which specifically preserves indices
+    /// by pairing with an insertion.
+    fn sorted_edges<'graph>(
+        edges: impl Iterator<Item = EdgeReference<'graph, QueryGraphEdge>>,
+    ) -> Vec<EdgeReference<'graph, QueryGraphEdge>> {
+        let mut edges: Vec<_> = edges.collect();
+        edges.sort_by_key(|e| -> EdgeIndex { e.id() });
+        edges
     }
 
     pub(crate) fn is_self_key_or_root_edge(
@@ -522,12 +553,8 @@ impl QueryGraph {
         Ok(false)
     }
 
-    pub(crate) fn edge_for_field(
-        &self,
-        node: NodeIndex,
-        field: &NormalizedField,
-    ) -> Option<EdgeIndex> {
-        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+    pub(crate) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
+        let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::FieldCollection {
                 field_definition_position,
@@ -561,13 +588,13 @@ impl QueryGraph {
     pub(crate) fn edge_for_inline_fragment(
         &self,
         node: NodeIndex,
-        inline_fragment: &NormalizedInlineFragment,
+        inline_fragment: &InlineFragment,
     ) -> Option<EdgeIndex> {
         let Some(type_condition_pos) = &inline_fragment.data().type_condition_position else {
             // No type condition means the type hasn't changed, meaning there is no edge to take.
             return None;
         };
-        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+        let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::Downcast {
                 to_type_position, ..
@@ -713,7 +740,7 @@ impl QueryGraph {
     pub(crate) fn get_locally_satisfiable_key(
         &self,
         node_index: NodeIndex,
-    ) -> Result<Option<NormalizedSelectionSet>, FederationError> {
+    ) -> Result<Option<SelectionSet>, FederationError> {
         let node = self.node_weight(node_index)?;
         let type_name = match &node.type_ {
             QueryGraphNodeType::SchemaType(ty) => {
@@ -747,7 +774,7 @@ impl QueryGraph {
             else {
                 continue;
             };
-            let selection = parse_field_set(schema, ty.name().clone(), value)?;
+            let selection = parse_field_set(schema, ty.name().clone(), &value)?;
             let has_external = metadata
                 .external_metadata()
                 .selects_any_external_field(&selection)?;

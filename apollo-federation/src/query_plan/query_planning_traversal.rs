@@ -1,33 +1,47 @@
+use std::sync::Arc;
+
+use indexmap::IndexSet;
+use petgraph::graph::EdgeIndex;
+use petgraph::graph::NodeIndex;
+
 use crate::error::FederationError;
-use crate::query_graph::condition_resolver::{
-    ConditionResolution, ConditionResolutionCacheResult, ConditionResolver, ConditionResolverCache,
-};
-use crate::query_graph::graph_path::{
-    create_initial_options, ClosedBranch, ClosedPath, ExcludedConditions, ExcludedDestinations,
-    OpGraphPath, OpGraphPathContext, OpPathElement, OpenBranch, SimultaneousPaths,
-    SimultaneousPathsWithLazyIndirectPaths,
-};
+use crate::query_graph::condition_resolver::ConditionResolution;
+use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
+use crate::query_graph::condition_resolver::ConditionResolver;
+use crate::query_graph::condition_resolver::ConditionResolverCache;
+use crate::query_graph::graph_path::create_initial_options;
+use crate::query_graph::graph_path::ClosedBranch;
+use crate::query_graph::graph_path::ClosedPath;
+use crate::query_graph::graph_path::ExcludedConditions;
+use crate::query_graph::graph_path::ExcludedDestinations;
+use crate::query_graph::graph_path::OpGraphPath;
+use crate::query_graph::graph_path::OpGraphPathContext;
+use crate::query_graph::graph_path::OpPathElement;
+use crate::query_graph::graph_path::OpenBranch;
+use crate::query_graph::graph_path::SimultaneousPaths;
+use crate::query_graph::graph_path::SimultaneousPathsWithLazyIndirectPaths;
 use crate::query_graph::path_tree::OpPathTree;
-use crate::query_graph::{QueryGraph, QueryGraphNodeType};
-use crate::query_plan::fetch_dependency_graph::{compute_nodes_for_tree, FetchDependencyGraph};
-use crate::query_plan::fetch_dependency_graph_processor::{
-    FetchDependencyGraphProcessor, FetchDependencyGraphToCostProcessor,
-    FetchDependencyGraphToQueryPlanProcessor,
-};
-use crate::query_plan::generate::{generate_all_plans_and_find_best, PlanBuilder};
-use crate::query_plan::operation::{
-    NormalizedOperation, NormalizedSelection, NormalizedSelectionSet,
-};
+use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
+use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
+use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
+use crate::query_plan::generate::generate_all_plans_and_find_best;
+use crate::query_plan::generate::PlanBuilder;
+use crate::query_plan::operation::Operation;
+use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::{AbstractTypeDefinitionPosition, OutputTypeDefinitionPosition};
-use crate::schema::position::{CompositeTypeDefinitionPosition, SchemaRootDefinitionKind};
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-use indexmap::IndexSet;
-use petgraph::graph::{EdgeIndex, NodeIndex};
-use std::sync::Arc;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we
@@ -41,7 +55,7 @@ pub(crate) struct QueryPlanningParameters {
     /// The federated query graph used for query planning.
     pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
-    pub(crate) operation: Arc<NormalizedOperation>,
+    pub(crate) operation: Arc<Operation>,
     /// A processor for converting fetch dependency graphs to query plans.
     pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor,
     /// The query graph node at which query planning begins.
@@ -92,11 +106,23 @@ pub(crate) struct QueryPlanningTraversal<'a> {
     resolver_cache: ConditionResolverCache,
 }
 
+#[derive(Debug)]
 struct OpenBranchAndSelections {
     /// The options for this open branch.
     open_branch: OpenBranch,
     /// A stack of the remaining selections to plan from the node this open branch ends on.
-    selections: Vec<NormalizedSelection>,
+    selections: Vec<Selection>,
+}
+
+struct PlanInfo {
+    fetch_dependency_graph: FetchDependencyGraph,
+    path_tree: Arc<OpPathTree>,
+}
+
+impl std::fmt::Debug for PlanInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.path_tree, f)
+    }
 }
 
 pub(crate) struct BestQueryPlanInfo {
@@ -132,7 +158,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         // The ownership of `QueryPlanningParameters` is awkward and should probably be
         // refactored.
         parameters: &'a QueryPlanningParameters,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
         has_defers: bool,
         root_kind: SchemaRootDefinitionKind,
         cost_processor: FetchDependencyGraphToCostProcessor,
@@ -154,7 +180,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     #[allow(clippy::too_many_arguments)]
     fn new_inner(
         parameters: &'a QueryPlanningParameters,
-        selection_set: NormalizedSelectionSet,
+        selection_set: SelectionSet,
         starting_id_generation: u64,
         has_defers: bool,
         root_kind: SchemaRootDefinitionKind,
@@ -166,7 +192,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         let is_top_level = parameters.head_must_be_root;
 
         fn map_options_to_selections(
-            selection_set: NormalizedSelectionSet,
+            selection_set: SelectionSet,
             options: Vec<SimultaneousPathsWithLazyIndirectPaths>,
         ) -> Vec<OpenBranchAndSelections> {
             let open_branch = OpenBranch(options);
@@ -255,7 +281,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     /// the stack.
     fn handle_open_branch(
         &mut self,
-        selection: &NormalizedSelection,
+        selection: &Selection,
         options: &mut Vec<SimultaneousPathsWithLazyIndirectPaths>,
     ) -> Result<(bool, Option<OpenBranchAndSelections>), FederationError> {
         let operation_element = selection.element()?;
@@ -435,7 +461,7 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     fn selection_set_is_fully_local_from_all_nodes(
         &self,
-        selection: &NormalizedSelectionSet,
+        selection: &SelectionSet,
         nodes: &IndexSet<NodeIndex>,
     ) -> Result<bool, FederationError> {
         // To guarantee that the selection is fully local from the provided vertex/type, we must have:
@@ -450,7 +476,7 @@ impl<'a> QueryPlanningTraversal<'a> {
         // skipped if `nodes` is empty.
         if !nodes.is_empty()
             && selection.selections.values().any(|val| match val {
-                NormalizedSelection::InlineFragment(fragment) => {
+                Selection::InlineFragment(fragment) => {
                     match &fragment.inline_fragment.data().type_condition_position {
                         Some(type_condition) => self
                             .parameters
@@ -589,13 +615,16 @@ impl<'a> QueryPlanningTraversal<'a> {
             .collect();
 
         let (best, cost) = generate_all_plans_and_find_best(
-            (initial_dependency_graph, Arc::new(initial_tree)),
+            PlanInfo {
+                fetch_dependency_graph: initial_dependency_graph,
+                path_tree: Arc::new(initial_tree),
+            },
             other_trees,
             /*plan_builder*/ self,
         )?;
         self.best_plan = BestQueryPlanInfo {
-            fetch_dependency_graph: best.0,
-            path_tree: best.1,
+            fetch_dependency_graph: best.fetch_dependency_graph,
+            path_tree: best.path_tree,
             cost,
         }
         .into();
@@ -934,35 +963,34 @@ impl<'a> QueryPlanningTraversal<'a> {
     }
 }
 
-impl PlanBuilder<(FetchDependencyGraph, Arc<OpPathTree>), Arc<OpPathTree>>
-    for QueryPlanningTraversal<'_>
-{
-    fn add_to_plan(
-        &mut self,
-        (plan_graph, plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
-        tree: Arc<OpPathTree>,
-    ) -> (FetchDependencyGraph, Arc<OpPathTree>) {
-        let mut updated_graph = plan_graph.clone();
+impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
+    fn add_to_plan(&mut self, plan_info: &PlanInfo, tree: Arc<OpPathTree>) -> PlanInfo {
+        let mut updated_graph = plan_info.fetch_dependency_graph.clone();
         let result = self.updated_dependency_graph(&mut updated_graph, &tree);
         if result.is_ok() {
-            let updated_tree = plan_tree.merge(&tree);
-            (updated_graph, updated_tree)
+            PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.merge(&tree),
+            }
         } else {
             // Failed to update. Return the original plan.
-            (updated_graph, plan_tree.clone())
+            PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.clone(),
+            }
         }
     }
 
     fn compute_plan_cost(
         &mut self,
-        (plan_graph, _): &mut (FetchDependencyGraph, Arc<OpPathTree>),
+        plan_info: &mut PlanInfo,
     ) -> Result<QueryPlanCost, FederationError> {
-        self.cost(plan_graph)
+        self.cost(&mut plan_info.fetch_dependency_graph)
     }
 
     fn on_plan_generated(
         &self,
-        (_, _plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
+        _plan_info: &PlanInfo,
         _cost: QueryPlanCost,
         _prev_cost: Option<QueryPlanCost>,
     ) {

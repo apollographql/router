@@ -1,15 +1,25 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::schema::position::{
-    DirectiveArgumentDefinitionPosition, EnumTypeDefinitionPosition, EnumValueDefinitionPosition,
-    InputObjectFieldDefinitionPosition, InputObjectTypeDefinitionPosition,
-    InterfaceFieldArgumentDefinitionPosition, InterfaceFieldDefinitionPosition,
-    InterfaceTypeDefinitionPosition, ObjectFieldArgumentDefinitionPosition,
-    ObjectFieldDefinitionPosition, ObjectTypeDefinitionPosition, ScalarTypeDefinitionPosition,
-    SchemaDefinitionPosition, SchemaRootDefinitionPosition, UnionTypeDefinitionPosition,
-    UnionTypenameFieldDefinitionPosition,
-};
 use apollo_compiler::schema::Name;
-use indexmap::{IndexMap, IndexSet};
+use indexmap::IndexMap;
+use indexmap::IndexSet;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::schema::position::DirectiveArgumentDefinitionPosition;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::EnumValueDefinitionPosition;
+use crate::schema::position::InputObjectFieldDefinitionPosition;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
+use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::position::SchemaDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
+use crate::schema::position::UnionTypenameFieldDefinitionPosition;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct Referencers {

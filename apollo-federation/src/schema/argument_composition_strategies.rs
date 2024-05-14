@@ -1,8 +1,7 @@
-use lazy_static::lazy_static;
-
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
 use apollo_compiler::schema::Type;
+use lazy_static::lazy_static;
 
 use crate::schema::FederationSchema;
 

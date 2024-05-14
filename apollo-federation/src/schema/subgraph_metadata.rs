@@ -1,19 +1,20 @@
+use apollo_compiler::validation::Valid;
+use apollo_compiler::Schema;
+use indexmap::IndexSet;
+
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::query_plan::operation::{NormalizedSelection, NormalizedSelectionSet};
-use crate::schema::field_set::{
-    add_interface_field_implementations, collect_target_fields_from_field_set,
-};
-use crate::schema::position::{
-    CompositeTypeDefinitionPosition, FieldDefinitionPosition,
-    ObjectOrInterfaceFieldDefinitionPosition, ObjectOrInterfaceTypeDefinitionPosition,
-};
+use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::SelectionSet;
+use crate::schema::field_set::add_interface_field_implementations;
+use crate::schema::field_set::collect_target_fields_from_field_set;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::FederationSchema;
-use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
-use indexmap::IndexSet;
 
 fn unwrap_schema(fed_schema: &Valid<FederationSchema>) -> &Valid<Schema> {
     // Okay to assume valid because `fed_schema` is known to be valid.
@@ -276,10 +277,10 @@ impl ExternalMetadata {
 
     pub(crate) fn selects_any_external_field(
         &self,
-        selection_set: &NormalizedSelectionSet,
+        selection_set: &SelectionSet,
     ) -> Result<bool, FederationError> {
         for selection in selection_set.selections.values() {
-            if let NormalizedSelection::Field(field_selection) = selection {
+            if let Selection::Field(field_selection) = selection {
                 if self.is_external(&field_selection.field.data().field_position)? {
                     return Ok(true);
                 }

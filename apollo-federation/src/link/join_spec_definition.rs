@@ -1,15 +1,27 @@
-use crate::error::{FederationError, SingleFederationError};
-use crate::link::argument::{
-    directive_optional_boolean_argument, directive_optional_enum_argument,
-    directive_optional_fieldset_argument, directive_optional_string_argument,
-    directive_required_enum_argument, directive_required_string_argument,
-};
-use crate::link::spec::{Identity, Url, Version};
-use crate::link::spec_definition::{SpecDefinition, SpecDefinitions};
-use crate::schema::FederationSchema;
-use apollo_compiler::schema::{Directive, DirectiveDefinition, EnumType, ExtendedType, Name};
-use apollo_compiler::{name, Node, NodeStr};
+use apollo_compiler::name;
+use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::DirectiveDefinition;
+use apollo_compiler::schema::EnumType;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::Name;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
 use lazy_static::lazy_static;
+
+use crate::error::FederationError;
+use crate::error::SingleFederationError;
+use crate::link::argument::directive_optional_boolean_argument;
+use crate::link::argument::directive_optional_enum_argument;
+use crate::link::argument::directive_optional_fieldset_argument;
+use crate::link::argument::directive_optional_string_argument;
+use crate::link::argument::directive_required_enum_argument;
+use crate::link::argument::directive_required_string_argument;
+use crate::link::spec::Identity;
+use crate::link::spec::Url;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
+use crate::link::spec_definition::SpecDefinitions;
+use crate::schema::FederationSchema;
 
 pub(crate) const JOIN_GRAPH_ENUM_NAME_IN_SPEC: Name = name!("Graph");
 pub(crate) const JOIN_GRAPH_DIRECTIVE_NAME_IN_SPEC: Name = name!("graph");

@@ -1,9 +1,17 @@
+use std::collections::HashSet;
+
+use apollo_compiler::ast::Name;
+use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::Node;
+use apollo_compiler::NodeStr;
+
 use crate::error::FederationError;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
-use crate::query_plan::operation::{NormalizedSelectionSet, RebasedFragments};
+use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -13,11 +21,6 @@ use crate::query_plan::PlanNode;
 use crate::query_plan::PrimaryDeferBlock;
 use crate::query_plan::QueryPlanCost;
 use crate::query_plan::SequenceNode;
-use apollo_compiler::ast::Name;
-use apollo_compiler::executable::VariableDefinition;
-use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
-use std::collections::HashSet;
 
 /// Constant used during query plan cost computation to account for the base cost of doing a fetch,
 /// that is the fact any fetch imply some networking cost, request serialization/deserialization,
@@ -102,7 +105,7 @@ pub(crate) trait FetchDependencyGraphProcessor<TProcessed, TDeferred> {
     fn reduce_defer(
         &mut self,
         main: TProcessed,
-        sub_selection: &NormalizedSelectionSet,
+        sub_selection: &SelectionSet,
         deferred_blocks: Vec<TDeferred>,
     ) -> Result<TProcessed, FederationError>;
 }
@@ -139,7 +142,7 @@ where
     fn reduce_defer(
         &mut self,
         main: TProcessed,
-        sub_selection: &NormalizedSelectionSet,
+        sub_selection: &SelectionSet,
         deferred_blocks: Vec<TDeferred>,
     ) -> Result<TProcessed, FederationError> {
         (*self).reduce_defer(main, sub_selection, deferred_blocks)
@@ -219,7 +222,7 @@ impl FetchDependencyGraphProcessor<QueryPlanCost, QueryPlanCost>
     fn reduce_defer(
         &mut self,
         main: QueryPlanCost,
-        _sub_selection: &NormalizedSelectionSet,
+        _sub_selection: &SelectionSet,
         deferred_blocks: Vec<QueryPlanCost>,
     ) -> Result<QueryPlanCost, FederationError> {
         Ok(sequence_cost([main, parallel_cost(deferred_blocks)]))
@@ -366,7 +369,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
     fn reduce_defer(
         &mut self,
         main: Option<PlanNode>,
-        sub_selection: &NormalizedSelectionSet,
+        sub_selection: &SelectionSet,
         deferred: Vec<DeferredDeferBlock>,
     ) -> Result<Option<PlanNode>, FederationError> {
         Ok(Some(PlanNode::Defer(DeferNode {
