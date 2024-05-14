@@ -32,6 +32,7 @@ fn some_name() {
 */
 
 mod fetch_operation_names;
+mod field_covariance_and_type_explosion;
 mod provides;
 mod requires;
 mod shareable_root_fields;
