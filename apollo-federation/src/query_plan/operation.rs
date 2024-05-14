@@ -985,6 +985,16 @@ impl Selection {
         }
     }
 
+    pub(crate) fn with_updated_selections<S: Into<Selection>>(
+        &self,
+        type_position: CompositeTypeDefinitionPosition,
+        selections: impl IntoIterator<Item = S>,
+    ) -> Result<Self, FederationError> {
+        let new_sub_selection =
+            SelectionSet::from_raw_selections(self.schema().clone(), type_position, selections);
+        self.with_updated_selection_set(Some(new_sub_selection))
+    }
+
     pub(crate) fn containment(
         &self,
         other: &Selection,

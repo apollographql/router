@@ -14,6 +14,7 @@ use super::operation::NamedFragments;
 use super::operation::NormalizeSelectionOption;
 use super::operation::Selection;
 use super::operation::SelectionId;
+use super::operation::SelectionKey;
 use super::operation::SelectionMap;
 use super::operation::SelectionOrSet;
 use super::operation::SelectionSet;
@@ -101,13 +102,30 @@ impl Fragment {
         // theoretically can be.
         let trimmed = expanded_selection_set
             .selections
-            .minus(&normalized_selection_set.selections);
+            .minus(&normalized_selection_set.selections)?;
         // TODO: add validator
         Ok(FragmentRestrictionAtType::new(trimmed))
     }
 
-    fn includes(&self, _name: &Name) -> bool {
-        todo!()
+    // Whether this fragment fully includes `other_fragment`.
+    // Note that this is slightly different from `self` "using" `other_fragment` in that this
+    // essentially checks if the full selection set of `other_fragment` is contained by `self`, so
+    // this only look at "top-level" usages.
+    //
+    // Note that this is guaranteed to return `false` if passed self's name.
+    // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port does not.
+    // TODO: consider memoize this function.
+    fn includes(&self, other_fragment_name: &Name) -> bool {
+        if self.name == *other_fragment_name {
+            return false;
+        }
+
+        self.selection_set.selections.iter().any(|(selection_key, _)| {
+            matches!(
+                selection_key,
+                SelectionKey::FragmentSpread {fragment_name, directives: _} if fragment_name == other_fragment_name,
+            )
+        })
     }
 }
 
@@ -125,29 +143,95 @@ impl NamedFragments {
 }
 
 impl Selection {
+    // PORT_NOTE: The definition of `minus` and `intersection` functions when either `self` or
+    // `other` has no sub-selection seems unintuitive. Why are `apple.minus(orange) = None` and
+    // `apple.intersection(orange) = apple`?
+
     /// Performs set-subtraction (self - other) and returns the result (the difference between self
-    /// and other). The result can be `None` if nothing is left after the subtraction.
-    fn minus(&self, _other: &Selection) -> Option<Selection> {
-        todo!()
+    /// and other).
+    /// If there are respective sub-selections, then we compute their diffs and add them (if not
+    /// empty). Otherwise, we have no diff.
+    fn minus(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
+        if let (Some(self_sub_selection), Some(other_sub_selection)) =
+            (self.selection_set()?, other.selection_set()?)
+        {
+            let diff = self_sub_selection
+                .selections
+                .minus(&other_sub_selection.selections)?;
+            if !diff.is_empty() {
+                return self
+                    .with_updated_selections(
+                        self_sub_selection.type_position.clone(),
+                        diff.into_iter().map(|(_, v)| v),
+                    )
+                    .map(Some);
+            }
+        }
+        Ok(None)
+    }
+
+    // If there are respective sub-selections, then we compute their intersections and add them
+    // (if not empty). Otherwise, the intersection is same as `self`.
+    fn intersection(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
+        if let (Some(self_sub_selection), Some(other_sub_selection)) =
+            (self.selection_set()?, other.selection_set()?)
+        {
+            let common = self_sub_selection
+                .selections
+                .intersection(&other_sub_selection.selections)?;
+            if !common.is_empty() {
+                return self
+                    .with_updated_selections(
+                        self_sub_selection.type_position.clone(),
+                        common.into_iter().map(|(_, v)| v),
+                    )
+                    .map(Some);
+            }
+        }
+        Ok(Some(self.clone()))
     }
 }
 
 impl SelectionMap {
     /// Performs set-subtraction (self - other) and returns the result (the difference between self
     /// and other).
-    fn minus(&self, other: &SelectionMap) -> SelectionMap {
-        let iter = self.iter().filter_map(|(k, v)| {
-            if let Some(other_v) = other.get(k) {
-                v.minus(other_v)
-            } else {
-                Some(v.clone())
-            }
-        });
-        SelectionMap::from_iter(iter)
+    fn minus(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
+        let iter = self
+            .iter()
+            .map(|(k, v)| {
+                if let Some(other_v) = other.get(k) {
+                    v.minus(other_v)
+                } else {
+                    Ok(Some(v.clone()))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()? // early break in case of Err
+            .into_iter()
+            .flatten();
+        Ok(SelectionMap::from_iter(iter))
     }
 
-    fn intersection(&self, _other: &SelectionMap) -> SelectionMap {
-        todo!()
+    fn intersection(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
+        if self.is_empty() {
+            return Ok(self.clone());
+        }
+        if other.is_empty() {
+            return Ok(other.clone());
+        }
+
+        let iter = self
+            .iter()
+            .map(|(k, v)| {
+                if let Some(other_v) = other.get(k) {
+                    v.intersection(other_v)
+                } else {
+                    Ok(None)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()? // early break in case of Err
+            .into_iter()
+            .flatten();
+        Ok(SelectionMap::from_iter(iter))
     }
 }
 
@@ -307,8 +391,8 @@ impl SelectionSet {
             // TODO: add validator check
             // if !validator.check_can_reuse_fragment_and_track_it(at_type) { continue; }
 
-            let not_covered = self.selections.minus(&at_type.selections);
-            not_covered_so_far = not_covered_so_far.intersection(&not_covered);
+            let not_covered = self.selections.minus(&at_type.selections)?;
+            not_covered_so_far = not_covered_so_far.intersection(&not_covered)?;
             // PORT_NOTE: JS version doesn't do this, but shouldn't we skip such fragments that
             //            don't cover any selections (thus, not reducing `not_covered_so_far`)?
 
