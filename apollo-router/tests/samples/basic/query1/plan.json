@@ -37,7 +37,13 @@
             "request": {
                 "query": "{ me { nom: name } }"
             },
-            "expected_response": {}
+            "expected_response": {
+                "data": {
+                    "me": {
+                        "nom": "test"
+                    }
+                }
+            }
         },
         {
             "type": "Stop"
