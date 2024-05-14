@@ -33,7 +33,7 @@ macro_rules! assert_bridge_results {
             .plan($query_str.to_string(), None, PlanOptions::default())
             .await
             .unwrap();
-        let bridge_result = ComparableUsageReporting {
+        let mut bridge_result = ComparableUsageReporting {
             result: plan.usage_reporting,
         };
         let expected_result = UsageReporting {
@@ -44,6 +44,14 @@ macro_rules! assert_bridge_results {
             bridge_result.compare(&expected_result),
             UsageReportingComparisonResult::Equal
         ));
+         // Field names need sorting
+        for ty in bridge_result.result.referenced_fields_by_type.values_mut() {
+            ty.field_names.sort();
+        }
+
+        insta::with_settings!({sort_maps => true, snapshot_suffix => "bridge"}, {
+            insta::assert_yaml_snapshot!(bridge_result);
+        });
     };
 }
 
