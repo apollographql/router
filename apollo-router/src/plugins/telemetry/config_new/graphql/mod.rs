@@ -7,8 +7,6 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::Increment;
-use crate::graphql::Request;
-use crate::graphql::Response;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
@@ -18,7 +16,6 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
-use crate::plugins::telemetry::config_new::Selector;
 
 pub(crate) mod attributes;
 pub(crate) mod selectors;
@@ -57,12 +54,12 @@ impl GraphQLInstrumentsConfig {
 
 #[derive(Default)]
 pub(crate) struct GraphQLInstruments {
-    field_length: Option<CustomHistogram<Request, Response, GraphQLAttributes, GraphQLSelector>>,
+    field_length: Option<CustomHistogram<(), (), GraphQLAttributes, GraphQLSelector>>,
 }
 
 impl Instrumented for GraphQLInstruments {
-    type Request = Request;
-    type Response = Response;
+    type Request = ();
+    type Response = ();
     type EventResponse = ();
 
     fn on_request(&self, _request: &Self::Request) {}
@@ -81,7 +78,7 @@ impl GraphQLInstruments {
         name: &'static str,
         config: &DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
         selector: GraphQLSelector,
-    ) -> CustomHistogram<Request, Response, GraphQLAttributes, GraphQLSelector> {
+    ) -> CustomHistogram<(), (), GraphQLAttributes, GraphQLSelector> {
         let meter = crate::metrics::meter_provider()
             .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
         let mut nb_attributes = 0;

@@ -3,8 +3,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::graphql::Request;
-use crate::graphql::Response;
 use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
@@ -28,19 +26,38 @@ impl DefaultForLevel for GraphQLAttributes {
 }
 
 impl Selectors for GraphQLAttributes {
-    type Request = Request;
-    type Response = Response;
+    type Request = ();
+    type Response = ();
     type EventResponse = ();
 
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_request(&self, _request: &Self::Request) -> Vec<KeyValue> {
+        Vec::default()
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
-        todo!()
+    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
+        Vec::default()
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    fn on_response_field(
+        &self,
+        field: &apollo_compiler::ast::Field,
+        _value: &serde_json::Value,
+    ) -> Vec<KeyValue> {
+        let mut attrs = Vec::with_capacity(2);
+        if let Some(true) = self.field_name {
+            attrs.push(KeyValue::new::<&str, String>(
+                "field.name",
+                field.name.to_string(),
+            ));
+        }
+        if let Some(true) = self.type_name {
+            // attrs.push(KeyValue::new("type.name", field.type_name().into()));
+            todo!("Implement type name attribute")
+        }
+        attrs
+    }
+
+    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+        Vec::default()
     }
 }
