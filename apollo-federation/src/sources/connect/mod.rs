@@ -8,16 +8,20 @@ use super::source::SourceId;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 pub(crate) mod federated_query_graph;
 pub(crate) mod fetch_dependency_graph;
+mod json_selection;
 mod models;
 pub mod query_plan;
-mod selection_parser;
 pub(crate) mod spec;
 mod url_path_template;
 
-pub use selection_parser::ApplyTo;
-pub use selection_parser::ApplyToError;
-pub use selection_parser::Selection;
-pub use selection_parser::SubSelection;
+pub use json_selection::ApplyTo;
+pub use json_selection::ApplyToError;
+pub use json_selection::JSONSelection;
+pub use json_selection::Key;
+pub use json_selection::PathSelection;
+pub use json_selection::SubSelection;
+pub use models::validate;
+pub use models::ValidationError;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 

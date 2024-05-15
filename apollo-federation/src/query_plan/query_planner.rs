@@ -748,18 +748,17 @@ type User
         QueryPlan {
           Fetch(service: "accounts") {
             {
-                    userById(id: 1) {
+              userById(id: 1) {
                 name
                 email
               }
             }
-          }
+          },
         }
         "###);
     }
 
     #[test]
-    #[ignore]
     fn plan_simple_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -783,53 +782,91 @@ type User
           Sequence {
             Fetch(service: "reviews") {
               {
-                        bestRatedProducts {
+                bestRatedProducts {
                   ... on Book {
-                    id
                     __typename
+                    id
                   }
                   ... on Movie {
-                    id
                     __typename
+                    id
                   }
                 }
               }
-            }
+            },
             Parallel {
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                                ... on Movie {
-                      id
-                    }
-                  } => {
-                                ... on Movie {
-                      vendor {
-                        id
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Movie {
                         __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Movie {
+                        vendor {
+                          __typename
+                          id
+                        }
                       }
                     }
-                  }
-                }
-              }
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                                ... on Book {
-                      id
-                    }
-                  } => {
-                                ... on Book {
-                      vendor {
-                        id
+                  },
+                },
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
                         __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on User {
+                        name
                       }
                     }
-                  }
-                }
-              }
-            }
-          }
+                  },
+                },
+              },
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Book {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Book {
+                        vendor {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on User {
+                        name
+                      }
+                    }
+                  },
+                },
+              },
+            },
+          },
         }
         "###);
     }
@@ -931,14 +968,14 @@ type User
         QueryPlan {
           Fetch(service: "A") {
             {
-                    a {
+              a {
                 b {
                   x
                   y
                 }
               }
             }
-          }
+          },
         }
         "###);
     }

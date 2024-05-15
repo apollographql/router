@@ -2,12 +2,14 @@ mod validation;
 
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
+pub use validation::validate;
+pub use validation::ValidationError;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;
 use super::spec::SourceHTTPArguments;
 use super::ConnectId;
-use super::Selection;
+use super::JSONSelection;
 use super::URLPathTemplate;
 use crate::error::FederationError;
 use crate::schema::ValidFederationSchema;
@@ -21,7 +23,7 @@ use crate::sources::connect::ConnectSpecDefinition;
 pub struct Connector {
     pub id: ConnectId,
     pub transport: Transport,
-    pub selection: Selection,
+    pub selection: JSONSelection,
 }
 
 #[derive(Debug, Clone)]
@@ -107,7 +109,7 @@ pub struct HttpJsonTransport {
     pub path_template: URLPathTemplate,
     pub method: HTTPMethod,
     pub headers: IndexMap<NodeStr, Option<HTTPHeaderOption>>,
-    pub body: Option<Selection>,
+    pub body: Option<JSONSelection>,
 }
 
 impl HttpJsonTransport {

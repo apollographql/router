@@ -4,7 +4,7 @@ use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
@@ -14,15 +14,11 @@ pub(crate) enum AbstractType {
     Union(UnionTypeDefinitionPosition),
 }
 
-impl AbstractType {
-    pub(crate) fn introspection_typename_field(&self) -> FieldDefinitionPosition {
-        match self {
-            AbstractType::Interface(interface) => {
-                FieldDefinitionPosition::Interface(interface.introspection_typename_field())
-            }
-            AbstractType::Union(union) => {
-                FieldDefinitionPosition::Union(union.introspection_typename_field())
-            }
+impl From<AbstractType> for CompositeTypeDefinitionPosition {
+    fn from(value: AbstractType) -> Self {
+        match value {
+            AbstractType::Interface(x) => Self::Interface(x),
+            AbstractType::Union(x) => Self::Union(x),
         }
     }
 }

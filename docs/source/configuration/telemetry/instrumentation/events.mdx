@@ -98,7 +98,7 @@ telemetry:
 
 ### `on`
 
-Each custom event must indicate when it should be triggered. This can be `request`, `response` or `error`.
+Each custom event must indicate when it should be triggered. This can be `request`, `response`, `event_response` or `error`.
 
 ```yaml title="future.router.yaml"
 telemetry:
@@ -106,9 +106,11 @@ telemetry:
     events:
       router:
         acme.event:
-          on: request # request, response, error
+          on: request # request, response, event_response, error
           # ...
 ```
+
+> `event_response` is useful when you want to directly access to the json response body. It also works for subscription events and `@defer` chunks.
 
 ### `level`
 

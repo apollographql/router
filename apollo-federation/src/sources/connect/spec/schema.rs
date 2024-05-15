@@ -4,7 +4,7 @@ use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-use crate::sources::connect::selection_parser::Selection;
+use crate::sources::connect::json_selection::JSONSelection;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
@@ -95,7 +95,7 @@ pub(crate) struct ConnectDirectiveArguments {
     ///
     /// Uses the JSONSelection syntax to define a mapping of connector response to
     /// GraphQL schema.
-    pub(crate) selection: Selection,
+    pub(crate) selection: JSONSelection,
 
     /// Entity resolver marker
     ///
@@ -119,7 +119,7 @@ pub(crate) struct ConnectHTTPArguments {
     /// Define a request body using JSONSelection. Selections can include values from
     /// field arguments using `$args.argName` and from fields on the parent type using
     /// `$this.fieldName`.
-    pub(crate) body: Option<Selection>,
+    pub(crate) body: Option<JSONSelection>,
 
     /// Configuration for headers to attach to the request.
     ///

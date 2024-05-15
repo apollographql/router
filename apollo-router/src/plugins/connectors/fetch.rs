@@ -9,7 +9,7 @@ use apollo_federation::sources::connect;
 use apollo_federation::sources::connect::query_plan::FetchNode as ConnectFetchNode;
 use apollo_federation::sources::connect::ConnectId;
 use apollo_federation::sources::connect::Connector;
-use apollo_federation::sources::connect::Selection;
+use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::SubSelection;
 use apollo_federation::sources::source;
 use apollo_federation::sources::source::SourceId;
@@ -50,7 +50,7 @@ impl From<FetchNode> for source::query_plan::FetchNode {
             },
             field_response_name: name!("Field"),
             field_arguments: Default::default(),
-            selection: Selection::Named(SubSelection {
+            selection: JSONSelection::Named(SubSelection {
                 selections: vec![],
                 star: None,
             }),
@@ -341,7 +341,7 @@ mod soure_node_tests {
                     headers: Default::default(),
                     body: Default::default(),
                 }),
-                selection: Selection::Named(SubSelection {
+                selection: JSONSelection::Named(SubSelection {
                     selections: vec![],
                     star: None,
                 }),
@@ -377,7 +377,7 @@ mod soure_node_tests {
             source_id: fake_connect_id(),
             field_response_name: name!("Field"),
             field_arguments: Default::default(),
-            selection: Selection::Named(SubSelection {
+            selection: JSONSelection::Named(SubSelection {
                 selections: vec![],
                 star: None,
             }),

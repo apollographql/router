@@ -1900,6 +1900,17 @@ expression: "&schema"
         }
       ]
     },
+    "ErrorRepr": {
+      "oneOf": [
+        {
+          "description": "The error reason",
+          "enum": [
+            "reason"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ErrorsConfiguration": {
       "additionalProperties": false,
       "properties": {
@@ -1957,6 +1968,13 @@ expression: "&schema"
           "type": "string"
         },
         {
+          "description": "Log the event on every chunks in the response",
+          "enum": [
+            "event_response"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Log the event on error",
           "enum": [
             "error"
@@ -1996,6 +2014,38 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Event_for_RouterSelector": {
+      "oneOf": [
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_duration"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "properties": {
+            "event_custom": {
+              "$ref": "#/definitions/RouterSelector",
+              "description": "#/definitions/RouterSelector"
+            }
+          },
+          "required": [
+            "event_custom"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Event_for_SubgraphAttributes_and_SubgraphSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
@@ -2027,6 +2077,38 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Event_for_SubgraphSelector": {
+      "oneOf": [
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_duration"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "properties": {
+            "event_custom": {
+              "$ref": "#/definitions/SubgraphSelector",
+              "description": "#/definitions/SubgraphSelector"
+            }
+          },
+          "required": [
+            "event_custom"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "Event_for_SupergraphAttributes_and_SupergraphSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
@@ -2057,6 +2139,38 @@ expression: "&schema"
         "on"
       ],
       "type": "object"
+    },
+    "Event_for_SupergraphSelector": {
+      "oneOf": [
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_duration"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "properties": {
+            "event_custom": {
+              "$ref": "#/definitions/SupergraphSelector",
+              "description": "#/definitions/SupergraphSelector"
+            }
+          },
+          "required": [
+            "event_custom"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "Events": {
       "additionalProperties": false,
@@ -2778,6 +2892,10 @@ expression: "&schema"
           "description": "#/definitions/Standard"
         },
         {
+          "$ref": "#/definitions/Event_for_RouterSelector",
+          "description": "#/definitions/Event_for_RouterSelector"
+        },
+        {
           "$ref": "#/definitions/RouterSelector",
           "description": "#/definitions/RouterSelector"
         }
@@ -2790,6 +2908,10 @@ expression: "&schema"
           "description": "#/definitions/Standard"
         },
         {
+          "$ref": "#/definitions/Event_for_SubgraphSelector",
+          "description": "#/definitions/Event_for_SubgraphSelector"
+        },
+        {
           "$ref": "#/definitions/SubgraphSelector",
           "description": "#/definitions/SubgraphSelector"
         }
@@ -2800,6 +2922,10 @@ expression: "&schema"
         {
           "$ref": "#/definitions/Standard",
           "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/Event_for_SupergraphSelector",
+          "description": "#/definitions/Event_for_SupergraphSelector"
         },
         {
           "$ref": "#/definitions/SupergraphSelector",
@@ -4465,6 +4591,19 @@ expression: "&schema"
             "on_graphql_error"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -5421,6 +5560,19 @@ expression: "&schema"
             "static"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -5908,6 +6060,42 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "response_data": {
+              "description": "The supergraph response body json path of the chunks.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_data"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue",
+              "nullable": true
+            },
+            "response_errors": {
+              "description": "The supergraph response body json path of the chunks.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "response_errors"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "baggage": {
               "description": "The name of the baggage item.",
               "type": "string"
@@ -5954,6 +6142,19 @@ expression: "&schema"
           },
           "required": [
             "static"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "error": {
+              "$ref": "#/definitions/ErrorRepr",
+              "description": "#/definitions/ErrorRepr"
+            }
+          },
+          "required": [
+            "error"
           ],
           "type": "object"
         },

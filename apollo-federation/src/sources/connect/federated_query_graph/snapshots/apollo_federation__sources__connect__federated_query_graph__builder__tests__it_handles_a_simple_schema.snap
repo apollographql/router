@@ -1,0 +1,135 @@
+---
+source: apollo-federation/src/sources/connect/federated_query_graph/builder.rs
+expression: connectors.source_data.values()
+---
+[
+    Connector {
+        id: ConnectId {
+            label: "connectors.json http: Get /users",
+            subgraph_name: "connectors",
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.users),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJson(
+            HttpJsonTransport {
+                base_url: "https://jsonplaceholder.typicode.com/",
+                path_template: URLPathTemplate {
+                    path: [
+                        ParameterValue {
+                            parts: [
+                                Text(
+                                    "users",
+                                ),
+                            ],
+                        },
+                    ],
+                    query: {},
+                },
+                method: Get,
+                headers: {
+                    "X-Auth-Token": Some(
+                        As(
+                            "AuthToken",
+                        ),
+                    ),
+                    "user-agent": Some(
+                        Value(
+                            [
+                                "Firefox",
+                            ],
+                        ),
+                    ),
+                    "X-From-Env": None,
+                },
+                body: None,
+            },
+        ),
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "name",
+                        None,
+                    ),
+                ],
+                star: None,
+            },
+        ),
+    },
+    Connector {
+        id: ConnectId {
+            label: "connectors.json http: Get /posts",
+            subgraph_name: "connectors",
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.posts),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJson(
+            HttpJsonTransport {
+                base_url: "https://jsonplaceholder.typicode.com/",
+                path_template: URLPathTemplate {
+                    path: [
+                        ParameterValue {
+                            parts: [
+                                Text(
+                                    "posts",
+                                ),
+                            ],
+                        },
+                    ],
+                    query: {},
+                },
+                method: Get,
+                headers: {
+                    "X-Auth-Token": Some(
+                        As(
+                            "AuthToken",
+                        ),
+                    ),
+                    "user-agent": Some(
+                        Value(
+                            [
+                                "Firefox",
+                            ],
+                        ),
+                    ),
+                    "X-From-Env": None,
+                },
+                body: None,
+            },
+        ),
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "title",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "body",
+                        None,
+                    ),
+                ],
+                star: None,
+            },
+        ),
+    },
+]

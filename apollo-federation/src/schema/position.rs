@@ -6402,7 +6402,7 @@ lazy_static! {
     };
     // This is static so that UnionTypenameFieldDefinitionPosition.field_name() can return `&Name`,
     // like the other field_name() methods in this file.
-    static ref INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
+    pub(crate) static ref INTROSPECTION_TYPENAME_FIELD_NAME: Name = name!("__typename");
 }
 
 fn validate_component_directives(
