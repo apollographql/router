@@ -33,6 +33,7 @@ use crate::query_plan::generate::PlanBuilder;
 use crate::query_plan::operation::Operation;
 use crate::query_plan::operation::Selection;
 use crate::query_plan::operation::SelectionSet;
+use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
@@ -41,8 +42,6 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
-
-use super::query_planner::compute_root_fetch_groups;
 
 // PORT_NOTE: Named `PlanningParameters` in the JS codebase, but there was no particular reason to
 // leave out to the `Query` prefix, so it's been added for consistency. Similar to `GraphPath`, we

@@ -20,6 +20,7 @@ use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
@@ -28,6 +29,8 @@ use crate::query_plan::operation::normalize_operation;
 use crate::query_plan::operation::NamedFragments;
 use crate::query_plan::operation::NormalizedDefer;
 use crate::query_plan::operation::RebasedFragments;
+use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::SelectionKey;
 use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
@@ -47,10 +50,6 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
-
-use super::fetch_dependency_graph::compute_nodes_for_tree;
-use super::operation::Selection;
-use super::operation::SelectionKey;
 
 #[derive(Debug, Clone, Hash)]
 pub struct QueryPlannerConfig {
@@ -576,13 +575,11 @@ fn compute_root_serial_dependency_graph(
     Ok(digest)
 }
 
-fn split_top_level_fields(
-    selection_set: SelectionSet,
-) -> Box<dyn 'static + Iterator<Item = SelectionSet>> {
+fn split_top_level_fields(selection_set: SelectionSet) -> Box<dyn Iterator<Item = SelectionSet>> {
     let parent_type = selection_set.type_position.clone();
     let selections: IndexMap<SelectionKey, Selection> = (**selection_set.selections).clone();
     Box::new(selections.into_values().flat_map(move |sel| {
-        let digest: Box<dyn 'static + Iterator<Item = SelectionSet>> = if sel.is_field() {
+        let digest: Box<dyn Iterator<Item = SelectionSet>> = if sel.is_field() {
             Box::new(std::iter::once(SelectionSet::from_selection(
                 parent_type.clone(),
                 sel.clone(),
