@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -12,13 +11,17 @@ use crate::graphql::Request;
 use crate::graphql::Response;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
-use crate::plugins::telemetry::config_new::Selectors;
+
+pub(crate) mod attributes;
+pub(crate) mod selectors;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -101,66 +104,6 @@ impl GraphQLInstruments {
                 updated: false,
             }),
         }
-    }
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct GraphQLAttributes {
-    field_name: Option<bool>,
-    type_name: Option<bool>,
-}
-
-impl DefaultForLevel for GraphQLAttributes {
-    fn defaults_for_level(
-        &mut self,
-        _requirement_level: super::attributes::DefaultAttributeRequirementLevel,
-        _kind: crate::plugins::telemetry::otlp::TelemetryDataKind,
-    ) {
-        // No-op?
-    }
-}
-
-impl Selectors for GraphQLAttributes {
-    type Request = Request;
-    type Response = Response;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
-    }
-
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
-        todo!()
-    }
-
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
-    }
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
-#[serde(deny_unknown_fields, untagged)]
-pub(crate) enum GraphQLSelector {
-    FieldLength,
-}
-
-impl Selector for GraphQLSelector {
-    type Request = Request;
-    type Response = Response;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
-        None
-    }
-
-    fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
-        todo!()
-    }
-
-    fn on_error(&self, error: &BoxError) -> Option<opentelemetry::Value> {
-        None
     }
 }
 
