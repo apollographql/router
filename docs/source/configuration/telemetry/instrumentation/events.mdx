@@ -105,7 +105,7 @@ telemetry:
 
 ### `level`
 
-Custom events have a level, `trace`, `debug`, `info`, `warn` or `error`. The level determines the severity of the event.
+Custom events have a level, `trace`, `debug`, `info`, `warn`, `error` or `off` (if you want to disable this event). The level determines the severity of the event.
 
 To set the level:
 ```yaml title="future.router.yaml"
@@ -113,7 +113,7 @@ telemetry:
   events:
     router:
       acme.event:
-        level: info # trace, debug, info, warn, error
+        level: info # trace, debug, info, warn, error, off
         # ...
 ```
 
@@ -195,8 +195,8 @@ telemetry:
 | Option             | Values                                                                       | Default | Description                                                 |
 |--------------------|------------------------------------------------------------------------------|---------|-------------------------------------------------------------|
 | `<attribute-name>` |                                                                              |         | The name of the custom attribute.                           |
-| `attributes`       | [standard attributes](./standard-attributes) or [selectors](./selectors) |         | The attributes of the custom log event.                     |
-| `condition`        | [conditions](./conditions)                                                 |         | The condition that must be met for the event to be emitted. |
+| `attributes`       | [standard attributes](./standard-attributes) or [selectors](./selectors)     |         | The attributes of the custom log event.                     |
+| `condition`        | [conditions](./conditions)                                                   |         | The condition that must be met for the event to be emitted. |
 | `error`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the error log event.                           |
 | `level`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the custom log event.                          |
 | `message`          |                                                                              |         | The message of the custom log event.                        |
