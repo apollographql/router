@@ -62,8 +62,45 @@ impl FragmentRestrictionAtType {
 }
 
 impl Fragment {
-    fn can_apply_directly_at_type(&self, _ty: &CompositeTypeDefinitionPosition) -> bool {
-        todo!()
+    /// Whether this fragment may apply _directly_ at the provided type, meaning that the fragment
+    /// sub-selection (_without_ the fragment condition, hence the "directly") can be normalized at
+    /// `ty` without overly "widening" the runtime types.
+    ///
+    /// * `ty` - the type at which we're looking at applying the fragment
+    //
+    // The runtime types of the fragment condition must be at least as general as those of the
+    // provided `ty`. Otherwise, putting it at `ty` without its condition would "generalize"
+    // more than the fragment meant to (and so we'd "widen" the runtime types more than what the
+    // query meant to.
+    fn can_apply_directly_at_type(
+        &self,
+        ty: &CompositeTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        // Short-circuit #1: the same type => trivially true.
+        if self.type_condition_position == *ty {
+            return Ok(true);
+        }
+
+        // Short-circuit #2: The type condition is a (different) object type (too restrictive).
+        // - It will never cover all of the runtime types of `ty` unless it's the same type, which is
+        //   already checked.
+        if self.type_condition_position.is_object_type() {
+            return Ok(false);
+        }
+
+        // Short-circuit #3: The type condition is an interface type, but the `ty` is more general.
+        // - The type condition is an interface but `ty` is a (different) interface or a union.
+        if self.type_condition_position.is_interface_type() && !ty.is_object_type() {
+            return Ok(false);
+        }
+
+        // Check if the type condition is a superset of the provided type.
+        // - The fragment condition must be at least as general as the provided type.
+        let condition_types = self
+            .schema
+            .possible_runtime_types(self.type_condition_position.clone())?;
+        let ty_types = self.schema.possible_runtime_types(ty.clone())?;
+        Ok(condition_types.is_superset(&ty_types))
     }
 
     // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port does not.
@@ -134,11 +171,15 @@ impl NamedFragments {
     fn get_all_may_apply_directly_at_type(
         &self,
         ty: &CompositeTypeDefinitionPosition,
-    ) -> Vec<Node<Fragment>> {
+    ) -> Result<Vec<Node<Fragment>>, FederationError> {
         self.iter()
-            .filter(|fragment| fragment.can_apply_directly_at_type(ty))
-            .cloned()
-            .collect()
+            .filter_map(|fragment| {
+                fragment
+                    .can_apply_directly_at_type(ty)
+                    .map(|can_apply| can_apply.then_some(fragment.clone()))
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()
     }
 }
 
@@ -318,7 +359,7 @@ impl SelectionSet {
         // fragment whose type _is_ the fragment condition (at which point, this
         // `can_apply_directly_at_type` method will apply. Also note that this is because we have
         // this restriction that calling `expanded_selection_set_at_type` is ok.
-        let candidates = fragments.get_all_may_apply_directly_at_type(parent_type);
+        let candidates = fragments.get_all_may_apply_directly_at_type(parent_type)?;
         if candidates.is_empty() {
             return Ok(self.clone().into());
         }
