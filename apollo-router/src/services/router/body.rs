@@ -46,7 +46,7 @@ impl Stream for RouterBody {
     type Item = <hyper::body::Body as Stream>::Item;
 
     fn poll_next(
-        mut self: std::pin::Pin<&mut Self>,
+        self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
         let mut pinned = unsafe { self.map_unchecked_mut(|s| &mut s.0) };

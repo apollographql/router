@@ -7,7 +7,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
-use crate::services::router::Body;
 use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
@@ -44,6 +43,7 @@ use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
+use crate::services::router::Body;
 use crate::services::subgraph;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;

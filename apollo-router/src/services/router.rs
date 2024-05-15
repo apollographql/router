@@ -35,7 +35,7 @@ pub type ServiceResult = Result<Response, BoxError>;
 pub type Body = hyper::Body;
 pub type Error = hyper::Error;
 
-pub(crate) mod body;
+pub mod body;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;

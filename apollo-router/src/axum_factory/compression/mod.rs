@@ -9,14 +9,13 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tracing::Instrument;
 
-use crate::services::router::body::RouterBody;
-
 use self::codec::BrotliEncoder;
 use self::codec::DeflateEncoder;
 use self::codec::Encode;
 use self::codec::GzipEncoder;
 use self::codec::ZstdEncoder;
 use self::util::PartialBuffer;
+use crate::services::router::body::RouterBody;
 
 pub(crate) mod codec;
 pub(crate) mod unshared;
