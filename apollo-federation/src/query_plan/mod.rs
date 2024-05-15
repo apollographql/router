@@ -87,7 +87,7 @@ pub struct FetchNode {
     pub output_rewrites: Vec<Arc<FetchDataRewrite>>,
     /// Similar to the other kinds of rewrites. This is a mechanism to convert a contextual path into
     /// an argument to a resolver
-    pub context_rewrites: Arc<Vec<Arc<FetchDataRewrite>>>,
+    pub context_rewrites: Vec<Arc<FetchDataRewrite>>,
 }
 
 #[derive(Debug, Clone)]

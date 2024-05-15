@@ -1,18 +1,12 @@
 use std::collections::HashMap;
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Document;
-use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::validation::WithErrors;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
-use json_ext::PathElement;
 use once_cell::sync::OnceCell as OnceLock;
 use serde::Deserialize;
 use serde::Serialize;
@@ -22,10 +16,10 @@ use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
-use super::rewrites::DataKeyRenamer;
-use super::rewrites::DataRewrite;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
+use super::subgraph_context::build_operation_with_aliasing;
+use super::subgraph_context::ContextualArguments;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::error::ValidationErrors;
@@ -42,6 +36,8 @@ use crate::plugins::authorization::CacheKeyMetadata;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Schema;
+
+use crate::query_planner::subgraph_context::SubgraphContext;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
@@ -255,189 +251,7 @@ impl Display for QueryHash {
 pub(crate) struct Variables {
     pub(crate) variables: Object,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
-    pub(crate) contextual_args: Option<(HashSet<String>, usize)>,
-}
-
-#[derive(Debug)]
-enum ContextBatchingError {
-    InvalidDocument(WithErrors<Document>),
-    NoSelectionSet,
-}
-
-fn query_batching_for_contextual_args(
-    operation: &str,
-    contextual_args: &Option<(HashSet<String>, usize)>,
-) -> Result<Option<String>, ContextBatchingError> {
-    if let Some((ctx, times)) = contextual_args {
-        let parser = apollo_compiler::Parser::new()
-            .parse_ast(operation, "")
-            .map_err(ContextBatchingError::InvalidDocument)?;
-        if let Some(mut operation) = parser
-            .definitions
-            .into_iter()
-            .find_map(|definition| definition.as_operation_definition().cloned())
-        {
-            let mut new_variables: Vec<_> = Default::default();
-            if operation
-                .variables
-                .iter()
-                .any(|v| ctx.contains(v.name.as_str()))
-            {
-                let new_selection_set: Vec<_> = (0..*times)
-                    .map(|i| {
-                        // TODO: Unwrap
-                        let mut s = operation
-                            .selection_set
-                            .first()
-                            .ok_or_else(|| ContextBatchingError::NoSelectionSet)?
-                            .clone();
-                        if let ast::Selection::Field(f) = &mut s {
-                            let f = f.make_mut();
-                            f.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
-                        }
-
-                        for v in &operation.variables {
-                            if ctx.contains(v.name.as_str()) {
-                                let mut cloned = v.clone();
-                                let new_variable = cloned.make_mut();
-                                new_variable.name =
-                                    Name::new_unchecked(format!("{}_{}", v.name, i).into());
-                                new_variables.push(Node::new(new_variable.clone()));
-
-                                s = rename_variables(s, v.name.clone(), new_variable.name.clone());
-                            } else if !new_variables.iter().any(|var| var.name == v.name) {
-                                new_variables.push(v.clone());
-                            }
-                        }
-
-                        Ok(s)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let new_operation = operation.make_mut();
-                new_operation.selection_set = new_selection_set;
-                new_operation.variables = new_variables;
-
-                return Ok(Some(new_operation.serialize().no_indent().to_string()));
-            }
-        }
-    }
-
-    Ok(None)
-}
-
-fn rename_variables(selection_set: ast::Selection, from: Name, to: Name) -> ast::Selection {
-    match selection_set {
-        ast::Selection::Field(f) => {
-            let mut new = f.clone();
-
-            let as_mut = new.make_mut();
-
-            as_mut.arguments.iter_mut().for_each(|arg| {
-                if arg.value.as_variable() == Some(&from) {
-                    arg.make_mut().value = ast::Value::Variable(to.clone()).into();
-                }
-            });
-
-            as_mut.selection_set = as_mut
-                .selection_set
-                .clone()
-                .into_iter()
-                .map(|s| rename_variables(s, from.clone(), to.clone()))
-                .collect();
-
-            ast::Selection::Field(new)
-        }
-        ast::Selection::InlineFragment(f) => {
-            let mut new = f.clone();
-            new.make_mut().selection_set = f
-                .selection_set
-                .clone()
-                .into_iter()
-                .map(|s| rename_variables(s, from.clone(), to.clone()))
-                .collect();
-            ast::Selection::InlineFragment(new)
-        }
-        ast::Selection::FragmentSpread(f) => ast::Selection::FragmentSpread(f),
-    }
-}
-
-#[test]
-fn test_query_batching_for_contextual_args() {
-    let old_query = "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}";
-    let mut ctx_args = HashSet::new();
-    ctx_args.insert("Subgraph1_U_field_a".to_string());
-    let contextual_args = Some((ctx_args, 2));
-
-    let expected = "query QueryLL__Subgraph1__1($representations: [_Any!]!, $Subgraph1_U_field_a_0: String!, $Subgraph1_U_field_a_1: String!) { _0: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_0) } } _1: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_1) } } }";
-
-    assert_eq!(
-        expected,
-        query_batching_for_contextual_args(old_query, &contextual_args)
-            .unwrap()
-            .unwrap()
-    );
-}
-
-// TODO: There is probably a function somewhere else that already does this
-fn data_at_path<'v>(data: &'v Value, path: &Path) -> Option<&'v Value> {
-    let v = match &path.0[0] {
-        PathElement::Fragment(s) => {
-            // get the value at data.get("__typename") and compare it with s. If the values are equal, return data, otherwise None
-            let mut z: Option<&Value> = None;
-            let wrapped_typename = data.get("__typename");
-            if let Some(t) = wrapped_typename {
-                if t.as_str() == Some(s.as_str()) {
-                    z = Some(data);
-                }
-            }
-            z
-        }
-        PathElement::Key(v, _) => data.get(v),
-        PathElement::Index(idx) => Some(&data[idx]),
-        PathElement::Flatten(_) => None,
-    };
-
-    if path.len() > 1 {
-        if let Some(val) = v {
-            let remaining_path = path.iter().skip(1).cloned().collect();
-            return data_at_path(val, &remaining_path);
-        }
-    }
-    v
-}
-
-fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
-    let mut i = 0;
-    let mut j = current_dir.len();
-    // iterate over the context_path(i), every time we encounter a '..', we want
-    // to go up one level in the current_dir(j)
-    while i < context_path.len() {
-        match &context_path.0.get(i) {
-            Some(PathElement::Key(e, _)) => {
-                let mut found = false;
-                if e == ".." {
-                    while !found {
-                        j -= 1;
-                        if let Some(PathElement::Key(_, _)) = current_dir.0.get(j) {
-                            found = true;
-                        }
-                    }
-                    i += 1;
-                } else {
-                    break;
-                }
-            }
-            _ => break,
-        }
-    }
-
-    let mut return_path: Vec<PathElement> = current_dir.iter().take(j).cloned().collect();
-
-    context_path.iter().skip(i).for_each(|e| {
-        return_path.push(e.clone());
-    });
-    Path(return_path.into_iter().collect())
+    pub(crate) contextual_arguments: Option<ContextualArguments>,
 }
 
 impl Variables {
@@ -453,79 +267,26 @@ impl Variables {
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        let mut variables: serde_json_bytes::Map<serde_json_bytes::ByteString, Value> =
-            Object::with_capacity(1 + variable_usages.len());
-
         let body = request.body();
-
-        variables.extend(variable_usages.iter().filter_map(|key| {
-            body.variables
-                .get_key_value(key.as_str())
-                .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
-        }));
-
+        let mut subgraph_context = SubgraphContext::new(data, current_dir, schema, context_rewrites);
+        dbg!("new variables");
         if !requires.is_empty() {
+            let mut variables = Object::with_capacity(1 + variable_usages.len());
+
+            variables.extend(variable_usages.iter().filter_map(|key| {
+                body.variables
+                    .get_key_value(key.as_str())
+                    .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
+            }));
+
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::new();
-            let mut named_args: Vec<HashMap<String, Value>> = Vec::new();
             data.select_values_and_paths(schema, current_dir, |path, value| {
+                dbg!(&path, &value);
                 // first get contextual values that are required
-                let mut found_rewrites: HashSet<String> = HashSet::new();
-                let hash_map: HashMap<String, Value> = context_rewrites
-                    .iter()
-                    .flatten()
-                    .filter_map(|rewrite| {
-                        // note that it's possible that we could have multiple rewrites for the same variable. If that's the case, don't lookup if a value has already been found
-                        match rewrite {
-                            DataRewrite::KeyRenamer(item) => {
-                                if !found_rewrites.contains(item.rename_key_to.as_str()) {
-                                    let data_path = merge_context_path(path, &item.path);
-                                    let val = data_at_path(data, &data_path);
-                                    if let Some(v) = val {
-                                        // add to found
-                                        found_rewrites
-                                            .insert(item.rename_key_to.clone().to_string());
-                                        // TODO: not great
-                                        let mut new_value = v.clone();
-                                        if let Some(values) = new_value.as_array_mut() {
-                                            for v in values {
-                                                rewrites::apply_single_rewrite(
-                                                    schema,
-                                                    v,
-                                                    &DataRewrite::KeyRenamer({
-                                                        DataKeyRenamer {
-                                                            path: data_path.clone(),
-                                                            rename_key_to: item
-                                                                .rename_key_to
-                                                                .clone(),
-                                                        }
-                                                    }),
-                                                );
-                                            }
-                                        } else {
-                                            rewrites::apply_single_rewrite(
-                                                schema,
-                                                &mut new_value,
-                                                &DataRewrite::KeyRenamer({
-                                                    DataKeyRenamer {
-                                                        path: data_path,
-                                                        rename_key_to: item.rename_key_to.clone(),
-                                                    }
-                                                }),
-                                            );
-                                        }
-                                        return Some((item.rename_key_to.to_string(), new_value));
-                                    }
-                                }
-                                None
-                            }
-                            DataRewrite::ValueSetter(_) => {
-                                // TODO: Log error? panic? not sure
-                                None
-                            }
-                        }
-                    })
-                    .collect();
+                if let Some(context) = subgraph_context.as_mut() {
+                    context.execute_on_path(path);
+                }
 
                 let mut value = execute_selection_set(value, requires, schema, None);
                 if value.as_object().map(|o| !o.is_empty()).unwrap_or(false) {
@@ -533,13 +294,11 @@ impl Variables {
                     match values.get_index_of(&value) {
                         Some(index) => {
                             inverted_paths[index].push(path.clone());
-                            named_args.push(hash_map);
                         }
                         None => {
                             inverted_paths.push(vec![path.clone()]);
                             values.insert(value);
                             debug_assert!(inverted_paths.len() == values.len());
-                            named_args.push(hash_map);
                         }
                     }
                 }
@@ -550,47 +309,16 @@ impl Variables {
             }
 
             let representations = Value::Array(Vec::from_iter(values));
-
-            // Here we create a new map with all the key value pairs to push into variables.
-            // Note that if all variables are the same, we just use the named parameter as a variable, but if they are different then each
-            // entity will have it's own set of parameters all appended by _<index>
-            let (extended_vars, contextual_args) = if let Some(first_map) = named_args.first() {
-                if named_args.iter().all(|map| map == first_map) {
-                    (
-                        first_map
-                            .iter()
-                            .map(|(k, v)| (k.as_str().into(), v.clone()))
-                            .collect(),
-                        None,
-                    )
-                } else {
-                    let mut hash_map: HashMap<String, Value> = HashMap::new();
-                    let arg_names: HashSet<_> = first_map.keys().cloned().collect();
-                    for (index, item) in named_args.iter().enumerate() {
-                        // append _<index> to each of the arguments and push all the values into hash_map
-                        hash_map.extend(item.iter().map(|(k, v)| {
-                            let mut new_named_param = k.clone();
-                            new_named_param.push_str(&format!("_{}", index));
-                            (new_named_param, v.clone())
-                        }));
-                    }
-                    (hash_map, Some((arg_names, named_args.len())))
-                }
-            } else {
-                (HashMap::new(), None)
+            let contextual_arguments = match subgraph_context.as_mut() {
+                Some(context) => context.add_variables_and_get_args(&mut variables),
+                None => None,
             };
-
-            variables.extend(
-                extended_vars
-                    .iter()
-                    .map(|(key, value)| (key.as_str().into(), value.clone())),
-            );
-
+            
             variables.insert("representations", representations);
             Some(Variables {
                 variables,
                 inverted_paths,
-                contextual_args,
+                contextual_arguments,
             })
         } else {
             // with nested operations (Query or Mutation has an operation returning a Query or Mutation),
@@ -611,13 +339,13 @@ impl Variables {
                 variables: variable_usages
                     .iter()
                     .filter_map(|key| {
-                        variables
+                        body.variables
                             .get_key_value(key.as_str())
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
                     .collect::<Object>(),
                 inverted_paths: Vec::new(),
-                contextual_args: None,
+                contextual_arguments: None,
             })
         }
     }
@@ -650,7 +378,7 @@ impl FetchNode {
         let Variables {
             variables,
             inverted_paths: paths,
-            contextual_args,
+            contextual_arguments,
         } = match Variables::new(
             &self.requires,
             &self.variable_usages,
@@ -667,16 +395,11 @@ impl FetchNode {
                 return (Value::Object(Object::default()), Vec::new());
             }
         };
-
-        let query_batched_query = if let Ok(qbq) =
-            query_batching_for_contextual_args(operation.as_serialized(), &contextual_args)
-        {
-            qbq
-        } else {
-            // TODO: do we need to provide an error here ?
-            return (Default::default(), Default::default());
-        };
-
+        
+        let aliased_operation = build_operation_with_aliasing(operation, &contextual_arguments, parameters.schema);
+        if let Ok(a) = aliased_operation {
+            dbg!(a.to_string());
+        }
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
@@ -695,7 +418,7 @@ impl FetchNode {
                     )
                     .body(
                         Request::builder()
-                            .query(query_batched_query.as_deref().unwrap_or(operation.as_serialized()))
+                            .query(operation.as_serialized())
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
@@ -763,6 +486,7 @@ impl FetchNode {
                 .to_graphql_error(Some(current_dir.to_owned()))],
             );
         }
+
         let (value, errors) =
             self.response_at_path(parameters.schema, current_dir, paths, response);
         if let Some(id) = &self.id {

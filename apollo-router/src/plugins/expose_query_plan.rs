@@ -218,8 +218,7 @@ mod tests {
             build_mock_supergraph(serde_json::json! {{
                 "plugins": {
                     "experimental.expose_query_plan": true
-                },
-                "include_subgraph_errors": { "all": true }
+                }
             }})
             .await,
         )
@@ -232,8 +231,7 @@ mod tests {
             build_mock_supergraph(serde_json::json! {{
                 "plugins": {
                     "experimental.expose_query_plan": true
-                },
-                "include_subgraph_errors": { "all": true }
+                }
             }})
             .await,
         )

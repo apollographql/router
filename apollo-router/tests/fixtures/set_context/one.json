@@ -74,6 +74,7 @@
         "data": {
           "tList": [
             {
+              "__typename": "T",
               "prop": "prop value 1",
               "id": "1",
               "uList": [
@@ -84,6 +85,7 @@
               ]
             },
             {
+              "__typename": "T",
               "prop": "prop value 2",
               "id": "2",
               "uList": [
@@ -118,7 +120,7 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String!){_entities(representations:$representations){...on U{__typename field(a:$contextualArgument_1_0)}}}",
+        "query": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
         "operationName": "Query__Subgraph1__1",
         "variables": {
           "contextualArgument_1_0": "prop value",
@@ -129,7 +131,6 @@
         "data": {
           "_entities": [
             {
-              "__typename": "U",
               "id": "1",
               "field": 1234
             }
