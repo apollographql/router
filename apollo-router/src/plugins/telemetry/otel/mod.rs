@@ -16,7 +16,7 @@ pub(crate) use tracer::PreSampledTracer;
 /// Per-span OpenTelemetry data tracked by this crate.
 ///
 /// Useful for implementing [PreSampledTracer] in alternate otel SDKs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub(crate) struct OtelData {
     /// The parent otel `Context` for the current tracing span.
     pub(crate) parent_cx: opentelemetry::Context,

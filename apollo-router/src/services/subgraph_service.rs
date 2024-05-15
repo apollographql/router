@@ -764,11 +764,11 @@ fn http_response_to_graphql_response(
 }
 
 /// Process a single subgraph batch request
-#[instrument(skip(client_factory, context, request))]
+#[instrument(skip(client_factory, contexts, request))]
 pub(crate) async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
-    context: Context,
+    mut contexts: Vec<Context>,
     mut request: http::Request<hyper::Body>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
@@ -810,7 +810,13 @@ pub(crate) async fn process_batch(
     // 2. If an HTTP status is not 2xx it will always be attached as a graphql error.
     // 3. If the response type is `application/json` and status is not 2xx and the body the entire body will be output if the response is not valid graphql.
 
-    let display_body = context.contains_key(LOGGING_DISPLAY_BODY);
+    // We need a "representative context" for a batch. We use the first context in our list of
+    // contexts
+    let batch_context = contexts
+        .first()
+        .expect("we have at least one context in the batch")
+        .clone();
+    let display_body = batch_context.contains_key(LOGGING_DISPLAY_BODY);
     let client = client_factory.create(&service);
 
     // Update our batching metrics (just before we fetch)
@@ -826,11 +832,12 @@ pub(crate) async fn process_batch(
 
     // Perform the actual fetch. If this fails then we didn't manage to make the call at all, so we can't do anything with it.
     tracing::debug!("fetching from subgraph: {service}");
-    let (parts, content_type, body) = do_fetch(client, &context, &service, request, display_body)
-        .instrument(subgraph_req_span)
-        .await?;
+    let (parts, content_type, body) =
+        do_fetch(client, &batch_context, &service, request, display_body)
+            .instrument(subgraph_req_span)
+            .await?;
 
-    let subgraph_response_event = context
+    let subgraph_response_event = batch_context
         .extensions()
         .lock()
         .get::<SubgraphEventResponseLevel>()
@@ -914,6 +921,21 @@ pub(crate) async fn process_batch(
     }
 
     tracing::debug!("we have a vec of graphql_responses: {graphql_responses:?}");
+    // Before we process our graphql responses, ensure that we have a context for each
+    // response
+    if graphql_responses.len() != contexts.len() {
+        return Err(FetchError::SubrequestBatchingError {
+            service,
+            reason: format!(
+                "number of contexts ({}) is not equal to number of graphql responses ({})",
+                contexts.len(),
+                graphql_responses.len()
+            ),
+        });
+    }
+
+    // We are going to pop contexts from the back, so let's reverse our contexts
+    contexts.reverse();
     // Build an http Response for each graphql response
     let subgraph_responses: Result<Vec<_>, _> = graphql_responses
         .into_iter()
@@ -924,7 +946,9 @@ pub(crate) async fn process_batch(
                 .body(res)
                 .map(|mut http_res| {
                     *http_res.headers_mut() = parts.headers.clone();
-                    let resp = SubgraphResponse::new_from_response(http_res, context.clone());
+                    // Use the original context for the request to create the response
+                    let context = contexts.pop().expect("we have a context for each response");
+                    let resp = SubgraphResponse::new_from_response(http_res, context);
 
                     tracing::debug!("we have a resp: {resp:?}");
                     resp
@@ -1002,7 +1026,7 @@ pub(crate) async fn notify_batch_query(
 }
 
 type BatchInfo = (
-    (String, http::Request<Body>, Context, usize),
+    (String, http::Request<Body>, Vec<Context>, usize),
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
 
@@ -1016,9 +1040,9 @@ pub(crate) async fn process_batches(
     let mut errors = vec![];
     let (info, txs): (Vec<_>, Vec<_>) =
         futures::future::join_all(svc_map.into_iter().map(|(service, requests)| async {
-            let (_op_name, context, request, txs) = assemble_batch(requests).await?;
+            let (_op_name, contexts, request, txs) = assemble_batch(requests).await?;
 
-            Ok(((service, request, context, txs.len()), txs))
+            Ok(((service, request, contexts, txs.len()), txs))
         }))
         .await
         .into_iter()
@@ -1047,11 +1071,11 @@ pub(crate) async fn process_batches(
         .into());
     }
     let batch_futures = info.into_iter().zip_eq(txs).map(
-        |((service, request, context, listener_count), senders)| async move {
+        |((service, request, contexts, listener_count), senders)| async move {
             let batch_result = process_batch(
                 cf.clone(),
                 service.clone(),
-                context,
+                contexts,
                 request,
                 listener_count,
             )
