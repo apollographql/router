@@ -46,15 +46,18 @@ impl Events {
             .router
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
+            .filter_map(|(event_name, event_cfg)| match &event_cfg.level {
+                EventLevel::Off => None,
+                _ => Some(CustomEvent {
+                    inner: Mutex::new(CustomEventInner {
+                        name: event_name.clone(),
+                        level: event_cfg.level,
+                        event_on: event_cfg.on,
+                        message: event_cfg.message.clone(),
+                        selectors: event_cfg.attributes.clone().into(),
+                        condition: event_cfg.condition.clone(),
+                        attributes: Vec::new(),
+                    }),
                 }),
             })
             .collect();
@@ -72,15 +75,18 @@ impl Events {
             .supergraph
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
+            .filter_map(|(event_name, event_cfg)| match &event_cfg.level {
+                EventLevel::Off => None,
+                _ => Some(CustomEvent {
+                    inner: Mutex::new(CustomEventInner {
+                        name: event_name.clone(),
+                        level: event_cfg.level,
+                        event_on: event_cfg.on,
+                        message: event_cfg.message.clone(),
+                        selectors: event_cfg.attributes.clone().into(),
+                        condition: event_cfg.condition.clone(),
+                        attributes: Vec::new(),
+                    }),
                 }),
             })
             .collect();
@@ -98,15 +104,18 @@ impl Events {
             .subgraph
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
+            .filter_map(|(event_name, event_cfg)| match &event_cfg.level {
+                EventLevel::Off => None,
+                _ => Some(CustomEvent {
+                    inner: Mutex::new(CustomEventInner {
+                        name: event_name.clone(),
+                        level: event_cfg.level,
+                        event_on: event_cfg.on,
+                        message: event_cfg.message.clone(),
+                        selectors: event_cfg.attributes.clone().into(),
+                        condition: event_cfg.condition.clone(),
+                        attributes: Vec::new(),
+                    }),
                 }),
             })
             .collect();
