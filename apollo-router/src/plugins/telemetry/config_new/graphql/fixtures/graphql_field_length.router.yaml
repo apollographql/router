@@ -1,9 +1,9 @@
+# yaml-language-server: $schema=/Users/tninesling/router/router.schema.json
+
 telemetry:
   instrumentation:
     instruments:
       graphql:
-        field.length: true
-        condition:
-          eq:
-            - field.name
-            - "ships"
+        field.length:
+          attributes:
+            field.name: ships

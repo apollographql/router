@@ -11,8 +11,8 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GraphQLAttributes {
-    field_name: Option<bool>,
-    type_name: Option<bool>,
+    #[serde(rename = "field.name")]
+    pub(crate) field_name: Option<String>,
 }
 
 impl DefaultForLevel for GraphQLAttributes {
@@ -40,21 +40,10 @@ impl Selectors for GraphQLAttributes {
 
     fn on_response_field(
         &self,
-        field: &apollo_compiler::ast::Field,
+        _field: &apollo_compiler::ast::Field,
         _value: &serde_json::Value,
     ) -> Vec<KeyValue> {
-        let mut attrs = Vec::with_capacity(2);
-        if let Some(true) = self.field_name {
-            attrs.push(KeyValue::new::<&str, String>(
-                "field.name",
-                field.name.to_string(),
-            ));
-        }
-        if let Some(true) = self.type_name {
-            // attrs.push(KeyValue::new("type.name", field.type_name().into()));
-            todo!("Implement type name attribute")
-        }
-        attrs
+        Vec::default()
     }
 
     fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {

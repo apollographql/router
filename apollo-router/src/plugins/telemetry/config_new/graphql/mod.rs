@@ -7,6 +7,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::Increment;
+use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
@@ -16,6 +17,7 @@ use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::otlp::TelemetryDataKind;
 
 pub(crate) mod attributes;
 pub(crate) mod selectors;
@@ -31,8 +33,8 @@ pub(crate) struct GraphQLInstrumentsConfig {
 impl DefaultForLevel for GraphQLInstrumentsConfig {
     fn defaults_for_level(
         &mut self,
-        requirement_level: super::attributes::DefaultAttributeRequirementLevel,
-        kind: crate::plugins::telemetry::otlp::TelemetryDataKind,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
     ) {
         self.field_length
             .defaults_for_level(requirement_level, kind);
@@ -41,13 +43,22 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
 
 impl GraphQLInstrumentsConfig {
     fn to_instruments(&self) -> GraphQLInstruments {
-        let field_length = self.field_length.is_enabled().then(|| {
-            GraphQLInstruments::histogram(
-                "field.length",
-                &self.field_length,
-                GraphQLSelector::FieldLength,
-            )
+        let field_length_selector = match &self.field_length {
+            DefaultedStandardInstrument::Unset => None,
+            DefaultedStandardInstrument::Bool(false) => None,
+            DefaultedStandardInstrument::Bool(true) => {
+                Some(GraphQLSelector::FieldLength { field_name: None })
+            }
+            DefaultedStandardInstrument::Extendable { attributes } => {
+                Some(GraphQLSelector::FieldLength {
+                    field_name: attributes.attributes.field_name.clone(),
+                })
+            }
+        };
+        let field_length = field_length_selector.map(|selector| {
+            GraphQLInstruments::histogram("field.length", &self.field_length, selector)
         });
+
         GraphQLInstruments { field_length }
     }
 }

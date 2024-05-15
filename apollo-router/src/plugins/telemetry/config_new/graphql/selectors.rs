@@ -8,7 +8,7 @@ use crate::plugins::telemetry::config_new::Selector;
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum GraphQLSelector {
-    FieldLength,
+    FieldLength { field_name: Option<String> },
 }
 
 impl Selector for GraphQLSelector {
@@ -26,12 +26,25 @@ impl Selector for GraphQLSelector {
 
     fn on_response_field(
         &self,
-        _field: &apollo_compiler::ast::Field,
+        field: &apollo_compiler::ast::Field,
         value: &serde_json::Value,
     ) -> Option<opentelemetry::Value> {
-        match value {
-            serde_json::Value::Array(items) => Some(opentelemetry::Value::F64(items.len() as f64)),
-            _ => None,
+        match self {
+            GraphQLSelector::FieldLength { field_name } => {
+                if field_name
+                    .as_ref()
+                    .is_some_and(|n| *n == field.name.to_string())
+                {
+                    match value {
+                        serde_json::Value::Array(items) => {
+                            Some(opentelemetry::Value::F64(items.len() as f64))
+                        }
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            }
         }
     }
 
