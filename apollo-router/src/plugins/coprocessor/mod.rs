@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::time::Instant;
 
+use crate::services::router::Body;
 use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
@@ -17,7 +18,6 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use hyper::client::HttpConnector;
-use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use hyper_rustls::HttpsConnector;
 use schemars::JsonSchema;
@@ -138,7 +138,7 @@ register_plugin!(
 #[derive(Debug)]
 struct CoprocessorPlugin<C>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync
@@ -152,7 +152,7 @@ where
 
 impl<C> CoprocessorPlugin<C>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync

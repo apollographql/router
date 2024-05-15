@@ -16,7 +16,6 @@ use http::header::{self};
 use http::response::Parts;
 use http::HeaderValue;
 use http::Request;
-use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
 use mediatype::names::APPLICATION;
@@ -40,6 +39,7 @@ use uuid::Uuid;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use super::router::body::RouterBody;
 use super::Plugins;
 use crate::batching::assemble_batch;
 use crate::batching::BatchQuery;
@@ -769,7 +769,7 @@ pub(crate) async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
     mut contexts: Vec<Context>,
-    mut request: http::Request<hyper::Body>,
+    mut request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
     // Now we need to "batch up" our data and send it to our subgraphs
@@ -1026,7 +1026,7 @@ pub(crate) async fn notify_batch_query(
 }
 
 type BatchInfo = (
-    (String, http::Request<Body>, Vec<Context>, usize),
+    (String, http::Request<RouterBody>, Vec<Context>, usize),
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
 
@@ -1157,7 +1157,7 @@ pub(crate) async fn call_single_http(
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
-    let mut request = http::Request::from_parts(parts, Body::from(body));
+    let mut request = http::Request::from_parts(parts, RouterBody::from(body));
 
     request
         .headers_mut()
@@ -1331,7 +1331,7 @@ async fn do_fetch(
     mut client: crate::services::http::BoxService,
     context: &Context,
     service_name: &str,
-    request: Request<Body>,
+    request: Request<RouterBody>,
     display_body: bool,
 ) -> Result<
     (
@@ -1362,7 +1362,8 @@ async fn do_fetch(
     let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
-        let body = hyper::body::to_bytes(body)
+        let body = body
+            .to_bytes()
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await
             .map_err(|err| {
@@ -1383,7 +1384,8 @@ async fn do_fetch(
         Some(body)
     } else {
         if display_body {
-            let body = hyper::body::to_bytes(body)
+            let body = body
+                .to_bytes()
                 .instrument(tracing::debug_span!("aggregate_response_data"))
                 .await
                 .map_err(|err| {

@@ -8,7 +8,6 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
-use hyper::Body;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::Context as otelContext;
 use parking_lot::Mutex as PMutex;
@@ -27,6 +26,7 @@ use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
+use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Context;
@@ -426,7 +426,7 @@ pub(crate) async fn assemble_batch(
     (
         String,
         Vec<Context>,
-        http::Request<Body>,
+        http::Request<RouterBody>,
         Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
     ),
     BoxError,
@@ -460,7 +460,7 @@ pub(crate) async fn assemble_batch(
     let (parts, _) = first_request.into_parts();
 
     // Generate the final request and pass it up
-    let request = http::Request::from_parts(parts, Body::from(bytes));
+    let request = http::Request::from_parts(parts, RouterBody::from(bytes));
     Ok((operation_name, contexts, request, txs))
 }
 
@@ -469,7 +469,6 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
-    use hyper::body::to_bytes;
     use tokio::sync::oneshot;
 
     use super::assemble_batch;
@@ -533,7 +532,7 @@ mod tests {
 
         // We should see the aggregation of all of the requests
         let actual: Vec<graphql::Request> = serde_json::from_str(
-            &String::from_utf8(to_bytes(request.into_body()).await.unwrap().to_vec()).unwrap(),
+            &String::from_utf8(request.into_body().to_bytes().await.unwrap().to_vec()).unwrap(),
         )
         .unwrap();
 

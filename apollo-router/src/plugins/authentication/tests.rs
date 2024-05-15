@@ -1341,7 +1341,9 @@ async fn jwks_send_headers() {
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .version(http::Version::HTTP_11)
-                            .body::<hyper::Body>(include_str!("testdata/jwks.json").into())
+                            .body::<crate::services::router::Body>(
+                                include_str!("testdata/jwks.json").into(),
+                            )
                             .unwrap(),
                     )
                 }

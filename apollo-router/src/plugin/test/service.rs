@@ -5,10 +5,10 @@
 use std::sync::Arc;
 
 use futures::Future;
-use hyper::Body;
 use hyper::Request as HyperRequest;
 use hyper::Response as HyperResponse;
 
+use crate::services::router::Body;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 #[cfg(test)]

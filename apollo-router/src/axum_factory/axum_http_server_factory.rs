@@ -696,7 +696,7 @@ async fn handle_graphql(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    Body::wrap_stream(compressor.process(body))
+                    Body::wrap_stream(compressor.process(body.into()))
                 }
             };
 

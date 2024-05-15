@@ -9,6 +9,8 @@ use tokio_stream::wrappers::ReceiverStream;
 use tower::BoxError;
 use tracing::Instrument;
 
+use crate::services::router::body::RouterBody;
+
 use self::codec::BrotliEncoder;
 use self::codec::DeflateEncoder;
 use self::codec::Encode;
@@ -68,7 +70,7 @@ impl Compressor {
 
     pub(crate) fn process(
         mut self,
-        mut stream: hyper::Body,
+        mut stream: RouterBody,
     ) -> impl Stream<Item = Result<Bytes, BoxError>>
 where {
         let (tx, rx) = mpsc::channel(10);
@@ -208,7 +210,6 @@ impl Encode for Compressor {
 mod tests {
     use async_compression::tokio::write::GzipDecoder;
     use futures::stream;
-    use hyper::Body;
     use rand::Rng;
     use tokio::io::AsyncWriteExt;
 
@@ -219,7 +220,7 @@ mod tests {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
         let mut rng = rand::thread_rng();
-        let body: Body = std::iter::repeat(())
+        let body: RouterBody = std::iter::repeat(())
             .map(|_| rng.gen_range(0u8..3))
             .take(5000)
             .collect::<Vec<_>>()
@@ -243,7 +244,7 @@ mod tests {
     async fn small_input() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: Body = vec![0u8, 1, 2, 3].into();
+        let body: RouterBody = vec![0u8, 1, 2, 3].into();
 
         let mut stream = compressor.process(body);
         let mut decoder = GzipDecoder::new(Vec::new());
@@ -263,7 +264,7 @@ mod tests {
     #[tokio::test]
     async fn gzip_header_writing() {
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
-        let body: Body = r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#.into();
+        let body: RouterBody = r#"{"data":{"me":{"id":"1","name":"Ada Lovelace"}}}"#.into();
 
         let mut stream = compressor.process(body);
         let _ = stream.next().await.unwrap().unwrap();
@@ -286,7 +287,7 @@ content-type: application/json
 
         let compressor = Compressor::new(["gzip"].into_iter()).unwrap();
 
-        let body: Body = Body::wrap_stream(stream::iter(vec![
+        let body: RouterBody = RouterBody::wrap_stream(stream::iter(vec![
             Ok::<_, BoxError>(Bytes::from(primary_response)),
             Ok(Bytes::from(deferred_response)),
         ]));
