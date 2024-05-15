@@ -10,7 +10,6 @@ mod tests {
     use http::HeaderValue;
     use http::Method;
     use http::StatusCode;
-    use hyper::Body;
     use mime::APPLICATION_JSON;
     use mime::TEXT_HTML;
     use serde_json::json;
@@ -24,6 +23,7 @@ mod tests {
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
+    use crate::services::router::Body;
     use crate::services::subgraph;
     use crate::services::supergraph;
 

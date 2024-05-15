@@ -11,7 +11,6 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
-use hyper::Body;
 use opentelemetry::global::get_text_map_propagator;
 use schemars::JsonSchema;
 use serde::de::DeserializeOwned;
@@ -24,6 +23,7 @@ use tower::Service;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
+use crate::services::router::Body;
 use crate::Context;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
@@ -267,7 +267,7 @@ where
 
     pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
     where
-        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+        C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
             + Clone
             + Send
             + Sync
@@ -275,7 +275,7 @@ where
     {
         tracing::debug!("forwarding json: {}", serde_json::to_string(&self)?);
 
-        let mut request = hyper::Request::builder()
+        let mut request = http::Request::builder()
             .uri(uri)
             .method(Method::POST)
             .header(ACCEPT, "application/json")

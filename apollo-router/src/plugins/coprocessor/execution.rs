@@ -71,7 +71,7 @@ impl ExecutionStage {
         sdl: Arc<String>,
     ) -> execution::BoxService
     where
-        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+        C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
             + Clone
             + Send
             + Sync
@@ -188,7 +188,7 @@ async fn process_execution_request_stage<C>(
     request_config: ExecutionRequestConf,
 ) -> Result<ControlFlow<execution::Response, execution::Request>, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync
