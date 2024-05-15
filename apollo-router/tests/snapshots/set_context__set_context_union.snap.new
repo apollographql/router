@@ -1,0 +1,21 @@
+---
+source: apollo-router/tests/set_context.rs
+assertion_line: 208
+expression: response
+---
+{
+  "errors": [
+    {
+      "message": "Cannot query field \"k\" on type \"Query\".",
+      "locations": [
+        {
+          "line": 2,
+          "column": 5
+        }
+      ],
+      "extensions": {
+        "code": "GRAPHQL_VALIDATION_FAILED"
+      }
+    }
+  ]
+}

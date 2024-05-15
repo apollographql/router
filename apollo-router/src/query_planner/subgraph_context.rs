@@ -9,8 +9,9 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::WithErrors;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 
@@ -252,7 +253,6 @@ pub fn build_operation_with_aliasing(
     schema: &Schema,
 ) -> Result<Operation, ContextBatchingError> {
     let mut selections: Vec<Selection> = vec![];
-    dbg!(subgraph_operation.as_serialized());
     match contextual_arguments {
         Some(ContextualArguments  { arguments, count }) => {
             dbg!("arguments", arguments);
@@ -263,7 +263,7 @@ pub fn build_operation_with_aliasing(
                 // let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
                 // let mut new_selection_set: Vec<SelectionSet> = vec![];
                 // let mut operations: Vec<Operation> = vec![];
-                if let Some((_, op)) = document.named_operations.first() {
+                if let Some((name, op)) = document.named_operations.first() {
                     let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
                     op.variables.iter().for_each(|v| {
                         if arguments.contains(v.name.as_str()) {
@@ -285,10 +285,11 @@ pub fn build_operation_with_aliasing(
                     for i in 0..*count {
                         // If we are aliasing, we know that there is only one selection in the top level SelectionSet
                         // it is a field selection for _entities, so it's ok to reach in and give it an alias
-                        let selection_set = transform_selection_set(&op.selection_set, arguments, i, true);
+                        let mut selection_set = op.selection_set.clone();
+                        transform_selection_set(&mut selection_set, arguments, i, true);
                         selections.push(selection_set.selections[0].clone())
                     };
-                    
+
                     Ok(
                         Operation {
                             operation_type: op.operation_type.clone(),
@@ -312,72 +313,54 @@ pub fn build_operation_with_aliasing(
     }
 }
 
-fn transform_field_arguments(
-    arguments_in_selection: &Vec<Node<ast::Argument>>,
-    arguments: &HashSet<String>,
+fn add_alias_to_selection(
+    selection: &mut executable::Field,
     index: usize,
-) -> Vec<Node<ast::Argument>> {
-    arguments_in_selection.iter().map(|arg| {
-        Node::new(
-            ast::Argument {
-                name: if arguments.contains(arg.name.as_str()) {
-                    Name::new_unchecked(format!("{}_{}", arg.value.clone(), index).into())
-                } else {
-                    arg.name.clone()
-                },
-                value: arg.value.clone(),
-            }
-        )
-    }).collect()
+) {
+    selection.alias = Some(Name::new_unchecked(format!("_{}", index).into()));
 }
 
 fn transform_selection_set(
-    selection_set: &SelectionSet,
+    selection_set: &mut SelectionSet,
     arguments: &HashSet<String>,
     index: usize,
-    add_alias: bool,
-) -> SelectionSet {
-    SelectionSet{
-        ty: selection_set.ty.clone(),
-        selections: selection_set.selections.iter().map(|selection| {
-            match selection {
-                executable::Selection::Field(node) => {
-                    executable::Selection::Field(
-                        Node::new(executable::Field {
-                            definition: node.definition.clone(),
-                            alias: if add_alias {
-                                Some(Name::new_unchecked(format!("_{}", index).into()))
-                             } else {
-                                node.alias.clone()
-                             },
-                            name: node.name.clone(),
-                            arguments: transform_field_arguments(&node.arguments, arguments, index),
-                            directives: node.directives.clone(),
-                            selection_set: transform_selection_set(&node.selection_set, arguments, index, false),
-                        })
-                    )
-                },
-                executable::Selection::FragmentSpread(node) => {
-                    executable::Selection::FragmentSpread(
-                        Node::new(executable::FragmentSpread {
-                            fragment_name: node.fragment_name.clone(),
-                            directives: node.directives.clone(),
-                        })
-                    )
-                },
-                executable::Selection::InlineFragment(node) => {
-                    executable::Selection::InlineFragment(
-                        Node::new(executable::InlineFragment {
-                            type_condition: node.type_condition.clone(),
-                            directives: node.directives.clone(),
-                            selection_set: transform_selection_set(&node.selection_set, arguments, index, false),
-                        })
-                    )
-                },
-            }
-        }).collect(),
-    }
+    add_alias: bool, // at the top level, we'll add an alias to field selections
+) {
+    selection_set.selections.iter_mut().for_each(|selection| {
+        match selection {
+            executable::Selection::Field(node) => {
+                let node = node.make_mut();
+                transform_field_arguments(&mut node.arguments, arguments, index);
+                transform_selection_set(&mut node.selection_set, arguments, index, false);
+                if add_alias {
+                    add_alias_to_selection(node, index);
+                }
+            },
+            executable::Selection::InlineFragment(node) => {
+                let node = node.make_mut();
+                transform_selection_set(&mut node.selection_set, arguments, index, false);
+            },
+            _ => (),
+        }
+    });
 }
+
+fn transform_field_arguments(
+    arguments_in_selection: &mut Vec<Node<ast::Argument>>,
+    arguments: &HashSet<String>,
+    index: usize,
+) {
+    dbg!("scanning arguments");
+    arguments_in_selection.iter_mut().for_each(|arg| {
+        let arg = arg.make_mut();
+        if let Some(v) = arg.value.as_variable() {
+            if arguments.contains(v.as_str()) {
+                arg.value = Node::new(ast::Value::Variable(Name::new_unchecked(format!("{}_{}", v.as_str(), index).into())));
+            }
+        }
+    });
+}
+
 
 // // to delete
 // fn query_batching_for_contextual_args(

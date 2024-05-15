@@ -398,7 +398,7 @@ impl FetchNode {
         
         let aliased_operation = build_operation_with_aliasing(operation, &contextual_arguments, parameters.schema);
         if let Ok(a) = aliased_operation {
-            dbg!(a.to_string());
+            dbg!(a.serialize().no_indent());
         }
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
