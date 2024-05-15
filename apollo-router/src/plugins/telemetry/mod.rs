@@ -610,6 +610,8 @@ impl Plugin for Telemetry {
                             ctx.clone(),
                             result,
                             start.elapsed(),
+                            custom_instruments,
+                            supergraph_events,
                         )
                         .await;
                         Self::update_metrics_on_response_events(
@@ -921,6 +923,8 @@ impl Telemetry {
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
+        custom_instruments: SupergraphInstruments,
+        custom_events: SupergraphEvents,
     ) -> Result<SupergraphResponse, BoxError> {
         let mut metric_attrs = {
             context
@@ -944,8 +948,13 @@ impl Telemetry {
                     response.response.status().as_u16().to_string(),
                 ));
 
+                let ctx = context.clone();
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
+                let stream = stream.inspect(move |resp| {
+                    custom_instruments.on_response_event(resp, &ctx);
+                    custom_events.on_response_event(resp, &ctx);
+                });
                 let (first_response, rest) = stream.into_future().await;
 
                 let attributes = config

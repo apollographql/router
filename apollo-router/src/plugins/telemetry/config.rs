@@ -379,6 +379,12 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl From<String> for AttributeValue {
+    fn from(value: String) -> Self {
+        AttributeValue::String(value)
+    }
+}
+
 impl From<&'static str> for AttributeValue {
     fn from(value: &'static str) -> Self {
         AttributeValue::String(value.to_string())
