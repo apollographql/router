@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use apollo_compiler::executable::Name;
 use apollo_compiler::Node;
 
@@ -23,7 +25,6 @@ struct FieldsConflictValidator {}
 
 struct FieldsConflictMultiBranchValidator {}
 
-#[derive(Clone)]
 struct FragmentRestrictionAtType {
     selections: SelectionMap,
     //validator: Option<FieldsConflictValidator>,
@@ -329,19 +330,19 @@ impl SelectionSet {
     // technically better to return only `F4`. However, this feels niche, and it might be
     // costly to verify such inclusions, so not doing it for now.
     fn reduce_applicable_fragments(
-        applicable_fragments: &[(Node<Fragment>, FragmentRestrictionAtType)],
-    ) -> Vec<(Node<Fragment>, FragmentRestrictionAtType)> {
-        // Note: `applicable_fragments.retain()` (and mutably borrowing it) won't work here, since
-        //       the filter argument closure also need to borrow `applicable_fragments`.
-        applicable_fragments
+        applicable_fragments: &mut Vec<(Node<Fragment>, FragmentRestrictionAtType)>,
+    ) {
+        let included_fragments: HashSet<Name> = applicable_fragments
             .iter()
             .filter(|(fragment, _)| {
-                !applicable_fragments
+                applicable_fragments
                     .iter()
                     .any(|(other_fragment, _)| other_fragment.includes(&fragment.name))
             })
-            .cloned()
-            .collect()
+            .map(|(fragment, _)| fragment.name.clone())
+            .collect();
+
+        applicable_fragments.retain(|(fragment, _)| !included_fragments.contains(&fragment.name));
     }
 
     // PORT_NOTE: Moved from `Selection` class in JS code to SelectionSet struct in Rust.
@@ -424,7 +425,7 @@ impl SelectionSet {
             return Ok(self.clone().into());
         }
 
-        applicable_fragments = Self::reduce_applicable_fragments(&applicable_fragments);
+        Self::reduce_applicable_fragments(&mut applicable_fragments);
 
         let mut not_covered_so_far = self.selections.as_ref().clone();
         let mut optimized = SelectionMap::new();
