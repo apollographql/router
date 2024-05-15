@@ -1,6 +1,6 @@
 # This coprocessor doesn't point to anything
 coprocessor:
-  url: "http://localhost:10000"
+  url: "http://unreachable.example.com"
   router:
     request:
       body: true
