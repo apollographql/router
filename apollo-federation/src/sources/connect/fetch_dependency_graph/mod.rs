@@ -124,7 +124,7 @@ pub(crate) struct Node {
     source_entering_edge: EdgeIndex,
     field_response_name: Name,
     field_arguments: IndexMap<Name, NodeElement<Value>>,
-    selection: JSONSelection,
+    selection: Option<JSONSelection>,
 }
 
 #[derive(Debug)]
