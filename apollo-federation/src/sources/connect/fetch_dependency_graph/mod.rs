@@ -124,8 +124,8 @@ pub(crate) struct Node {
     merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
     field_response_name: Name,
-    field_arguments: IndexMap<Name, Value>,
-    selection: JSONSelection,
+    field_arguments: IndexMap<Name, NodeElement<Value>>,
+    selection: Option<JSONSelection>,
 }
 
 /// Connect-specific path tracking information.
