@@ -3,3 +3,7 @@ telemetry:
     instruments:
       graphql:
         field.length: true
+        condition:
+          eq:
+            - field.name
+            - "ships"

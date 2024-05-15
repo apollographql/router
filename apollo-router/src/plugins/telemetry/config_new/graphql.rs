@@ -15,6 +15,7 @@ use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
+use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
@@ -56,6 +57,22 @@ pub(crate) struct GraphQLInstruments {
     field_length: Option<CustomHistogram<Request, Response, GraphQLAttributes, GraphQLSelector>>,
 }
 
+impl Instrumented for GraphQLInstruments {
+    type Request = Request;
+    type Response = Response;
+    type EventResponse = ();
+
+    fn on_request(&self, _request: &Self::Request) {}
+
+    fn on_response(&self, response: &Self::Response) {
+        if let Some(field_length) = &self.field_length {
+            field_length.on_response(response);
+        }
+    }
+
+    fn on_error(&self, _error: &BoxError, _ctx: &crate::Context) {}
+}
+
 impl GraphQLInstruments {
     fn histogram(
         name: &'static str,
@@ -89,15 +106,18 @@ impl GraphQLInstruments {
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct GraphQLAttributes {}
+pub(crate) struct GraphQLAttributes {
+    field_name: Option<bool>,
+    type_name: Option<bool>,
+}
 
 impl DefaultForLevel for GraphQLAttributes {
     fn defaults_for_level(
         &mut self,
-        requirement_level: super::attributes::DefaultAttributeRequirementLevel,
-        kind: crate::plugins::telemetry::otlp::TelemetryDataKind,
+        _requirement_level: super::attributes::DefaultAttributeRequirementLevel,
+        _kind: crate::plugins::telemetry::otlp::TelemetryDataKind,
     ) {
-        todo!()
+        // No-op?
     }
 }
 
