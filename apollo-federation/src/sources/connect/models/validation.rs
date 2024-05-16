@@ -56,7 +56,7 @@
 
 ## @link
 
-- Rename imports
+- Rename @connect import
 
 */
 
@@ -68,57 +68,69 @@ use apollo_compiler::Schema;
 use itertools::Itertools;
 use url::Url;
 
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::link::Link;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
+use crate::sources::connect::ConnectSpecDefinition;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
 pub fn validate(schema: Schema) -> Vec<ValidationError> {
-    let mut source_names = Vec::new();
-    let errors = schema
+    let connect_identity = ConnectSpecDefinition::identity();
+    let link = schema
         .schema_definition
         .directives
         .iter()
-        .filter_map(|directive| {
-            if directive.name == CONNECT_SOURCE_ARGUMENT_NAME {
-                match validate_source(directive) {
-                    Ok(source_directive) => {
-                        if let SourceName::Valid(name) = source_directive.name {
-                            source_names.push(name);
-                        }
-                        (!source_directive.errors.is_empty()).then_some(source_directive.errors)
-                    }
-                    Err(error) => Some(vec![error]),
-                }
+        .find_map(|directive| {
+            let link = Link::from_directive_application(directive).ok()?;
+            if link.url.identity == connect_identity {
+                Some(link)
             } else {
                 None
             }
+        });
+    let Some(link) = link else {
+        return vec![ValidationError::GraphQLError(
+            "No connect spec definition. If you see this error, it's a bug, please report it."
+                .to_string(),
+        )];
+    };
+    let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
+    let (source_names, errors): (Vec<Option<String>>, Vec<Vec<ValidationError>>) = schema
+        .schema_definition
+        .directives
+        .iter()
+        .filter(|directive| directive.name == source_directive_name)
+        .map(|directive| {
+            let SourceDirective { name, errors } = validate_source(directive);
+            (name, errors)
         })
-        .flatten()
-        .collect_vec();
+        .unzip();
 
+    let errors = errors.into_iter().flatten().collect_vec();
     // Check for duplicate source names
+    let source_names = source_names.into_iter().flatten().counts();
+
     source_names
         .into_iter()
-        .counts()
-        .into_iter()
-        .filter_map(|(name, count)| {
-            (count > 1).then_some(ValidationError::DuplicateSourceName(name))
+        .filter(|(_, count)| *count > 1)
+        .map(|(name, _)| ValidationError::DuplicateSourceName {
+            source_name: name,
+            directive_name: source_directive_name.to_string(),
         })
         .chain(errors)
         .collect()
 }
 
-fn validate_source(directive: &Component<Directive>) -> Result<SourceDirective, ValidationError> {
-    let name = SourceName::try_from(directive)?;
+fn validate_source(directive: &Component<Directive>) -> SourceDirective {
+    let source_name = SourceName::from_directive(directive);
     let url_error = directive
         .arguments
         .iter()
-        .find(|arg| arg.name == CONNECT_HTTP_ARGUMENT_NAME)
+        .find(|arg| arg.name == SOURCE_HTTP_ARGUMENT_NAME)
         .and_then(|arg| {
             let value = arg
                 .value
@@ -132,7 +144,7 @@ fn validate_source(directive: &Component<Directive>) -> Result<SourceDirective, 
                 Err(inner) => {
                     return Some(ValidationError::SourceUrl {
                         inner,
-                        source_name: name.clone(),
+                        source_name: source_name.clone(),
                     })
                 }
                 Ok(url) => url,
@@ -140,24 +152,28 @@ fn validate_source(directive: &Component<Directive>) -> Result<SourceDirective, 
             if url.scheme() != "http" && url.scheme() != "https" {
                 return Some(ValidationError::SourceScheme {
                     scheme: url.scheme().to_string(),
-                    source_name: name.clone(),
+                    source_name: source_name.clone(),
                 });
             }
             None
         });
     let mut errors = Vec::new();
-    if matches!(name, SourceName::Invalid(_)) {
-        errors.push(ValidationError::InvalidSourceName(name.clone()));
-    }
     if let Some(url_error) = url_error {
         errors.push(url_error);
     }
-    Ok(SourceDirective { name, errors })
+    let name = match source_name.into_value_or_error() {
+        Ok(name) => Some(name),
+        Err(error) => {
+            errors.push(error);
+            None
+        }
+    };
+    SourceDirective { name, errors }
 }
 
 /// A `@source` directive along with any errors related to it.
 struct SourceDirective {
-    name: SourceName,
+    name: Option<String>,
     errors: Vec<ValidationError>,
 }
 
@@ -165,41 +181,72 @@ struct SourceDirective {
 #[derive(Clone, Debug)]
 pub enum SourceName {
     /// A perfectly reasonable source name.
-    Valid(String),
+    Valid {
+        name: String,
+        directive_name: DirectiveName,
+    },
     /// Contains invalid characters, so it will have to be renamed. This means certain checks
     /// (like uniqueness) should be skipped. However, we have _a_ name, so _other_ checks on the
     /// `@source` directive can continue.
-    Invalid(String),
+    Invalid {
+        name: String,
+        directive_name: DirectiveName,
+    },
+    /// The name was an empty string
+    Empty { directive_name: DirectiveName },
+    /// No `name` argument was defined
+    Missing { directive_name: DirectiveName },
 }
 
-impl From<SourceName> for String {
-    fn from(source_name: SourceName) -> String {
-        match source_name {
-            SourceName::Valid(name) | SourceName::Invalid(name) => name,
-        }
-    }
-}
+type DirectiveName = String;
 
-impl TryFrom<&Component<Directive>> for SourceName {
-    type Error = ValidationError;
-
-    fn try_from(directive: &Component<Directive>) -> Result<Self, Self::Error> {
-        let str_value = directive
+impl SourceName {
+    fn from_directive(directive: &Component<Directive>) -> Self {
+        let directive_name = directive.name.to_string();
+        let Some(arg) = directive
             .arguments
             .iter()
             .find(|arg| arg.name == SOURCE_NAME_ARGUMENT_NAME)
-            .ok_or(ValidationError::GraphQLError(
-                "missing name argument for a @source directive",
-            ))?
-            .value
-            .as_str()
-            .ok_or(ValidationError::SourceNameType)?;
+        else {
+            return Self::Missing { directive_name };
+        };
+        let Some(str_value) = arg.value.as_str() else {
+            return Self::Invalid {
+                name: arg.value.to_string(),
+                directive_name,
+            };
+        };
         if str_value.is_empty() {
-            Err(ValidationError::EmptySourceName)
+            Self::Empty { directive_name }
         } else if str_value.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            Ok(Self::Valid(str_value.to_string()))
+            Self::Valid {
+                name: str_value.to_string(),
+                directive_name,
+            }
         } else {
-            Ok(Self::Invalid(str_value.to_string()))
+            Self::Invalid {
+                name: str_value.to_string(),
+                directive_name,
+            }
+        }
+    }
+
+    fn into_value_or_error(self) -> Result<String, ValidationError> {
+        match self {
+            Self::Valid { name, .. } => Ok(name),
+            Self::Invalid {
+                name,
+                directive_name,
+            } => Err(ValidationError::InvalidSourceName {
+                name,
+                directive_name,
+            }),
+            Self::Empty { directive_name } => {
+                Err(ValidationError::EmptySourceName { directive_name })
+            }
+            Self::Missing { directive_name } => Err(ValidationError::GraphQLError(format!(
+                "missing name argument to @{directive_name}"
+            ))),
         }
     }
 }
@@ -207,7 +254,17 @@ impl TryFrom<&Component<Directive>> for SourceName {
 impl Display for SourceName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Valid(name) | Self::Invalid(name) => write!(f, "{}", name),
+            Self::Valid {
+                name,
+                directive_name,
+            }
+            | Self::Invalid {
+                name,
+                directive_name,
+            } => write!(f, "@{directive_name} \"{name}\""),
+            Self::Empty { directive_name } | Self::Missing { directive_name } => {
+                write!(f, "unnamed @{directive_name}")
+            }
         }
     }
 }
@@ -215,31 +272,38 @@ impl Display for SourceName {
 #[derive(Debug, thiserror::Error)]
 pub enum ValidationError {
     #[error("invalid GraphQL: {0}")]
-    GraphQLError(&'static str),
-    #[error("baseURL argument for @source \"{source_name}\" was not a valid URL: {inner}")]
+    GraphQLError(String),
+    #[error("baseURL argument for {source_name} was not a valid URL: {inner}")]
     SourceUrl {
         inner: url::ParseError,
         source_name: SourceName,
     },
-    #[error("baseURL argument for @source \"{source_name}\" must be http or https, got {scheme}")]
+    #[error("baseURL argument for {source_name} must be http or https, got {scheme}")]
     SourceScheme {
         scheme: String,
         source_name: SourceName,
     },
-    #[error("name argument for a @source directive must be a string")]
-    SourceNameType,
-    #[error("name argument to @source can't be empty")]
-    EmptySourceName,
+    #[error("name argument to @{directive_name} can't be empty")]
+    EmptySourceName { directive_name: DirectiveName },
     #[error(
-        "invalid characters in source name {0}, only alphanumeric and underscores are allowed"
+        "invalid characters in @{directive_name} name {name}, only alphanumeric and underscores are allowed"
     )]
-    InvalidSourceName(SourceName),
-    /// Intentionally a String so we remember to only check valid source names
-    #[error("every @source name must be unique; found duplicate source name {0}")]
-    DuplicateSourceName(String),
+    InvalidSourceName {
+        name: String,
+        directive_name: DirectiveName,
+    },
+    #[error(
+        "every @{directive_name} name must be unique; found duplicate source name {source_name}"
+    )]
+    DuplicateSourceName {
+        directive_name: DirectiveName,
+        source_name: String,
+    },
 }
 #[cfg(test)]
 mod test_validate_source {
+    use insta::assert_snapshot;
+
     use super::*;
 
     #[test]
@@ -266,10 +330,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert!(matches!(
-            &errors[0],
-            ValidationError::InvalidSourceName(SourceName::Invalid(_))
-        ));
+        assert_snapshot!(errors[0].to_string());
     }
 
     #[test]
@@ -278,7 +339,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert!(matches!(&errors[0], ValidationError::EmptySourceName));
+        assert_snapshot!(errors[0].to_string());
     }
 
     #[test]
@@ -287,10 +348,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert!(matches!(
-            &errors[0],
-            ValidationError::DuplicateSourceName(_)
-        ));
+        assert_snapshot!(errors[0].to_string());
     }
 
     #[test]
@@ -300,9 +358,18 @@ mod test_validate_source {
         let errors = validate(schema);
         assert_eq!(errors.len(), 2);
         assert!(matches!(
-            &errors[0],
+            &errors[1],
             ValidationError::InvalidSourceName { .. }
         ));
-        assert!(matches!(&errors[1], ValidationError::SourceScheme { .. }));
+        assert!(matches!(&errors[0], ValidationError::SourceScheme { .. }));
+    }
+
+    #[test]
+    fn source_directive_rename() {
+        let schema = include_str!("test_data/source_directive_rename.graphql");
+        let schema = Schema::parse(schema, "test.graphql").unwrap();
+        let errors = validate(schema);
+        assert_eq!(errors.len(), 1);
+        assert_snapshot!(errors[0].to_string());
     }
 }
