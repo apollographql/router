@@ -49,6 +49,17 @@ impl<'a> SchemaAwareResponse<'a> {
     }
 }
 
+impl<'a> IntoIterator for SchemaAwareResponse<'a> {
+    type Item = &'a TypedValue<'a>;
+    type IntoIter = std::vec::IntoIter<Self::Item>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let mut vec = Vec::new();
+        self.value.collect(&mut vec);
+        vec.into_iter()
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum TypedValue<'a> {
     Null,
@@ -127,6 +138,33 @@ impl<'a> TypedValue<'a> {
             }
         }
         Ok(typed_children)
+    }
+
+    fn collect(&'a self, target: &mut Vec<&'a TypedValue<'a>>) {
+        match self {
+            TypedValue::Null => target.push(self),
+            TypedValue::Bool(_, _) => target.push(self),
+            TypedValue::Number(_, _) => target.push(self),
+            TypedValue::String(_, _) => target.push(self),
+            TypedValue::Array(_, items) => {
+                for item in items {
+                    item.collect(target);
+                }
+                target.push(self);
+            }
+            TypedValue::Object(_, children) => {
+                for child in children.values() {
+                    child.collect(target);
+                }
+                target.push(self);
+            }
+            TypedValue::Root(children) => {
+                for child in children.values() {
+                    child.collect(target);
+                }
+                target.push(self);
+            }
+        }
     }
 }
 
