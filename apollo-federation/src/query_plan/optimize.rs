@@ -1,3 +1,24 @@
+//! Subgraph query optimization.
+//!
+//! This module contains the logic to optimize (or "compress") a subgraph query by using fragments
+//! (either reusing existing ones in the original query or generating new ones).
+//!
+//! ## Field validation
+//! `FieldsConflictMultiBranchValidator` (and `FieldsConflictValidator`) are used to check if
+//! modified subgraph GraphQL queries are still valid, since adding fragments can introduce
+//! conflicts.
+//!
+//! ## Fragment expansion
+//! Once all applicable fragments are collected, they are expanded into selection sets in order to
+//! match them against given selection set.
+//!
+//! ## Re-using existing fragments (`try_optimize_with_fragments`)
+//! This is the first strategy to optimize the selection set. It tries to re-use existing
+//! fragments. Set-intersection/-minus/-containment operations are used to narrow down to fewer
+//! number of fragments that can be used to optimize the selection set. If there is a single
+//! fragment that covers the full selection set, then that fragment is used. Otherwise, we
+//! attempted to reduce the number of fragments applied, but optimality is not guaranteed, yet.
+
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::ops::Not;
@@ -387,12 +408,16 @@ impl Fragment {
         ))
     }
 
-    // Whether this fragment fully includes `other_fragment`.
+    /// Checks whether `self` fragment includes the other fragment (`other_fragment_name`).
+    //
     // Note that this is slightly different from `self` "using" `other_fragment` in that this
     // essentially checks if the full selection set of `other_fragment` is contained by `self`, so
     // this only look at "top-level" usages.
     //
     // Note that this is guaranteed to return `false` if passed self's name.
+    // Note: This is a heuristic looking for the other named fragment used directly in the
+    //       selection set. It may not return `true` even though the other fragment's selections
+    //       are actually covered by self's selection set.
     // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port does not.
     fn includes(&self, other_fragment_name: &Name) -> bool {
         if self.name == *other_fragment_name {
@@ -596,6 +621,10 @@ impl SelectionSet {
         applicable_fragments.retain(|(fragment, _)| !included_fragments.contains(&fragment.name));
     }
 
+    /// Try to optimize the selection set by re-using existing fragments.
+    /// Returns either
+    /// - a new selection set partially optimized by re-using given `fragments`, or
+    /// - a single fragment that covers the full selection set.
     // PORT_NOTE: Moved from `Selection` class in JS code to SelectionSet struct in Rust.
     pub(crate) fn try_optimize_with_fragments(
         &self,
