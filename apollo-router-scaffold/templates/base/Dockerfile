@@ -45,5 +45,7 @@ WORKDIR /dist
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config.yaml"
 
+USER router
+
 # Default executable is the router
 ENTRYPOINT ["/dist/router"]
