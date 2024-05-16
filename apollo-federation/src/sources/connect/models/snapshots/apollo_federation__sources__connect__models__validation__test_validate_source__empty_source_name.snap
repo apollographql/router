@@ -1,0 +1,5 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "errors[0].to_string()"
+---
+name argument to @source can't be empty
