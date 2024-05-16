@@ -185,7 +185,7 @@ regex = "1.10.3"
 reqwest.workspace = true
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = { git = "https://github.com/apollographql/federation-rs", rev = "518ce143088f84575e2c64436985802a25458a13" }
+router-bridge = { git = "https://github.com/apollographql/federation-rs", rev = "ced6eed5c4394bb3cbf3867798b8b7f63cb82d66" }
 
 rust-embed = "8.2.0"
 rustls = "0.21.11"

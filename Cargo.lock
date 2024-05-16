@@ -360,7 +360,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rhai",
- "router-bridge 0.5.21+v2.7.5 (git+https://github.com/apollographql/federation-rs?rev=518ce143088f84575e2c64436985802a25458a13)",
+ "router-bridge",
  "rstack",
  "rust-embed",
  "rustls",
@@ -5722,31 +5722,6 @@ dependencies = [
 [[package]]
 name = "router-bridge"
 version = "0.5.21+v2.7.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b2142445fe3fe2aae7a3c3c5083d1211a448a0dabb489a14dd90d427cf6c0b13"
-dependencies = [
- "anyhow",
- "async-channel 1.9.0",
- "deno_console",
- "deno_core",
- "deno_crypto",
- "deno_url",
- "deno_web",
- "deno_webidl",
- "rand 0.8.5",
- "serde",
- "serde_json",
- "thiserror",
- "tokio",
- "tower",
- "tower-service",
- "tracing",
- "which",
-]
-
-[[package]]
-name = "router-bridge"
-version = "0.5.21+v2.7.5"
 source = "git+https://github.com/apollographql/federation-rs?rev=518ce143088f84575e2c64436985802a25458a13#518ce143088f84575e2c64436985802a25458a13"
 dependencies = [
  "anyhow",
@@ -5783,7 +5758,7 @@ dependencies = [
  "libfuzzer-sys",
  "log",
  "reqwest",
- "router-bridge 0.5.21+v2.7.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "router-bridge",
  "schemars",
  "serde",
  "serde_json",
