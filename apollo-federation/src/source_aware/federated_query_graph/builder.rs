@@ -45,8 +45,7 @@ struct IntraSourceQueryGraphBuilder {
     is_for_query_planning: bool,
     non_entity_supergraph_types_to_nodes:
         IndexMap<ObjectTypeDefinitionPosition, IndexSet<NodeIndex>>,
-    current_source_kind: Option<SourceKind>,
-    current_source_id: Option<SourceId>,
+    source_kind: SourceKind,
 }
 
 pub(crate) trait IntraSourceQueryGraphBuilderApi {
@@ -56,15 +55,31 @@ pub(crate) trait IntraSourceQueryGraphBuilderApi {
 
     fn is_for_query_planning(&self) -> bool;
 
-    fn add_and_set_current_source(&mut self, source: SourceId) -> Result<(), FederationError>;
+    fn add_source(
+        &mut self,
+        source: SourceId,
+    ) -> Result<impl IntraSourceQueryGraphSubBuilderApi, FederationError>;
+}
 
-    fn get_current_source(&self) -> Result<SourceId, FederationError>;
+struct IntraSourceQueryGraphSubBuilder<'a> {
+    source_id: Option<SourceId>,
+    builder: &'a mut IntraSourceQueryGraphBuilder,
+}
+
+pub(crate) trait IntraSourceQueryGraphSubBuilderApi {
+    fn source_query_graph(
+        &mut self,
+    ) -> Result<&mut source::federated_query_graph::FederatedQueryGraph, FederationError>;
+
+    fn is_for_query_planning(&self) -> bool;
+
+    fn get_source(&self) -> Result<SourceId, FederationError>;
 
     fn add_self_condition(
         &mut self,
         supergraph_type_name: NamedType,
         field_set: &str,
-    ) -> Result<SelfConditionIndex, FederationError>;
+    ) -> Result<Option<SelfConditionIndex>, FederationError>;
 
     fn add_abstract_node(
         &mut self,
