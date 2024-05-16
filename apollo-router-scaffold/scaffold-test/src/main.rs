@@ -1,4 +1,3 @@
-#![deny(warnings)]
 mod plugins;
 
 use anyhow::Result;
