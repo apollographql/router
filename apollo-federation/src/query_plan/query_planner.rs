@@ -29,8 +29,6 @@ use crate::query_plan::operation::normalize_operation;
 use crate::query_plan::operation::NamedFragments;
 use crate::query_plan::operation::NormalizedDefer;
 use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionKey;
 use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
@@ -518,7 +516,7 @@ fn compute_root_serial_dependency_graph(
         None
     };
     // We have to serially compute a plan for each top-level selection.
-    let mut split_roots = split_top_level_fields(operation.selection_set.clone());
+    let mut split_roots = operation.selection_set.clone().split_top_level_fields();
     let mut digest = Vec::new();
     let mut starting_fetch_id = 0;
     let selection_set = split_roots
@@ -573,30 +571,6 @@ fn compute_root_serial_dependency_graph(
     }
     digest.push(fetch_dependency_graph);
     Ok(digest)
-}
-
-fn split_top_level_fields(selection_set: SelectionSet) -> Box<dyn Iterator<Item = SelectionSet>> {
-    let parent_type = selection_set.type_position.clone();
-    let selections: IndexMap<SelectionKey, Selection> = (**selection_set.selections).clone();
-    Box::new(selections.into_values().flat_map(move |sel| {
-        let digest: Box<dyn Iterator<Item = SelectionSet>> = if sel.is_field() {
-            Box::new(std::iter::once(SelectionSet::from_selection(
-                parent_type.clone(),
-                sel.clone(),
-            )))
-        } else {
-            Box::new(
-                sel.selection_set()
-                    .ok()
-                    .flatten()
-                    .cloned()
-                    .into_iter()
-                    .flat_map(split_top_level_fields)
-                    .map(|_set| todo!("Port mapping that uses selectionSetOfElement")),
-            )
-        };
-        digest
-    }))
 }
 
 fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, FederationError> {
