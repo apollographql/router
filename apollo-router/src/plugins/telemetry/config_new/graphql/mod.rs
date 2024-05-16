@@ -7,6 +7,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::instruments::Increment;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -44,7 +45,7 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
 }
 
 impl GraphQLInstrumentsConfig {
-    fn to_instruments(&self) -> GraphQLInstruments {
+    pub(crate) fn to_instruments(&self) -> GraphQLInstruments {
         let field_length = self.field_length.is_enabled().then(|| {
             Self::histogram(
                 FIELD_LENGTH,
@@ -105,6 +106,28 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_error(&self, _error: &BoxError, _ctx: &crate::Context) {}
+
+    fn on_response_field(
+        &self,
+        field: &apollo_compiler::executable::FieldDefinition,
+        value: &serde_json::Value,
+    ) {
+    }
+}
+
+impl schema_aware_response::Visitor for GraphQLInstruments {
+    fn visit_array(
+        &mut self,
+        field: &apollo_compiler::executable::Field,
+        items: &Vec<schema_aware_response::TypedValue>,
+    ) {
+        if let Some(field_length) = self.field_length {
+            field_length.on_response_field(field, value);
+        }
+        for value in items.iter() {
+            self.visit(value);
+        }
+    }
 }
 
 #[cfg(test)]

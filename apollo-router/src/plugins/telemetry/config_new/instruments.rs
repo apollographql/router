@@ -32,6 +32,7 @@ use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -312,6 +313,10 @@ impl InstrumentsConfig {
             http_client_response_body_size,
             custom: CustomInstruments::new(&self.subgraph.custom),
         }
+    }
+
+    pub(crate) fn new_graphql_instruments(&self) -> GraphQLInstruments {
+        self.graphql.attributes.to_instruments()
     }
 }
 
@@ -650,6 +655,14 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
+    fn on_response_field(
+        &self,
+        _ty: &apollo_compiler::schema::Type,
+        _field: &apollo_compiler::schema::FieldDefinition,
+        _value: &serde_json::Value,
+        _ctx: &Context,
+    ) {
+    }
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 

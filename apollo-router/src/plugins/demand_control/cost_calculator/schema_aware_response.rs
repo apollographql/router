@@ -47,9 +47,40 @@ impl<'a> SchemaAwareResponse<'a> {
             ))
         }
     }
+}
 
-    pub(crate) fn post_order_traversal(self) -> impl Iterator<Item = TypedValue<'a>> {
-        self.value.post_order_traversal()
+pub(crate) trait Visitor {
+    fn visit(&mut self, value: &TypedValue) {
+        match value {
+            TypedValue::Null => self.visit_null(),
+            TypedValue::Bool(f, b) => self.visit_bool(f, b),
+            TypedValue::Number(f, n) => self.visit_number(f, n),
+            TypedValue::String(f, s) => self.visit_string(f, s),
+            TypedValue::Array(f, items) => self.visit_array(f, items),
+            TypedValue::Object(f, children) => self.visit_object(f, children),
+            TypedValue::Root(children) => self.visit_root(children),
+        }
+    }
+
+    fn visit_null(&mut self) {}
+    fn visit_bool(&mut self, field: &Field, value: &bool) {}
+    fn visit_number(&mut self, field: &Field, value: &serde_json::Number) {}
+    fn visit_string(&mut self, field: &Field, value: &str) {}
+
+    fn visit_array(&mut self, field: &Field, items: &Vec<TypedValue>) {
+        for value in items.iter() {
+            self.visit(value);
+        }
+    }
+    fn visit_object(&mut self, field: &Field, children: &HashMap<String, TypedValue>) {
+        for value in children.values() {
+            self.visit(value);
+        }
+    }
+    fn visit_root(&mut self, children: &HashMap<String, TypedValue>) {
+        for value in children.values() {
+            self.visit(value);
+        }
     }
 }
 
@@ -132,27 +163,6 @@ impl<'a> TypedValue<'a> {
         }
         Ok(typed_children)
     }
-
-    fn post_order_traversal(self) -> impl Iterator<Item = TypedValue<'a>> {
-        match self {
-            TypedValue::Null => std::iter::once(self),
-            TypedValue::Bool(_, _) => std::iter::once(self),
-            TypedValue::Number(_, _) => std::iter::once(self),
-            TypedValue::String(_, _) => std::iter::once(self),
-            TypedValue::Array(_, items) => items
-                .iter()
-                .flat_map(|item| item.post_order_traversal())
-                .chain(std::iter::once(self)),
-            TypedValue::Object(_, children) => children
-                .values()
-                .flat_map(|child| child.post_order_traversal())
-                .chain(std::iter::once(self)),
-            TypedValue::Root(children) => children
-                .values()
-                .flat_map(|child| child.post_order_traversal())
-                .chain(std::iter::once(self)),
-        }
-    }
 }
 
 #[cfg(test)]
@@ -161,8 +171,9 @@ mod tests {
     use apollo_compiler::Schema;
     use bytes::Bytes;
 
+    use super::*;
+
     use crate::graphql::Response;
-    use crate::plugins::demand_control::cost_calculator::schema_aware_response::SchemaAwareResponse;
 
     #[test]
     fn response_zipper() {

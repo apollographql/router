@@ -86,6 +86,7 @@ use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response::SchemaAwareResponse;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::Visitor;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -942,6 +943,7 @@ impl Telemetry {
                 .collect::<Vec<KeyValue>>()
         })
         .unwrap_or_default();
+        let conf = config.clone();
         let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
@@ -955,9 +957,14 @@ impl Telemetry {
                 let stream = stream.inspect(move |resp| {
                     custom_instruments.on_response_event(resp, &ctx);
                     custom_events.on_response_event(resp, &ctx);
+
+                    // Get metrics related to GraphQL response fields
                     if let Some(document) = ctx.unsupported_executable_document() {
                         if let Ok(typed_response) = SchemaAwareResponse::new(&document, resp) {
-                            todo!("Handle typed response: {:?}", typed_response);
+                            let mut graphql_instruments =
+                                conf.instrumentation.instruments.new_graphql_instruments();
+
+                            graphql_instruments.visit(&typed_response.value);
                         }
                     }
                 });
