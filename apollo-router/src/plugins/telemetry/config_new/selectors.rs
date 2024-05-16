@@ -20,6 +20,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::ToOtelValue;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -33,6 +34,8 @@ pub(crate) enum TraceIdFormat {
     OpenTelemetry,
     /// Datadog trace ID, a u64.
     Datadog,
+    /// Apollo Studio trace id
+    Apollo,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -556,13 +559,20 @@ impl Selector for RouterSelector {
                 .map(opentelemetry::Value::from),
             RouterSelector::TraceId {
                 trace_id: trace_id_format,
-            } => trace_id().map(|id| {
-                match trace_id_format {
-                    TraceIdFormat::OpenTelemetry => id.to_string(),
-                    TraceIdFormat::Datadog => id.to_datadog(),
+            } => {
+                if let TraceIdFormat::Apollo = &trace_id_format {
+                    return None;
                 }
-                .into()
-            }),
+                trace_id().map(|id| {
+                    match trace_id_format {
+                        TraceIdFormat::OpenTelemetry => id.to_string(),
+                        TraceIdFormat::Datadog => id.to_datadog(),
+                        // It happens in the response
+                        TraceIdFormat::Apollo => String::new(),
+                    }
+                    .into()
+                })
+            }
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
@@ -618,6 +628,20 @@ impl Selector for RouterSelector {
                 }
             }
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::TraceId {
+                trace_id: trace_id_format,
+            } => {
+                if let TraceIdFormat::Apollo = &trace_id_format {
+                    response
+                        .context
+                        .get::<_, String>(APOLLO_OPERATION_ID)
+                        .ok()
+                        .flatten()
+                        .map(opentelemetry::Value::from)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -1108,6 +1132,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
+    use crate::query_planner::APOLLO_OPERATION_ID;
 
     #[test]
     fn router_static() {
@@ -1817,6 +1842,27 @@ mod test {
                 opentelemetry::Value::String("42".into())
             );
         });
+    }
+
+    #[test]
+    fn test_router_studio_trace_id() {
+        let selector = RouterSelector::TraceId {
+            trace_id: TraceIdFormat::Apollo,
+        };
+        let ctx = crate::Context::new();
+        let _ = ctx.insert(APOLLO_OPERATION_ID, "42".to_string()).unwrap();
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .context(ctx)
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap(),
+            opentelemetry::Value::String("42".into())
+        );
     }
 
     #[test]
