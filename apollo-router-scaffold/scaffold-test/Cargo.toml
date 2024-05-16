@@ -5,7 +5,7 @@ version = "0.1.0"
 edition = "2021"
 
 [[bin]]
-name = "router"
+name = "apollo-router-scaffold-test"
 path = "src/main.rs"
 
 [dependencies]
