@@ -1684,7 +1684,7 @@ impl std::fmt::Display for FetchInputs {
                 // We can safely unwrap because we know the len >= 1.
                 self.selection_sets_per_parent_type.values().next().unwrap()
             ),
-            2.. => {
+            _ => {
                 write!(f, "[")?;
                 let mut iter = self.selection_sets_per_parent_type.values();
                 // We can safely unwrap because we know the len >= 1.
