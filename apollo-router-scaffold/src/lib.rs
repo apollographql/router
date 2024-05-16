@@ -39,9 +39,6 @@ mod test {
     use tempfile::TempDir;
 
     #[test]
-    fn the_next_test_takes_a_while_to_pass_do_not_worry() {}
-
-    #[test]
     // this test takes a while, I hope the above test name
     // let users know they should not worry and wait a bit.
     // Hang in there!
