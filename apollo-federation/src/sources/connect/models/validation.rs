@@ -238,7 +238,7 @@ impl SourceName {
                 name,
                 directive_name,
             } => Err(ValidationError::InvalidSourceName {
-                name,
+                source_name: name,
                 directive_name,
             }),
             Self::Empty { directive_name } => {
@@ -286,18 +286,18 @@ pub enum ValidationError {
     #[error("name argument to @{directive_name} can't be empty")]
     EmptySourceName { directive_name: DirectiveName },
     #[error(
-        "invalid characters in @{directive_name} name {name}, only alphanumeric and underscores are allowed"
+        "invalid characters in @{directive_name} name {source_name}, only alphanumeric and underscores are allowed"
     )]
     InvalidSourceName {
-        name: String,
+        source_name: String,
         directive_name: DirectiveName,
     },
     #[error(
         "every @{directive_name} name must be unique; found duplicate source name {source_name}"
     )]
     DuplicateSourceName {
-        directive_name: DirectiveName,
         source_name: String,
+        directive_name: DirectiveName,
     },
 }
 #[cfg(test)]
