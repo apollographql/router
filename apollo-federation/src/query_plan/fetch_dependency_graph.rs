@@ -488,6 +488,16 @@ impl FetchDependencyGraph {
         }
     }
 
+    pub(crate) fn next_fetch_id(&self) -> u64 {
+        self.fetch_id_generation.next_id()
+    }
+
+    pub(crate) fn root_node_by_subgraph_iter(
+        &self,
+    ) -> impl Iterator<Item = (&NodeStr, &NodeIndex)> {
+        self.root_nodes_by_subgraph.iter()
+    }
+
     /// Must be called every time the "shape" of the graph is modified
     /// to know that the graph may not be minimal/optimized anymore.
     fn on_modification(&mut self) {

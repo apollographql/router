@@ -685,7 +685,7 @@ impl Containment {
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -1911,6 +1911,42 @@ impl SelectionSet {
             type_position,
             selections: Default::default(),
         }
+    }
+
+    // TODO: Ideally, this method returns a proper, recursive iterator. As is, there is a lot of
+    // overhead due to indirection, both from over allocation and from v-table lookups.
+    pub(crate) fn split_top_level_fields(self) -> Box<dyn Iterator<Item = SelectionSet>> {
+        let parent_type = self.type_position.clone();
+        let selections: IndexMap<SelectionKey, Selection> = (**self.selections).clone();
+        Box::new(selections.into_values().flat_map(move |sel| {
+            let digest: Box<dyn Iterator<Item = SelectionSet>> = if sel.is_field() {
+                Box::new(std::iter::once(SelectionSet::from_selection(
+                    parent_type.clone(),
+                    sel.clone(),
+                )))
+            } else {
+                let Some(ele) = sel.element().ok() else {
+                    let digest: Box<dyn Iterator<Item = SelectionSet>> =
+                        Box::new(std::iter::empty());
+                    return digest;
+                };
+                Box::new(
+                    sel.selection_set()
+                        .ok()
+                        .flatten()
+                        .cloned()
+                        .into_iter()
+                        .flat_map(SelectionSet::split_top_level_fields)
+                        .filter_map(move |set| {
+                            let parent_type = ele.parent_type_position();
+                            Selection::from_element(ele.clone(), Some(set))
+                                .ok()
+                                .map(|sel| SelectionSet::from_selection(parent_type, sel))
+                        }),
+                )
+            };
+            digest
+        }))
     }
 
     /// PORT_NOTE: JS calls this `newCompositeTypeSelectionSet`
