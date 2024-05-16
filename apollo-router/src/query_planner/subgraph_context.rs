@@ -122,6 +122,9 @@ impl<'a> SubgraphContext<'a> {
         None
     }
 
+    // For each of the rewrites, start collecting data for the data at path.
+    // Once we find a Value for a given variable, skip additional rewrites that 
+    // reference the same variable
     pub(crate) fn execute_on_path(&mut self, path: &Path) {
         let mut found_rewrites: HashSet<String> = HashSet::new();
         let hash_map: HashMap<String, Value> = self
@@ -176,6 +179,9 @@ impl<'a> SubgraphContext<'a> {
         self.named_args.push(hash_map);
     }
 
+    // Once all a value has been extracted for every variable, go ahead and add all 
+    // variables to the variables map. Additionally, return a ContextualArguments structure if 
+    // values of variables are entity dependent
     pub(crate) fn add_variables_and_get_args(
         &self,
         variables: &mut Map<ByteString, Value>,
@@ -222,6 +228,8 @@ impl<'a> SubgraphContext<'a> {
     }
 }
 
+// Take the existing subgraph operation and rewrite it to use aliasing. This will occur in the case
+// where we are collecting entites and different entities may have different variables passed to the resolver.
 pub(crate) fn build_operation_with_aliasing(
     subgraph_operation: &SubgraphOperation,
     contextual_arguments: &Option<ContextualArguments>,
@@ -271,7 +279,7 @@ pub(crate) fn build_operation_with_aliasing(
                             selections,
                         },
                     })
-                } else {
+                } else { // TODO: This is ugly, but I get compiler errors if the else blocks aren't present
                     Err(ContextBatchingError::NoSelectionSet)
                 }
             } else {
