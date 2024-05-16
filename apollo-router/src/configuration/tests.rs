@@ -25,6 +25,12 @@ fn schema_generation() {
     insta::with_settings!({sort_maps => true}, {
         assert_json_snapshot!(&schema)
     });
+    let json_schema =
+        serde_json::to_string_pretty(&schema).expect("must be able to deserialize schema");
+    assert!(
+        json_schema.len() < 500 * 1024,
+        "schema must be less than 500kb"
+    );
 }
 
 #[test]
