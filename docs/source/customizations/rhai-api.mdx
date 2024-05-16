@@ -337,6 +337,19 @@ fn router_service(service) {
 
 </Note>
 
+## Available constants
+
+You can access to provided constants, it's mainly context keys to use when you want to fetch data from the context.
+
+```
+Router.APOLLO_SDL // Context key to access the SDL
+Router.APOLLO_START // Constant to calculate durations
+Router.APOLLO_AUTHENTICATION_JWT_CLAIMS // Context key to access authentication jwt claims
+Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS // Context key to modify or access the custom connection params when using subscriptions in WebSocket to subgraphs (cf subscription docs)
+Router.APOLLO_ENTITY_CACHE_KEY // Context key to access the entity cache key
+Router.APOLLO_OPERATION_ID // Context key to get the value of apollo operation id (studio trace id) from the context
+```
+
 ## `Request` interface
 
 All callback functions registered via `map_request` are passed a `request` object that represents the request sent by the client. This object provides the following fields:
