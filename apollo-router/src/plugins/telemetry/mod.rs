@@ -956,7 +956,9 @@ impl Telemetry {
                     custom_instruments.on_response_event(resp, &ctx);
                     custom_events.on_response_event(resp, &ctx);
                     if let Some(document) = ctx.unsupported_executable_document() {
-                        if let Ok(typed_response) = SchemaAwareResponse::new(&document, resp) {}
+                        if let Ok(typed_response) = SchemaAwareResponse::new(&document, resp) {
+                            todo!("Handle typed response: {:?}", typed_response);
+                        }
                     }
                 });
                 let (first_response, rest) = stream.into_future().await;

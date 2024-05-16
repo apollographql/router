@@ -317,7 +317,6 @@ pub(crate) enum SupergraphSelector {
         error: ErrorRepr,
     },
     /// Cost attributes
-    #[allow(dead_code)]
     Cost {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,

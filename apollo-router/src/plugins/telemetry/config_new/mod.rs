@@ -39,8 +39,10 @@ pub(crate) trait Selectors {
     }
     fn on_response_field(
         &self,
-        _field: &apollo_compiler::ast::Field,
+        _ty: &apollo_compiler::schema::Type,
+        _field: &apollo_compiler::schema::FieldDefinition,
         _value: &serde_json::Value,
+        _ctx: &Context,
     ) -> Vec<KeyValue> {
         Vec::default()
     }
@@ -63,8 +65,10 @@ pub(crate) trait Selector {
     }
     fn on_response_field(
         &self,
-        _field: &apollo_compiler::ast::Field,
+        _ty: &apollo_compiler::schema::Type,
+        _field: &apollo_compiler::schema::FieldDefinition,
         _value: &serde_json::Value,
+        _ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         None
     }

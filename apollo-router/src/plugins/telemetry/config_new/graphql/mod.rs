@@ -22,6 +22,8 @@ use crate::plugins::telemetry::otlp::TelemetryDataKind;
 pub(crate) mod attributes;
 pub(crate) mod selectors;
 
+static FIELD_LENGTH: &str = "graphql.field.length";
+
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GraphQLInstrumentsConfig {
@@ -43,48 +45,17 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
 
 impl GraphQLInstrumentsConfig {
     fn to_instruments(&self) -> GraphQLInstruments {
-        let field_length_selector = match &self.field_length {
-            DefaultedStandardInstrument::Unset => None,
-            DefaultedStandardInstrument::Bool(false) => None,
-            DefaultedStandardInstrument::Bool(true) => {
-                Some(GraphQLSelector::FieldLength { field_name: None })
-            }
-            DefaultedStandardInstrument::Extendable { attributes } => {
-                Some(GraphQLSelector::FieldLength {
-                    field_name: attributes.attributes.field_name.clone(),
-                })
-            }
-        };
-        let field_length = field_length_selector.map(|selector| {
-            GraphQLInstruments::histogram("field.length", &self.field_length, selector)
+        let field_length = self.field_length.is_enabled().then(|| {
+            Self::histogram(
+                FIELD_LENGTH,
+                &self.field_length,
+                GraphQLSelector::FieldLength { field_length: true },
+            )
         });
 
         GraphQLInstruments { field_length }
     }
-}
 
-#[derive(Default)]
-pub(crate) struct GraphQLInstruments {
-    field_length: Option<CustomHistogram<(), (), GraphQLAttributes, GraphQLSelector>>,
-}
-
-impl Instrumented for GraphQLInstruments {
-    type Request = ();
-    type Response = ();
-    type EventResponse = ();
-
-    fn on_request(&self, _request: &Self::Request) {}
-
-    fn on_response(&self, response: &Self::Response) {
-        if let Some(field_length) = &self.field_length {
-            field_length.on_response(response);
-        }
-    }
-
-    fn on_error(&self, _error: &BoxError, _ctx: &crate::Context) {}
-}
-
-impl GraphQLInstruments {
     fn histogram(
         name: &'static str,
         config: &DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
@@ -113,6 +84,27 @@ impl GraphQLInstruments {
             }),
         }
     }
+}
+
+#[derive(Default)]
+pub(crate) struct GraphQLInstruments {
+    field_length: Option<CustomHistogram<(), (), GraphQLAttributes, GraphQLSelector>>,
+}
+
+impl Instrumented for GraphQLInstruments {
+    type Request = ();
+    type Response = ();
+    type EventResponse = ();
+
+    fn on_request(&self, _request: &Self::Request) {}
+
+    fn on_response(&self, response: &Self::Response) {
+        if let Some(field_length) = &self.field_length {
+            field_length.on_response(response);
+        }
+    }
+
+    fn on_error(&self, _error: &BoxError, _ctx: &crate::Context) {}
 }
 
 #[cfg(test)]
