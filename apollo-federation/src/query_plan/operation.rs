@@ -258,6 +258,7 @@ pub(crate) mod normalized_selection_map {
     use crate::query_plan::operation::normalized_field_selection::FieldSelection;
     use crate::query_plan::operation::normalized_fragment_spread_selection::FragmentSpreadSelection;
     use crate::query_plan::operation::normalized_inline_fragment_selection::InlineFragmentSelection;
+    use crate::query_plan::operation::CollectedFieldInSet;
     use crate::query_plan::operation::Containment;
     use crate::query_plan::operation::ContainmentOptions;
     use crate::query_plan::operation::HasSelectionKey;
@@ -265,6 +266,7 @@ pub(crate) mod normalized_selection_map {
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::operation::TYPENAME_FIELD;
+    use crate::query_plan::FetchDataPathElement;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -434,6 +436,49 @@ pub(crate) mod normalized_selection_map {
             });
 
             self.contains_key(key)
+        }
+
+        pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
+            let mut fields = Vec::new();
+
+            for (_key, selection) in self.iter() {
+                match selection {
+                    Selection::Field(field) => fields.push(CollectedFieldInSet {
+                        path: Vec::new(),
+                        field: field.clone(),
+                    }),
+                    Selection::FragmentSpread(_fragment) => {
+                        todo!()
+                    }
+                    Selection::InlineFragment(inline_fragment) => {
+                        let condition = inline_fragment
+                            .inline_fragment
+                            .data()
+                            .type_condition_position
+                            .as_ref();
+                        let header = match condition {
+                            Some(cond) => vec![FetchDataPathElement::TypenameEquals(
+                                cond.type_name().clone().into(),
+                            )],
+                            None => vec![],
+                        };
+                        for CollectedFieldInSet { path, field } in inline_fragment
+                            .selection_set
+                            .selections
+                            .fields_in_set()
+                            .into_iter()
+                        {
+                            let mut new_path = header.clone();
+                            new_path.extend(path);
+                            fields.push(CollectedFieldInSet {
+                                path: new_path,
+                                field,
+                            })
+                        }
+                    }
+                }
+            }
+            fields
         }
 
         pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
@@ -1138,6 +1183,7 @@ mod normalized_field_selection {
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
+    use crate::schema::definitions::types_can_be_merged;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
@@ -1293,6 +1339,20 @@ mod normalized_field_selection {
             for dir in self.data().directives.iter() {
                 collect_variables_from_directive(dir, variables)
             }
+        }
+
+        pub(crate) fn types_can_be_merged(&self, other: &Self) -> Result<bool, FederationError> {
+            let self_definition = self.data().field_position.get(self.schema().schema())?;
+            let other_definition = other.data().field_position.get(self.schema().schema())?;
+            types_can_be_merged(
+                &self_definition.ty,
+                &other_definition.ty,
+                self.schema().schema(),
+            )
+        }
+
+        pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
+            self.data().field_position.parent()
         }
     }
 
@@ -3169,46 +3229,6 @@ impl SelectionSet {
         })
     }
 
-    pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
-        let mut fields = Vec::new();
-
-        for (_key, selection) in self.selections.iter() {
-            match selection {
-                Selection::Field(field) => fields.push(CollectedFieldInSet {
-                    path: Vec::new(),
-                    field: field.clone(),
-                }),
-                Selection::FragmentSpread(_fragment) => {
-                    todo!()
-                }
-                Selection::InlineFragment(inline_fragment) => {
-                    let condition = inline_fragment
-                        .inline_fragment
-                        .data()
-                        .type_condition_position
-                        .as_ref();
-                    let header = match condition {
-                        Some(cond) => vec![FetchDataPathElement::TypenameEquals(
-                            cond.type_name().clone().into(),
-                        )],
-                        None => vec![],
-                    };
-                    for CollectedFieldInSet { path, field } in
-                        inline_fragment.selection_set.fields_in_set().into_iter()
-                    {
-                        let mut new_path = header.clone();
-                        new_path.extend(path);
-                        fields.push(CollectedFieldInSet {
-                            path: new_path,
-                            field,
-                        })
-                    }
-                }
-            }
-        }
-        fields
-    }
-
     pub(crate) fn used_variables(&self) -> Result<Vec<Name>, FederationError> {
         let mut variables = HashSet::new();
         self.collect_variables(&mut variables)?;
@@ -3277,6 +3297,12 @@ pub(crate) struct CollectedFieldInSet {
     field: Arc<FieldSelection>,
 }
 
+impl CollectedFieldInSet {
+    pub(crate) fn field(&self) -> &Arc<FieldSelection> {
+        &self.field
+    }
+}
+
 struct FieldInPath {
     path: Vec<FetchDataPathElement>,
     field: Arc<FieldSelection>,
@@ -3291,7 +3317,8 @@ fn compute_aliases_for_non_merging_fields(
 
     fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
         s.selections.iter().flat_map(|s2| {
-            s2.fields_in_set()
+            s2.selections
+                .fields_in_set()
                 .into_iter()
                 .map(|CollectedFieldInSet { path, field }| {
                     let mut new_path = s.path.clone();

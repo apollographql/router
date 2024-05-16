@@ -1,4 +1,7 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
+use std::ops::Not;
+use std::sync::Arc;
 
 use apollo_compiler::executable::Name;
 use apollo_compiler::Node;
@@ -6,8 +9,10 @@ use apollo_compiler::Node;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
+use super::operation::CollectedFieldInSet;
 use super::operation::Containment;
 use super::operation::ContainmentOptions;
+use super::operation::Field;
 use super::operation::Fragment;
 use super::operation::FragmentSpread;
 use super::operation::FragmentSpreadData;
@@ -18,21 +23,251 @@ use super::operation::Selection;
 use super::operation::SelectionId;
 use super::operation::SelectionKey;
 use super::operation::SelectionMap;
-use super::operation::SelectionOrSet;
 use super::operation::SelectionSet;
 
-struct FieldsConflictValidator {}
+// PORT_NOTE: Not having a validator and having a FieldsConflictValidator with empty
+// `by_response_name` map has no difference in behavior. So, we could drop the `Option` from
+// `Option<FieldsConflictValidator>`. However, `None` validator makes it clearer that validation is
+// unnecessary.
+struct FieldsConflictValidator {
+    by_response_name: HashMap<Name, HashMap<Field, Option<Arc<FieldsConflictValidator>>>>,
+}
 
-struct FieldsConflictMultiBranchValidator {}
+impl FieldsConflictValidator {
+    fn from_selection_map(selection_map: &SelectionMap) -> Self {
+        Self::for_level(&selection_map.fields_in_set())
+    }
+
+    fn for_level(level: &[CollectedFieldInSet]) -> Self {
+        // Group `level`'s fields by the response-name/field
+        let mut at_level: HashMap<Name, HashMap<Field, Option<Vec<CollectedFieldInSet>>>> =
+            HashMap::new();
+        for collected_field in level {
+            let response_name = collected_field.field().field.data().response_name();
+            let at_response_name = at_level.entry(response_name).or_default();
+            if let Some(ref field_selection_set) = collected_field.field().selection_set {
+                at_response_name
+                    .entry(collected_field.field().field.clone())
+                    .or_default()
+                    .get_or_insert_with(Default::default)
+                    .extend(field_selection_set.selections.fields_in_set());
+            } else {
+                // Note that whether a `FieldSelection` has a sub-selection set or not is entirely
+                // determined by whether the field type is a composite type or not, so even if
+                // we've seen a previous version of `field` before, we know it's guarantee to have
+                // had no selection set here, either. So the `set` below may overwrite a previous
+                // entry, but it would be a `None` so no harm done.
+                at_response_name.insert(collected_field.field().field.clone(), None);
+            }
+        }
+
+        // Collect validators per response-name/field
+        let mut by_response_name = HashMap::new();
+        for (response_name, fields) in at_level {
+            let mut at_response_name: HashMap<Field, Option<Arc<FieldsConflictValidator>>> =
+                HashMap::new();
+            for (field, collected_fields) in fields {
+                let validator = collected_fields
+                    .map(|collected_fields| Arc::new(Self::for_level(&collected_fields)));
+                at_response_name.insert(field, validator);
+            }
+            by_response_name.insert(response_name, at_response_name);
+        }
+        Self { by_response_name }
+    }
+
+    fn for_field(&self, field: &Field) -> Vec<Arc<Self>> {
+        let Some(by_response_name) = self.by_response_name.get(&field.data().response_name())
+        else {
+            return Vec::new();
+        };
+        by_response_name.values().flatten().cloned().collect()
+    }
+
+    fn has_same_response_shape(
+        &self,
+        other: &FieldsConflictValidator,
+    ) -> Result<bool, FederationError> {
+        for (response_name, self_fields) in self.by_response_name.iter() {
+            let Some(other_fields) = other.by_response_name.get(response_name) else {
+                continue;
+            };
+
+            for (self_field, self_validator) in self_fields {
+                for (other_field, other_validator) in other_fields {
+                    if !self_field.types_can_be_merged(other_field)? {
+                        return Ok(false);
+                    }
+
+                    if let Some(self_validator) = self_validator {
+                        if let Some(other_validator) = other_validator {
+                            if !self_validator.has_same_response_shape(other_validator)? {
+                                return Ok(false);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn do_merge_with(&self, other: &FieldsConflictValidator) -> Result<bool, FederationError> {
+        for (response_name, self_fields) in self.by_response_name.iter() {
+            let Some(other_fields) = other.by_response_name.get(response_name) else {
+                continue;
+            };
+
+            // We're basically checking
+            // [FieldsInSetCanMerge](https://spec.graphql.org/draft/#FieldsInSetCanMerge()), but
+            // from 2 set of fields (`self_fields` and `other_fields`) of the same response that we
+            // know individually merge already.
+            for (self_field, self_validator) in self_fields {
+                for (other_field, other_validator) in other_fields {
+                    if !self_field.types_can_be_merged(other_field)? {
+                        return Ok(false);
+                    }
+
+                    let p1 = self_field.parent_type_position();
+                    let p2 = other_field.parent_type_position();
+                    if p1 == p2 || !p1.is_object_type() || !p2.is_object_type() {
+                        // Additional checks of `FieldsInSetCanMerge` when same parent type or one
+                        // isn't object
+                        if self_field.data().name() != other_field.data().name()
+                            || self_field.data().arguments != other_field.data().arguments
+                        {
+                            return Ok(false);
+                        }
+                        if let Some(self_validator) = self_validator {
+                            if let Some(other_validator) = other_validator {
+                                if !self_validator.do_merge_with(other_validator)? {
+                                    return Ok(false);
+                                }
+                            }
+                        }
+                    } else {
+                        // Otherwise, the sub-selection must pass
+                        // [SameResponseShape](https://spec.graphql.org/draft/#SameResponseShape()).
+                        if let Some(self_validator) = self_validator {
+                            if let Some(other_validator) = other_validator {
+                                if !self_validator.has_same_response_shape(other_validator)? {
+                                    return Ok(false);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn do_merge_with_all<'a>(
+        &self,
+        mut iter: impl Iterator<Item = &'a FieldsConflictValidator>,
+    ) -> Result<bool, FederationError> {
+        iter.try_fold(true, |acc, v| Ok(acc && self.do_merge_with(v)?))
+    }
+}
+
+pub(crate) struct FieldsConflictMultiBranchValidator {
+    validators: Vec<Arc<FieldsConflictValidator>>,
+    used_spread_trimmed_part_at_level: Vec<Arc<FieldsConflictValidator>>,
+}
+
+impl FieldsConflictMultiBranchValidator {
+    fn new(validators: Vec<Arc<FieldsConflictValidator>>) -> Self {
+        Self {
+            validators,
+            used_spread_trimmed_part_at_level: Vec::new(),
+        }
+    }
+
+    fn from_initial_validator(validator: FieldsConflictValidator) -> Self {
+        Self {
+            validators: vec![Arc::new(validator)],
+            used_spread_trimmed_part_at_level: Vec::new(),
+        }
+    }
+
+    fn for_field(&self, field: &Field) -> Self {
+        let for_all_branches = self.validators.iter().flat_map(|v| v.for_field(field));
+        Self::new(for_all_branches.collect())
+    }
+
+    // When this method is used in the context of `try_optimize_with_fragments`, we know that the
+    // fragment, restricted to the current parent type, matches a subset of the sub-selection.
+    // However, there is still one case we we cannot use it that we need to check, and this is if
+    // using the fragment would create a field "conflict" (in the sense of the graphQL spec
+    // [`FieldsInSetCanMerge`](https://spec.graphql.org/draft/#FieldsInSetCanMerge())) and thus
+    // create an invalid selection. To be clear, `at_type.selections` cannot create a conflict,
+    // since it is a subset of the target selection set and it is valid by itself. *But* there may
+    // be some part of the fragment that is not `at_type.selections` due to being "dead branches"
+    // for type `parent_type`. And while those branches _are_ "dead" as far as execution goes, the
+    // `FieldsInSetCanMerge` validation does not take this into account (it's 1st step says
+    // "including visiting fragments and inline fragments" but has no logic regarding ignoring any
+    // fragment that may not apply due to the intersection of runtime types between multiple
+    // fragment being empty).
+    fn check_can_reuse_fragment_and_track_it(
+        &mut self,
+        fragment_restriction: &FragmentRestrictionAtType,
+    ) -> Result<bool, FederationError> {
+        // No validator means that everything in the fragment selection was part of the selection
+        // we're optimizing away (by using the fragment), and we know the original selection was
+        // ok, so nothing to check.
+        let Some(validator) = &fragment_restriction.validator else {
+            return Ok(true); // Nothing to check; Trivially ok.
+        };
+
+        if validator.do_merge_with_all(self.validators.iter().map(Arc::as_ref))? {
+            return Ok(false);
+        }
+
+        // We need to make sure the trimmed parts of `fragment` merges with the rest of the
+        // selection, but also that it merge with any of the trimmed parts of any fragment we have
+        // added already.
+        // Note: this last condition means that if 2 fragment conflict on their "trimmed" parts,
+        // then the choice of which is used can be based on the fragment ordering and selection
+        // order, which may not be optimal. This feels niche enough that we keep it simple for now,
+        // but we can revisit this decision if we run into real cases that justify it (but making
+        // it optimal would be a involved in general, as in theory you could have complex
+        // dependencies of fragments that conflict, even cycles, and you need to take the size of
+        // fragments into account to know what's best; and even then, this could even depend on
+        // overall usage, as it can be better to reuse a fragment that is used in other places,
+        // than to use one for which it's the only usage. Adding to all that the fact that conflict
+        // can happen in sibling branches).
+        if !validator.do_merge_with_all(
+            self.used_spread_trimmed_part_at_level
+                .iter()
+                .map(Arc::as_ref),
+        )? {
+            return Ok(false);
+        }
+
+        // We're good, but track the fragment.
+        self.used_spread_trimmed_part_at_level
+            .push(validator.clone());
+        Ok(true)
+    }
+}
 
 struct FragmentRestrictionAtType {
+    /// Selections that are expanded from a given fragment at a given type and then normalized.
+    /// - This represents the part of given type's sub-selections that are covered by the fragment.
     selections: SelectionMap,
-    //validator: Option<FieldsConflictValidator>,
+
+    /// A runtime validator to check the fragment selections against other fields.
+    /// - `None` means that there is nothing to check.
+    /// - See `check_can_reuse_fragment_and_track_it` for more details.
+    validator: Option<Arc<FieldsConflictValidator>>,
 }
 
 impl FragmentRestrictionAtType {
-    fn new(selections: SelectionMap) -> Self {
-        Self { selections }
+    fn new(selections: SelectionMap, validator: Option<FieldsConflictValidator>) -> Self {
+        Self {
+            selections,
+            validator: validator.map(Arc::new),
+        }
     }
 
     // It's possible that while the fragment technically applies at `parent_type`, it's "rebasing" on
@@ -105,7 +340,6 @@ impl Fragment {
     }
 
     // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port does not.
-    // TODO: consider memoize this function.
     fn expanded_selection_set_at_type(
         &self,
         ty: &CompositeTypeDefinitionPosition,
@@ -123,9 +357,11 @@ impl Fragment {
             // `FieldsInSetCanMerge` rule is more restrictive and any fields can create conflicts.
             // Thus, we have to use the full validator in this case. (see
             // https://github.com/graphql/graphql-spec/issues/1085 for details.)
-            // TODO: add validator
             return Ok(FragmentRestrictionAtType::new(
-                expanded_selection_set.selections.as_ref().clone(),
+                normalized_selection_set.selections.as_ref().clone(),
+                Some(FieldsConflictValidator::from_selection_map(
+                    &expanded_selection_set.selections,
+                )),
             ));
         }
 
@@ -141,8 +377,14 @@ impl Fragment {
         let trimmed = expanded_selection_set
             .selections
             .minus(&normalized_selection_set.selections)?;
-        // TODO: add validator
-        Ok(FragmentRestrictionAtType::new(trimmed))
+        let validator = trimmed
+            .is_empty()
+            .not()
+            .then(|| FieldsConflictValidator::from_selection_map(&trimmed));
+        Ok(FragmentRestrictionAtType::new(
+            normalized_selection_set.selections.as_ref().clone(),
+            validator,
+        ))
     }
 
     // Whether this fragment fully includes `other_fragment`.
@@ -152,7 +394,6 @@ impl Fragment {
     //
     // Note that this is guaranteed to return `false` if passed self's name.
     // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port does not.
-    // TODO: consider memoize this function.
     fn includes(&self, other_fragment_name: &Name) -> bool {
         if self.name == *other_fragment_name {
             return false;
@@ -277,6 +518,14 @@ impl SelectionMap {
     }
 }
 
+/// The return type for `SelectionSet::try_optimize_with_fragments`.
+#[derive(derive_more::From)]
+pub(crate) enum SelectionSetOrFragment {
+    //Selection(Selection),
+    SelectionSet(SelectionSet),
+    Fragment(Node<Fragment>),
+}
+
 impl SelectionSet {
     /// Reduce the list of applicable fragments by eliminating ones that are subsumed by another.
     //
@@ -332,6 +581,8 @@ impl SelectionSet {
     fn reduce_applicable_fragments(
         applicable_fragments: &mut Vec<(Node<Fragment>, FragmentRestrictionAtType)>,
     ) {
+        // Note: It's not possible for two fragments to include each other. So, we don't need to
+        //       worry about inclusion cycles.
         let included_fragments: HashSet<Name> = applicable_fragments
             .iter()
             .filter(|(fragment, _)| {
@@ -346,13 +597,13 @@ impl SelectionSet {
     }
 
     // PORT_NOTE: Moved from `Selection` class in JS code to SelectionSet struct in Rust.
-    fn try_optimize_with_fragments(
+    pub(crate) fn try_optimize_with_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         fragments: &NamedFragments,
-        // validator: &SelectionSetValidator,
-        // can_use_full_matching_fragment,
-    ) -> Result<SelectionOrSet, FederationError> {
+        mut validator: FieldsConflictMultiBranchValidator,
+        can_use_full_matching_fragment: impl Fn(&Fragment) -> bool,
+    ) -> Result<SelectionSetOrFragment, FederationError> {
         // We limit to fragments whose selection could be applied "directly" at `parent_type`,
         // meaning without taking the fragment condition into account. The idea being that if the
         // fragment condition would be needed inside `parent_type`, then that condition will not
@@ -362,7 +613,7 @@ impl SelectionSet {
         // this restriction that calling `expanded_selection_set_at_type` is ok.
         let candidates = fragments.get_all_may_apply_directly_at_type(parent_type)?;
         if candidates.is_empty() {
-            return Ok(self.clone().into());
+            return Ok(self.clone().into()); // Not optimizable
         }
 
         // First, we check which of the candidates do apply inside the selection set, if any. If we
@@ -373,6 +624,9 @@ impl SelectionSet {
         for candidate in candidates {
             let at_type = candidate.expanded_selection_set_at_type(parent_type)?;
             if at_type.is_useless() {
+                continue;
+            }
+            if !validator.check_can_reuse_fragment_and_track_it(&at_type)? {
                 continue;
             }
 
@@ -397,46 +651,35 @@ impl SelectionSet {
                     ignore_missing_typename: true,
                 },
             );
-            if matches!(res, Containment::Equal) {
-                // NOCHECKIN
-                // if can_use_full_matching_fragment(candidate) {
-                //     if !validator.check_can_reuse_fragment_and_track_it(at_type) {
-                //         // We cannot use it at all, so no point in adding to `applyingFragments`.
-                //         continue;
-                //     }
-                //     return candidate;
-                // }
-
-                // If we're not going to replace the full thing, then same reasoning a below.
-                if candidate.directives.is_empty() {
-                    applicable_fragments.push((candidate, at_type));
-                }
+            if matches!(res, Containment::NotContained) {
+                continue; // Not eligible; Skip it.
             }
-            // Note that if a fragment applies to only a subset of the subSelection, then we really only can use
-            // it if that fragment is defined _without_ directives.
-            else if matches!(res, Containment::StrictlyContained)
-                && candidate.directives.is_empty()
-            {
-                applicable_fragments.push((candidate, at_type));
+            if matches!(res, Containment::Equal) && can_use_full_matching_fragment(&candidate) {
+                // Special case: Found a fragment that covers the full selection set.
+                return Ok(candidate.into());
             }
+            // Note that if a fragment applies to only a subset of the sub-selections, then we
+            // really only can use it if that fragment is defined _without_ directives.
+            if !candidate.directives.is_empty() {
+                continue; // Not eligible as a partial selection; Skip it.
+            }
+            applicable_fragments.push((candidate, at_type));
         }
 
         if applicable_fragments.is_empty() {
-            return Ok(self.clone().into());
+            return Ok(self.clone().into()); // Not optimizable
         }
 
+        // Narrow down the list of applicable fragments by removing those that are included in
+        // another.
         Self::reduce_applicable_fragments(&mut applicable_fragments);
 
+        // Build a new optimized selection set.
         let mut not_covered_so_far = self.selections.as_ref().clone();
         let mut optimized = SelectionMap::new();
         for (fragment, at_type) in applicable_fragments {
-            // TODO: add validator check
-            // if !validator.check_can_reuse_fragment_and_track_it(at_type) { continue; }
-
             let not_covered = self.selections.minus(&at_type.selections)?;
             not_covered_so_far = not_covered_so_far.intersection(&not_covered)?;
-            // PORT_NOTE: JS version doesn't do this, but shouldn't we skip such fragments that
-            //            don't cover any selections (thus, not reducing `not_covered_so_far`)?
 
             let fragment_spread_data = FragmentSpreadData {
                 schema: self.schema.clone(),
