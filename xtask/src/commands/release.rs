@@ -176,13 +176,7 @@ impl Prepare {
         println!("updating Cargo.toml files");
         fn bump(component: &str) -> Result<()> {
             for package in ["apollo-federation", "apollo-router"] {
-                cargo!([
-                    "set-version",
-                    "--bump",
-                    component,
-                    "--package",
-                    package
-                ]);
+                cargo!(["set-version", "--bump", component, "--package", package]);
             }
             Ok(())
         }
