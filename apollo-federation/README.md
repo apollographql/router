@@ -13,6 +13,16 @@ Federation 2 is an evolution of the original Apollo Federation with an improved 
 
 Checkout the [Federation 2 docs](https://www.apollographql.com/docs/federation) and [demo repo](https://github.com/apollographql/supergraph-demo-fed2) to take it for a spin and [let us know what you think](https://community.apollographql.com/t/announcing-apollo-federation-2/1821)!
 
+## Versioning
+
+The  `apollo-federation` crate does **not** adhere to [Semantic Versioning](https://semver.org/).
+Any version may have breaking API changes, as this API is expected to only be used by `apollo-router`.
+Instead, the version number matches exactly that of the `apollo-router` crate version using it.
+
+This version number is **not** that of the Apollo Federation specification being implemented.
+See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
+for which Federation versions are supported by which Router versions.
+
 ## Usage
 
 TODO
