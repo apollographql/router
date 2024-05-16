@@ -1064,7 +1064,7 @@ impl Path {
         }
 
         self.clone()
-    }
+    }    
 }
 
 impl FromIterator<PathElement> for Path {

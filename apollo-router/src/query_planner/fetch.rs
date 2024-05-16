@@ -269,7 +269,6 @@ impl Variables {
     ) -> Option<Variables> {
         let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, current_dir, schema, context_rewrites);
-        dbg!("new variables");
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
@@ -282,7 +281,6 @@ impl Variables {
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
             let mut values: IndexSet<Value> = IndexSet::new();
             data.select_values_and_paths(schema, current_dir, |path, value| {
-                dbg!(&path, &value);
                 // first get contextual values that are required
                 if let Some(context) = subgraph_context.as_mut() {
                     context.execute_on_path(path);
@@ -397,9 +395,14 @@ impl FetchNode {
         };
         
         let aliased_operation = build_operation_with_aliasing(operation, &contextual_arguments, parameters.schema);
-        if let Ok(a) = aliased_operation {
-            dbg!(a.serialize().no_indent());
-        }
+        let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
+        let query_str = if let Ok(op) = aliased_operation {
+            alias_query_string = op.to_string();
+            alias_query_string.as_str()
+        } else {
+            operation.as_serialized()
+        };
+        
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
@@ -418,7 +421,7 @@ impl FetchNode {
                     )
                     .body(
                         Request::builder()
-                            .query(operation.as_serialized())
+                            .query(query_str)
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),
