@@ -176,7 +176,7 @@ Start following the steps below to start a release PR.  The process is **not ful
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-7. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
+7. Now, review and stage the changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
     ```
     git add -up .
