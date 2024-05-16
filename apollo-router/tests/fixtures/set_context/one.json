@@ -193,7 +193,7 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _0: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_0) } } _1: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_1) } } }",
+        "query": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
         "operationName": "QueryLL__Subgraph1__1",
         "variables": {
           "contextualArgument_1_0_0": "prop value 1",

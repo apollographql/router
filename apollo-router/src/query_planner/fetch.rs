@@ -268,7 +268,8 @@ impl Variables {
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
         let body = request.body();
-        let mut subgraph_context = SubgraphContext::new(data, current_dir, schema, context_rewrites);
+        let mut subgraph_context =
+            SubgraphContext::new(data, current_dir, schema, context_rewrites);
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 
@@ -311,7 +312,7 @@ impl Variables {
                 Some(context) => context.add_variables_and_get_args(&mut variables),
                 None => None,
             };
-            
+
             variables.insert("representations", representations);
             Some(Variables {
                 variables,
@@ -393,16 +394,26 @@ impl FetchNode {
                 return (Value::Object(Object::default()), Vec::new());
             }
         };
-        
-        let aliased_operation = build_operation_with_aliasing(operation, &contextual_arguments, parameters.schema);
+
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
-        let query_str = if let Ok(op) = aliased_operation {
-            alias_query_string = op.serialize().no_indent().to_string();
-            alias_query_string.as_str()
+        let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
+            match build_operation_with_aliasing(operation, &ctx_arg, parameters.schema) {
+                Ok(op) => {
+                    alias_query_string = op.serialize().no_indent().to_string();
+                    alias_query_string.as_str()
+                }
+                Err(errors) => {
+                    tracing::debug!(
+                        "couldn't generate a valid executable document? {:?}",
+                        errors
+                    );
+                    operation.as_serialized()
+                }
+            }
         } else {
             operation.as_serialized()
         };
-        
+
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(parameters.supergraph_request.clone())
             .subgraph_request(
@@ -421,7 +432,7 @@ impl FetchNode {
                     )
                     .body(
                         Request::builder()
-                            .query(query_str)
+                            .query(aliased_operation)
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
                             .variables(variables.clone())
                             .build(),

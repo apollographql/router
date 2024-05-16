@@ -5,6 +5,9 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::validation::Valid;
+use apollo_compiler::validation::WithErrors;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -23,6 +26,7 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 
+#[derive(Debug)]
 pub(crate) struct ContextualArguments {
     pub(crate) arguments: HashSet<String>, // a set of all argument names that will be passed to the subgraph. This is the unmodified name from the query plan
     pub(crate) count: usize, // the number of different sets of arguments that exist. This will either be 1 or the number of entities
@@ -36,7 +40,7 @@ pub(crate) struct SubgraphContext<'a> {
     pub(crate) named_args: Vec<HashMap<String, Value>>,
 }
 
-// TODO: We're using ValueExt::get_path, so I believe this is no longer needed, but I'm 
+// TODO: We're using ValueExt::get_path, so I believe this is no longer needed, but I'm
 //       going to keep it commented until all the tests are passing
 // fn data_at_path<'v>(data: &'v Value, path: &Path) -> Option<&'v Value> {
 //     let v = match &path.0[0] {
@@ -65,7 +69,7 @@ pub(crate) struct SubgraphContext<'a> {
 //     v
 // }
 
-// context_path is a non-standard relative path which may navigate up the tree 
+// context_path is a non-standard relative path which may navigate up the tree
 // from the current position. This is indicated with a ".." PathElement::Key
 // note that the return value is an absolute path that may be used anywhere
 fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
@@ -123,7 +127,7 @@ impl<'a> SubgraphContext<'a> {
     }
 
     // For each of the rewrites, start collecting data for the data at path.
-    // Once we find a Value for a given variable, skip additional rewrites that 
+    // Once we find a Value for a given variable, skip additional rewrites that
     // reference the same variable
     pub(crate) fn execute_on_path(&mut self, path: &Path) {
         let mut found_rewrites: HashSet<String> = HashSet::new();
@@ -136,7 +140,7 @@ impl<'a> SubgraphContext<'a> {
                         if !found_rewrites.contains(item.rename_key_to.as_str()) {
                             let data_path = merge_context_path(path, &item.path);
                             let val = self.data.get_path(self.schema, &data_path);
-                            
+
                             if let Ok(v) = val {
                                 // add to found
                                 found_rewrites.insert(item.rename_key_to.clone().to_string());
@@ -179,8 +183,8 @@ impl<'a> SubgraphContext<'a> {
         self.named_args.push(hash_map);
     }
 
-    // Once all a value has been extracted for every variable, go ahead and add all 
-    // variables to the variables map. Additionally, return a ContextualArguments structure if 
+    // Once all a value has been extracted for every variable, go ahead and add all
+    // variables to the variables map. Additionally, return a ContextualArguments structure if
     // values of variables are entity dependent
     pub(crate) fn add_variables_and_get_args(
         &self,
@@ -232,62 +236,65 @@ impl<'a> SubgraphContext<'a> {
 // where we are collecting entites and different entities may have different variables passed to the resolver.
 pub(crate) fn build_operation_with_aliasing(
     subgraph_operation: &SubgraphOperation,
-    contextual_arguments: &Option<ContextualArguments>,
+    contextual_arguments: &ContextualArguments,
     schema: &Schema,
-) -> Result<Operation, ContextBatchingError> {
+) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
+    dbg!(
+        &subgraph_operation.to_string(),
+        &contextual_arguments,
+        &schema.raw_sdl
+    );
     let mut selections: Vec<Selection> = vec![];
-    match contextual_arguments {
-        Some(ContextualArguments { arguments, count }) => {
-            let parsed_document = subgraph_operation.as_parsed(schema.supergraph_schema());
-            if let Ok(document) = parsed_document {
-                // TODO: Can there be more than one named operation?
-                //       Can there be an anonymous operation?
-                if let Some((_, op)) = document.named_operations.first() {
-                    let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
-                    op.variables.iter().for_each(|v| {
-                        if arguments.contains(v.name.as_str()) {
-                            for i in 0..*count {
-                                new_variables.push(Node::new(VariableDefinition {
-                                    name: Name::new_unchecked(
-                                        format!("{}_{}", v.name.as_str(), i).into(),
-                                    ),
-                                    ty: v.ty.clone(),
-                                    default_value: v.default_value.clone(),
-                                    directives: v.directives.clone(),
-                                }));
-                            }
-                        } else {
-                            new_variables.push(v.clone());
-                        }
-                    });
-
+    let ContextualArguments { arguments, count } = contextual_arguments;
+    let parsed_document = subgraph_operation.as_parsed(schema.supergraph_schema());
+    if let Ok(document) = parsed_document {
+        // TODO: Can there be more than one named operation?
+        //       Can there be an anonymous operation?
+        if let Some((_, op)) = document.named_operations.first() {
+            let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
+            op.variables.iter().for_each(|v| {
+                if arguments.contains(v.name.as_str()) {
                     for i in 0..*count {
-                        // If we are aliasing, we know that there is only one selection in the top level SelectionSet
-                        // it is a field selection for _entities, so it's ok to reach in and give it an alias
-                        let mut selection_set = op.selection_set.clone();
-                        transform_selection_set(&mut selection_set, arguments, i, true);
-                        selections.push(selection_set.selections[0].clone())
+                        new_variables.push(Node::new(VariableDefinition {
+                            name: Name::new_unchecked(format!("{}_{}", v.name.as_str(), i).into()),
+                            ty: v.ty.clone(),
+                            default_value: v.default_value.clone(),
+                            directives: v.directives.clone(),
+                        }));
                     }
-
-                    Ok(Operation {
-                        operation_type: op.operation_type.clone(),
-                        name: op.name.clone(),
-                        directives: op.directives.clone(),
-                        variables: new_variables,
-                        selection_set: SelectionSet {
-                            ty: op.selection_set.ty.clone(),
-                            selections,
-                        },
-                    })
-                } else { // TODO: This is ugly, but I get compiler errors if the else blocks aren't present
-                    Err(ContextBatchingError::NoSelectionSet)
+                } else {
+                    new_variables.push(v.clone());
                 }
-            } else {
-                Err(ContextBatchingError::NoSelectionSet)
+            });
+
+            for i in 0..*count {
+                // If we are aliasing, we know that there is only one selection in the top level SelectionSet
+                // it is a field selection for _entities, so it's ok to reach in and give it an alias
+                let mut selection_set = op.selection_set.clone();
+                transform_selection_set(&mut selection_set, arguments, i, true);
+                selections.push(selection_set.selections[0].clone())
             }
+
+            let mut ed = ExecutableDocument::new();
+            ed.insert_operation(Operation {
+                operation_type: op.operation_type.clone(),
+                name: op.name.clone(),
+                directives: op.directives.clone(),
+                variables: new_variables,
+                selection_set: SelectionSet {
+                    ty: op.selection_set.ty.clone(),
+                    selections,
+                },
+            });
+
+            let valid_document = ed
+                .validate(schema.supergraph_schema())
+                .map_err(ContextBatchingError::InvalidDocumentGenerated)?;
+
+            return Ok(valid_document);
         }
-        None => Err(ContextBatchingError::NoSelectionSet),
     }
+    Err(ContextBatchingError::NoSelectionSet)
 }
 
 fn add_alias_to_selection(selection: &mut executable::Field, index: usize) {
@@ -340,22 +347,30 @@ fn transform_field_arguments(
 #[derive(Debug)]
 pub(crate) enum ContextBatchingError {
     NoSelectionSet,
+    InvalidDocumentGenerated(WithErrors<ExecutableDocument>),
 }
 
-#[test]
-fn test_merge_context_path() {}
-// fn test_query_batching_for_contextual_args() {
-//     let old_query = "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}";
-//     let mut ctx_args = HashSet::new();
-//     ctx_args.insert("Subgraph1_U_field_a".to_string());
-//     let contextual_args = Some((ctx_args, 2));
+#[cfg(test)]
+mod subgraph_context_tests {
+    use super::*;
 
-//     let expected = "query QueryLL__Subgraph1__1($representations: [_Any!]!, $Subgraph1_U_field_a_0: String!, $Subgraph1_U_field_a_1: String!) { _0: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_0) } } _1: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_1) } } }";
+    // #[test]
+    // fn test_merge_context_path() {
+    //     let old_query = "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}";
+    //     let mut ctx_args = HashSet::new();
+    //     ctx_args.insert("Subgraph1_U_field_a".to_string());
+    //     let contextual_args = Some((ctx_args, 2));
 
-//     assert_eq!(
-//         expected,
-//         query_batching_for_contextual_args(old_query, &contextual_args)
-//             .unwrap()
-//             .unwrap()
-//     );
-// }
+    //     let expected = "query QueryLL__Subgraph1__1($representations: [_Any!]!, $Subgraph1_U_field_a_0: String!, $Subgraph1_U_field_a_1: String!) { _0: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_0) } } _1: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_1) } } }";
+
+    //     assert_eq!(
+    //         expected,
+    //         build_operation_with_aliasing(old_query, &contextual_args)
+    //             .unwrap()
+    //             .serialize()
+    //             .no_indent()
+    //             .to_string()
+    //             .as_str()
+    //     );
+    // }
+}
