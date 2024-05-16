@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use serde_json::json;
 
 use crate::integration::IntegrationTest;
@@ -64,7 +66,20 @@ async fn test_metrics_reloading() {
     check_metrics_contains(&metrics, r#"custom_header="test_custom""#);
     check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
 
+    router
+        .assert_metrics_does_not_contain(r#"_total_total{"#)
+        .await;
+
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
+        tokio::time::sleep(Duration::from_secs(10)).await;
+
+        let metrics = router
+            .get_metrics_response()
+            .await
+            .expect("failed to fetch metrics")
+            .text()
+            .await
+            .unwrap();
         check_metrics_contains(
             &metrics,
             r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
@@ -82,10 +97,6 @@ async fn test_metrics_reloading() {
             r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#,
         );
     }
-
-    router
-        .assert_metrics_does_not_contain(r#"_total_total{"#)
-        .await;
 }
 
 #[track_caller]
