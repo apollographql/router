@@ -370,15 +370,15 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr ready "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-8. Use the `gh` CLI to enable **auto-merge** (**_NOT_** auto-**_squash_**):
+7. Use the `gh` CLI to enable **auto-merge** (**_NOT_** auto-**_squash_**):
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --body "" -t "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-9. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `main`**
+8. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `main`**
 
-10. After the PR has merged to `main`, pull `main` to your local terminal, and Git tag & push the release:
+9. After the PR has merged to `main`, pull `main` to your local terminal, and Git tag & push the release:
 
     This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
 
@@ -389,13 +389,13 @@ Start following the steps below to start a release PR.  The process is **not ful
     git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-11. Open a PR that reconciles `dev` (Make sure to merge this reconciliation PR back to dev, **do not squash or rebase**):
+10. Open a PR that reconciles `dev` (Make sure to merge this reconciliation PR back to dev, **do not squash or rebase**):
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --title "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}" -B dev -H main --body "Follow-up to the v${APOLLO_ROUTER_RELEASE_VERSION} being officially released, bringing version bumps and changelog updates into the \`dev\` branch."
     ```
 
-12. Mark the PR to **auto-merge NOT auto-squash** using the URL that is output from the previous command
+11. Mark the PR to **auto-merge NOT auto-squash** using the URL that is output from the previous command
 
     ```
     APOLLO_RECONCILE_PR_URL=$(gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr list --state open --base dev --head main --json url --jq '.[-1] | .url')
@@ -404,15 +404,15 @@ Start following the steps below to start a release PR.  The process is **not ful
     ```
 
 
-13. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `dev`**
+12. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `dev`**
 
-14. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.
+13. 👀 Follow along with the process by [going to CircleCI for the repository](https://app.circleci.com/pipelines/github/apollographql/router) and clicking on `release` for the Git tag that appears at the top of the list.
 
-15. ⚠️ **Wait for `publish_github_release` on CircleCI to finish on this job before continuing.** ⚠️
+14. ⚠️ **Wait for `publish_github_release` on CircleCI to finish on this job before continuing.** ⚠️
 
     You should expect this will take at least 30 minutes.
 
-16. Re-create the file you may have previously created called `this_release.md` _just to make sure_ it is up to date after final edits from review:
+15. Re-create the file you may have previously created called `this_release.md` _just to make sure_ it is up to date after final edits from review:
 
     ```
     perl -0777 \
@@ -433,19 +433,19 @@ Start following the steps below to start a release PR.  The process is **not ful
         CHANGELOG.md >  this_release.md
     ```
 
-17. Change the links in `this_release.md` from `[@username](https://github.com/username)` to `@username` in order to facilitate the correct "Contributorship" attribution on the final GitHub release.
+16. Change the links in `this_release.md` from `[@username](https://github.com/username)` to `@username` in order to facilitate the correct "Contributorship" attribution on the final GitHub release.
 
     ```
     perl -pi -e 's/\[@([^\]]+)\]\([^)]+\)/@\1/g' this_release.md
     ```
 
-18. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we just created):
+17. Update the release notes on the now-published [GitHub Releases](https://github.com/apollographql/router/releases) (this needs to be moved to CI, but requires `this_release.md` which we just created):
 
     ```
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-19. Finally, publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+18. Finally, publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
 
@@ -453,7 +453,7 @@ Start following the steps below to start a release PR.  The process is **not ful
     cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-20. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
+19. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:
 
     ```
     curl -s "https://github.com/apollographql/router/releases/tag/v${APOLLO_ROUTER_RELEASE_VERSION}" | htmlq 'meta[property="og:image"]' --attribute content
