@@ -39,9 +39,6 @@ mod test {
     use similar::TextDiff;
 
     #[test]
-    fn the_next_test_takes_a_while_to_pass_do_not_worry() {}
-
-    #[test]
     // this test takes a while, I hope the above test name
     // let users know they should not worry and wait a bit.
     // Hang in there!
@@ -103,6 +100,7 @@ mod test {
         if !diff.is_empty() {
             println!("generated scaffolding project has changed:\n{:#?}", diff);
             for file in diff.changed {
+                println!("file: {file:?}");
                 let file = PathBuf::from(
                     file.to_str()
                         .unwrap()
