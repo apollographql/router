@@ -111,7 +111,12 @@ mod test {
                 // we do not check the Cargo.toml files because they have differences due to import paths and workspace usage
                 if file == PathBuf::from("Cargo.toml") || file == PathBuf::from("xtask/Cargo.toml")
                 {
-                    println!("skipping Cargo.toml");
+                    println!("skipping {}", file.to_str().unwrap());
+                    continue;
+                }
+                // we are not dealing with windows line endings
+                if file == PathBuf::from("src\\plugins\\mod.rs") {
+                    println!("skipping {}", file.to_str().unwrap());
                     continue;
                 }
 
