@@ -1,19 +1,54 @@
 ---
 source: apollo-router/tests/set_context.rs
+assertion_line: 88
 expression: response
 ---
 {
   "data": {
     "t": {
-      "__typename": "T",
       "id": "1",
-      "u": {
-        "__typename": "U",
-        "field": 1234
-      }
+      "uList": [
+        null,
+        null,
+        null
+      ]
     }
   },
+  "errors": [
+    {
+      "message": "couldn't find mock for query {\"query\":\"query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}\",\"operationName\":\"Query__Subgraph1__1\",\"variables\":{\"contextualArgument_1_0\":\"prop value\",\"representations\":[{\"__typename\":\"U\",\"id\":\"1\"},{\"__typename\":\"U\",\"id\":\"2\"},{\"__typename\":\"U\",\"id\":\"3\"}]}}",
+      "extensions": {
+        "code": "FETCH_ERROR"
+      }
+    }
+  ],
   "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Cannot return null for non-nullable field U.field",
+        "path": [
+          "t",
+          "uList",
+          0
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field U.field",
+        "path": [
+          "t",
+          "uList",
+          1
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field U.field",
+        "path": [
+          "t",
+          "uList",
+          2
+        ]
+      }
+    ],
     "apolloQueryPlan": {
       "object": {
         "kind": "QueryPlan",
@@ -24,14 +59,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "Subgraph1",
               "variableUsages": [],
-              "operation": "query Query__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+              "operation": "query Query__Subgraph1__0{t{prop id uList{__typename id}}}",
               "operationName": "Query__Subgraph1__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "d7cb2d1809789d49360ca0a60570555f83855f00547675f366915c9d9d90fef9",
+              "schemaAwareHash": "904cce765299d4ec167658b15259c8bc8c3093af5bb33db4d2979827472646cd",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -43,7 +78,8 @@ expression: response
               "path": [
                 "",
                 "t",
-                "u"
+                "uList",
+                "@"
               ],
               "node": {
                 "kind": "Fetch",
@@ -95,7 +131,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          prop\n          id\n          uList {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".t.uList.@\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
     }
   }
 }

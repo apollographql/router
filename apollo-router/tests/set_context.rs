@@ -23,8 +23,10 @@ struct RequestAndResponse {
     response: Response,
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn test_set_context() {
+async fn run_single_request(
+    query: &str,
+    mocks: &[(&'static str, &'static str)],
+) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
@@ -36,139 +38,65 @@ async fn test_set_context() {
                 "all": true
             }
         }},
-        &[
-            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-        ],
+        mocks,
     );
     let supergraph_service = harness.build_supergraph().await.unwrap();
     let request = supergraph::Request::fake_builder()
-        .query(QUERY.to_string())
+        .query(query.to_string())
         .header("Apollo-Expose-Query-Plan", "true")
         .variables(Default::default())
         .build()
         .expect("expecting valid request");
 
-    let response = supergraph_service
+    supergraph_service
         .oneshot(request)
         .await
         .unwrap()
         .next_response()
         .await
-        .unwrap();
+        .unwrap()
+}
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_context() {
+    let response = run_single_request(QUERY, &[
+        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+    ]).await;
+    
     insta::assert_json_snapshot!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_no_typenames() {
-    let harness = setup_from_mocks(
-        json! {{
-            "experimental_type_conditioned_fetching": true,
-            // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
-            "include_subgraph_errors": {
-                "all": true
-            }
-        }},
-        &[
-            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-        ],
-    );
-    let supergraph_service = harness.build_supergraph().await.unwrap();
-    let request = supergraph::Request::fake_builder()
-        .query(QUERY_NO_TYPENAMES.to_string())
-        .header("Apollo-Expose-Query-Plan", "true")
-        .variables(Default::default())
-        .build()
-        .expect("expecting valid request");
-
-    let response = supergraph_service
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
+    let response = run_single_request(QUERY_NO_TYPENAMES, &[
+        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+    ]).await;
+    
     insta::assert_json_snapshot!(response);
+
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_list() {
-    let harness = setup_from_mocks(
-        json! {{
-            "experimental_type_conditioned_fetching": true,
-            // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
-            "include_subgraph_errors": {
-                "all": true
-            }
-        }},
-        &[
-            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-        ],
-    );
-    let supergraph_service = harness.build_supergraph().await.unwrap();
-    let request = supergraph::Request::fake_builder()
-        .query(QUERY_WITH_LIST.to_string())
-        .header("Apollo-Expose-Query-Plan", "true")
-        .variables(Default::default())
-        .build()
-        .expect("expecting valid request");
-
-    let response = supergraph_service
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
+    let response = run_single_request(QUERY_WITH_LIST, &[
+        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+    ]).await;
+    
     insta::assert_json_snapshot!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_list_of_lists() {
-    let harness = setup_from_mocks(
-        json! {{
-            "experimental_type_conditioned_fetching": true,
-            // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
-            "include_subgraph_errors": {
-                "all": true
-            }
-        }},
-        &[
-            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-        ],
-    );
-    let supergraph_service = harness.build_supergraph().await.unwrap();
-    let request: supergraph::Request = supergraph::Request::fake_builder()
-        .query(QUERY_WITH_LIST_OF_LISTS.to_string())
-        .header("Apollo-Expose-Query-Plan", "true")
-        .variables(Default::default())
-        .build()
-        .expect("expecting valid request");
-
-    let response = supergraph_service
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
-
+    let response = run_single_request(QUERY_WITH_LIST_OF_LISTS, &[
+        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+    ]).await;
+    
     insta::assert_json_snapshot!(response);
+
 }
 
 #[tokio::test(flavor = "multi_thread")]
