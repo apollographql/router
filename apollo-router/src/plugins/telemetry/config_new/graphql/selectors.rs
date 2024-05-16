@@ -1,11 +1,9 @@
-use crate::context::OPERATION_NAME;
-use crate::Context;
+use apollo_compiler::executable::Field;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use sha2::Digest;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::selectors::OperationName;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::Selector;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -25,85 +23,31 @@ pub(crate) enum GraphQLSelector {
     TypeName {
         type_name: bool,
     },
-    OperationName {
-        /// The operation name from the query.
-        operation_name: OperationName,
-        /// Optional default value.
-        default: Option<String>,
-    },
 }
 
 impl Selector for GraphQLSelector {
-    type Request = ();
-    type Response = ();
+    type Request = Field;
+    type Response = TypedValue;
     type EventResponse = ();
 
-    fn on_request(&self, _request: &Self::Request) -> Option<opentelemetry::Value> {
-        None
-    }
-
-    fn on_response(&self, _response: &Self::Response) -> Option<opentelemetry::Value> {
-        None
-    }
-
-    fn on_response_field(
-        &self,
-        ty: &apollo_compiler::schema::Type,
-        field: &apollo_compiler::schema::FieldDefinition,
-        value: &serde_json::Value,
-        ctx: &Context,
-    ) -> Option<opentelemetry::Value> {
+    fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
         match self {
-            GraphQLSelector::FieldLength { field_length } => {
-                if *field_length {
-                    match value {
-                        serde_json::Value::Array(items) => {
-                            Some(opentelemetry::Value::F64(items.len() as f64))
-                        }
-                        _ => None,
-                    }
-                } else {
-                    None
-                }
+            GraphQLSelector::FieldName { field_name: true } => {
+                Some(request.name.to_string().into())
             }
-            GraphQLSelector::FieldName { field_name } => {
-                if *field_name {
-                    Some(opentelemetry::Value::String(field.name.to_string().into()))
-                } else {
-                    None
-                }
-            }
-            GraphQLSelector::FieldType { field_type } => {
-                if *field_type {
-                    Some(opentelemetry::Value::String(field.ty.to_string().into()))
-                } else {
-                    None
-                }
-            }
-            GraphQLSelector::TypeName { type_name } => {
-                if *type_name {
-                    Some(opentelemetry::Value::String(ty.to_string().into()))
-                } else {
-                    None
-                }
-            }
-            GraphQLSelector::OperationName {
-                operation_name,
-                default,
-                ..
-            } => {
-                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
-                match operation_name {
-                    OperationName::String => op_name.or_else(|| default.clone()),
-                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
-                        let mut hasher = sha2::Sha256::new();
-                        hasher.update(op_name.as_bytes());
-                        let result = hasher.finalize();
-                        hex::encode(result)
-                    }),
-                }
-                .map(opentelemetry::Value::from)
-            }
+            GraphQLSelector::FieldType { field_type: true } => todo!(),
+            GraphQLSelector::TypeName { type_name } => todo!(),
+            _ => None,
+        }
+    }
+
+    fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
+        match self {
+            GraphQLSelector::FieldLength { field_length: true } => match response {
+                TypedValue::Array(_, items) => Some((items.len() as f64).into()),
+                _ => None,
+            },
+            _ => None,
         }
     }
 

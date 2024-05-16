@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use apollo_compiler::executable::Field;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
@@ -8,6 +9,7 @@ use tower::BoxError;
 
 use super::instruments::Increment;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -61,7 +63,7 @@ impl GraphQLInstrumentsConfig {
         name: &'static str,
         config: &DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
         selector: GraphQLSelector,
-    ) -> CustomHistogram<(), (), GraphQLAttributes, GraphQLSelector> {
+    ) -> CustomHistogram<Field, TypedValue, GraphQLAttributes, GraphQLSelector> {
         let meter = crate::metrics::meter_provider()
             .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
         let mut nb_attributes = 0;
@@ -89,15 +91,19 @@ impl GraphQLInstrumentsConfig {
 
 #[derive(Default)]
 pub(crate) struct GraphQLInstruments {
-    field_length: Option<CustomHistogram<(), (), GraphQLAttributes, GraphQLSelector>>,
+    field_length: Option<CustomHistogram<Field, TypedValue, GraphQLAttributes, GraphQLSelector>>,
 }
 
 impl Instrumented for GraphQLInstruments {
-    type Request = ();
-    type Response = ();
+    type Request = Field;
+    type Response = TypedValue;
     type EventResponse = ();
 
-    fn on_request(&self, _request: &Self::Request) {}
+    fn on_request(&self, request: &Self::Request) {
+        if let Some(field_length) = &self.field_length {
+            field_length.on_request(request);
+        }
+    }
 
     fn on_response(&self, response: &Self::Response) {
         if let Some(field_length) = &self.field_length {
@@ -106,26 +112,24 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_error(&self, _error: &BoxError, _ctx: &crate::Context) {}
-
-    fn on_response_field(
-        &self,
-        field: &apollo_compiler::executable::FieldDefinition,
-        value: &serde_json::Value,
-    ) {
-    }
 }
 
 impl schema_aware_response::Visitor for GraphQLInstruments {
-    fn visit_array(
-        &mut self,
-        field: &apollo_compiler::executable::Field,
-        items: &Vec<schema_aware_response::TypedValue>,
-    ) {
-        if let Some(field_length) = self.field_length {
-            field_length.on_response_field(field, value);
-        }
-        for value in items.iter() {
-            self.visit(value);
+    fn visit(&mut self, value: &TypedValue) {
+        match value {
+            TypedValue::Array(field, items) => {
+                if let Some(field_length) = self.field_length {
+                    // There may be a bug here with stateful evaluation of conditions because the
+                    // logic currently expects to only ever run on one request (albeit at different
+                    // points in the request lifecycle).
+                    field_length.on_request(field);
+                    field_length.on_response(value);
+                }
+                self.visit_array(field, items);
+            }
+            TypedValue::Object(f, children) => self.visit_object(f, children),
+            TypedValue::Root(children) => self.visit_root(children),
+            _ => {}
         }
     }
 }
