@@ -231,7 +231,7 @@ impl SourceName {
         }
     }
 
-    fn into_value_or_error(self) -> Result<String, ValidationError> {
+    pub fn into_value_or_error(self) -> Result<String, ValidationError> {
         match self {
             Self::Valid { name, .. } => Ok(name),
             Self::Invalid {
