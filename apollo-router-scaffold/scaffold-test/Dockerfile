@@ -45,5 +45,10 @@ WORKDIR /dist
 
 ENV APOLLO_ROUTER_CONFIG_PATH="/dist/config.yaml"
 
+# Make sure we can run the router
+RUN chmod 755 /dist/router
+
+USER router
+
 # Default executable is the router
 ENTRYPOINT ["/dist/router"]
