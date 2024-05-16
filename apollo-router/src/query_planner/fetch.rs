@@ -397,7 +397,7 @@ impl FetchNode {
         let aliased_operation = build_operation_with_aliasing(operation, &contextual_arguments, parameters.schema);
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let query_str = if let Ok(op) = aliased_operation {
-            alias_query_string = op.to_string();
+            alias_query_string = op.serialize().no_indent().to_string();
             alias_query_string.as_str()
         } else {
             operation.as_serialized()

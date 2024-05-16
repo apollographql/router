@@ -5,7 +5,7 @@ schema
   query: Query
 }
 
-directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
+directive @context(name: String!) repeatable on INTERFACE | OBJECT
 
 directive @context__fromContext(field: String) on ARGUMENT_DEFINITION
 
@@ -94,19 +94,23 @@ type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
   t: T! @join__field(graph: SUBGRAPH1)
   tList: [T]! @join__field(graph: SUBGRAPH1)
   a: Int! @join__field(graph: SUBGRAPH2)
+  k: K! @join__field(graph: SUBGRAPH1)
 }
 
-type A
-  @join__type(graph: SUBGRAPH1, key: "id")
-{
+union K
+  @join__type(graph: SUBGRAPH1)
+  @join__unionMember(graph: SUBGRAPH1, member: "A")
+  @join__unionMember(graph: SUBGRAPH1, member: "B") =
+    A
+  | B
+
+type A @join__type(graph: SUBGRAPH1, key: "id") {
   id: ID!
   v: V!
   prop: String!
 }
 
-type B
-  @join__type(graph: SUBGRAPH1, key: "id")
-{
+type B @join__type(graph: SUBGRAPH1, key: "id") {
   id: ID!
   v: V!
   prop: String!
@@ -138,7 +142,7 @@ type U
         }
       ]
     )
-  }
+}
 
 type V
   @join__type(graph: SUBGRAPH1, key: "id")

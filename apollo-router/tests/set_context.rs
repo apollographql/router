@@ -23,10 +23,7 @@ struct RequestAndResponse {
     response: Response,
 }
 
-async fn run_single_request(
-    query: &str,
-    mocks: &[(&'static str, &'static str)],
-) -> Response {
+async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)]) -> Response {
     let harness = setup_from_mocks(
         json! {{
             "experimental_type_conditioned_fetching": true,
@@ -59,44 +56,58 @@ async fn run_single_request(
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context() {
-    let response = run_single_request(QUERY, &[
-        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-    ]).await;
-    
+    let response = run_single_request(
+        QUERY,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
+
     insta::assert_json_snapshot!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_no_typenames() {
-    let response = run_single_request(QUERY_NO_TYPENAMES, &[
-        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-    ]).await;
-    
-    insta::assert_json_snapshot!(response);
+    let response = run_single_request(
+        QUERY_NO_TYPENAMES,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
 
+    insta::assert_json_snapshot!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_list() {
-    let response = run_single_request(QUERY_WITH_LIST, &[
-        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-    ]).await;
-    
+    let response = run_single_request(
+        QUERY_WITH_LIST,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
+
     insta::assert_json_snapshot!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_list_of_lists() {
-    let response = run_single_request(QUERY_WITH_LIST_OF_LISTS, &[
-        ("Subgraph1", include_str!("fixtures/set_context/one.json")),
-        ("Subgraph2", include_str!("fixtures/set_context/two.json")),
-    ]).await;
-    
-    insta::assert_json_snapshot!(response);
+    let response = run_single_request(
+        QUERY_WITH_LIST_OF_LISTS,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
 
+    insta::assert_json_snapshot!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -166,55 +177,59 @@ fn setup_from_mocks(
         .extra_plugin(mocked_subgraphs)
 }
 
-// TODO[clenfest]: figure out why i need __typename here?
-static QUERY: &str = r#"query Query {
-        t {
-          __typename
-          id
-          u {
+static QUERY: &str = r#"
+query Query {
+    t {
+        __typename
+        id
+        u {
             __typename
             field
-          }
         }
-      }"#;
-static QUERY_NO_TYPENAMES: &str = r#"query Query {
-        t {
-          id
-          u {
+    }
+}"#;
+static QUERY_NO_TYPENAMES: &str = r#"
+query Query {
+    t {
+        id
+        u {
             field
-          }
         }
-      }"#;
+    }
+}"#;
 
-static QUERY_WITH_LIST: &str = r#"query Query {
-        t {
-          id
-          uList {
+static QUERY_WITH_LIST: &str = r#"
+query Query {
+    t {
+        id
+        uList {
             field
-          }
         }
-      }"#;
+    }
+}"#;
 
-static QUERY_WITH_LIST_OF_LISTS: &str = r#"query QueryLL {
-        tList {
-          id
-          uList {
+static QUERY_WITH_LIST_OF_LISTS: &str = r#"
+query QueryLL {
+    tList {
+        id
+        uList {
             field
-          }
         }
-      }"#;
+    }
+}"#;
 
-static QUERY_WITH_UNION: &str = r#"query QueryUnion {
+static QUERY_WITH_UNION: &str = r#"
+query QueryUnion {
     k {
         ... on A {
-          v {
-            field
-          }
+            v {
+                field
+            }
         }
         ... on B {
-          v {
-            field
-          }
+            v {
+                field
+            }
         }
-      }
-    }"#;
+    }
+}"#;

@@ -140,7 +140,7 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String!){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+        "query": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
         "operationName": "Query__Subgraph1__1",
         "variables": {
           "contextualArgument_1_0": "prop value",
@@ -161,7 +161,7 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String!){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+        "query": "query Query__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
         "operationName": "Query__Subgraph1__1",
         "variables": {
           "contextualArgument_1_0": "prop value",
@@ -249,13 +249,11 @@
     },
     {
       "request": {
-        "query": "query QueryUnion__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_1:String!){_entities(representations:$representations){...on V{field(a:$contextualArgument_1_1)}}}",
+        "query": "query QueryUnion__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_1:String){_entities(representations:$representations){...on V{field(a:$contextualArgument_1_1)}}}",
         "operationName": "QueryUnion__Subgraph1__1",
         "variables": {
           "contextualArgument_1_1": "prop value 3",
-          "representations": [
-            { "__typename": "V", "id": "2" }
-          ]
+          "representations": [{ "__typename": "V", "id": "2" }]
         }
       },
       "response": {
@@ -268,5 +266,6 @@
           ]
         }
       }
-    }  ]
+    }
+  ]
 }
