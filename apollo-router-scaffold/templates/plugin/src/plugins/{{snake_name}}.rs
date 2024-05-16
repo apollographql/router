@@ -1,4 +1,6 @@
 {{#if type_auth}}
+use std::ops::ControlFlow;
+
 use apollo_router::layers::ServiceBuilderExt;
 {{/if}}
 {{#if type_tracing}}
@@ -17,9 +19,6 @@ use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use schemars::JsonSchema;
 use serde::Deserialize;
-{{#if type_auth}}
-use std::ops::ControlFlow;
-{{/if}}
 use tower::BoxError;
 {{#if type_auth}}
 use tower::ServiceBuilder;
