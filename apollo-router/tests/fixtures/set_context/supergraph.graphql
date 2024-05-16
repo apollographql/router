@@ -5,7 +5,7 @@ schema
   query: Query
 }
 
-directive @context(name: String!) repeatable on INTERFACE | OBJECT
+directive @context(name: String!) repeatable on INTERFACE | OBJECT | UNION
 
 directive @context__fromContext(field: String) on ARGUMENT_DEFINITION
 
@@ -100,7 +100,8 @@ type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
 union K
   @join__type(graph: SUBGRAPH1)
   @join__unionMember(graph: SUBGRAPH1, member: "A")
-  @join__unionMember(graph: SUBGRAPH1, member: "B") =
+  @join__unionMember(graph: SUBGRAPH1, member: "B")
+  @context(name: "Subgraph1__context2") =
     A
   | B
 
@@ -154,10 +155,10 @@ type V
       graph: SUBGRAPH1
       contextArguments: [
         {
-          context: "Subgraph1__context"
+          context: "Subgraph1__context2"
           name: "a"
           type: "String"
-          selection: "... on T { prop }"
+          selection: "... on A { prop } ... on B { prop }"
         }
       ]
     )

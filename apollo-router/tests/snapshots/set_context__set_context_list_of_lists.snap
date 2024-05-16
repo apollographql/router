@@ -79,7 +79,7 @@ expression: response
                 "variableUsages": [
                   "contextualArgument_1_0"
                 ],
-                "operation": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String!){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+                "operation": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
                 "operationName": "QueryLL__Subgraph1__1",
                 "operationKind": "query",
                 "id": null,
@@ -90,12 +90,13 @@ expression: response
                     "kind": "KeyRenamer",
                     "path": [
                       "..",
+                      "... on T",
                       "prop"
                     ],
                     "renameKeyTo": "contextualArgument_1_0"
                   }
                 ],
-                "schemaAwareHash": "1b34ea844758738c6cd197900b48a6a3717db97d30a43c77faf63b3a39f84dda",
+                "schemaAwareHash": "a9b24549250c12e38c398c32e9218134fab000be3b934ebc6bb38ea096343646",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
