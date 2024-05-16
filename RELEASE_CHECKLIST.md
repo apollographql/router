@@ -176,29 +176,25 @@ Start following the steps below to start a release PR.  The process is **not ful
      - Run our compliance checks and update the `licenses.html` file as appropriate.
      - Ensure we're not using any incompatible licenses in the release.
 
-7. Until the script above is updated to do automate this step,
-   increment the version number in `apollo-federation/Cargo.toml` to match 
-   that of `apollo-router/Cargo.toml`.
-
-8. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
+7. Now, review and stage he changes produced by the previous step.  This is most safely done using the `--patch` (or `-p`) flag to `git add` (`-u` ignores untracked files).
 
     ```
     git add -up .
     ```
 
-9. Now commit those changes locally, using a brief message:
+8. Now commit those changes locally, using a brief message:
 
     ```
     git commit -m "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
-10. Push this commit up to the existing release PR:
+9. Push this commit up to the existing release PR:
 
     ```
     git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
-11. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
+10. Git tag the current commit and & push the branch and the pre-release tag simultaneously:
 
     This process will kick off the bulk of the release process on CircleCI, including building each architecture on its own infrastructure and notarizing the macOS binary.
 
@@ -207,7 +203,7 @@ Start following the steps below to start a release PR.  The process is **not ful
       git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "${APOLLO_ROUTER_RELEASE_VERSION}" "v${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
-12. Finally, publish the Crates from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+11. Finally, publish the Crates from your local computer (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
 
