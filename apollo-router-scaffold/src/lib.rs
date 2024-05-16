@@ -91,9 +91,14 @@ mod test {
         )
         .unwrap();
 
+        #[cfg(target_os = "windows")]
+        let left = ".\\scaffold-test\\";
+        #[cfg(not(target_os = "windows"))]
+        let left = "./scaffold-test/";
+
         let cmp = Comparison::default();
         let diff = cmp
-            .compare("./scaffold-test", temp_dir_path.to_str().unwrap())
+            .compare(left, temp_dir_path.to_str().unwrap())
             .expect("should compare");
 
         let mut found = false;
@@ -101,12 +106,7 @@ mod test {
             println!("generated scaffolding project has changed:\n{:#?}", diff);
             for file in diff.changed {
                 println!("file: {file:?}");
-                let file = PathBuf::from(
-                    file.to_str()
-                        .unwrap()
-                        .strip_prefix("./scaffold-test/")
-                        .unwrap(),
-                );
+                let file = PathBuf::from(file.to_str().unwrap().strip_prefix(left).unwrap());
 
                 // we do not check the Cargo.toml files because they have differences due to import paths and workspace usage
                 if file == PathBuf::from("Cargo.toml") || file == PathBuf::from("xtask/Cargo.toml")
