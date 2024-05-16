@@ -330,6 +330,7 @@ tracing-opentelemetry = "0.21.0"
 tracing-test = "0.2.4"
 walkdir = "2.4.0"
 wiremock = "0.5.22"
+libtest-mimic = "0.7.2"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
@@ -348,6 +349,11 @@ serde_json.workspace = true
 [[test]]
 name = "integration_tests"
 path = "tests/integration_tests.rs"
+
+[[test]]
+name = "samples"
+path = "tests/samples_tests.rs"
+harness = false
 
 [[bench]]
 name = "huge_requests"
