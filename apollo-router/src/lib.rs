@@ -17,8 +17,10 @@
 //!   and APIs for plugins to intercept them
 
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
+#![allow(warnings)]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
+#![deny(exported_private_dependencies)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{

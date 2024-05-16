@@ -1,5 +1,5 @@
 #![allow(dead_code)] // TODO: This is fine while we're iterating, but should be removed later.
-
+#![allow(exported_private_dependencies)]
 mod api_schema;
 mod compat;
 pub mod error;
