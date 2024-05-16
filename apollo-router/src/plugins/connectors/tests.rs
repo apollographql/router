@@ -19,7 +19,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::supergraph;
 
-mod mock_api {
+pub(super) mod mock_api {
     struct PathTemplate(String);
 
     impl wiremock::Match for PathTemplate {
@@ -223,7 +223,7 @@ mod mock_api {
             })))
     }
 
-    pub(super) async fn mount_all(server: &MockServer) {
+    pub(crate) async fn mount_all(server: &MockServer) {
         futures::stream::iter(vec![
             hello(),
             hello_id(),
@@ -247,10 +247,10 @@ mod mock_api {
     }
 }
 
-mod mock_subgraph {
+pub(super) mod mock_subgraph {
     use super::*;
 
-    pub(super) fn start_join() -> Mock {
+    pub(crate) fn start_join() -> Mock {
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(serde_json::json!({
@@ -272,7 +272,7 @@ mod mock_subgraph {
             )
     }
 
-    pub(super) fn test_requires() -> Mock {
+    pub(crate) fn test_requires() -> Mock {
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(serde_json::json!({
@@ -293,7 +293,7 @@ mod mock_subgraph {
             )
     }
 
-    pub(super) fn interface_object() -> Mock {
+    pub(crate) fn interface_object() -> Mock {
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(serde_json::json!({
@@ -321,7 +321,7 @@ mod mock_subgraph {
             )
     }
 
-    pub(super) fn entity_interface() -> Mock {
+    pub(crate) fn entity_interface() -> Mock {
         Mock::given(method("POST"))
             .and(path("/graphql"))
             .and(body_json(serde_json::json!({

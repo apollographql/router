@@ -61,6 +61,111 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
     HeaderName::from_static("keep-alive"),
 ];
 
+pub(super) mod http_json_transport {
+    use apollo_federation::sources::connect::HttpJsonTransport;
+    use url::Url;
+
+    use crate::error::ConnectorDirectiveError;
+
+    use super::flatten_keys;
+    use super::HttpJsonTransportError;
+    use super::Value;
+
+    pub(crate) fn make_request(
+        transport: &HttpJsonTransport,
+        inputs: Value,
+    ) -> Result<http::Request<hyper::Body>, HttpJsonTransportError> {
+        let body = hyper::Body::empty();
+
+        // TODO: why is apollo_federation HTTPMethod Ucfirst?
+        let method = transport.method.to_string().to_uppercase();
+        let request = http::Request::builder()
+            .method(method.as_bytes())
+            .uri(make_uri(transport, &inputs)
+                .map_err(HttpJsonTransportError::ConnectorDirectiveError)?
+                .as_str())
+            .header("content-type", "application/json")
+            .body(body)
+            .map_err(HttpJsonTransportError::InvalidNewRequest)?;
+
+        Ok(request)
+    }
+
+    fn make_uri(
+        transport: &HttpJsonTransport,
+        inputs: &Value,
+    ) -> Result<url::Url, ConnectorDirectiveError> {
+        let flat_inputs = flatten_keys(inputs);
+        let path = transport
+            .path_template
+            .generate_path(&Value::Object(flat_inputs))
+            .map_err(ConnectorDirectiveError::PathGenerationError)?;
+        append_path(Url::parse(&transport.base_url.to_string()).unwrap(), &path)
+    }
+
+    /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).
+    /// Expects the path to start with "/".
+    fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError> {
+        // we will need to work on path segments, and on query parameters.
+        // the first thing we need to do is parse the path so we have APIs to reason with both:
+        let path_uri: Url = Url::options()
+            .base_url(Some(&base_uri))
+            .parse(path)
+            .map_err(ConnectorDirectiveError::InvalidPath)?;
+        // get query parameters from both base_uri and path
+        let base_uri_query_pairs =
+            (!base_uri.query().unwrap_or_default().is_empty()).then(|| base_uri.query_pairs());
+        let path_uri_query_pairs =
+            (!path_uri.query().unwrap_or_default().is_empty()).then(|| path_uri.query_pairs());
+
+        let mut res = base_uri.clone();
+
+        // append segments
+        {
+            // Path segments being none indicates the base_uri cannot be a base URL.
+            // This means the schema is invalid.
+            let segments =
+                base_uri
+                    .path_segments()
+                    .ok_or(ConnectorDirectiveError::InvalidBaseUri(
+                        url::ParseError::RelativeUrlWithCannotBeABaseBase,
+                    ))?;
+
+            // Ok this one is a bit tricky.
+            // Here we're trying to only append segments that are not empty, to avoid `//`
+            let mut res_segments = res.path_segments_mut().map_err(|_| {
+                ConnectorDirectiveError::InvalidBaseUri(
+                    url::ParseError::RelativeUrlWithCannotBeABaseBase,
+                )
+            })?;
+            res_segments
+                .clear()
+                .extend(segments.filter(|segment| !segment.is_empty()))
+                .extend(
+                    path_uri
+                        .path_segments()
+                        .ok_or(ConnectorDirectiveError::InvalidPath(
+                            url::ParseError::RelativeUrlWithCannotBeABaseBase,
+                        ))?
+                        .filter(|segment| !segment.is_empty()),
+                );
+        }
+        // Calling clear on query_pairs will cause a `?` to be appended.
+        // We only want to do it if necessary
+        if base_uri_query_pairs.is_some() || path_uri_query_pairs.is_some() {
+            res.query_pairs_mut().clear();
+        }
+        if let Some(pairs) = base_uri_query_pairs {
+            res.query_pairs_mut().extend_pairs(pairs);
+        }
+        if let Some(pairs) = path_uri_query_pairs {
+            res.query_pairs_mut().extend_pairs(pairs);
+        }
+
+        Ok(res)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(super) struct HttpJsonTransport {
     pub(super) base_uri: url::Url,
