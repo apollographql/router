@@ -1598,9 +1598,6 @@ mod tests {
             }
         }
 
-        /*let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default())
-        .await
-        .unwrap();*/
 
         let mut configuration: Configuration = Default::default();
         configuration.supergraph.introspection = true;
