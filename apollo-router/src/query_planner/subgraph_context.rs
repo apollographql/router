@@ -87,7 +87,7 @@ impl<'a> SubgraphContext<'a> {
         context_rewrites: &'a Option<Vec<DataRewrite>>,
     ) -> Option<SubgraphContext<'a>> {
         if let Some(rewrites) = context_rewrites {
-            if rewrites.len() > 0 {
+            if !rewrites.is_empty() {
                 return Some(SubgraphContext {
                     data,
                     schema,
@@ -236,18 +236,18 @@ pub(crate) fn build_operation_with_aliasing(
                 // it is a field selection for _entities, so it's ok to reach in and give it an alias
                 let mut selection_set = op.selection_set.clone();
                 transform_selection_set(&mut selection_set, arguments, i, true);
-                selection_set.selections.get_mut(0).map(|selection| {
+                if let Some(selection) = selection_set.selections.get_mut(0) {
                     if let Selection::Field(f) = selection {
                         let field = f.make_mut();
                         field.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
                     }
                     selections.push(selection.clone());
-                });
+                };
             }
 
             let mut ed = ExecutableDocument::new();
             ed.insert_operation(Operation {
-                operation_type: op.operation_type.clone(),
+                operation_type: op.operation_type,
                 name: op.name.clone(),
                 directives: op.directives.clone(),
                 variables: new_variables,
@@ -301,7 +301,7 @@ fn transform_selection_set(
 
 // transforms the variable name on the field argment
 fn transform_field_arguments(
-    arguments_in_selection: &mut Vec<Node<ast::Argument>>,
+    arguments_in_selection: &mut [Node<ast::Argument>],
     arguments: &HashSet<String>,
     index: usize,
 ) {
