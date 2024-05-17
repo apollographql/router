@@ -396,18 +396,29 @@ impl FetchNode {
 
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
-            match build_operation_with_aliasing(operation, &ctx_arg, parameters.schema) {
-                Ok(op) => {
-                    alias_query_string = op.serialize().no_indent().to_string();
-                    alias_query_string.as_str()
+            // TODO: subgraph_schemas should be a HashMap of NodeStr or Name.
+            if let Some(subgraph_schema) =
+                parameters.subgraph_schemas.get(&service_name.to_string())
+            {
+                match build_operation_with_aliasing(operation, &ctx_arg, subgraph_schema) {
+                    Ok(op) => {
+                        alias_query_string = op.serialize().no_indent().to_string();
+                        alias_query_string.as_str()
+                    }
+                    Err(errors) => {
+                        tracing::debug!(
+                            "couldn't generate a valid executable document? {:?}",
+                            errors
+                        );
+                        operation.as_serialized()
+                    }
                 }
-                Err(errors) => {
-                    tracing::debug!(
-                        "couldn't generate a valid executable document? {:?}",
-                        errors
-                    );
-                    operation.as_serialized()
-                }
+            } else {
+                tracing::debug!(
+                    "couldn't find a subgraph schema for service {:?}",
+                    &service_name
+                );
+                operation.as_serialized()
             }
         } else {
             operation.as_serialized()

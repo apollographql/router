@@ -206,12 +206,11 @@ impl<'a> SubgraphContext<'a> {
 pub(crate) fn build_operation_with_aliasing(
     subgraph_operation: &SubgraphOperation,
     contextual_arguments: &ContextualArguments,
-    schema: &Schema,
+    subgraph_schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
     let mut selections: Vec<Selection> = vec![];
     let ContextualArguments { arguments, count } = contextual_arguments;
-    let parsed_document =
-        subgraph_operation.as_parsed(schema.federation_supergraph().schema.schema());
+    let parsed_document = subgraph_operation.as_parsed(subgraph_schema);
     if let Ok(document) = parsed_document {
         // TODO: Can there be more than one named operation?
         //       Can there be an anonymous operation?
@@ -237,7 +236,13 @@ pub(crate) fn build_operation_with_aliasing(
                 // it is a field selection for _entities, so it's ok to reach in and give it an alias
                 let mut selection_set = op.selection_set.clone();
                 transform_selection_set(&mut selection_set, arguments, i, true);
-                selections.push(selection_set.selections[0].clone())
+                selection_set.selections.get_mut(0).map(|selection| {
+                    if let Selection::Field(f) = selection {
+                        let field = f.make_mut();
+                        field.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
+                    }
+                    selections.push(selection.clone());
+                });
             }
 
             let mut ed = ExecutableDocument::new();
@@ -252,11 +257,9 @@ pub(crate) fn build_operation_with_aliasing(
                 },
             });
 
-            let valid_document = ed
-                .validate(schema.federation_supergraph().schema.schema())
-                .map_err(ContextBatchingError::InvalidDocumentGenerated)?;
-
-            return Ok(valid_document);
+            return ed
+                .validate(subgraph_schema)
+                .map_err(ContextBatchingError::InvalidDocumentGenerated);
         }
     }
     Err(ContextBatchingError::NoSelectionSet)
@@ -334,7 +337,7 @@ mod subgraph_context_unit_tests {
         let result = merge_context_path(&current_dir, &relative_path).unwrap();
         assert_eq!(expected, serde_json::to_string(&result).unwrap(),);
     }
-    
+
     #[test]
     fn test_merge_context_path_invalid() {
         let current_dir: Path = serde_json::from_str(r#"["t","u"]"#).unwrap();
@@ -350,7 +353,7 @@ mod subgraph_context_unit_tests {
             },
         }
     }
-    
+
     #[test]
     fn test_transform_selection_set() {
         let type_name = executable::Name::new("Hello").unwrap();
@@ -358,15 +361,15 @@ mod subgraph_context_unit_tests {
         let field_definition = ast::FieldDefinition {
             description: None,
             name: field_name.clone(),
-            arguments: vec![
-                Node::new(ast::InputValueDefinition {
-                    description: None,
-                    name: executable::Name::new("param").unwrap(),
-                    ty: Node::new(ast::Type::Named(executable::Name::new("ParamType").unwrap())),
-                    default_value: None,
-                    directives: ast::DirectiveList(vec![]),
-                }),
-            ],
+            arguments: vec![Node::new(ast::InputValueDefinition {
+                description: None,
+                name: executable::Name::new("param").unwrap(),
+                ty: Node::new(ast::Type::Named(
+                    executable::Name::new("ParamType").unwrap(),
+                )),
+                default_value: None,
+                directives: ast::DirectiveList(vec![]),
+            })],
             ty: ast::Type::Named(executable::Name::new("FieldType").unwrap()),
             directives: ast::DirectiveList(vec![]),
         };
@@ -374,10 +377,16 @@ mod subgraph_context_unit_tests {
         let field = executable::Field::new(
             executable::Name::new("f").unwrap(),
             Node::new(field_definition),
-        ).with_argument(executable::Name::new("param").unwrap(), Node::new(ast::Value::Variable(executable::Name::new("variable").unwrap())));
-        
+        )
+        .with_argument(
+            executable::Name::new("param").unwrap(),
+            Node::new(ast::Value::Variable(
+                executable::Name::new("variable").unwrap(),
+            )),
+        );
+
         selection_set.push(Selection::Field(Node::new(field)));
-        
+
         // before modifications
         assert_eq!(
             "{ f(param: $variable) }",
@@ -385,7 +394,7 @@ mod subgraph_context_unit_tests {
         );
 
         let mut hash_set = HashSet::new();
-        
+
         // create a hash set that will miss completely. transform has no effect
         hash_set.insert("one".to_string());
         hash_set.insert("two".to_string());
@@ -396,7 +405,7 @@ mod subgraph_context_unit_tests {
             "{ f(param: $variable) }",
             clone.serialize().no_indent().to_string()
         );
-        
+
         // add variable that will hit and cause a rewrite
         hash_set.insert("variable".to_string());
         let mut clone = selection_set.clone();

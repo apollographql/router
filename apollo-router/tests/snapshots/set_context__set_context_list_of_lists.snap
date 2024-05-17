@@ -31,60 +31,31 @@ expression: response
           "kind": "Sequence",
           "nodes": [
             {
-              "kind": "Fetch",
-              "serviceName": "Subgraph1",
-              "variableUsages": [],
-              "operation": "query QueryLL__Subgraph1__0{tList{__typename prop id uList{__typename id}}}",
-              "operationName": "QueryLL__Subgraph1__0",
-              "operationKind": "query",
-              "id": null,
-              "inputRewrites": null,
-              "outputRewrites": null,
-              "contextRewrites": null,
-              "schemaAwareHash": "babf88ea82c1330e535966572a55b03a2934097cd1cf905303b86ae7c197ccaf",
               "authorization": {
                 "is_authenticated": false,
-                "scopes": [],
-                "policies": []
-              }
+                "policies": [],
+                "scopes": []
+              },
+              "contextRewrites": null,
+              "id": null,
+              "inputRewrites": null,
+              "kind": "Fetch",
+              "operation": "query QueryLL__Subgraph1__0{tList{__typename prop id uList{__typename id}}}",
+              "operationKind": "query",
+              "operationName": "QueryLL__Subgraph1__0",
+              "outputRewrites": null,
+              "schemaAwareHash": "babf88ea82c1330e535966572a55b03a2934097cd1cf905303b86ae7c197ccaf",
+              "serviceName": "Subgraph1",
+              "variableUsages": []
             },
             {
               "kind": "Flatten",
-              "path": [
-                "",
-                "tList",
-                "@",
-                "uList",
-                "@"
-              ],
               "node": {
-                "kind": "Fetch",
-                "serviceName": "Subgraph1",
-                "requires": [
-                  {
-                    "kind": "InlineFragment",
-                    "typeCondition": "U",
-                    "selections": [
-                      {
-                        "kind": "Field",
-                        "name": "__typename"
-                      },
-                      {
-                        "kind": "Field",
-                        "name": "id"
-                      }
-                    ]
-                  }
-                ],
-                "variableUsages": [
-                  "contextualArgument_1_0"
-                ],
-                "operation": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
-                "operationName": "QueryLL__Subgraph1__1",
-                "operationKind": "query",
-                "id": null,
-                "inputRewrites": null,
-                "outputRewrites": null,
+                "authorization": {
+                  "is_authenticated": false,
+                  "policies": [],
+                  "scopes": []
+                },
                 "contextRewrites": [
                   {
                     "kind": "KeyRenamer",
@@ -96,13 +67,42 @@ expression: response
                     "renameKeyTo": "contextualArgument_1_0"
                   }
                 ],
+                "id": null,
+                "inputRewrites": null,
+                "kind": "Fetch",
+                "operation": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+                "operationKind": "query",
+                "operationName": "QueryLL__Subgraph1__1",
+                "outputRewrites": null,
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      }
+                    ],
+                    "typeCondition": "U"
+                  }
+                ],
                 "schemaAwareHash": "a9b24549250c12e38c398c32e9218134fab000be3b934ebc6bb38ea096343646",
-                "authorization": {
-                  "is_authenticated": false,
-                  "scopes": [],
-                  "policies": []
-                }
-              }
+                "serviceName": "Subgraph1",
+                "variableUsages": [
+                  "contextualArgument_1_0"
+                ]
+              },
+              "path": [
+                "",
+                "tList",
+                "@",
+                "uList",
+                "@"
+              ]
             }
           ]
         }

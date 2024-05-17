@@ -23,6 +23,15 @@ struct RequestAndResponse {
     response: Response,
 }
 
+macro_rules! snap
+{
+    ($result:ident) => {
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_json_snapshot!($result);
+        });
+    }
+}
+
 async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)]) -> Response {
     let harness = setup_from_mocks(
         json! {{
@@ -77,7 +86,7 @@ async fn test_set_context() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response);
+    snap!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -101,7 +110,7 @@ async fn test_set_context_no_typenames() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response);
+    snap!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -125,7 +134,7 @@ async fn test_set_context_list() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response);
+    snap!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -149,7 +158,7 @@ async fn test_set_context_list_of_lists() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response);
+    snap!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -179,7 +188,7 @@ async fn test_set_context_union() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response);
+    snap!(response);
 }
 
 #[tokio::test(flavor = "multi_thread")]
@@ -219,7 +228,7 @@ async fn test_set_context_type_mismatch() {
                 }
             }
         }"#;
-    
+
     let response = run_single_request(
         QUERY,
         &[
@@ -229,7 +238,7 @@ async fn test_set_context_type_mismatch() {
     )
     .await;
 
-    insta::assert_json_snapshot!(response);
+    snap!(response);
 }
 
 fn setup_from_mocks(
