@@ -32,7 +32,6 @@ fn some_name() {
 */
 
 mod fetch_operation_names;
-mod field_covariance_and_type_explosion;
 mod provides;
 mod requires;
 mod shareable_root_fields;
@@ -139,6 +138,78 @@ fn pick_keys_that_minimize_fetches() {
                   }
                 },
               },
+            },
+          }
+        "###
+    );
+}
+
+/// This tests the issue from https://github.com/apollographql/federation/issues/1858.
+/// That issue, which was a bug in the handling of selection sets, was concretely triggered with
+/// a mix of an interface field implemented with some covariance and the query plan using
+/// type-explosion.
+/// That error can be reproduced on a pure fed2 example, it's just a bit more
+/// complex as we need to involve a @provide just to force the query planner to type explode
+/// (more precisely, this force the query planner to _consider_ type explosion; the generated
+/// query plan still ends up not type-exploding in practice since as it's not necessary).
+#[test]
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure
+fn field_covariance_and_type_explosion() {
+    let planner = planner!(
+        Subgraph1: r#"
+        type Query {
+          dummy: Interface
+        }
+
+        interface Interface {
+          field: Interface
+        }
+
+        type Object implements Interface @key(fields: "id") {
+          id: ID!
+          field: Object @provides(fields: "x")
+          x: Int @external
+        }
+        "#,
+        Subgraph2: r#"
+        type Object @key(fields: "id") {
+          id: ID!
+          x: Int @shareable
+        }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        {
+          dummy {
+            field {
+              ... on Object {
+                field {
+                  __typename
+                }
+              }
+            }
+          }
+        }
+        "#,
+        @r###"
+          QueryPlan {
+            Fetch(service: "Subgraph1") {
+              {
+                dummy {
+                  __typename
+                  field {
+                    __typename
+                    ... on Object {
+                      field {
+                        __typename
+                      }
+                    }
+                  }
+                }
+              }
             },
           }
         "###
