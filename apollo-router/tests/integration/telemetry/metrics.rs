@@ -83,31 +83,6 @@ async fn test_metrics_reloading() {
                 r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
             ], Some(Duration::from_secs(10)))
             .await;
-        /*tokio::time::sleep(Duration::from_secs(10)).await;
-
-        let metrics = router
-            .get_metrics_response()
-            .await
-            .expect("failed to fetch metrics")
-            .text()
-            .await
-            .unwrap();
-        check_metrics_contains(
-            &metrics,
-            r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
-        );
-        check_metrics_contains(
-            &metrics,
-            r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
-        );
-        check_metrics_contains(
-            &metrics,
-            r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
-        );
-        check_metrics_contains(
-            &metrics,
-            r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#,
-        );*/
     }
 }
 
