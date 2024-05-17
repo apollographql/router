@@ -966,6 +966,9 @@ impl Telemetry {
                         .get_field_length_histogram()
                         .zip(ctx.unsupported_executable_document())
                     {
+                        // This currently only works for primary responses, as a deferred response's data won't match with the root level
+                        // field in the schema. The response zipper will need to be able to find the right part of the schema from the
+                        // response's JSON `path` to make that work, but it's currently unimplemented.
                         if let Ok(typed_response) = SchemaAwareResponse::new(&document, resp) {
                             field_length_histogram.visit(&typed_response.value);
                         }
