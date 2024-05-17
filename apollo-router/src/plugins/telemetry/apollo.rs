@@ -15,6 +15,7 @@ use serde::Serialize;
 use url::Url;
 use uuid::Uuid;
 
+use super::config::Sampler;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
@@ -74,8 +75,8 @@ pub(crate) struct Config {
     /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
-    /// The protocol used for sending traces to Apollo Studio.
-    pub(crate) experimental_tracing_protocol: ApolloTracingProtocol,
+    /// Percentage of traces to send via the OTel protocol when sending to Apollo Studio.
+    pub(crate) experimental_otlp_tracing_pct: SamplerOption,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
@@ -142,6 +143,10 @@ const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
+const fn default_experimental_otlp_tracing_pct() -> SamplerOption {
+    SamplerOption::Always(Sampler::AlwaysOff)
+}
+
 fn endpoint_default() -> Url {
     Url::parse(ENDPOINT_DEFAULT).expect("must be valid url")
 }
@@ -182,7 +187,7 @@ impl Default for Config {
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
-            experimental_tracing_protocol: ApolloTracingProtocol::Apollo,
+            experimental_otlp_tracing_pct: default_experimental_otlp_tracing_pct(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
@@ -199,7 +204,7 @@ pub(crate) enum ApolloTracingProtocol {
     /// Use only OTLP over GRPC
     Otlp,
     /// Use both the Apollo usage reporting protobuf AND OTLP
-    /// (note this is a testing mode and not intended for use in production)
+    /// (note this is an experimental mode - use experimental_otlp_tracing_pct to configure)
     ApolloAndOtlp,
 }
 

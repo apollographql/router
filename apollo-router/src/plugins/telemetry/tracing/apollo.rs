@@ -27,7 +27,7 @@ impl TracingConfigurator for Config {
         let exporter = apollo_telemetry::Exporter::builder()
             .endpoint(&self.endpoint)
             .otlp_endpoint(&self.experimental_otlp_endpoint)
-            .apollo_tracing_protocol(self.experimental_tracing_protocol)
+            .otlp_tracing_pct(&self.experimental_otlp_tracing_pct)
             .apollo_key(
                 self.apollo_key
                     .as_ref()
