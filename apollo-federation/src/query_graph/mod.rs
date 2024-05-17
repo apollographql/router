@@ -104,6 +104,32 @@ impl Display for QueryGraphNodeType {
     }
 }
 
+impl TryFrom<QueryGraphNodeType> for CompositeTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
+        match value {
+            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
+            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a composite type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
+        match value {
+            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
+            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object type"#
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone)]
 pub(crate) struct QueryGraphEdge {
     /// Indicates what kind of edge this is and what the edge does/represents. For instance, if the
