@@ -206,6 +206,32 @@ async fn test_set_context_with_null() {
     insta::assert_json_snapshot!(response);
 }
 
+// this test returns the contextual value with a different than expected type
+// this currently works, but perhaps should do type valdiation in the future to reject
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_context_type_mismatch() {
+    static QUERY: &str = r#"
+        query Query_type_mismatch {
+            t {
+                id
+                u {
+                    field
+                }
+            }
+        }"#;
+    
+    let response = run_single_request(
+        QUERY,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response);
+}
+
 fn setup_from_mocks(
     configuration: serde_json::Value,
     mocks: &[(&'static str, &'static str)],

@@ -350,24 +350,68 @@ mod subgraph_context_unit_tests {
             },
         }
     }
+    
+    #[test]
+    fn test_transform_selection_set() {
+        let type_name = executable::Name::new("Hello").unwrap();
+        let field_name = executable::Name::new("f").unwrap();
+        let field_definition = ast::FieldDefinition {
+            description: None,
+            name: field_name.clone(),
+            arguments: vec![
+                Node::new(ast::InputValueDefinition {
+                    description: None,
+                    name: executable::Name::new("param").unwrap(),
+                    ty: Node::new(ast::Type::Named(executable::Name::new("ParamType").unwrap())),
+                    default_value: None,
+                    directives: ast::DirectiveList(vec![]),
+                }),
+            ],
+            ty: ast::Type::Named(executable::Name::new("FieldType").unwrap()),
+            directives: ast::DirectiveList(vec![]),
+        };
+        let mut selection_set = SelectionSet::new(type_name);
+        let field = executable::Field::new(
+            executable::Name::new("f").unwrap(),
+            Node::new(field_definition),
+        ).with_argument(executable::Name::new("param").unwrap(), Node::new(ast::Value::Variable(executable::Name::new("variable").unwrap())));
+        
+        selection_set.push(Selection::Field(Node::new(field)));
+        
+        // before modifications
+        assert_eq!(
+            "{ f(param: $variable) }",
+            selection_set.serialize().no_indent().to_string()
+        );
 
-    // #[test]
-    // fn test_merge_context_path() {
-    //     let old_query = "query QueryLL__Subgraph1__1($representations:[_Any!]!$Subgraph1_U_field_a:String!){_entities(representations:$representations){...on U{id field(a:$Subgraph1_U_field_a)}}}";
-    //     let mut ctx_args = HashSet::new();
-    //     ctx_args.insert("Subgraph1_U_field_a".to_string());
-    //     let contextual_args = Some((ctx_args, 2));
+        let mut hash_set = HashSet::new();
+        
+        // create a hash set that will miss completely. transform has no effect
+        hash_set.insert("one".to_string());
+        hash_set.insert("two".to_string());
+        hash_set.insert("param".to_string());
+        let mut clone = selection_set.clone();
+        transform_selection_set(&mut clone, &hash_set, 7, false);
+        assert_eq!(
+            "{ f(param: $variable) }",
+            clone.serialize().no_indent().to_string()
+        );
+        
+        // add variable that will hit and cause a rewrite
+        hash_set.insert("variable".to_string());
+        let mut clone = selection_set.clone();
+        transform_selection_set(&mut clone, &hash_set, 7, false);
+        assert_eq!(
+            "{ f(param: $variable_7) }",
+            clone.serialize().no_indent().to_string()
+        );
 
-    //     let expected = "query QueryLL__Subgraph1__1($representations: [_Any!]!, $Subgraph1_U_field_a_0: String!, $Subgraph1_U_field_a_1: String!) { _0: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_0) } } _1: _entities(representations: $representations) { ... on U { id field(a: $Subgraph1_U_field_a_1) } } }";
-
-    //     assert_eq!(
-    //         expected,
-    //         build_operation_with_aliasing(old_query, &contextual_args)
-    //             .unwrap()
-    //             .serialize()
-    //             .no_indent()
-    //             .to_string()
-    //             .as_str()
-    //     );
-    // }
+        // add_alias = true will add a "_3:" alias
+        let mut clone = selection_set.clone();
+        transform_selection_set(&mut clone, &hash_set, 3, true);
+        assert_eq!(
+            "{ _3: f(param: $variable_3) }",
+            clone.serialize().no_indent().to_string()
+        );
+    }
 }
