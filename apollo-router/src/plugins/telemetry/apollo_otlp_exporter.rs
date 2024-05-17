@@ -1,6 +1,5 @@
 use std::borrow::Cow;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use derivative::Derivative;
 use futures::future::BoxFuture;
@@ -17,6 +16,7 @@ use opentelemetry::InstrumentationLibrary;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use parking_lot::Mutex;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
@@ -129,12 +129,12 @@ impl ApolloOtlpExporter {
     }
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
-        let mut exporter = self.otlp_exporter.lock().unwrap();
+        let mut exporter = self.otlp_exporter.lock();
         exporter.export(spans)
     }
 
     pub(crate) fn shutdown(&self) {
-        let mut exporter = self.otlp_exporter.lock().unwrap();
+        let mut exporter = self.otlp_exporter.lock();
         exporter.shutdown()
     }
 }
