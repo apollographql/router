@@ -15,7 +15,7 @@ use apollo_federation::query_plan::query_planner::QueryPlanner;
 #[test]
 #[should_panic] // TODO: does this test make sense if we don’t support fed1 supergraphs?
 fn with_federation_1_supergraphs() {
-    let supergraph = r#""
+    let supergraph = r#"
         schema @core(feature: "https://specs.apollo.dev/core/v0.1") @core(feature: "https://specs.apollo.dev/join/v0.1") {
             query: Query
         }
