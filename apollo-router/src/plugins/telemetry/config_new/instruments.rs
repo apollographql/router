@@ -645,14 +645,6 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
-    fn on_response_field(
-        &self,
-        _ty: &apollo_compiler::schema::Type,
-        _field: &apollo_compiler::schema::FieldDefinition,
-        _value: &serde_json::Value,
-        _ctx: &Context,
-    ) {
-    }
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
