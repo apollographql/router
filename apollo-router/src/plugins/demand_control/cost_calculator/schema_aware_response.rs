@@ -67,7 +67,7 @@ pub(crate) trait Visitor {
     fn visit_number(&mut self, _field: &Field, _value: &serde_json::Number) {}
     fn visit_string(&mut self, _field: &Field, _value: &str) {}
 
-    fn visit_array(&mut self, _field: &Field, items: &Vec<TypedValue>) {
+    fn visit_array(&mut self, _field: &Field, items: &[TypedValue]) {
         for value in items.iter() {
             self.visit(value);
         }
@@ -172,7 +172,6 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-
     use crate::graphql::Response;
 
     #[test]
