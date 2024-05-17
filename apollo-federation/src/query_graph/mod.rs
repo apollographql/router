@@ -104,7 +104,7 @@ impl Display for QueryGraphNodeType {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 pub(crate) struct QueryGraphEdge {
     /// Indicates what kind of edge this is and what the edge does/represents. For instance, if the
     /// edge represents a field, the `transition` will be a `FieldCollection` transition and will
@@ -458,26 +458,42 @@ impl QueryGraph {
     pub(crate) fn out_edges_with_federation_self_edges(
         &self,
         node: NodeIndex,
-    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
-        self.graph.edges_directed(node, Direction::Outgoing)
+    ) -> Vec<EdgeReference<QueryGraphEdge>> {
+        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing))
     }
 
     /// The outward edges from the given node, minus self-key and self-root-type-resolution edges,
     /// as they're rarely useful (currently only used by `@defer`).
-    pub(crate) fn out_edges(
-        &self,
-        node: NodeIndex,
-    ) -> impl Iterator<Item = EdgeReference<QueryGraphEdge>> {
-        self.graph
-            .edges_directed(node, Direction::Outgoing)
-            .filter(|edge_ref| {
+    pub(crate) fn out_edges(&self, node: NodeIndex) -> Vec<EdgeReference<QueryGraphEdge>> {
+        Self::sorted_edges(self.graph.edges_directed(node, Direction::Outgoing).filter(
+            |edge_ref| {
                 !(edge_ref.source() == edge_ref.target()
                     && matches!(
                         edge_ref.weight().transition,
                         QueryGraphEdgeTransition::KeyResolution
                             | QueryGraphEdgeTransition::RootTypeResolution { .. }
                     ))
-            })
+            },
+        ))
+    }
+
+    /// Edge iteration order is unspecified in petgraph, but appears to be
+    /// *reverse* insertion order in practice.
+    /// This can affect generated query plans, such as when two options have the same cost.
+    /// To match the JS code base, we want to iterate in insertion order.
+    ///
+    /// Sorting by edge indices relies on documented behavior:
+    /// <https://docs.rs/petgraph/latest/petgraph/graph/struct.Graph.html#graph-indices>
+    ///
+    /// As of this writing, edges of the query graph are removed
+    /// in `FederatedQueryGraphBuilder::update_edge_tail` which specifically preserves indices
+    /// by pairing with an insertion.
+    fn sorted_edges<'graph>(
+        edges: impl Iterator<Item = EdgeReference<'graph, QueryGraphEdge>>,
+    ) -> Vec<EdgeReference<'graph, QueryGraphEdge>> {
+        let mut edges: Vec<_> = edges.collect();
+        edges.sort_by_key(|e| -> EdgeIndex { e.id() });
+        edges
     }
 
     pub(crate) fn is_self_key_or_root_edge(
@@ -538,7 +554,7 @@ impl QueryGraph {
     }
 
     pub(crate) fn edge_for_field(&self, node: NodeIndex, field: &Field) -> Option<EdgeIndex> {
-        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+        let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::FieldCollection {
                 field_definition_position,
@@ -578,7 +594,7 @@ impl QueryGraph {
             // No type condition means the type hasn't changed, meaning there is no edge to take.
             return None;
         };
-        let mut candidates = self.out_edges(node).filter_map(|edge_ref| {
+        let mut candidates = self.out_edges(node).into_iter().filter_map(|edge_ref| {
             let edge_weight = edge_ref.weight();
             let QueryGraphEdgeTransition::Downcast {
                 to_type_position, ..

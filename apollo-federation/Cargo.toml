@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "0.0.11"
+version = "1.46.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
@@ -26,7 +26,10 @@ thiserror = "1.0"
 url = "2"
 
 [dev-dependencies]
+hex.workspace = true
 insta.workspace = true
+sha1.workspace = true
+tempfile.workspace = true
 
 [[test]]
 name = "main"

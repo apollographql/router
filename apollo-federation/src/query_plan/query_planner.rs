@@ -8,6 +8,8 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use petgraph::csr::NodeIndex;
+use petgraph::stable_graph::IndexType;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -15,7 +17,10 @@ use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::query_graph::build_federated_query_graph;
+use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
+use crate::query_graph::QueryGraphNodeType;
+use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
@@ -34,8 +39,10 @@ use crate::query_plan::QueryPlan;
 use crate::query_plan::SequenceNode;
 use crate::query_plan::TopLevelPlanNode;
 use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
@@ -491,10 +498,132 @@ impl QueryPlanner {
 }
 
 fn compute_root_serial_dependency_graph(
-    _parameters: &QueryPlanningParameters,
-    _has_defers: bool,
+    parameters: &QueryPlanningParameters,
+    has_defers: bool,
 ) -> Result<Vec<FetchDependencyGraph>, FederationError> {
-    todo!("FED-127")
+    let QueryPlanningParameters {
+        supergraph_schema,
+        federated_query_graph,
+        operation,
+        ..
+    } = parameters;
+    let root_type: Option<CompositeTypeDefinitionPosition> = if has_defers {
+        supergraph_schema
+            .schema()
+            .root_operation(operation.root_kind.into())
+            .and_then(|name| supergraph_schema.get_type(name.clone()).ok())
+            .and_then(|ty| ty.try_into().ok())
+    } else {
+        None
+    };
+    // We have to serially compute a plan for each top-level selection.
+    let mut split_roots = operation.selection_set.clone().split_top_level_fields();
+    let mut digest = Vec::new();
+    let mut starting_fetch_id = 0;
+    let selection_set = split_roots
+        .next()
+        .ok_or_else(|| FederationError::internal("Empty top level fields"))?;
+    let BestQueryPlanInfo {
+        mut fetch_dependency_graph,
+        path_tree: mut prev_path,
+        ..
+    } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    let mut prev_subgraph = only_root_subgraph(&fetch_dependency_graph)?;
+    for selection_set in split_roots {
+        let BestQueryPlanInfo {
+            fetch_dependency_graph: new_dep_graph,
+            path_tree: new_path,
+            ..
+        } = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+        let new_subgraph = only_root_subgraph(&new_dep_graph)?;
+        if new_subgraph == prev_subgraph {
+            // The new operation (think 'mutation' operation) is on the same subgraph than the previous one, so we can concat them in a single fetch
+            // and rely on the subgraph to enforce seriability. Do note that we need to `concat()` and not `merge()` because if we have
+            // mutation Mut {
+            //    mut1 {...}
+            //    mut2 {...}
+            //    mut1 {...}
+            // }
+            // then we should _not_ merge the 2 `mut1` fields (contrarily to what happens on queried fields).
+
+            prev_path = OpPathTree::merge(&prev_path, &new_path);
+            fetch_dependency_graph = FetchDependencyGraph::new(
+                supergraph_schema.clone(),
+                federated_query_graph.clone(),
+                root_type.clone(),
+                starting_fetch_id,
+            );
+            compute_root_fetch_groups(
+                operation.root_kind,
+                &mut fetch_dependency_graph,
+                &prev_path,
+            )?;
+        } else {
+            // PORT_NOTE: It is unclear if they correct thing to do here is get the next ID, use
+            // the current ID that is inside the fetch dep graph's ID generator, or to use the
+            // starting ID. Because this method ensure uniqueness between IDs, this approach was
+            // taken; however, it could be the case that this causes unforseen issues.
+            starting_fetch_id = fetch_dependency_graph.next_fetch_id();
+            digest.push(std::mem::replace(
+                &mut fetch_dependency_graph,
+                new_dep_graph,
+            ));
+            prev_path = new_path;
+            prev_subgraph = new_subgraph;
+        }
+    }
+    digest.push(fetch_dependency_graph);
+    Ok(digest)
+}
+
+fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, FederationError> {
+    let mut iter = graph.root_node_by_subgraph_iter();
+    let (Some((_, index)), None) = (iter.next(), iter.next()) else {
+        return Err(FederationError::internal(format!(
+            "{graph} should have only one root."
+        )));
+    };
+    Ok(index.index() as u32)
+}
+
+pub(crate) fn compute_root_fetch_groups(
+    root_kind: SchemaRootDefinitionKind,
+    dependency_graph: &mut FetchDependencyGraph,
+    path: &OpPathTree,
+) -> Result<(), FederationError> {
+    // The root of the pathTree is one of the "fake" root of the subgraphs graph,
+    // which belongs to no subgraph but points to each ones.
+    // So we "unpack" the first level of the tree to find out our top level groups
+    // (and initialize our stack).
+    // Note that we can safely ignore the triggers of that first level
+    // as it will all be free transition, and we know we cannot have conditions.
+    for child in &path.childs {
+        let edge = child.edge.expect("The root edge should not be None");
+        let (_source_node, target_node) = path.graph.edge_endpoints(edge)?;
+        let target_node = path.graph.node_weight(target_node)?;
+        let subgraph_name = &target_node.source;
+        let root_type = match &target_node.type_ {
+            QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(object)) => {
+                object.clone().into()
+            }
+            ty => {
+                return Err(FederationError::internal(format!(
+                    "expected an object type for the root of a subgraph, found {ty}"
+                )))
+            }
+        };
+        let fetch_dependency_node =
+            dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        compute_nodes_for_tree(
+            dependency_graph,
+            &child.tree,
+            fetch_dependency_node,
+            Default::default(),
+            Default::default(),
+            &Default::default(),
+        )?;
+    }
+    Ok(())
 }
 
 fn compute_root_parallel_dependency_graph(
@@ -754,13 +883,12 @@ type User
                 email
               }
             }
-          }
+          },
         }
         "###);
     }
 
     #[test]
-    #[ignore]
     fn plan_simple_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -784,53 +912,91 @@ type User
           Sequence {
             Fetch(service: "reviews") {
               {
-                        bestRatedProducts {
+                bestRatedProducts {
                   ... on Book {
-                    id
                     __typename
+                    id
                   }
                   ... on Movie {
-                    id
                     __typename
+                    id
                   }
                 }
               }
-            }
+            },
             Parallel {
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                                ... on Movie {
-                      id
-                    }
-                  } => {
-                                ... on Movie {
-                      vendor {
-                        id
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Movie {
                         __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Movie {
+                        vendor {
+                          __typename
+                          id
+                        }
                       }
                     }
-                  }
-                }
-              }
-              Flatten(path: "bestRatedProducts.*") {
-                Fetch(service: "products") {
-                  {
-                                ... on Book {
-                      id
-                    }
-                  } => {
-                                ... on Book {
-                      vendor {
-                        id
+                  },
+                },
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
                         __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on User {
+                        name
                       }
                     }
-                  }
-                }
-              }
-            }
-          }
+                  },
+                },
+              },
+              Sequence {
+                Flatten(path: "bestRatedProducts.*") {
+                  Fetch(service: "products") {
+                    {
+                      ... on Book {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on Book {
+                        vendor {
+                          __typename
+                          id
+                        }
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "bestRatedProducts.*.vendor") {
+                  Fetch(service: "accounts") {
+                    {
+                      ... on User {
+                        __typename
+                        id
+                      }
+                    } =>
+                    {
+                      ... on User {
+                        name
+                      }
+                    }
+                  },
+                },
+              },
+            },
+          },
         }
         "###);
     }
@@ -939,7 +1105,7 @@ type User
                 }
               }
             }
-          }
+          },
         }
         "###);
     }

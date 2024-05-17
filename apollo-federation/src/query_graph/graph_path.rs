@@ -271,7 +271,7 @@ impl std::fmt::Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
             if i > 0 {
-                write!(f, ", ")?;
+                write!(f, "::")?;
             }
             match element.deref() {
                 OpPathElement::Field(field) => write!(f, "{field}")?,
@@ -794,10 +794,12 @@ impl std::fmt::Display for ClosedPath {
 
 /// A list of the options generated during query planning for a specific "closed branch", which is a
 /// full/closed path in a GraphQL operation (i.e. one that ends in a leaf field).
+#[derive(Debug)]
 pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
+#[derive(Debug)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
@@ -1169,6 +1171,7 @@ where
             return Ok(Box::new(
                 self.graph
                     .out_edges_with_federation_self_edges(self.tail)
+                    .into_iter()
                     .map(|edge_ref| edge_ref.id()),
             ));
         }
@@ -1194,6 +1197,7 @@ where
         Ok(Box::new(
             self.graph
                 .out_edges(self.tail)
+                .into_iter()
                 .map(|edge_ref| edge_ref.id()),
         ))
     }
@@ -1988,14 +1992,11 @@ impl OpGraphPath {
         else {
             return Ok(path);
         };
-        let typename_field = Field::new(FieldData {
-            schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
-            field_position: tail_type_pos.introspection_typename_field(),
-            alias: None,
-            arguments: Arc::new(vec![]),
-            directives: Arc::new(Default::default()),
-            sibling_typename: None,
-        });
+        let typename_field = Field::new_introspection_typename(
+            self.graph.schema_by_source(&tail_weight.source)?,
+            &tail_type_pos,
+            None,
+        );
         let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
@@ -3438,9 +3439,7 @@ impl ClosedBranch {
         }
 
         // Keep track of which options should be kept.
-        let mut keep_options = std::iter::repeat_with(|| true)
-            .take(self.0.len())
-            .collect::<Vec<_>>();
+        let mut keep_options = vec![true; self.0.len()];
         for option_index in 0..(self.0.len()) {
             if !keep_options[option_index] {
                 continue;

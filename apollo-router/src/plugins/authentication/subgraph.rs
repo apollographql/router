@@ -185,8 +185,8 @@ pub(crate) struct Config {
 #[allow(dead_code)]
 #[derive(Clone, Default)]
 pub(crate) struct SigningParams {
-    pub(crate) all: Option<SigningParamsConfig>,
-    pub(crate) subgraphs: HashMap<String, SigningParamsConfig>,
+    pub(crate) all: Option<Arc<SigningParamsConfig>>,
+    pub(crate) subgraphs: HashMap<String, Arc<SigningParamsConfig>>,
 }
 
 #[derive(Clone)]
@@ -199,7 +199,7 @@ pub(crate) struct SigningParamsConfig {
 
 impl SigningParamsConfig {
     pub(crate) async fn sign(
-        self,
+        &self,
         mut req: Request<Body>,
         subgraph_name: &str,
     ) -> Result<Request<Body>, BoxError> {
@@ -236,9 +236,10 @@ impl SigningParamsConfig {
         increment_success_counter(subgraph_name);
         Ok(req)
     }
+
     // This function is the same as above, except it's a new one because () doesn't implement HttpBody`
     pub(crate) async fn sign_empty(
-        self,
+        &self,
         mut req: Request<()>,
         subgraph_name: &str,
     ) -> Result<Request<()>, BoxError> {
@@ -360,7 +361,7 @@ fn get_signing_settings(signing_params: &SigningParamsConfig) -> SigningSettings
 }
 
 pub(super) struct SubgraphAuth {
-    pub(super) signing_params: SigningParams,
+    pub(super) signing_params: Arc<SigningParams>,
 }
 
 impl SubgraphAuth {
@@ -385,7 +386,7 @@ impl SubgraphAuth {
 }
 
 impl SubgraphAuth {
-    fn params_for_service(&self, service_name: &str) -> Option<SigningParamsConfig> {
+    fn params_for_service(&self, service_name: &str) -> Option<Arc<SigningParamsConfig>> {
         self.signing_params
             .subgraphs
             .get(service_name)
@@ -527,7 +528,7 @@ mod test {
             .returning(example_response);
 
         let mut service = SubgraphAuth {
-            signing_params: SigningParams {
+            signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
                         access_key_id: "id".to_string(),
@@ -539,9 +540,10 @@ mod test {
                     "all",
                 )
                 .await
-                .ok(),
+                .ok()
+                .map(Arc::new),
                 subgraphs: Default::default(),
-            },
+            }),
         }
         .subgraph_service("test_subgraph", mock.boxed());
 
@@ -579,7 +581,7 @@ mod test {
             .returning(example_response);
 
         let mut service = SubgraphAuth {
-            signing_params: SigningParams {
+            signing_params: Arc::new(SigningParams {
                 all: make_signing_params(
                     &AuthConfig::AWSSigV4(AWSSigV4Config::Hardcoded(AWSSigV4HardcodedConfig {
                         access_key_id: "id".to_string(),
@@ -591,9 +593,10 @@ mod test {
                     "all",
                 )
                 .await
-                .ok(),
+                .ok()
+                .map(Arc::new),
                 subgraphs: Default::default(),
-            },
+            }),
         }
         .subgraph_service("test_subgraph", mock.boxed());
 
@@ -643,7 +646,7 @@ mod test {
     ) -> hyper::Request<hyper::Body> {
         let signing_params = {
             let ctx = request.context.extensions().lock();
-            let sp = ctx.get::<SigningParamsConfig>();
+            let sp = ctx.get::<Arc<SigningParamsConfig>>();
             sp.cloned().unwrap()
         };
 

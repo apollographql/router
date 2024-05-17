@@ -685,7 +685,7 @@ impl Containment {
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -694,11 +694,7 @@ pub(crate) enum Selection {
 
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
-        let field_selection = FieldSelection {
-            field,
-            selection_set: sub_selections,
-        };
-        Self::Field(Arc::new(field_selection))
+        Self::Field(Arc::new(field.with_subselection(sub_selections)))
     }
 
     pub(crate) fn from_inline_fragment(
@@ -1067,6 +1063,7 @@ mod normalized_field_selection {
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
+    use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
@@ -1127,10 +1124,16 @@ mod normalized_field_selection {
 
     /// The non-selection-set data of `FieldSelection`, used with operation paths and graph
     /// paths.
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone, PartialEq, Eq, Hash)]
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
+    }
+
+    impl std::fmt::Debug for Field {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.data.fmt(f)
+        }
     }
 
     impl Field {
@@ -1147,6 +1150,21 @@ mod normalized_field_selection {
             field_position: FieldDefinitionPosition,
         ) -> Self {
             Self::new(FieldData::from_position(schema, field_position))
+        }
+
+        pub(crate) fn new_introspection_typename(
+            schema: &ValidFederationSchema,
+            parent_type: &CompositeTypeDefinitionPosition,
+            alias: Option<Name>,
+        ) -> Self {
+            Self::new(FieldData {
+                schema: schema.clone(),
+                field_position: parent_type.introspection_typename_field(),
+                alias,
+                arguments: Default::default(),
+                directives: Default::default(),
+                sibling_typename: None,
+            })
         }
 
         /// Turn this `Field` into a `FieldSelection` with the given sub-selection. If this is
@@ -1320,10 +1338,16 @@ mod normalized_fragment_spread_selection {
     /// An analogue of the apollo-compiler type `FragmentSpread` with these changes:
     /// - Stores the schema (may be useful for directives).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Clone, PartialEq, Eq)]
     pub(crate) struct FragmentSpread {
         data: FragmentSpreadData,
         key: SelectionKey,
+    }
+
+    impl std::fmt::Debug for FragmentSpread {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.data.fmt(f)
+        }
     }
 
     impl FragmentSpread {
@@ -1653,10 +1677,16 @@ mod normalized_inline_fragment_selection {
 
     /// The non-selection-set data of `InlineFragmentSelection`, used with operation paths and
     /// graph paths.
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone, PartialEq, Eq, Hash)]
     pub(crate) struct InlineFragment {
         data: InlineFragmentData,
         key: SelectionKey,
+    }
+
+    impl std::fmt::Debug for InlineFragment {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            self.data.fmt(f)
+        }
     }
 
     impl InlineFragment {
@@ -1800,6 +1830,8 @@ pub(crate) use normalized_inline_fragment_selection::InlineFragment;
 pub(crate) use normalized_inline_fragment_selection::InlineFragmentData;
 pub(crate) use normalized_inline_fragment_selection::InlineFragmentSelection;
 
+use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
+
 // TODO(@goto-bus-stop): merge this with the other Operation impl block.
 impl Operation {
     pub(crate) fn optimize(
@@ -1878,6 +1910,56 @@ impl SelectionSet {
             schema,
             type_position,
             selections: Default::default(),
+        }
+    }
+
+    // TODO: Ideally, this method returns a proper, recursive iterator. As is, there is a lot of
+    // overhead due to indirection, both from over allocation and from v-table lookups.
+    pub(crate) fn split_top_level_fields(self) -> Box<dyn Iterator<Item = SelectionSet>> {
+        let parent_type = self.type_position.clone();
+        let selections: IndexMap<SelectionKey, Selection> = (**self.selections).clone();
+        Box::new(selections.into_values().flat_map(move |sel| {
+            let digest: Box<dyn Iterator<Item = SelectionSet>> = if sel.is_field() {
+                Box::new(std::iter::once(SelectionSet::from_selection(
+                    parent_type.clone(),
+                    sel.clone(),
+                )))
+            } else {
+                let Some(ele) = sel.element().ok() else {
+                    let digest: Box<dyn Iterator<Item = SelectionSet>> =
+                        Box::new(std::iter::empty());
+                    return digest;
+                };
+                Box::new(
+                    sel.selection_set()
+                        .ok()
+                        .flatten()
+                        .cloned()
+                        .into_iter()
+                        .flat_map(SelectionSet::split_top_level_fields)
+                        .filter_map(move |set| {
+                            let parent_type = ele.parent_type_position();
+                            Selection::from_element(ele.clone(), Some(set))
+                                .ok()
+                                .map(|sel| SelectionSet::from_selection(parent_type, sel))
+                        }),
+                )
+            };
+            digest
+        }))
+    }
+
+    /// PORT_NOTE: JS calls this `newCompositeTypeSelectionSet`
+    pub(crate) fn for_composite_type(
+        schema: ValidFederationSchema,
+        type_position: CompositeTypeDefinitionPosition,
+    ) -> Self {
+        let typename_field = Field::new_introspection_typename(&schema, &type_position, None)
+            .with_subselection(None);
+        Self {
+            schema,
+            type_position,
+            selections: Arc::new(std::iter::once(typename_field).collect()),
         }
     }
 
@@ -2581,18 +2663,11 @@ impl SelectionSet {
             } else {
                 Some(sibling_typename.clone())
             };
-            let field_position = selection
-                .element()?
-                .parent_type_position()
-                .introspection_typename_field();
-            let field_element = Field::new(FieldData {
-                schema: self.schema.clone(),
-                field_position,
+            let field_element = Field::new_introspection_typename(
+                &self.schema,
+                &selection.element()?.parent_type_position(),
                 alias,
-                arguments: Default::default(),
-                directives: Default::default(),
-                sibling_typename: None,
-            });
+            );
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
             Ok([typename_selection, updated].into_iter().collect())
@@ -2607,9 +2682,8 @@ impl SelectionSet {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
             if !self.has_top_level_typename_field() {
-                let field_position = parent.introspection_typename_field();
                 let typename_selection = Selection::from_field(
-                    Field::new(FieldData::from_position(&self.schema, field_position)),
+                    Field::new_introspection_typename(&self.schema, &parent.into(), None),
                     None,
                 );
                 selection_map.insert(typename_selection);
@@ -4768,6 +4842,15 @@ impl TryFrom<&SelectionSet> for executable::SelectionSet {
         let mut flattened = vec![];
         for normalized_selection in val.selections.values() {
             let selection: executable::Selection = normalized_selection.try_into()?;
+            if let executable::Selection::Field(field) = &selection {
+                if field.name == *INTROSPECTION_TYPENAME_FIELD_NAME && field.alias.is_none() {
+                    // Move unaliased __typename to the start of the selection set.
+                    // This looks nicer, and matches existing tests.
+                    // PORT_NOTE: JS does this in `selectionsInPrintOrder`
+                    flattened.insert(0, selection);
+                    continue;
+                }
+            }
             flattened.push(selection);
         }
         Ok(Self {
@@ -4989,11 +5072,7 @@ impl Display for Field {
         // serializing it when empty. Note we're implicitly relying on the lack of type-checking
         // in both `FieldSelection` and `Field` display logic (specifically, we rely on
         // them not checking whether it is valid for the selection set to be empty).
-        let selection = FieldSelection {
-            field: self.clone(),
-            selection_set: None,
-        };
-        selection.fmt(f)
+        self.clone().with_subselection(None).fmt(f)
     }
 }
 
@@ -7186,15 +7265,8 @@ type T {
 
                 let parent_type_pos = s.element()?.parent_type_position();
                 // "__typename" field
-                let field_position = parent_type_pos.introspection_typename_field();
-                let field_element = Field::new(FieldData {
-                    schema: s.schema().clone(),
-                    field_position,
-                    alias: None,
-                    arguments: Default::default(),
-                    directives: Default::default(),
-                    sibling_typename: None,
-                });
+                let field_element =
+                    Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
                 let typename_selection =
                     Selection::from_element(field_element.into(), /*subselection*/ None)?;
                 // return `updated` and `typename_selection`
