@@ -1,130 +1,53 @@
-use std::sync::Arc;
-
-use apollo_compiler::executable::Field;
 use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
+use opentelemetry::KeyValue;
+use opentelemetry_api::metrics::Histogram;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::BoxError;
 
-use super::instruments::Increment;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
-use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
-use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
-use crate::plugins::telemetry::config_new::instruments::Instrumented;
-use crate::plugins::telemetry::config_new::DefaultForLevel;
-use crate::plugins::telemetry::otlp::TelemetryDataKind;
-
-pub(crate) mod attributes;
-pub(crate) mod selectors;
-
-static FIELD_LENGTH: &str = "graphql.field.length";
+use crate::plugins::telemetry::config_new::instruments::METER_NAME;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct GraphQLInstrumentsConfig {
-    /// A histogram of the length of a selected field in the GraphQL response
+pub(crate) struct GraphQLInstrumentationConfig {
     #[serde(rename = "field.length")]
-    field_length: DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
+    field_length: Option<bool>,
 }
 
-impl DefaultForLevel for GraphQLInstrumentsConfig {
-    fn defaults_for_level(
-        &mut self,
-        requirement_level: DefaultAttributeRequirementLevel,
-        kind: TelemetryDataKind,
-    ) {
+impl GraphQLInstrumentationConfig {
+    pub(crate) fn get_field_length_histogram(&self) -> Option<GraphQLFieldLengthHistogram> {
         self.field_length
-            .defaults_for_level(requirement_level, kind);
+            .is_some()
+            .then(|| GraphQLFieldLengthHistogram::new())
     }
 }
 
-impl GraphQLInstrumentsConfig {
-    pub(crate) fn to_instruments(&self) -> GraphQLInstruments {
-        let field_length = self.field_length.is_enabled().then(|| {
-            Self::histogram(
-                FIELD_LENGTH,
-                &self.field_length,
-                GraphQLSelector::FieldLength { field_length: true },
-            )
-        });
-
-        GraphQLInstruments { field_length }
-    }
-
-    fn histogram(
-        name: &'static str,
-        config: &DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
-        selector: GraphQLSelector,
-    ) -> CustomHistogram<Field, TypedValue, GraphQLAttributes, GraphQLSelector> {
-        let meter = crate::metrics::meter_provider()
-            .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
-        let mut nb_attributes = 0;
-        let selectors = match config {
-            DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
-            DefaultedStandardInstrument::Extendable { attributes } => {
-                nb_attributes = attributes.custom.len();
-                Some(attributes.clone())
-            }
-        };
-
-        CustomHistogram {
-            inner: Mutex::new(CustomHistogramInner {
-                increment: Increment::EventCustom(None),
-                condition: Condition::True,
-                histogram: Some(meter.f64_histogram(name).init()),
-                attributes: Vec::with_capacity(nb_attributes),
-                selector: Some(Arc::new(selector)),
-                selectors,
-                updated: false,
-            }),
-        }
-    }
+pub(crate) struct GraphQLFieldLengthHistogram {
+    histogram: Histogram<f64>,
 }
 
-#[derive(Default)]
-pub(crate) struct GraphQLInstruments {
-    field_length: Option<CustomHistogram<Field, TypedValue, GraphQLAttributes, GraphQLSelector>>,
-}
-
-impl Instrumented for GraphQLInstruments {
-    type Request = Field;
-    type Response = TypedValue;
-    type EventResponse = ();
-
-    fn on_request(&self, request: &Self::Request) {
-        if let Some(field_length) = &self.field_length {
-            field_length.on_request(request);
+impl GraphQLFieldLengthHistogram {
+    pub(crate) fn new() -> Self {
+        let meter = crate::metrics::meter_provider().meter(METER_NAME);
+        Self {
+            histogram: meter.f64_histogram("graphql.field.length").init(),
         }
     }
 
-    fn on_response(&self, response: &Self::Response) {
-        if let Some(field_length) = &self.field_length {
-            field_length.on_response(response);
-        }
+    pub(crate) fn record(&self, field_name: &str, field_length: f64) {
+        self.histogram.record(
+            field_length,
+            &[KeyValue::new("graphql.field.name", field_name.to_string())],
+        );
     }
-
-    fn on_error(&self, _error: &BoxError, _ctx: &crate::Context) {}
 }
 
-impl schema_aware_response::Visitor for GraphQLInstruments {
+impl schema_aware_response::Visitor for GraphQLFieldLengthHistogram {
     fn visit(&mut self, value: &TypedValue) {
         match value {
             TypedValue::Array(field, items) => {
-                if let Some(field_length) = self.field_length {
-                    // There may be a bug here with stateful evaluation of conditions because the
-                    // logic currently expects to only ever run on one request (albeit at different
-                    // points in the request lifecycle).
-                    field_length.on_request(field);
-                    field_length.on_response(value);
-                }
+                self.record(field.name.as_str(), items.len() as f64);
                 self.visit_array(field, items);
             }
             TypedValue::Object(f, children) => self.visit_object(f, children),
@@ -136,7 +59,6 @@ impl schema_aware_response::Visitor for GraphQLInstruments {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
 
@@ -146,21 +68,5 @@ mod test {
             .config(include_str!("fixtures/graphql_field_length.router.yaml"))
             .build()
             .await;
-    }
-
-    #[test]
-    fn conversion_to_instruments() {
-        let config = config(include_str!("fixtures/graphql_field_length.router.yaml"));
-        let instruments = config.to_instruments();
-
-        assert!(true)
-    }
-
-    fn config(config: &'static str) -> GraphQLInstrumentsConfig {
-        let config: serde_json::Value = serde_yaml::from_str(config).expect("config");
-        let graphql_instruments = jsonpath_lib::select(&config, "$..graphql");
-
-        serde_json::from_value((*graphql_instruments.unwrap().first().unwrap()).clone())
-            .expect("config")
     }
 }

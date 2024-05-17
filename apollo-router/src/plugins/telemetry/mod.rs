@@ -959,12 +959,15 @@ impl Telemetry {
                     custom_events.on_response_event(resp, &ctx);
 
                     // Get metrics related to GraphQL response fields
-                    if let Some(document) = ctx.unsupported_executable_document() {
+                    if let Some((mut field_length_histogram, document)) = conf
+                        .instrumentation
+                        .instruments
+                        .graphql
+                        .get_field_length_histogram()
+                        .zip(ctx.unsupported_executable_document())
+                    {
                         if let Ok(typed_response) = SchemaAwareResponse::new(&document, resp) {
-                            let mut graphql_instruments =
-                                conf.instrumentation.instruments.new_graphql_instruments();
-
-                            graphql_instruments.visit(&typed_response.value);
+                            field_length_histogram.visit(&typed_response.value);
                         }
                     }
                 });

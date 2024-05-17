@@ -30,10 +30,7 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
-use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
-use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentationConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
@@ -64,8 +61,7 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) subgraph:
         Extendable<SubgraphInstrumentsConfig, Instrument<SubgraphAttributes, SubgraphSelector>>,
     /// GraphQL response field instruments.
-    pub(crate) graphql:
-        Extendable<GraphQLInstrumentsConfig, Instrument<GraphQLAttributes, GraphQLSelector>>,
+    pub(crate) graphql: GraphQLInstrumentationConfig,
 }
 
 impl InstrumentsConfig {
@@ -77,8 +73,6 @@ impl InstrumentsConfig {
         self.supergraph
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.subgraph
-            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
-        self.graphql
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 
@@ -313,10 +307,6 @@ impl InstrumentsConfig {
             http_client_response_body_size,
             custom: CustomInstruments::new(&self.subgraph.custom),
         }
-    }
-
-    pub(crate) fn new_graphql_instruments(&self) -> GraphQLInstruments {
-        self.graphql.attributes.to_instruments()
     }
 }
 

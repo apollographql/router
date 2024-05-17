@@ -63,16 +63,16 @@ pub(crate) trait Visitor {
     }
 
     fn visit_null(&mut self) {}
-    fn visit_bool(&mut self, field: &Field, value: &bool) {}
-    fn visit_number(&mut self, field: &Field, value: &serde_json::Number) {}
-    fn visit_string(&mut self, field: &Field, value: &str) {}
+    fn visit_bool(&mut self, _field: &Field, _value: &bool) {}
+    fn visit_number(&mut self, _field: &Field, _value: &serde_json::Number) {}
+    fn visit_string(&mut self, _field: &Field, _value: &str) {}
 
-    fn visit_array(&mut self, field: &Field, items: &Vec<TypedValue>) {
+    fn visit_array(&mut self, _field: &Field, items: &Vec<TypedValue>) {
         for value in items.iter() {
             self.visit(value);
         }
     }
-    fn visit_object(&mut self, field: &Field, children: &HashMap<String, TypedValue>) {
+    fn visit_object(&mut self, _field: &Field, children: &HashMap<String, TypedValue>) {
         for value in children.values() {
             self.visit(value);
         }
