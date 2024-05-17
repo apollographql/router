@@ -14,7 +14,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::selectors::{FieldLength, GraphQLSelector};
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
@@ -52,7 +52,9 @@ impl GraphQLInstrumentsConfig {
             Self::histogram(
                 FIELD_LENGTH,
                 &self.field_length,
-                GraphQLSelector::FieldLength { field_length: true },
+                GraphQLSelector::FieldLength {
+                    field_length: FieldLength::Value,
+                },
             )
         });
 

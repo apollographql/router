@@ -5,7 +5,9 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::selectors::{
+    FieldLength, FieldName, FieldType, GraphQLSelector, TypeName,
+};
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::{DefaultAttributeRequirementLevel, Selector};
@@ -42,27 +44,38 @@ impl Selectors for GraphQLAttributes {
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
         if let Some(true) = self.field_name {
-            if let Some(name) =
-                (GraphQLSelector::FieldName { field_name: true }).on_request(request)
+            if let Some(name) = (GraphQLSelector::FieldName {
+                field_name: FieldName::String,
+            })
+            .on_request(request)
             {
                 attrs.push(KeyValue::new("graphql.field.name", name));
             }
         }
         if let Some(true) = self.field_type {
-            if let Some(ty) = (GraphQLSelector::FieldType { field_type: true }).on_request(request)
+            if let Some(ty) = (GraphQLSelector::FieldType {
+                field_type: FieldType::String,
+            })
+            .on_request(request)
             {
                 attrs.push(KeyValue::new("graphql.field.type", ty));
             }
         }
         if let Some(true) = self.field_length {
-            if let Some(length) =
-                (GraphQLSelector::FieldLength { field_length: true }).on_request(request)
+            if let Some(length) = (GraphQLSelector::FieldLength {
+                field_length: FieldLength::Value,
+            })
+            .on_request(request)
             {
                 attrs.push(KeyValue::new("graphql.field.length", length));
             }
         }
         if let Some(true) = self.type_name {
-            if let Some(ty) = (GraphQLSelector::TypeName { type_name: true }).on_request(request) {
+            if let Some(ty) = (GraphQLSelector::TypeName {
+                type_name: TypeName::String,
+            })
+            .on_request(request)
+            {
                 attrs.push(KeyValue::new("graphql.type.name", ty));
             }
         }

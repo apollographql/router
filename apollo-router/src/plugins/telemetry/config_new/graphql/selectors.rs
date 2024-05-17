@@ -7,21 +7,44 @@ use crate::plugins::demand_control::cost_calculator::schema_aware_response::Type
 use crate::plugins::telemetry::config_new::Selector;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum FieldLength {
+    Value,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum FieldName {
+    String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum FieldType {
+    String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum TypeName {
+    String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum GraphQLSelector {
     /// The length of the field
     FieldLength {
-        field_length: bool,
+        field_length: FieldLength,
     },
     FieldName {
-        field_name: bool,
+        field_name: FieldName,
     },
     FieldType {
-        field_type: bool,
+        field_type: FieldType,
     },
     TypeName {
-        type_name: bool,
+        type_name: TypeName,
     },
 }
 
@@ -32,18 +55,18 @@ impl Selector for GraphQLSelector {
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
         match self {
-            GraphQLSelector::FieldName { field_name: true } => {
-                Some(request.name.to_string().into())
-            }
-            GraphQLSelector::FieldType { field_type: true } => todo!(),
-            GraphQLSelector::TypeName { type_name } => todo!(),
+            GraphQLSelector::FieldName { .. } => Some(request.name.to_string().into()),
+            GraphQLSelector::FieldType { .. } => todo!(),
+            GraphQLSelector::TypeName { .. } => todo!(),
             _ => None,
         }
     }
 
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
         match self {
-            GraphQLSelector::FieldLength { field_length: true } => match response {
+            GraphQLSelector::FieldLength {
+                field_length: FieldLength::Value,
+            } => match response {
                 TypedValue::Array(_, items) => Some((items.len() as f64).into()),
                 _ => None,
             },
