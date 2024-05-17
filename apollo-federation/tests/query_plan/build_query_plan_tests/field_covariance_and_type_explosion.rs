@@ -13,7 +13,7 @@
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 
 #[test]
-#[should_panic] // TODO: does this test make sense if we don’t support fed1 supergraphs?
+#[should_panic(expected = "not yet implemented")] // TODO: does this test make sense if we don’t support fed1 supergraphs?
 fn with_federation_1_supergraphs() {
     let supergraph = r#"
         schema @core(feature: "https://specs.apollo.dev/core/v0.1") @core(feature: "https://specs.apollo.dev/join/v0.1") {
@@ -87,7 +87,8 @@ fn with_federation_1_supergraphs() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure
 fn with_federation_2_subgraphs() {
     let planner = planner!(
         Subgraph1: r#"

@@ -1,7 +1,8 @@
 mod include_skip;
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_handles_multiple_requires_within_the_same_entity_fetch() {
     let planner = planner!(
         Subgraph1: r#"
@@ -115,7 +116,8 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
         Subgraph1: r#"
@@ -228,7 +230,8 @@ fn handles_multiple_requires_involving_different_nestedness() {
 
 /// require that depends on another require
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_handles_simple_require_chain() {
     let planner = planner!(
         Subgraph1: r#"
@@ -381,7 +384,8 @@ fn it_handles_simple_require_chain() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_handles_require_chain_not_ending_in_original_group() {
     // This is somewhat simiar to the 'simple require chain' case, but the chain does not
     // end in the group in which the query start
@@ -567,7 +571,8 @@ fn it_handles_require_chain_not_ending_in_original_group() {
 
 /// a chain of 10 requires
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_handles_longer_require_chain() {
     let planner = planner!(
         Subgraph1: r#"
@@ -817,7 +822,8 @@ fn it_handles_longer_require_chain() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_handles_complex_require_chain() {
     // Another "require chain" test but with more complexity as we have a require on multiple fields, some of which being
     // nested, and having requirements of their own.
@@ -1100,7 +1106,8 @@ fn it_handles_complex_require_chain() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_handes_diamond_shape_depedencies() {
     // The idea of this test is that to be able to fulfill the @require in subgraph D, we need
     // both values from C for the @require and values from B for the key itself, but both
@@ -1230,7 +1237,8 @@ fn it_handes_diamond_shape_depedencies() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_can_require_at_inaccessible_fields() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1302,7 +1310,8 @@ fn it_can_require_at_inaccessible_fields() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
 fn it_require_of_multiple_field_when_one_is_also_a_key_to_reach_another() {
     // The specificity of this example is that we `T.v` requires 2 fields `req1`
     // and `req2`, but `req1` is also a key to get `req2`. This dependency was

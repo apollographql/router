@@ -112,7 +112,7 @@ fn it_works_with_nested_provides() {
 }
 
 #[test]
-#[should_panic] // TODO: fix bug FED-230
+#[should_panic(expected = "Schema has no type \"I\"")] // TODO: fix bug FED-230
 fn it_works_on_interfaces() {
     let planner = planner!(
         Subgraph1: r#"
@@ -247,7 +247,8 @@ fn it_works_on_interfaces() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure
 fn it_works_on_unions() {
     let planner = planner!(
         Subgraph1: r#"
@@ -472,7 +473,8 @@ fn it_works_on_unions() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "Schema has no type \"I\"")]
+// TODO: investigate this failure
 fn it_allow_providing_fields_for_only_some_subtype() {
     let planner = planner!(
         Subgraph1: r#"
@@ -679,7 +681,8 @@ fn it_allow_providing_fields_for_only_some_subtype() {
 }
 
 #[test]
-#[should_panic] // TODO: investigate this failure
+#[should_panic(expected = "Subgraph unexpectedly does not use federation spec")]
+// TODO: investigate this failure
 fn it_works_with_type_condition_even_for_types_only_reachable_by_the_at_provides() {
     let planner = planner!(
         Subgraph1: r#"
