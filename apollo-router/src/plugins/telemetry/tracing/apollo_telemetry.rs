@@ -202,7 +202,10 @@ impl LightSpanData {
                 // when attributes are stored as Vec<KeyValue>.
                 // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
                 let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
-                let mut new_attrs = EvictedHashMap::new(max_attr_len.try_into().unwrap(), max_attr_len);
+                let mut new_attrs = EvictedHashMap::new(
+                    max_attr_len.try_into().expect("expected usize -> u32"),
+                    max_attr_len,
+                );
                 value.attributes.into_iter().for_each(|(key, value)| {
                     if attr_names.contains(&key) {
                         new_attrs.insert(KeyValue::new(key, value))
@@ -219,7 +222,7 @@ impl LightSpanData {
             name: value.name,
             start_time: value.start_time,
             end_time: value.end_time,
-            attributes: filtered_attributes
+            attributes: filtered_attributes,
         }
     }
 }
@@ -324,9 +327,11 @@ impl Exporter {
             include_attr_names: match apollo_tracing_protocol {
                 // TBD(tim): consider filtering the current implementation for memory purposes to HashSet::from(REPORTS_INCLUDE_ATTRS)
                 ApolloTracingProtocol::Apollo => None,
-                ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => Some(
-                    HashSet::from_iter([&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat())
-                )
+                ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => {
+                    Some(HashSet::from_iter(
+                        [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
+                    ))
+                }
             },
         })
     }
@@ -422,7 +427,10 @@ impl Exporter {
     }
 
     fn init_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
-        let exporter = self.otlp_exporter.as_ref().expect("expected an otlp exporter");
+        let exporter = self
+            .otlp_exporter
+            .as_ref()
+            .expect("expected an otlp exporter");
         let root_span_data = exporter.prepare_for_export(root_span);
         vec![root_span_data]
     }
@@ -932,7 +940,8 @@ impl SpanExporter for Exporter {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
-                let root_span: LightSpanData = LightSpanData::from_span_data(span, &self.include_attr_names);
+                let root_span: LightSpanData =
+                    LightSpanData::from_span_data(span, &self.include_attr_names);
                 if self.otlp_exporter.is_some() {
                     // Only pop from the cache if running in Otlp-only mode.
                     let pop_cache = self.apollo_tracing_protocol == ApolloTracingProtocol::Otlp;
@@ -977,7 +986,10 @@ impl SpanExporter for Exporter {
                 self.spans_by_parent_id
                     .get_mut(&span.parent_span_id)
                     .expect("capacity of cache was zero")
-                    .push(len, LightSpanData::from_span_data(span, &self.include_attr_names));
+                    .push(
+                        len,
+                        LightSpanData::from_span_data(span, &self.include_attr_names),
+                    );
             }
         }
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
