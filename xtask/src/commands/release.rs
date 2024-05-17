@@ -174,29 +174,17 @@ impl Prepare {
     /// Update the `apollo-router` version in the `dependencies` sections of the `Cargo.toml` files in `apollo-router-scaffold/templates/**`.
     fn update_cargo_tomls(&self, version: &Version) -> Result<String> {
         println!("updating Cargo.toml files");
+        fn bump(component: &str) -> Result<()> {
+            for package in ["apollo-federation", "apollo-router"] {
+                cargo!(["set-version", "--bump", component, "--package", package]);
+            }
+            Ok(())
+        }
         match version {
             Version::Current => {}
-            Version::Major => cargo!([
-                "set-version",
-                "--bump",
-                "major",
-                "--package",
-                "apollo-router"
-            ]),
-            Version::Minor => cargo!([
-                "set-version",
-                "--bump",
-                "minor",
-                "--package",
-                "apollo-router"
-            ]),
-            Version::Patch => cargo!([
-                "set-version",
-                "--bump",
-                "patch",
-                "--package",
-                "apollo-router"
-            ]),
+            Version::Major => bump("major")?,
+            Version::Minor => bump("minor")?,
+            Version::Patch => bump("patch")?,
             Version::Nightly => {
                 // Get the first 8 characters of the current commit hash by running
                 // the Command::new("git") command.  Be sure to take the output and
@@ -231,6 +219,9 @@ impl Prepare {
                 );
             }
             Version::Version(version) => {
+                // Also updates apollo-router's dependency:
+                cargo!(["set-version", version, "--package", "apollo-federation"]);
+
                 cargo!(["set-version", version, "--package", "apollo-router"])
             }
         }

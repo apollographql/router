@@ -1,3 +1,4 @@
+use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::fmt::Display;
 use std::fmt::Formatter;
@@ -393,8 +394,8 @@ pub struct MultipleFederationErrors {
 impl MultipleFederationErrors {
     pub fn push(&mut self, error: FederationError) {
         match error {
-            FederationError::SingleFederationError(error) => {
-                self.errors.push(error);
+            FederationError::SingleFederationError { inner, .. } => {
+                self.errors.push(inner);
             }
             FederationError::MultipleFederationErrors(errors) => {
                 self.errors.extend(errors.errors);
@@ -468,18 +469,45 @@ impl Display for AggregateFederationError {
     }
 }
 
+/// Work around thiserror, which when an error field has a type named `Backtrace`
+/// "helpfully" implements `Error::provides` even though that API is not stable yet:
+/// <https://github.com/rust-lang/rust/issues/99301>
+type ThiserrorTrustMeThisIsTotallyNotABacktrace = Backtrace;
+
 // PORT_NOTE: Often times, JS functions would either throw/return a GraphQLError, return a vector
 // of GraphQLErrors, or take a vector of GraphQLErrors and group them together under an
 // AggregateGraphQLError which itself would have a specific error message and code, and throw that.
 // We represent all these cases with an enum, and delegate to the members.
-#[derive(Debug, Clone, thiserror::Error)]
+#[derive(thiserror::Error)]
 pub enum FederationError {
-    #[error(transparent)]
-    SingleFederationError(#[from] SingleFederationError),
+    #[error("{inner}")]
+    SingleFederationError {
+        inner: SingleFederationError,
+        trace: ThiserrorTrustMeThisIsTotallyNotABacktrace,
+    },
     #[error(transparent)]
     MultipleFederationErrors(#[from] MultipleFederationErrors),
     #[error(transparent)]
     AggregateFederationError(#[from] AggregateFederationError),
+}
+
+impl std::fmt::Debug for FederationError {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::SingleFederationError { inner, trace } => write!(f, "{inner}\n{trace}"),
+            Self::MultipleFederationErrors(inner) => std::fmt::Debug::fmt(inner, f),
+            Self::AggregateFederationError(inner) => std::fmt::Debug::fmt(inner, f),
+        }
+    }
+}
+
+impl From<SingleFederationError> for FederationError {
+    fn from(inner: SingleFederationError) -> Self {
+        Self::SingleFederationError {
+            inner,
+            trace: Backtrace::capture(),
+        }
+    }
 }
 
 impl From<DiagnosticList> for FederationError {
@@ -496,7 +524,7 @@ impl<T> From<WithErrors<T>> for FederationError {
 }
 
 impl FederationError {
-    pub(crate) fn internal(message: impl Into<String>) -> Self {
+    pub fn internal(message: impl Into<String>) -> Self {
         SingleFederationError::Internal {
             message: message.into(),
         }

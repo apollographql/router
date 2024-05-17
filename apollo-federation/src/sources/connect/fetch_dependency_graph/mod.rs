@@ -413,6 +413,7 @@ mod tests {
         use apollo_compiler::name;
         use indexmap::IndexMap;
         use insta::assert_debug_snapshot;
+        use insta::assert_snapshot;
         use petgraph::graph::DiGraph;
         use petgraph::prelude::EdgeIndex;
 
@@ -717,17 +718,16 @@ mod tests {
             // Make sure that we fail since we do not have an entering edge
             let path = fetch_graph.new_path(query_graph, Arc::new([]), last_edge_index, None);
 
-            assert_debug_snapshot!(
+            let Err(path) = path else {
+                panic!("Unexpectedly succeeded with non-source-entering edge.")
+            };
+            assert_snapshot!(
                 path,
                 @r###"
-        Err(
-            SingleFederationError(
-                Internal {
-                    message: "a path should start from an entering edge",
-                },
-            ),
-        )
-        "###
+            An internal error has occurred, please report this bug to Apollo.
+
+            Details: a path should start from an entering edge
+            "###
             );
         }
 
@@ -745,17 +745,16 @@ mod tests {
             // Make sure that we fail since we pass in an invalid edge
             let path = fetch_graph.new_path(query_graph, Arc::new([]), invalid_index, None);
 
-            assert_debug_snapshot!(
+            let Err(path) = path else {
+                panic!("Unexpectedly succeeded with invalid edge.")
+            };
+            assert_snapshot!(
                 path,
                 @r###"
-        Err(
-            SingleFederationError(
-                Internal {
-                    message: "Edge unexpectedly missing",
-                },
-            ),
-        )
-        "###
+            An internal error has occurred, please report this bug to Apollo.
+
+            Details: Edge unexpectedly missing
+            "###
             );
         }
     }
