@@ -5,6 +5,7 @@ description: Create and customize instruments to collect data and report measure
 ---
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
+import TelemetryPerformanceNote from '../../../../shared/telemetry-performance.mdx';
 
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
 
@@ -100,6 +101,12 @@ telemetry:
           description: "my description"
 ```
 
+<Note>
+
+<TelemetryPerformanceNote/>
+
+</Note>
+
 #### Instrument naming conventions
 
 Make sure to follow naming conventions for instruments. For reference, the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) can help guide you to:
@@ -192,6 +199,9 @@ The `value` of an instrument is the value which will be drawn from. This can be 
 * `duration` - the duration of the pipeline service.
 * `unit` - the number of times the pipeline service has been executed.
 * `custom` - a custom value extracted from the pipeline service. See [selectors](./selectors) for more information.
+* `event_duration` - the duration of an event in the pipeline service.
+* `event_unit` - the number of times an event in the pipeline service has been executed.
+* `event_custom` - a custom value extracted from the event in the pipeline service. See [selectors](./selectors) for more information.
 
 ```yaml title="future.router.yaml"
 telemetry:
@@ -202,6 +212,8 @@ telemetry:
           # ...
           value: duration
 ```
+
+> `event_*` are mandantory when you want to use a [selector](./selectors) on the supergraph response body (`response_data` and `response_errors`).
 
 Values of custom metrics can be extracted from the pipeline using custom attributes. For example, to sum the contents of a request header, create a counter with value set as the request header:
 
@@ -329,6 +341,18 @@ telemetry:
             "my_attribute":
               # ...
               response_header: "x-my-header"
+      subgraph:
+        requests.timeout:
+          value: unit
+          type: counter
+          unit: request
+          description: "subgraph requests containing subgraph timeout"
+          attributes:
+            subgraph.name: true
+          condition:
+            eq:
+              - "request timed out"
+              - error: reason
 ```
 
 ### Instrument configuration reference

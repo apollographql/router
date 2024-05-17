@@ -11,6 +11,17 @@ telemetry:
         error: info
 
         # Custom events
+        my.disabled_request_event:
+          message: "my event message"
+          level: off
+          on: request
+          attributes:
+            http.request.body.size: true
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
         my.request_event:
           message: "my event message"
           level: info
@@ -40,6 +51,15 @@ telemetry:
         error: info
 
         # Custom events
+        my.disabled_request.event:
+          message: "my event message"
+          level: off
+          on: request
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
         my.request.event:
           message: "my event message"
           level: info
@@ -64,6 +84,10 @@ telemetry:
         error: error
 
         # Custom events
+        my.disabled_request.event:
+          message: "my event message"
+          level: off
+          on: request
         my.request.event:
           message: "my event message"
           level: info

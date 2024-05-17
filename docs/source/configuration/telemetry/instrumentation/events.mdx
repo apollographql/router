@@ -5,8 +5,9 @@ description: Capture standard and custom events from the Apollo Router's request
 ---
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
+import TelemetryPerformanceNote from '../../../../shared/telemetry-performance.mdx';
 
-An **event** is used to signal when something of note happens in the [Apollo Router's request lifecycle](../../../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
+An _event_ is used to signal when something of note happens in the [Apollo Router's request lifecycle](../../../customizations/overview/#the-request-lifecycle). Events are output to both logs and traces.
 
 You can configure events for each service in `router.yaml`. Events can be standard or custom, and they can be triggered by configurable conditions.
 
@@ -75,6 +76,12 @@ telemetry:
           # Custom event configuration
 ```
 
+<Note>
+
+<TelemetryPerformanceNote/>
+
+</Note>
+
 ### `message`
 
 Each custom event must have a message. This is a fixed value, and custom attributes should be used to add additional information.
@@ -91,7 +98,7 @@ telemetry:
 
 ### `on`
 
-Each custom event must indicate when it should be triggered. This can be `request`, `response` or `error`.
+Each custom event must indicate when it should be triggered. This can be `request`, `response`, `event_response` or `error`.
 
 ```yaml title="future.router.yaml"
 telemetry:
@@ -99,13 +106,15 @@ telemetry:
     events:
       router:
         acme.event:
-          on: request # request, response, error
+          on: request # request, response, event_response, error
           # ...
 ```
 
+> `event_response` is useful when you want to directly access to the json response body. It also works for subscription events and `@defer` chunks.
+
 ### `level`
 
-Custom events have a level, `trace`, `debug`, `info`, `warn` or `error`. The level determines the severity of the event.
+Custom events have a level, `trace`, `debug`, `info`, `warn`, `error` or `off` (if you want to disable this event). The level determines the severity of the event.
 
 To set the level:
 ```yaml title="future.router.yaml"
@@ -113,7 +122,7 @@ telemetry:
   events:
     router:
       acme.event:
-        level: info # trace, debug, info, warn, error
+        level: info # trace, debug, info, warn, error, off
         # ...
 ```
 
@@ -185,9 +194,9 @@ telemetry:
             - request_header: "x-log-request"
         
     supergraph:
-        # ...
+        # Custom event configuration for supergraph service ...
     subgraph:
-        # ...
+        # Custom event configuration for subgraph service ...
 ```
 
 ## Event configuration reference
@@ -195,8 +204,8 @@ telemetry:
 | Option             | Values                                                                       | Default | Description                                                 |
 |--------------------|------------------------------------------------------------------------------|---------|-------------------------------------------------------------|
 | `<attribute-name>` |                                                                              |         | The name of the custom attribute.                           |
-| `attributes`       | [standard attributes](./standard-attributes) or [selectors](./selectors) |         | The attributes of the custom log event.                     |
-| `condition`        | [conditions](./conditions)                                                 |         | The condition that must be met for the event to be emitted. |
+| `attributes`       | [standard attributes](./standard-attributes) or [selectors](./selectors)     |         | The attributes of the custom log event.                     |
+| `condition`        | [conditions](./conditions)                                                   |         | The condition that must be met for the event to be emitted. |
 | `error`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the error log event.                           |
 | `level`            | `trace`\|`info`\|`warn`\|`error`\| `off`                                     | `off`   | The level of the custom log event.                          |
 | `message`          |                                                                              |         | The message of the custom log event.                        |

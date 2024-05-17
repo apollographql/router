@@ -65,7 +65,6 @@ use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
 use self::config_new::instruments::RouterInstruments;
 use self::config_new::instruments::SubgraphInstruments;
-use self::config_new::instruments::SupergraphCustomInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -92,6 +91,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -574,9 +574,10 @@ impl Plugin for Telemetry {
                 move |req: &SupergraphRequest| {
                     let custom_attributes = config.instrumentation.spans.supergraph.attributes.on_request(req);
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
-                    let custom_instruments = SupergraphCustomInstruments::new(
-                        &config.instrumentation.instruments.supergraph.custom,
-                    );
+                    let custom_instruments = config
+                        .instrumentation
+                        .instruments
+                        .new_supergraph_instruments();
                     custom_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
@@ -584,7 +585,7 @@ impl Plugin for Telemetry {
 
                     (req.context.clone(), custom_instruments, custom_attributes, supergraph_events)
                 },
-                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphCustomInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
+                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -610,6 +611,8 @@ impl Plugin for Telemetry {
                             ctx.clone(),
                             result,
                             start.elapsed(),
+                            custom_instruments,
+                            supergraph_events,
                         )
                         .await;
                         Self::update_metrics_on_response_events(
@@ -921,6 +924,8 @@ impl Telemetry {
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
+        custom_instruments: SupergraphInstruments,
+        custom_events: SupergraphEvents,
     ) -> Result<SupergraphResponse, BoxError> {
         let mut metric_attrs = {
             context
@@ -944,8 +949,13 @@ impl Telemetry {
                     response.response.status().as_u16().to_string(),
                 ));
 
+                let ctx = context.clone();
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
+                let stream = stream.inspect(move |resp| {
+                    custom_instruments.on_response_event(resp, &ctx);
+                    custom_events.on_response_event(resp, &ctx);
+                });
                 let (first_response, rest) = stream.into_future().await;
 
                 let attributes = config
@@ -1381,6 +1391,7 @@ impl Telemetry {
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
+                                    result: "".to_string(),
                                     client_name: context
                                         .get(CLIENT_NAME)
                                         .unwrap_or_default()
@@ -1844,9 +1855,10 @@ impl CustomTraceIdPropagator {
 
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
         let trace_id = extractor.get(&self.header_name)?;
+        let trace_id = trace_id.replace('-', "");
 
         // extract trace id
-        let trace_id = match opentelemetry::trace::TraceId::from_hex(trace_id) {
+        let trace_id = match opentelemetry::trace::TraceId::from_hex(&trace_id) {
             Ok(trace_id) => trace_id,
             Err(err) => {
                 ::tracing::error!("cannot generate custom trace_id: {err}");
@@ -1903,6 +1915,7 @@ struct EnableSubgraphFtv1;
 //
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
     use std::sync::Arc;
@@ -1933,6 +1946,7 @@ mod tests {
     use tracing_subscriber::Layer;
 
     use super::apollo::ForwardHeaders;
+    use super::CustomTraceIdPropagator;
     use super::Telemetry;
     use crate::error::FetchError;
     use crate::graphql;
@@ -2957,5 +2971,19 @@ mod tests {
         .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
         .await;
         test_layer.assert_log_entry_count("other error", 2);
+    }
+
+    #[tokio::test]
+    async fn test_custom_trace_id_propagator_strip_dashes_in_trace_id() {
+        let header = String::from("x-trace-id");
+        let trace_id = String::from("04f9e396-465c-4840-bc2b-f493b8b1a7fc");
+        let expected_trace_id = String::from("04f9e396465c4840bc2bf493b8b1a7fc");
+
+        let propagator = CustomTraceIdPropagator::new(header.clone());
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, trace_id);
+        let span = propagator.extract_span_context(&headers);
+        assert!(span.is_some());
+        assert_eq!(span.unwrap().trace_id().to_string(), expected_trace_id);
     }
 }

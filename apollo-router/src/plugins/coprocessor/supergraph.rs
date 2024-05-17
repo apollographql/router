@@ -33,8 +33,6 @@ pub(super) struct SupergraphRequestConf {
     pub(super) sdl: bool,
     /// Send the method
     pub(super) method: bool,
-    /// Handles the request without waiting for the coprocessor to respond
-    pub(super) detached: bool,
 }
 
 /// What information is passed to a router request/response stage
@@ -51,8 +49,6 @@ pub(super) struct SupergraphResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
-    /// Handles the response without waiting for the coprocessor to respond
-    pub(super) detached: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
@@ -225,22 +221,6 @@ where
         .and_sdl(sdl_to_send)
         .build();
 
-    if request_config.detached {
-        tokio::task::spawn(async move {
-            tracing::debug!(?payload, "externalized output");
-            let start = Instant::now();
-            let _ = payload.call(http_client, &coprocessor_url).await;
-            let duration = start.elapsed().as_secs_f64();
-            tracing::info!(
-                histogram.apollo.router.operations.coprocessor.duration = duration,
-                coprocessor.stage = %PipelineStep::SupergraphRequest,
-            );
-        });
-
-        request.supergraph_request = http::Request::from_parts(parts, body);
-        return Ok(ControlFlow::Continue(request));
-    }
-
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
     let start = Instant::now();
@@ -338,7 +318,7 @@ async fn process_supergraph_response_stage<C>(
     http_client: C,
     coprocessor_url: String,
     sdl: Arc<String>,
-    mut response: supergraph::Response,
+    response: supergraph::Response,
     response_config: SupergraphResponseConf,
 ) -> Result<supergraph::Response, BoxError>
 where
@@ -385,72 +365,6 @@ where
         .and_sdl(sdl_to_send.clone())
         .and_has_next(first.has_next)
         .build();
-
-    if response_config.detached {
-        let http_client2 = http_client.clone();
-        let coprocessor_url2 = coprocessor_url.clone();
-        tokio::task::spawn(async move {
-            tracing::debug!(?payload, "externalized output");
-            let start = Instant::now();
-            let _ = payload.call(http_client, &coprocessor_url).await;
-            let duration = start.elapsed().as_secs_f64();
-            tracing::info!(
-                histogram.apollo.router.operations.coprocessor.duration = duration,
-                coprocessor.stage = %PipelineStep::SupergraphResponse,
-            );
-        });
-
-        let map_context = response.context.clone();
-        // Map the rest of our body to process subsequent chunks of response
-        let mapped_stream = rest.map(move |deferred_response| {
-            let generator_client = http_client2.clone();
-            let generator_coprocessor_url = coprocessor_url2.clone();
-            let generator_map_context = map_context.clone();
-            let generator_sdl_to_send = sdl_to_send.clone();
-            let generator_id = map_context.id.clone();
-
-            let body_to_send = response_config.body.then(|| {
-                serde_json::to_value(&deferred_response).expect("serialization will not fail")
-            });
-            let context_to_send = response_config
-                .context
-                .then(|| generator_map_context.clone());
-
-            // Note: We deliberately DO NOT send headers or status_code even if the user has
-            // requested them. That's because they are meaningless on a deferred response and
-            // providing them will be a source of confusion.
-            let payload = Externalizable::supergraph_builder()
-                .stage(PipelineStep::SupergraphResponse)
-                .id(generator_id)
-                .and_body(body_to_send)
-                .and_context(context_to_send)
-                .and_sdl(generator_sdl_to_send)
-                .and_has_next(deferred_response.has_next)
-                .build();
-            tokio::task::spawn(async move {
-                // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
-                let start = Instant::now();
-                let _ = payload
-                    .call(generator_client, &generator_coprocessor_url)
-                    .await;
-                let duration = start.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo.router.operations.coprocessor.duration = duration,
-                    coprocessor.stage = %PipelineStep::SupergraphResponse,
-                );
-            });
-
-            deferred_response
-        });
-
-        // Create our response stream which consists of our first body chained with the
-        // rest of the responses in our mapped stream.
-        let stream = once(ready(first)).chain(mapped_stream).boxed();
-
-        response.response = http::Response::from_parts(parts, stream);
-        return Ok(response);
-    }
 
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
@@ -627,32 +541,6 @@ mod tests {
     }
 
     #[allow(clippy::type_complexity)]
-    pub(crate) fn mock_with_detached_response_callback(
-        callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
-
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
-                //mock_http_client.expect_call().returning(callback);
-                mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockHttpClientService::new();
-                    mock_http_client.expect_call().returning(callback);
-                    mock_http_client
-                });
-                mock_http_client
-            });
-            mock_http_client
-        });
-
-        mock_http_client
-    }
-
-    #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
             hyper::Request<Body>,
@@ -685,7 +573,6 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
-                detached: false,
             },
             response: Default::default(),
         };
@@ -819,7 +706,6 @@ mod tests {
                 body: true,
                 sdl: false,
                 method: false,
-                detached: false,
             },
             response: Default::default(),
         };
@@ -891,7 +777,6 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                detached: false,
             },
             request: Default::default(),
         };
@@ -1023,7 +908,6 @@ mod tests {
                 body: true,
                 sdl: true,
                 status_code: false,
-                detached: false,
             },
             request: Default::default(),
         };
@@ -1120,120 +1004,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
-        );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_supergraph_request_async() {
-        let supergraph_stage = SupergraphStage {
-            request: SupergraphRequestConf {
-                detached: true,
-                ..Default::default()
-            },
-            response: SupergraphResponseConf::default(),
-        };
-
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-
-        let mock_http_client =
-            mock_with_callback(move |_: hyper::Request<Body>| Box::pin(async { panic!() }));
-
-        let service = supergraph_stage.as_service(
-            mock_http_client,
-            mock_supergraph_service.boxed(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-        );
-
-        let request = supergraph::Request::fake_builder()
-            .query("query Long {\n  me {\n  name\n}\n}")
-            .build()
-            .unwrap();
-
-        assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
-            service
-                .oneshot(request)
-                .await
-                .unwrap()
-                .response
-                .into_body()
-                .next()
-                .await
-                .unwrap()
-                .data
-                .unwrap()
-        );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_supergraph_response_async() {
-        let supergraph_stage = SupergraphStage {
-            request: SupergraphRequestConf::default(),
-            response: SupergraphResponseConf {
-                detached: true,
-                ..Default::default()
-            },
-        };
-
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_supergraph_service = MockSupergraphService::new();
-
-        mock_supergraph_service
-            .expect_call()
-            .returning(|req: supergraph::Request| {
-                Ok(supergraph::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-
-        let mock_http_client =
-            mock_with_detached_response_callback(move |_: hyper::Request<Body>| {
-                Box::pin(async { panic!() })
-            });
-
-        let service = supergraph_stage.as_service(
-            mock_http_client,
-            mock_supergraph_service.boxed(),
-            "http://test".to_string(),
-            Arc::new("".to_string()),
-        );
-
-        let request = supergraph::Request::fake_builder()
-            .query("query Long {\n  me {\n  name\n}\n}")
-            .build()
-            .unwrap();
-
-        assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
-            service
-                .oneshot(request)
-                .await
-                .unwrap()
-                .response
-                .into_body()
-                .next()
-                .await
-                .unwrap()
-                .data
-                .unwrap()
         );
     }
 }

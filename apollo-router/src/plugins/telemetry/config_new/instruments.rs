@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use opentelemetry::metrics::Unit;
 use opentelemetry_api::metrics::Counter;
 use opentelemetry_api::metrics::Histogram;
 use opentelemetry_api::metrics::MeterProvider;
@@ -26,6 +27,8 @@ use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::cost::CostInstruments;
+use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -37,9 +40,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::Context;
 
-const METER_NAME: &str = "apollo/router";
+pub(crate) const METER_NAME: &str = "apollo/router";
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct InstrumentsConfig {
@@ -50,8 +52,10 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) router:
         Extendable<RouterInstrumentsConfig, Instrument<RouterAttributes, RouterSelector>>,
     /// Supergraph service instruments. For more information see documentation on Router lifecycle.
-    pub(crate) supergraph:
-        Extendable<SupergraphInstruments, Instrument<SupergraphAttributes, SupergraphSelector>>,
+    pub(crate) supergraph: Extendable<
+        SupergraphInstrumentsConfig,
+        Instrument<SupergraphAttributes, SupergraphSelector>,
+    >,
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
     pub(crate) subgraph:
         Extendable<SubgraphInstrumentsConfig, Instrument<SubgraphAttributes, SubgraphSelector>>,
@@ -90,6 +94,7 @@ impl InstrumentsConfig {
                             Some(attributes.clone())
                         }
                     },
+                    updated: false,
                 }),
             });
         let http_server_request_body_size =
@@ -121,6 +126,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -154,6 +160,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -188,6 +195,13 @@ impl InstrumentsConfig {
         }
     }
 
+    pub(crate) fn new_supergraph_instruments(&self) -> SupergraphInstruments {
+        SupergraphInstruments {
+            cost: self.supergraph.attributes.cost.to_instruments(),
+            custom: CustomInstruments::new(&self.supergraph.custom),
+        }
+    }
+
     pub(crate) fn new_subgraph_instruments(&self) -> SubgraphInstruments {
         let meter = metrics::meter_provider().meter(METER_NAME);
         let http_client_request_duration = self
@@ -214,6 +228,7 @@ impl InstrumentsConfig {
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: None,
                         selectors,
+                        updated: false,
                     }),
                 }
             });
@@ -246,6 +261,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -278,6 +294,7 @@ impl InstrumentsConfig {
                                 default: None,
                             })),
                             selectors,
+                            updated: false,
                         }),
                     }
                 });
@@ -333,12 +350,16 @@ impl DefaultForLevel for RouterInstrumentsConfig {
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct ActiveRequestsAttributes {
+    /// The HTTP request method
     #[serde(rename = "http.request.method")]
     http_request_method: bool,
+    /// The server address
     #[serde(rename = "server.address")]
     server_address: bool,
+    /// The server port
     #[serde(rename = "server.port")]
     server_port: bool,
+    /// The URL scheme
     #[serde(rename = "url.scheme")]
     url_scheme: bool,
 }
@@ -362,7 +383,7 @@ impl DefaultForLevel for ActiveRequestsAttributes {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, untagged)]
-enum DefaultedStandardInstrument<T> {
+pub(crate) enum DefaultedStandardInstrument<T> {
     #[default]
     Unset,
     Bool(bool),
@@ -372,7 +393,7 @@ enum DefaultedStandardInstrument<T> {
 }
 
 impl<T> DefaultedStandardInstrument<T> {
-    fn is_enabled(&self) -> bool {
+    pub(crate) fn is_enabled(&self) -> bool {
         match self {
             Self::Unset => false,
             Self::Bool(enabled) => *enabled,
@@ -421,41 +442,51 @@ where
     }
 }
 
-impl<T, Request, Response> Selectors for DefaultedStandardInstrument<T>
+impl<T, Request, Response, EventResponse> Selectors for DefaultedStandardInstrument<T>
 where
-    T: Selectors<Request = Request, Response = Response>,
+    T: Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) | Self::Unset => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_request(request),
         }
     }
 
     fn on_response(&self, response: &Self::Response) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) | Self::Unset => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_response(response),
         }
     }
 
     fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         match self {
-            Self::Bool(_) | Self::Unset => Vec::new(),
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
             Self::Extendable { attributes } => attributes.on_error(error),
+        }
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+        match self {
+            Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
+            Self::Extendable { attributes } => attributes.on_response_event(response, ctx),
         }
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
-pub(crate) struct SupergraphInstruments {}
+pub(crate) struct SupergraphInstrumentsConfig {
+    #[serde(flatten)]
+    pub(crate) cost: CostInstrumentsConfig,
+}
 
-impl DefaultForLevel for SupergraphInstruments {
+impl DefaultForLevel for SupergraphInstrumentsConfig {
     fn defaults_for_level(
         &mut self,
         _requirement_level: DefaultAttributeRequirementLevel,
@@ -464,7 +495,6 @@ impl DefaultForLevel for SupergraphInstruments {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SubgraphInstrumentsConfig {
@@ -499,8 +529,8 @@ impl DefaultForLevel for SubgraphInstrumentsConfig {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct Instrument<A, E>
 where
     A: Default + Debug,
@@ -528,14 +558,16 @@ where
     condition: Condition<E>,
 }
 
-impl<A, E, Request, Response> Selectors for Instrument<A, E>
+impl<A, E, Request, Response, EventResponse> Selectors for Instrument<A, E>
 where
-    A: Debug + Default + Selectors<Request = Request, Response = Response>,
-    E: Debug + Selector<Request = Request, Response = Response>,
+    A: Debug
+        + Default
+        + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
-
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_request(request)
@@ -545,12 +577,19 @@ where
         self.attributes.on_response(response)
     }
 
+    fn on_response_event(
+        &self,
+        response: &Self::EventResponse,
+        ctx: &Context,
+    ) -> Vec<opentelemetry_api::KeyValue> {
+        self.attributes.on_response_event(response, ctx)
+    }
+
     fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
         self.attributes.on_error(error)
     }
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum InstrumentType {
@@ -565,15 +604,14 @@ pub(crate) enum InstrumentType {
     // Gauge,
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum InstrumentValue<T> {
     Standard(Standard),
+    Chunked(Event<T>),
     Custom(T),
 }
 
-#[allow(dead_code)]
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Standard {
@@ -582,23 +620,43 @@ pub(crate) enum Standard {
     // Active,
 }
 
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Event<T> {
+    /// For every supergraph response payload (including subscription events and defer events)
+    #[serde(rename = "event_duration")]
+    Duration,
+    /// For every supergraph response payload (including subscription events and defer events)
+    #[serde(rename = "event_unit")]
+    Unit,
+    /// For every supergraph response payload (including subscription events and defer events)
+    #[serde(rename = "event_custom")]
+    Custom(T),
+}
+
 pub(crate) trait Instrumented {
     type Request;
     type Response;
+    type EventResponse;
 
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
+    fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
-impl<A, B, E, Request, Response> Instrumented for Extendable<A, Instrument<B, E>>
+impl<A, B, E, Request, Response, EventResponse> Instrumented for Extendable<A, Instrument<B, E>>
 where
-    A: Default + Instrumented<Request = Request, Response = Response>,
-    B: Default + Debug + Selectors<Request = Request, Response = Response>,
-    E: Debug + Selector<Request = Request, Response = Response>,
+    A: Default
+        + Instrumented<Request = Request, Response = Response, EventResponse = EventResponse>,
+    B: Default
+        + Debug
+        + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         self.attributes.on_request(request);
@@ -606,6 +664,10 @@ where
 
     fn on_response(&self, response: &Self::Response) {
         self.attributes.on_response(response);
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        self.attributes.on_response_event(response, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -616,6 +678,7 @@ where
 impl Selectors for SubgraphInstrumentsConfig {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) -> Vec<opentelemetry_api::KeyValue> {
         let mut attrs = self.http_client_request_body_size.on_request(request);
@@ -675,14 +738,29 @@ where
                         InstrumentValue::Custom(selector) => {
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
+                        InstrumentValue::Chunked(incr) => match incr {
+                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Unit => (None, Increment::EventUnit),
+                            Event::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::EventCustom(None),
+                            ),
+                        },
                     };
                     let counter = CustomCounterInner {
                         increment,
                         condition: instrument.condition.clone(),
-                        counter: Some(meter.f64_counter(instrument_name.clone()).init()),
+                        counter: Some(
+                            meter
+                                .f64_counter(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .init(),
+                        ),
                         attributes: Vec::new(),
                         selector,
                         selectors: instrument.attributes.clone(),
+                        incremented: false,
                     };
 
                     counters.push(CustomCounter {
@@ -701,14 +779,29 @@ where
                         InstrumentValue::Custom(selector) => {
                             (Some(Arc::new(selector.clone())), Increment::Custom(None))
                         }
+                        InstrumentValue::Chunked(incr) => match incr {
+                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
+                            Event::Unit => (None, Increment::EventUnit),
+                            Event::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::EventCustom(None),
+                            ),
+                        },
                     };
                     let histogram = CustomHistogramInner {
                         increment,
                         condition: instrument.condition.clone(),
-                        histogram: Some(meter.f64_histogram(instrument_name.clone()).init()),
+                        histogram: Some(
+                            meter
+                                .f64_histogram(instrument_name.clone())
+                                .with_description(instrument.description.clone())
+                                .with_unit(Unit::new(instrument.unit.clone()))
+                                .init(),
+                        ),
                         attributes: Vec::new(),
                         selector,
                         selectors: Some(instrument.attributes.clone()),
+                        updated: false,
                     };
 
                     histograms.push(CustomHistogram {
@@ -725,14 +818,16 @@ where
     }
 }
 
-impl<Request, Response, Attributes, Select> Instrumented
+impl<Request, Response, EventResponse, Attributes, Select> Instrumented
     for CustomInstruments<Request, Response, Attributes, Select>
 where
-    Attributes: Selectors<Request = Request, Response = Response> + Default,
-    Select: Selector<Request = Request, Response = Response> + Debug,
+    Attributes:
+        Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    Select: Selector<Request = Request, Response = Response, EventResponse = EventResponse> + Debug,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         for counter in &self.counters {
@@ -760,6 +855,15 @@ where
             histogram.on_error(error, ctx);
         }
     }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        for counter in &self.counters {
+            counter.on_response_event(response, ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_response_event(response, ctx);
+        }
+    }
 }
 
 pub(crate) struct RouterInstruments {
@@ -778,8 +882,8 @@ pub(crate) struct RouterInstruments {
 
 impl Instrumented for RouterInstruments {
     type Request = router::Request;
-
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(http_server_request_duration) = &self.http_server_request_duration {
@@ -830,6 +934,37 @@ impl Instrumented for RouterInstruments {
     }
 }
 
+pub(crate) struct SupergraphInstruments {
+    cost: CostInstruments,
+    custom: SupergraphCustomInstruments,
+}
+
+impl Instrumented for SupergraphInstruments {
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
+
+    fn on_request(&self, request: &Self::Request) {
+        self.cost.on_request(request);
+        self.custom.on_request(request);
+    }
+
+    fn on_response(&self, response: &Self::Response) {
+        self.cost.on_response(response);
+        self.custom.on_response(response);
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
+        self.cost.on_error(error, ctx);
+        self.custom.on_error(error, ctx);
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        self.cost.on_response_event(response, ctx);
+        self.custom.on_response_event(response, ctx);
+    }
+}
+
 pub(crate) struct SubgraphInstruments {
     http_client_request_duration: Option<
         CustomHistogram<
@@ -860,8 +995,8 @@ pub(crate) struct SubgraphInstruments {
 
 impl Instrumented for SubgraphInstruments {
     type Request = subgraph::Request;
-
     type Response = subgraph::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(http_client_request_duration) = &self.http_client_request_duration {
@@ -917,10 +1052,14 @@ pub(crate) type SubgraphCustomInstruments =
     CustomInstruments<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
 
 // ---------------- Counter -----------------------
-enum Increment {
+#[derive(Debug)]
+pub(crate) enum Increment {
     Unit,
+    EventUnit,
     Duration(Instant),
+    EventDuration(Instant),
     Custom(Option<i64>),
+    EventCustom(Option<i64>),
 }
 
 struct CustomCounter<Request, Response, A, T>
@@ -942,15 +1081,20 @@ where
     counter: Option<Counter<f64>>,
     condition: Condition<T>,
     attributes: Vec<opentelemetry_api::KeyValue>,
+    // Useful when it's a counter on events to know if we have to count for an event or not
+    incremented: bool,
 }
 
-impl<A, T, Request, Response> Instrumented for CustomCounter<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response> + Debug + Debug,
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
+        + Debug
+        + Debug,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -960,25 +1104,54 @@ where
         }
         inner.attributes = inner.selectors.on_request(request).into_iter().collect();
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match &inner.increment {
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
     }
 
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
-            let _ = inner.counter.take();
+            if !matches!(
+                &inner.increment,
+                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+            ) {
+                let _ = inner.counter.take();
+            }
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
-        attrs.append(&mut inner.attributes);
+        let attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
+        inner.attributes.extend(attrs);
 
         if let Some(selected_value) = inner
             .selector
             .as_ref()
             .and_then(|s| s.on_response(response))
         {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match &inner.increment {
+                Increment::EventCustom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
 
         let increment = match inner.increment {
@@ -988,10 +1161,75 @@ where
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
+            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
+                // Nothing to do because we're incrementing on events
+                return;
+            }
         };
 
-        if let Some(counter) = inner.counter.take() {
-            counter.add(increment, &attrs);
+        if increment != 0.0 {
+            if let Some(counter) = &inner.counter {
+                counter.add(increment, &inner.attributes);
+            }
+            inner.incremented = true;
+        }
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_event_response(response, ctx) {
+            return;
+        }
+        let attrs: Vec<KeyValue> = inner
+            .selectors
+            .on_response_event(response, ctx)
+            .into_iter()
+            .collect();
+        inner.attributes.extend(attrs);
+
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response_event(response, ctx))
+        {
+            let new_incr = match &inner.increment {
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment = match &mut inner.increment {
+            Increment::EventUnit => 1f64,
+            Increment::EventDuration(instant) => {
+                let incr = instant.elapsed().as_secs_f64();
+                // Set it to new instant for the next event
+                *instant = Instant::now();
+                incr
+            }
+            Increment::Custom(val) | Increment::EventCustom(val) => {
+                let incr = match val {
+                    Some(incr) => *incr as f64,
+                    None => 0f64,
+                };
+                // Set it to None again for the next event
+                *val = None;
+                incr
+            }
+            _ => 0f64,
+        };
+
+        inner.incremented = true;
+        if let Some(counter) = &inner.counter {
+            counter.add(increment, &inner.attributes);
         }
     }
 
@@ -1001,9 +1239,11 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit => 1f64,
-            Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
-            Increment::Custom(val) => match val {
+            Increment::Unit | Increment::EventUnit => 1f64,
+            Increment::Duration(instant) | Increment::EventDuration(instant) => {
+                instant.elapsed().as_secs_f64()
+            }
+            Increment::Custom(val) | Increment::EventCustom(val) => match val {
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
@@ -1024,11 +1264,16 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
+            if inner.incremented {
+                return;
+            }
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
-                    Increment::Unit => 1f64,
-                    Increment::Duration(instant) => instant.elapsed().as_secs_f64(),
-                    Increment::Custom(val) => match val {
+                    Increment::Unit | Increment::EventUnit => 1f64,
+                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
+                        instant.elapsed().as_secs_f64()
+                    }
+                    Increment::Custom(val) | Increment::EventCustom(val) => match val {
                         Some(incr) => *incr as f64,
                         None => 0f64,
                     },
@@ -1052,6 +1297,7 @@ struct ActiveRequestsCounterInner {
 impl Instrumented for ActiveRequestsCounter {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -1122,34 +1368,38 @@ impl Drop for ActiveRequestsCounter {
 
 // ---------------- Histogram -----------------------
 
-struct CustomHistogram<Request, Response, A, T>
+pub(crate) struct CustomHistogram<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response>,
 {
-    inner: Mutex<CustomHistogramInner<Request, Response, A, T>>,
+    pub(crate) inner: Mutex<CustomHistogramInner<Request, Response, A, T>>,
 }
 
-struct CustomHistogramInner<Request, Response, A, T>
+pub(crate) struct CustomHistogramInner<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response>,
 {
-    increment: Increment,
-    condition: Condition<T>,
-    selector: Option<Arc<T>>,
-    selectors: Option<Arc<Extendable<A, T>>>,
-    histogram: Option<Histogram<f64>>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) increment: Increment,
+    pub(crate) condition: Condition<T>,
+    pub(crate) selector: Option<Arc<T>>,
+    pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(crate) histogram: Option<Histogram<f64>>,
+    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
+    // Useful when it's an histogram on events to know if we have to count for an event or not
+    pub(crate) updated: bool,
 }
 
-impl<A, T, Request, Response> Instrumented for CustomHistogram<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Instrumented
+    for CustomHistogram<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response>,
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -1161,37 +1411,126 @@ where
             inner.attributes = selectors.on_request(request).into_iter().collect();
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match &inner.increment {
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
     }
 
     fn on_response(&self, response: &Self::Response) {
         let mut inner = self.inner.lock();
         if !inner.condition.evaluate_response(response) {
-            let _ = inner.histogram.take();
+            if !matches!(
+                &inner.increment,
+                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+            ) {
+                let _ = inner.histogram.take();
+            }
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner
+        let attrs: Vec<KeyValue> = inner
             .selectors
             .as_ref()
             .map(|s| s.on_response(response).into_iter().collect())
             .unwrap_or_default();
-        attrs.append(&mut inner.attributes);
+        inner.attributes.extend(attrs);
         if let Some(selected_value) = inner
             .selector
             .as_ref()
             .and_then(|s| s.on_response(response))
         {
-            inner.increment = Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+            let new_incr = match &inner.increment {
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
         }
 
         let increment = match inner.increment {
             Increment::Unit => Some(1f64),
             Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
             Increment::Custom(val) => val.map(|incr| incr as f64),
+            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
+                // Nothing to do because we're incrementing on events
+                return;
+            }
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+            histogram.record(increment, &inner.attributes);
+        }
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_event_response(response, ctx) {
+            return;
+        }
+        let mut attrs: Vec<KeyValue> = inner
+            .selectors
+            .as_ref()
+            .map(|s| s.on_response_event(response, ctx).into_iter().collect())
+            .unwrap_or_default();
+        attrs.extend(inner.attributes.clone());
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response_event(response, ctx))
+        {
+            let new_incr = match &inner.increment {
+                Increment::EventCustom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment: Option<f64> = match &mut inner.increment {
+            Increment::EventUnit => Some(1f64),
+            Increment::EventDuration(instant) => {
+                let incr = Some(instant.elapsed().as_secs_f64());
+                // Need a new instant for the next event
+                *instant = Instant::now();
+                incr
+            }
+            Increment::EventCustom(val) => {
+                let incr = val.map(|incr| incr as f64);
+                // Set it to None again
+                *val = None;
+                incr
+            }
+            Increment::Unit | Increment::Duration(_) | Increment::Custom(_) => {
+                // Nothing to do because we're incrementing on events
+                return;
+            }
+        };
+        inner.updated = true;
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &attrs);
         }
     }
@@ -1206,9 +1545,11 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit => Some(1f64),
-            Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
-            Increment::Custom(val) => val.map(|incr| incr as f64),
+            Increment::Unit | Increment::EventUnit => Some(1f64),
+            Increment::Duration(instant) | Increment::EventDuration(instant) => {
+                Some(instant.elapsed().as_secs_f64())
+            }
+            Increment::Custom(val) | Increment::EventCustom(val) => val.map(|incr| incr as f64),
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
@@ -1226,11 +1567,18 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
+            if inner.updated {
+                return;
+            }
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
-                    Increment::Unit => Some(1f64),
-                    Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
-                    Increment::Custom(val) => val.map(|incr| incr as f64),
+                    Increment::Unit | Increment::EventUnit => Some(1f64),
+                    Increment::Duration(instant) | Increment::EventDuration(instant) => {
+                        Some(instant.elapsed().as_secs_f64())
+                    }
+                    Increment::Custom(val) | Increment::EventCustom(val) => {
+                        val.map(|incr| incr as f64)
+                    }
                 };
 
                 if let Some(increment) = increment {
@@ -1283,6 +1631,23 @@ mod tests {
                                         }
                                     ]
                                 }
+                            },
+                            "attributes": {
+                                "http.response.status_code": true
+                            }
+                        },
+                        "acme.request.on_critical_error": {
+                            "value": "unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "request time out",
+                                    {
+                                        "error": "reason"
+                                    }
+                                ]
                             },
                             "attributes": {
                                 "http.response.status_code": true
@@ -1429,6 +1794,20 @@ mod tests {
                 2.0,
                 "http.response.status_code" = 400
             );
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            router_instruments.on_error(&BoxError::from("request time out"), &Context::new());
+            assert_counter!(
+                "acme.request.on_critical_error",
+                1.0,
+                "http.response.status_code" = 500
+            );
         }
         .with_metrics()
         .await;
@@ -1453,6 +1832,38 @@ mod tests {
                                             "response_status": "code"
                                         }
                                     ]
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error": {
+                            "value": "event_unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "NOPE",
+                                    {
+                                        "response_errors": "$.[0].extensions.code"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_data": {
+                            "value": {
+                                "response_data": "$.price"
+                            },
+                            "type": "counter",
+                            "unit": "$",
+                            "description": "my description",
+                            "attributes": {
+                                "response.data": {
+                                    "response_data": "$.*"
                                 }
                             }
                         },
@@ -1508,9 +1919,27 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_response_event(
+                &graphql::Response::builder()
+                    .data(json!({
+                        "price": 500
+                    }))
+                    .errors(vec![graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build()])
+                    .build(),
+                &supergraph_req.context.clone(),
+            );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 1.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let supergraph_req = supergraph::Request::fake_builder()
@@ -1534,9 +1963,27 @@ mod tests {
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_response_event(
+                &graphql::Response::builder()
+                    .data(json!({
+                        "price": 500
+                    }))
+                    .errors(vec![graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build()])
+                    .build(),
+                &supergraph_req.context.clone(),
+            );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let supergraph_req = supergraph::Request::fake_builder()
@@ -1552,16 +1999,25 @@ mod tests {
                 .status_code(StatusCode::OK)
                 .header("content-type", "application/json")
                 .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
+                .data(serde_json_bytes::json!({"foo": "bar"}))
                 .build()
                 .unwrap();
             custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_response_event(
+                &graphql::Response::builder()
+                    .data(serde_json_bytes::json!({"foo": "bar"}))
+                    .build(),
+                &supergraph_req.context.clone(),
+            );
 
             assert_counter!("acme.query", 2.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
         }
         .with_metrics()
         .await;

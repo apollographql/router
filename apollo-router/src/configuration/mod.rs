@@ -189,6 +189,10 @@ pub struct Configuration {
     /// Batching configuration.
     #[serde(default)]
     pub(crate) batching: Batching,
+
+    /// Type conditioned fetching configuration.
+    #[serde(default)]
+    pub(crate) experimental_type_conditioned_fetching: bool,
 }
 
 impl PartialEq for Configuration {
@@ -266,6 +270,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             limits: Limits,
             experimental_chaos: Chaos,
             batching: Batching,
+            experimental_type_conditioned_fetching: bool,
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
             experimental_api_schema_generation_mode: ApiSchemaMode,
             experimental_query_planner_mode: QueryPlannerMode,
@@ -290,6 +295,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_api_schema_generation_mode: ad_hoc.experimental_api_schema_generation_mode,
             experimental_apollo_metrics_generation_mode: ad_hoc
                 .experimental_apollo_metrics_generation_mode,
+            experimental_type_conditioned_fetching: ad_hoc.experimental_type_conditioned_fetching,
             experimental_query_planner_mode: ad_hoc.experimental_query_planner_mode,
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
@@ -335,6 +341,7 @@ impl Configuration {
         chaos: Option<Chaos>,
         uplink: Option<UplinkConfig>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        experimental_type_conditioned_fetching: Option<bool>,
         batching: Option<Batching>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
@@ -366,6 +373,8 @@ impl Configuration {
             tls: tls.unwrap_or_default(),
             uplink,
             batching: batching.unwrap_or_default(),
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
+                .unwrap_or_default(),
             notify,
         };
 
@@ -405,6 +414,27 @@ impl Configuration {
                 .build()
             ).build())
     }
+
+    pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
+        router_bridge::planner::QueryPlannerConfig {
+            reuse_query_fragments: self.supergraph.reuse_query_fragments,
+            generate_query_fragments: Some(self.supergraph.generate_query_fragments),
+            incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
+                enable_defer: Some(self.supergraph.defer_support),
+            }),
+            graphql_validation: false,
+            debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
+                bypass_planner_for_single_subgraph: None,
+                max_evaluated_plans: self
+                    .supergraph
+                    .query_planning
+                    .experimental_plans_limit
+                    .or(Some(10000)),
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            }),
+            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+        }
+    }
 }
 
 impl Default for Configuration {
@@ -435,6 +465,7 @@ impl Configuration {
         uplink: Option<UplinkConfig>,
         batching: Option<Batching>,
         experimental_api_schema_generation_mode: Option<ApiSchemaMode>,
+        experimental_type_conditioned_fetching: Option<bool>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
     ) -> Result<Self, ConfigurationError> {
@@ -463,6 +494,8 @@ impl Configuration {
             apq: apq.unwrap_or_default(),
             persisted_queries: persisted_query.unwrap_or_default(),
             uplink,
+            experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
+                .unwrap_or_default(),
             batching: batching.unwrap_or_default(),
         };
 

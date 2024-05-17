@@ -1,0 +1,8 @@
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        cost.delta:
+          attributes:
+            graphql.operation.name: true
+            cost.result: true

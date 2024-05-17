@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/plugins/authorization/tests.rs
+expression: response
+---
+{
+  "data": {
+    "currentUser": {
+      "id": 1,
+      "name": null,
+      "phone": "1234"
+    }
+  },
+  "errors": [
+    {
+      "message": "Unauthorized field or type",
+      "path": [
+        "currentUser",
+        "name"
+      ],
+      "extensions": {
+        "code": "UNAUTHORIZED_FIELD_OR_TYPE"
+      }
+    }
+  ]
+}

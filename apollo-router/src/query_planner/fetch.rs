@@ -1,12 +1,12 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 use std::sync::Arc;
-use std::sync::OnceLock;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
+use once_cell::sync::OnceCell as OnceLock;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -19,6 +19,7 @@ use super::selection::execute_selection_set;
 use super::selection::Selection;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -168,21 +169,20 @@ impl SubgraphOperation {
     pub(crate) fn as_parsed(
         &self,
         subgraph_schema: &Valid<apollo_compiler::Schema>,
-    ) -> &Arc<Valid<ExecutableDocument>> {
-        self.parsed.get_or_init(|| {
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
+        self.parsed.get_or_try_init(|| {
             let serialized = self
                 .serialized
                 .get()
                 .expect("SubgraphOperation has neither representation initialized");
-            Arc::new(
+            Ok(Arc::new(
                 ExecutableDocument::parse_and_validate(
                     subgraph_schema,
                     serialized,
                     "operation.graphql",
                 )
-                .map_err(|e| e.errors)
-                .expect("Subgraph operation should be valid"),
-            )
+                .map_err(|e| e.errors)?,
+            ))
         })
     }
 }
@@ -294,7 +294,6 @@ impl Variables {
             let representations = Value::Array(Vec::from_iter(values));
 
             variables.insert("representations", representations);
-
             Some(Variables {
                 variables,
                 inverted_paths,
@@ -333,7 +332,7 @@ impl FetchNode {
     pub(crate) fn parsed_operation(
         &self,
         subgraph_schemas: &SubgraphSchemas,
-    ) -> &Arc<Valid<ExecutableDocument>> {
+    ) -> Result<&Arc<Valid<ExecutableDocument>>, ValidationErrors> {
         self.operation
             .as_parsed(&subgraph_schemas[self.service_name.as_str()])
     }
@@ -481,7 +480,10 @@ impl FetchNode {
         response: graphql::Response,
     ) -> (Value, Vec<Error>) {
         if !self.requires.is_empty() {
-            let entities_path = Path(vec![json_ext::PathElement::Key("_entities".to_string())]);
+            let entities_path = Path(vec![json_ext::PathElement::Key(
+                "_entities".to_string(),
+                None,
+            )]);
 
             let mut errors: Vec<Error> = vec![];
             for mut error in response.errors {
@@ -567,11 +569,12 @@ impl FetchNode {
 
             (Value::Null, errors)
         } else {
-            let current_slice = if current_dir.last() == Some(&json_ext::PathElement::Flatten) {
-                &current_dir.0[..current_dir.0.len() - 1]
-            } else {
-                &current_dir.0[..]
-            };
+            let current_slice =
+                if matches!(current_dir.last(), Some(&json_ext::PathElement::Flatten(_))) {
+                    &current_dir.0[..current_dir.0.len() - 1]
+                } else {
+                    &current_dir.0[..]
+                };
 
             let errors: Vec<Error> = response
                 .errors
@@ -604,25 +607,39 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas) {
-        let doc = self.parsed_operation(subgraph_schemas);
+    pub(crate) fn hash_subquery(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+        supergraph_schema_hash: &str,
+    ) -> Result<(), ValidationErrors> {
+        let doc = self.parsed_operation(subgraph_schemas)?;
         let schema = &subgraph_schemas[self.service_name.as_str()];
 
-        if let Ok(hash) = QueryHashVisitor::hash_query(schema, doc, self.operation_name.as_deref())
-        {
+        if let Ok(hash) = QueryHashVisitor::hash_query(
+            schema,
+            supergraph_schema_hash,
+            doc,
+            self.operation_name.as_deref(),
+        ) {
             self.schema_aware_hash = Arc::new(QueryHash(hash));
         }
+        Ok(())
     }
 
     pub(crate) fn extract_authorization_metadata(
         &mut self,
-        subgraph_schemas: &SubgraphSchemas,
+        schema: &Valid<apollo_compiler::Schema>,
         global_authorisation_cache_key: &CacheKeyMetadata,
     ) {
-        let doc = self.parsed_operation(subgraph_schemas);
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let doc = ExecutableDocument::parse(
+            schema,
+            self.operation.as_serialized().to_string(),
+            "query.graphql",
+        )
+        // Assume query planing creates a valid document: ignore parse errors
+        .unwrap_or_else(|invalid| invalid.partial);
         let subgraph_query_cache_key = AuthorizationPlugin::generate_cache_metadata(
-            doc,
+            &doc,
             self.operation_name.as_deref(),
             schema,
             !self.requires.is_empty(),
