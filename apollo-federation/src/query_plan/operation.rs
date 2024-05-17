@@ -139,7 +139,7 @@ fn same_directives(left: &executable::DirectiveList, right: &executable::Directi
 
 /// An analogue of the apollo-compiler type `Operation` with these changes:
 /// - Stores the schema that the operation is queried against.
-/// - Swaps `operation_type` with `root_kind` (using the analogous federation-next type).
+/// - Swaps `operation_type` with `root_kind` (using the analogous apollo-federation type).
 /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
 /// - Stores the fragments used by this operation (the executable document the operation was taken
 ///   from may contain other fragments that are not used by this operation).
@@ -685,7 +685,7 @@ impl Containment {
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -1913,6 +1913,42 @@ impl SelectionSet {
         }
     }
 
+    // TODO: Ideally, this method returns a proper, recursive iterator. As is, there is a lot of
+    // overhead due to indirection, both from over allocation and from v-table lookups.
+    pub(crate) fn split_top_level_fields(self) -> Box<dyn Iterator<Item = SelectionSet>> {
+        let parent_type = self.type_position.clone();
+        let selections: IndexMap<SelectionKey, Selection> = (**self.selections).clone();
+        Box::new(selections.into_values().flat_map(move |sel| {
+            let digest: Box<dyn Iterator<Item = SelectionSet>> = if sel.is_field() {
+                Box::new(std::iter::once(SelectionSet::from_selection(
+                    parent_type.clone(),
+                    sel.clone(),
+                )))
+            } else {
+                let Some(ele) = sel.element().ok() else {
+                    let digest: Box<dyn Iterator<Item = SelectionSet>> =
+                        Box::new(std::iter::empty());
+                    return digest;
+                };
+                Box::new(
+                    sel.selection_set()
+                        .ok()
+                        .flatten()
+                        .cloned()
+                        .into_iter()
+                        .flat_map(SelectionSet::split_top_level_fields)
+                        .filter_map(move |set| {
+                            let parent_type = ele.parent_type_position();
+                            Selection::from_element(ele.clone(), Some(set))
+                                .ok()
+                                .map(|sel| SelectionSet::from_selection(parent_type, sel))
+                        }),
+                )
+            };
+            digest
+        }))
+    }
+
     /// PORT_NOTE: JS calls this `newCompositeTypeSelectionSet`
     pub(crate) fn for_composite_type(
         schema: ValidFederationSchema,
@@ -2370,12 +2406,12 @@ impl SelectionSet {
                 }
                 SelectionValue::FragmentSpread(fragment_spread) => {
                     // at this point in time all fragment spreads should have been converted into inline fragments
-                    return Err(FederationError::SingleFederationError(Internal {
-                        message: format!(
+                    return Err(FederationError::internal(
+                        format!(
                             "Error while optimizing sibling typename information, selection set contains {} named fragment",
                             fragment_spread.get().spread.data().fragment_name
-                        ),
-                    }));
+                        )
+                    ));
                 }
             }
         }
@@ -3389,11 +3425,9 @@ pub(crate) fn subselection_type_if_abstract(
                     r.original_fragments
                         .get(&fragment_spread.spread.data().fragment_name)
                 })
-                .ok_or(FederationError::SingleFederationError(
-                    crate::error::SingleFederationError::InvalidGraphQL {
-                        message: "missing fragment".to_string(),
-                    },
-                ))
+                .ok_or(crate::error::SingleFederationError::InvalidGraphQL {
+                    message: "missing fragment".to_string(),
+                })
                 //FIXME: return error
                 .ok()?;
             match fragment.type_condition_position.clone() {
