@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+use std::collections::HashSet;
+
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
 use apollo_compiler::ast::VariableDefinition;
@@ -11,13 +14,10 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
-use std::collections::HashMap;
-use std::collections::HashSet;
 
 use super::fetch::SubgraphOperation;
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
-
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::json_ext::Value;

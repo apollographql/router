@@ -33,11 +33,10 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::query_planner::subgraph_context::SubgraphContext;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Schema;
-
-use crate::query_planner::subgraph_context::SubgraphContext;
 
 /// GraphQL operation type.
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
