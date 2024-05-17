@@ -6,14 +6,19 @@
 [![Join our Discord server](https://img.shields.io/discord/1022972389463687228.svg?color=7389D8&labelColor=6A7EC2&logo=discord&logoColor=ffffff&style=flat-square)](https://discord.gg/graphos)
 
 Apollo Federation
------------------------------
+-----------------
 Apollo Federation is an architecture for declaratively composing APIs into a unified graph. Each team can own their slice of the graph independently, empowering them to deliver autonomously and incrementally.
 
 Federation 2 is an evolution of the original Apollo Federation with an improved shared ownership model, enhanced type merging, and cleaner syntax for a smoother developer experience. It’s backwards compatible, requiring no major changes to your subgraphs.
 
 Checkout the [Federation 2 docs](https://www.apollographql.com/docs/federation) and [demo repo](https://github.com/apollographql/supergraph-demo-fed2) to take it for a spin and [let us know what you think](https://community.apollographql.com/t/announcing-apollo-federation-2/1821)!
 
-## Versioning
+## Usage
+
+This crate is internal to [Apollo Router](https://www.apollographql.com/docs/router/)
+and not intended to be used directly.
+
+## Crate versioning
 
 The  `apollo-federation` crate does **not** adhere to [Semantic Versioning](https://semver.org/).
 Any version may have breaking API changes, as this API is expected to only be used by `apollo-router`.
@@ -23,17 +28,9 @@ This version number is **not** that of the Apollo Federation specification being
 See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
 for which Federation versions are supported by which Router versions.
 
-## Usage
-
-TODO
-
-### CLI tool
-
-`cargo fed --help`
-
 ## Contributing
 
-TODO
+See [contributing to the `apollo-router` repository](https://github.com/apollographql/router/blob/dev/CONTRIBUTING.md)
 
 ## Security
 
