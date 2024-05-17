@@ -2454,6 +2454,16 @@ expression: "&schema"
         }
       ]
     },
+    "GraphQLInstrumentationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "field.length": {
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "GrpcExporter": {
       "additionalProperties": false,
       "properties": {
@@ -3033,6 +3043,10 @@ expression: "&schema"
         "default_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
           "description": "#/definitions/DefaultAttributeRequirementLevel"
+        },
+        "graphql": {
+          "$ref": "#/definitions/GraphQLInstrumentationConfig",
+          "description": "#/definitions/GraphQLInstrumentationConfig"
         },
         "router": {
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
