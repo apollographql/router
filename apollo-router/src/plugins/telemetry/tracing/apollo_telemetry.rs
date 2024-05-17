@@ -140,7 +140,7 @@ const OTLP_EXT_INCLUDE_ATTRS: [Key; 6] = [
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
 ];
 
-const INCLUDE_SPANS: [&str; 15] = [
+const INCLUDE_SPANS: [&str; 16] = [
     PARALLEL_SPAN_NAME,
     SEQUENCE_SPAN_NAME,
     FETCH_SPAN_NAME,
@@ -155,6 +155,7 @@ const INCLUDE_SPANS: [&str; 15] = [
     CONDITION_IF_SPAN_NAME,
     CONDITION_ELSE_SPAN_NAME,
     EXECUTION_SPAN_NAME,
+    SUBSCRIBE_SPAN_NAME,
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
 
@@ -202,10 +203,9 @@ impl LightSpanData {
                 // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
                 let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
                 let mut new_attrs = EvictedHashMap::new(max_attr_len.try_into().unwrap(), max_attr_len);
-                value.attributes.iter().for_each(|(key, value)| {
-                    if attr_names.contains(key) {
-                        // TBD(tim): any way to avoid copies here since it looks like we already own the SpanData at this point?
-                        new_attrs.insert(KeyValue::new(key.to_owned(), value.to_owned()))
+                value.attributes.into_iter().for_each(|(key, value)| {
+                    if attr_names.contains(&key) {
+                        new_attrs.insert(KeyValue::new(key, value))
                     }
                 });
                 new_attrs
