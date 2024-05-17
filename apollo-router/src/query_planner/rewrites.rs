@@ -47,7 +47,7 @@ pub(crate) struct DataKeyRenamer {
 }
 
 impl DataRewrite {
-    fn maybe_apply(&self, schema: &Schema, data: &mut Value) {
+    pub(crate) fn maybe_apply(&self, schema: &Schema, data: &mut Value) {
         match self {
             DataRewrite::ValueSetter(setter) => {
                 // The `path` of rewrites can only be either `Key` or `Fragment`, and so far
@@ -105,10 +105,6 @@ pub(crate) fn apply_rewrites(
             rewrite.maybe_apply(schema, value);
         }
     }
-}
-
-pub(crate) fn apply_single_rewrite(schema: &Schema, value: &mut Value, rewrite: &DataRewrite) {
-    rewrite.maybe_apply(schema, value);
 }
 
 #[cfg(test)]

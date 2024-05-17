@@ -56,6 +56,18 @@ async fn run_single_request(query: &str, mocks: &[(&'static str, &'static str)])
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context() {
+    static QUERY: &str = r#"
+        query Query {
+            t {
+                __typename
+                id
+                u {
+                    __typename
+                    field
+                }
+            }
+        }"#;
+
     let response = run_single_request(
         QUERY,
         &[
@@ -70,6 +82,16 @@ async fn test_set_context() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_no_typenames() {
+    static QUERY_NO_TYPENAMES: &str = r#"
+        query Query {
+            t {
+                id
+                u {
+                    field
+                }
+            }
+        }"#;
+
     let response = run_single_request(
         QUERY_NO_TYPENAMES,
         &[
@@ -84,6 +106,16 @@ async fn test_set_context_no_typenames() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_list() {
+    static QUERY_WITH_LIST: &str = r#"
+        query Query {
+            t {
+                id
+                uList {
+                    field
+                }
+            }
+        }"#;
+
     let response = run_single_request(
         QUERY_WITH_LIST,
         &[
@@ -98,6 +130,16 @@ async fn test_set_context_list() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_list_of_lists() {
+    static QUERY_WITH_LIST_OF_LISTS: &str = r#"
+        query QueryLL {
+            tList {
+                id
+                uList {
+                    field
+                }
+            }
+        }"#;
+
     let response = run_single_request(
         QUERY_WITH_LIST_OF_LISTS,
         &[
@@ -112,37 +154,54 @@ async fn test_set_context_list_of_lists() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_union() {
-    let harness = setup_from_mocks(
-        json! {{
-            "experimental_type_conditioned_fetching": true,
-            // will make debugging easier
-            "plugins": {
-                "experimental.expose_query_plan": true
-            },
-            "include_subgraph_errors": {
-                "all": true
+    static QUERY_WITH_UNION: &str = r#"
+        query QueryUnion {
+            k {
+                ... on A {
+                    v {
+                        field
+                    }
+                }
+                ... on B {
+                    v {
+                        field
+                    }
+                }
             }
-        }},
+        }"#;
+
+    let response = run_single_request(
+        QUERY_WITH_UNION,
         &[
             ("Subgraph1", include_str!("fixtures/set_context/one.json")),
             ("Subgraph2", include_str!("fixtures/set_context/two.json")),
         ],
-    );
-    let supergraph_service = harness.build_supergraph().await.unwrap();
-    let request: supergraph::Request = supergraph::Request::fake_builder()
-        .query(QUERY_WITH_UNION.to_string())
-        .header("Apollo-Expose-Query-Plan", "true")
-        .variables(Default::default())
-        .build()
-        .expect("expecting valid request");
+    )
+    .await;
 
-    let response = supergraph_service
-        .oneshot(request)
-        .await
-        .unwrap()
-        .next_response()
-        .await
-        .unwrap();
+    insta::assert_json_snapshot!(response);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_context_with_null() {
+    static QUERY: &str = r#"
+        query Query_Null_Param {
+            t {
+                id
+                u {
+                    field
+                }
+            }
+        }"#;
+
+    let response = run_single_request(
+        QUERY,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
 
     insta::assert_json_snapshot!(response);
 }
@@ -176,60 +235,3 @@ fn setup_from_mocks(
         .schema(schema)
         .extra_plugin(mocked_subgraphs)
 }
-
-static QUERY: &str = r#"
-query Query {
-    t {
-        __typename
-        id
-        u {
-            __typename
-            field
-        }
-    }
-}"#;
-static QUERY_NO_TYPENAMES: &str = r#"
-query Query {
-    t {
-        id
-        u {
-            field
-        }
-    }
-}"#;
-
-static QUERY_WITH_LIST: &str = r#"
-query Query {
-    t {
-        id
-        uList {
-            field
-        }
-    }
-}"#;
-
-static QUERY_WITH_LIST_OF_LISTS: &str = r#"
-query QueryLL {
-    tList {
-        id
-        uList {
-            field
-        }
-    }
-}"#;
-
-static QUERY_WITH_UNION: &str = r#"
-query QueryUnion {
-    k {
-        ... on A {
-            v {
-                field
-            }
-        }
-        ... on B {
-            v {
-                field
-            }
-        }
-    }
-}"#;

@@ -268,8 +268,7 @@ impl Variables {
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
         let body = request.body();
-        let mut subgraph_context =
-            SubgraphContext::new(data, current_dir, schema, context_rewrites);
+        let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
 

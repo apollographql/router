@@ -1,5 +1,6 @@
 ---
 source: apollo-router/tests/set_context.rs
+assertion_line: 152
 expression: response
 ---
 {
@@ -8,22 +9,46 @@ expression: response
       {
         "id": "1",
         "uList": [
-          {
-            "field": 3456
-          }
+          null
         ]
       },
       {
         "id": "2",
         "uList": [
-          {
-            "field": 4567
-          }
+          null
         ]
       }
     ]
   },
+  "errors": [
+    {
+      "message": "couldn't find mock for query {\"query\":\"query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}\",\"operationName\":\"QueryLL__Subgraph1__1\",\"variables\":{\"contextualArgument_1_0_0\":\"prop value 1\",\"contextualArgument_1_0_1\":\"prop value 2\",\"representations\":[{\"__typename\":\"U\",\"id\":\"3\"},{\"__typename\":\"U\",\"id\":\"4\"}]}}",
+      "extensions": {
+        "code": "FETCH_ERROR"
+      }
+    }
+  ],
   "extensions": {
+    "valueCompletion": [
+      {
+        "message": "Cannot return null for non-nullable field U.field",
+        "path": [
+          "tList",
+          0,
+          "uList",
+          0
+        ]
+      },
+      {
+        "message": "Cannot return null for non-nullable field U.field",
+        "path": [
+          "tList",
+          1,
+          "uList",
+          0
+        ]
+      }
+    ],
     "apolloQueryPlan": {
       "object": {
         "kind": "QueryPlan",

@@ -5595,8 +5595,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.21+v2.7.5"
-source = "git+https://github.com/apollographql/federation-rs?rev=ced6eed5c4394bb3cbf3867798b8b7f63cb82d66#ced6eed5c4394bb3cbf3867798b8b7f63cb82d66"
+version = "0.5.23+v2.8.0-alpha.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6824bf0a836f1df5b4091ff83efeedbf2aa56ab29baaff840b8f9053563d5c24"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",

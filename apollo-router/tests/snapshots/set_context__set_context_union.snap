@@ -21,14 +21,14 @@ expression: response
               "kind": "Fetch",
               "serviceName": "Subgraph1",
               "variableUsages": [],
-              "operation": "query QueryUnion__Subgraph1__0{k{__typename ...on A{prop v{__typename id}}...on B{prop v{__typename id}}}}",
+              "operation": "query QueryUnion__Subgraph1__0{k{__typename ...on A{__typename prop v{__typename id}}...on B{__typename prop v{__typename id}}}}",
               "operationName": "QueryUnion__Subgraph1__0",
               "operationKind": "query",
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "0f1ba6ea48b6f8adfc469d87012031090fe5de3f5ba9de8a8823a2d139c0370e",
+              "schemaAwareHash": "b9124cd1daa6e8347175ffe2108670a31c73cbc983e7812ee39f415235541005",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -151,7 +151,7 @@ expression: response
           ]
         }
       },
-      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        k {\n          __typename\n          ... on A {\n            prop\n            v {\n              __typename\n              id\n            }\n          }\n          ... on B {\n            prop\n            v {\n              __typename\n              id\n            }\n          }\n        }\n      }\n    },\n    Parallel {\n      Flatten(path: \".k|[A].v\") {\n        Fetch(service: \"Subgraph1\") {\n          {\n            ... on V {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on V {\n              field(a: $contextualArgument_1_1)\n            }\n          }\n        },\n      },\n      Flatten(path: \".k|[B].v\") {\n        Fetch(service: \"Subgraph1\") {\n          {\n            ... on V {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on V {\n              field(a: $contextualArgument_1_1)\n            }\n          }\n        },\n      },\n    },\n  },\n}"
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        k {\n          __typename\n          ... on A {\n            __typename\n            prop\n            v {\n              __typename\n              id\n            }\n          }\n          ... on B {\n            __typename\n            prop\n            v {\n              __typename\n              id\n            }\n          }\n        }\n      }\n    },\n    Parallel {\n      Flatten(path: \".k|[A].v\") {\n        Fetch(service: \"Subgraph1\") {\n          {\n            ... on V {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on V {\n              field(a: $contextualArgument_1_1)\n            }\n          }\n        },\n      },\n      Flatten(path: \".k|[B].v\") {\n        Fetch(service: \"Subgraph1\") {\n          {\n            ... on V {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on V {\n              field(a: $contextualArgument_1_1)\n            }\n          }\n        },\n      },\n    },\n  },\n}"
     }
   }
 }

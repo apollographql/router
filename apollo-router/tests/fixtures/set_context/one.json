@@ -21,12 +21,13 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__0{t{prop id u{__typename id}}}",
+        "query": "query Query__Subgraph1__0{t{__typename prop id u{__typename id}}}",
         "operationName": "Query__Subgraph1__0"
       },
       "response": {
         "data": {
           "t": {
+            "__typename": "T",
             "prop": "prop value",
             "id": "1",
             "u": {
@@ -39,12 +40,13 @@
     },
     {
       "request": {
-        "query": "query Query__Subgraph1__0{t{prop id uList{__typename id}}}",
+        "query": "query Query__Subgraph1__0{t{__typename prop id uList{__typename id}}}",
         "operationName": "Query__Subgraph1__0"
       },
       "response": {
         "data": {
           "t": {
+            "__typename": "T",
             "prop": "prop value",
             "id": "1",
             "uList": [
@@ -67,7 +69,7 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__0{tList{prop id uList{__typename id}}}",
+        "query": "query QueryLL__Subgraph1__0{tList{__typename prop id uList{__typename id}}}",
         "operationName": "QueryLL__Subgraph1__0"
       },
       "response": {
@@ -101,7 +103,7 @@
     },
     {
       "request": {
-        "query": "query QueryUnion__Subgraph1__0{k{__typename ...on A{prop v{__typename id}}...on B{prop v{__typename id}}}}",
+        "query": "query QueryUnion__Subgraph1__0{k{__typename ...on A{__typename prop v{__typename id}}...on B{__typename prop v{__typename id}}}}",
         "operationName": "QueryUnion__Subgraph1__0"
       },
       "response": {
@@ -193,34 +195,6 @@
     },
     {
       "request": {
-        "query": "query QueryLL__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
-        "operationName": "QueryLL__Subgraph1__1",
-        "variables": {
-          "contextualArgument_1_0_0": "prop value 1",
-          "contextualArgument_1_0_1": "prop value 2",
-          "representations": [
-            { "__typename": "U", "id": "3" },
-            { "__typename": "U", "id": "4" }
-          ]
-        }
-      },
-      "response": {
-        "data": {
-          "_entities": [
-            {
-              "id": "3",
-              "field": 3456
-            },
-            {
-              "id": "4",
-              "field": 4567
-            }
-          ]
-        }
-      }
-    },
-    {
-      "request": {
         "query": "query QueryLL__Subgraph1__1($representations: [_Any!]!, $contextualArgument_1_0_0: String, $contextualArgument_1_0_1: String) { _0: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_0) } } _1: _entities(representations: $representations) { ... on U { field(a: $contextualArgument_1_0_1) } } }",
         "operationName": "QueryLL__Subgraph1__1",
         "variables": {
@@ -262,6 +236,45 @@
             {
               "id": "3",
               "field": 3456
+            }
+          ]
+        }
+      }
+    },
+    {
+      "request": {
+        "query": "query Query_Null_Param__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+        "operationName": "Query_Null_Param__Subgraph1__0"
+      },
+      "response": {
+        "data": {
+          "t": {
+            "__typename": "T",
+            "prop": null,
+            "id": "1",
+            "u": {
+              "__typename": "U",
+              "id": "1"
+            }
+          }
+        }
+      }
+    },
+    {
+      "request": {
+        "query": "query Query_Null_Param__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+        "operationName": "Query_Null_Param__Subgraph1__1",
+        "variables": {
+          "contextualArgument_1_0": null,
+          "representations": [{ "__typename": "U", "id": "1" }]
+        }
+      },
+      "response": {
+        "data": {
+          "_entities": [
+            {
+              "id": "1",
+              "field": 1234
             }
           ]
         }

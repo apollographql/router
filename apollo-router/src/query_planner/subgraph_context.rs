@@ -15,10 +15,8 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 
 use super::fetch::SubgraphOperation;
-use super::rewrites;
 use super::rewrites::DataKeyRenamer;
 use super::rewrites::DataRewrite;
-// use crate::json_ext::Object;
 
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
@@ -34,45 +32,18 @@ pub(crate) struct ContextualArguments {
 
 pub(crate) struct SubgraphContext<'a> {
     pub(crate) data: &'a Value,
-    pub(crate) current_dir: &'a Path,
     pub(crate) schema: &'a Schema,
     pub(crate) context_rewrites: &'a Vec<DataRewrite>,
     pub(crate) named_args: Vec<HashMap<String, Value>>,
 }
 
-// TODO: We're using ValueExt::get_path, so I believe this is no longer needed, but I'm
-//       going to keep it commented until all the tests are passing
-// fn data_at_path<'v>(data: &'v Value, path: &Path) -> Option<&'v Value> {
-//     let v = match &path.0[0] {
-//         PathElement::Fragment(s) => {
-//             // get the value at data.get("__typename") and compare it with s. If the values are equal, return data, otherwise None
-//             let mut result: Option<&Value> = None;
-//             let wrapped_typename = data.get("__typename");
-//             if let Some(t) = wrapped_typename {
-//                 if t.as_str() == Some(s.as_str()) {
-//                     result = Some(data);
-//                 }
-//             }
-//             result
-//         }
-//         PathElement::Key(v, _) => data.get(v),
-//         PathElement::Index(idx) => Some(&data[idx]),
-//         PathElement::Flatten(_) => None,
-//     };
-
-//     if path.len() > 1 {
-//         if let Some(val) = v {
-//             let remaining_path = path.iter().skip(1).cloned().collect();
-//             return data_at_path(val, &remaining_path);
-//         }
-//     }
-//     v
-// }
-
 // context_path is a non-standard relative path which may navigate up the tree
 // from the current position. This is indicated with a ".." PathElement::Key
 // note that the return value is an absolute path that may be used anywhere
-fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
+fn merge_context_path(
+    current_dir: &Path,
+    context_path: &Path,
+) -> Result<Path, ContextBatchingError> {
     let mut i = 0;
     let mut j = current_dir.len();
     // iterate over the context_path(i), every time we encounter a '..', we want
@@ -83,7 +54,11 @@ fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
                 let mut found = false;
                 if e == ".." {
                     while !found {
+                        if j == 0 {
+                            return Err(ContextBatchingError::InvalidRelativePath);
+                        }
                         j -= 1;
+
                         if let Some(PathElement::Key(_, _)) = current_dir.0.get(j) {
                             found = true;
                         }
@@ -102,13 +77,12 @@ fn merge_context_path(current_dir: &Path, context_path: &Path) -> Path {
     context_path.iter().skip(i).for_each(|e| {
         return_path.push(e.clone());
     });
-    Path(return_path.into_iter().collect())
+    Ok(Path(return_path.into_iter().collect()))
 }
 
 impl<'a> SubgraphContext<'a> {
     pub(crate) fn new(
         data: &'a Value,
-        current_dir: &'a Path,
         schema: &'a Schema,
         context_rewrites: &'a Option<Vec<DataRewrite>>,
     ) -> Option<SubgraphContext<'a>> {
@@ -116,7 +90,6 @@ impl<'a> SubgraphContext<'a> {
             if rewrites.len() > 0 {
                 return Some(SubgraphContext {
                     data,
-                    current_dir,
                     schema,
                     context_rewrites: rewrites,
                     named_args: Vec::new(),
@@ -138,40 +111,36 @@ impl<'a> SubgraphContext<'a> {
                 match rewrite {
                     DataRewrite::KeyRenamer(item) => {
                         if !found_rewrites.contains(item.rename_key_to.as_str()) {
-                            let data_path = merge_context_path(path, &item.path);
-                            let val = self.data.get_path(self.schema, &data_path);
+                            let wrapped_data_path = merge_context_path(path, &item.path);
+                            if let Ok(data_path) = wrapped_data_path {
+                                let val = self.data.get_path(self.schema, &data_path);
 
-                            if let Ok(v) = val {
-                                // add to found
-                                found_rewrites.insert(item.rename_key_to.clone().to_string());
-                                // TODO: not great
-                                let mut new_value = v.clone();
-                                if let Some(values) = new_value.as_array_mut() {
-                                    for v in values {
-                                        rewrites::apply_single_rewrite(
-                                            self.schema,
-                                            v,
-                                            &DataRewrite::KeyRenamer({
+                                if let Ok(v) = val {
+                                    // add to found
+                                    found_rewrites.insert(item.rename_key_to.clone().to_string());
+                                    // TODO: not great
+                                    let mut new_value = v.clone();
+                                    if let Some(values) = new_value.as_array_mut() {
+                                        for v in values {
+                                            let data_rewrite = DataRewrite::KeyRenamer({
                                                 DataKeyRenamer {
                                                     path: data_path.clone(),
                                                     rename_key_to: item.rename_key_to.clone(),
                                                 }
-                                            }),
-                                        );
-                                    }
-                                } else {
-                                    rewrites::apply_single_rewrite(
-                                        self.schema,
-                                        &mut new_value,
-                                        &DataRewrite::KeyRenamer({
+                                            });
+                                            data_rewrite.maybe_apply(self.schema, v);
+                                        }
+                                    } else {
+                                        let data_rewrite = DataRewrite::KeyRenamer({
                                             DataKeyRenamer {
-                                                path: data_path,
+                                                path: data_path.clone(),
                                                 rename_key_to: item.rename_key_to.clone(),
                                             }
-                                        }),
-                                    );
+                                        });
+                                        data_rewrite.maybe_apply(self.schema, &mut new_value);
+                                    }
+                                    return Some((item.rename_key_to.to_string(), new_value));
                                 }
-                                return Some((item.rename_key_to.to_string(), new_value));
                             }
                         }
                         None
@@ -239,14 +208,10 @@ pub(crate) fn build_operation_with_aliasing(
     contextual_arguments: &ContextualArguments,
     schema: &Schema,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
-    dbg!(
-        &subgraph_operation.to_string(),
-        &contextual_arguments,
-        &schema.raw_sdl
-    );
     let mut selections: Vec<Selection> = vec![];
     let ContextualArguments { arguments, count } = contextual_arguments;
-    let parsed_document = subgraph_operation.as_parsed(schema.supergraph_schema());
+    let parsed_document =
+        subgraph_operation.as_parsed(schema.federation_supergraph().schema.schema());
     if let Ok(document) = parsed_document {
         // TODO: Can there be more than one named operation?
         //       Can there be an anonymous operation?
@@ -288,7 +253,7 @@ pub(crate) fn build_operation_with_aliasing(
             });
 
             let valid_document = ed
-                .validate(schema.supergraph_schema())
+                .validate(schema.federation_supergraph().schema.schema())
                 .map_err(ContextBatchingError::InvalidDocumentGenerated)?;
 
             return Ok(valid_document);
@@ -297,10 +262,14 @@ pub(crate) fn build_operation_with_aliasing(
     Err(ContextBatchingError::NoSelectionSet)
 }
 
+// adds an alias that aligns with the index for this selection
 fn add_alias_to_selection(selection: &mut executable::Field, index: usize) {
     selection.alias = Some(Name::new_unchecked(format!("_{}", index).into()));
 }
 
+// This function will take the selection set (which has been cloned from the original)
+// and transform it so that all contextual variables in the selection set will be appended with a _<index>
+// to match the index in the alias that it is
 fn transform_selection_set(
     selection_set: &mut SelectionSet,
     arguments: &HashSet<String>,
@@ -327,6 +296,7 @@ fn transform_selection_set(
         });
 }
 
+// transforms the variable name on the field argment
 fn transform_field_arguments(
     arguments_in_selection: &mut Vec<Node<ast::Argument>>,
     arguments: &HashSet<String>,
@@ -348,11 +318,38 @@ fn transform_field_arguments(
 pub(crate) enum ContextBatchingError {
     NoSelectionSet,
     InvalidDocumentGenerated(WithErrors<ExecutableDocument>),
+    InvalidRelativePath,
 }
 
 #[cfg(test)]
-mod subgraph_context_tests {
+mod subgraph_context_unit_tests {
     use super::*;
+
+    #[test]
+    fn test_merge_context_path() {
+        let current_dir: Path = serde_json::from_str(r#"["t","u"]"#).unwrap();
+        let relative_path: Path = serde_json::from_str(r#"["..","... on T","prop"]"#).unwrap();
+        let expected = r#"["t","... on T","prop"]"#;
+
+        let result = merge_context_path(&current_dir, &relative_path).unwrap();
+        assert_eq!(expected, serde_json::to_string(&result).unwrap(),);
+    }
+    
+    #[test]
+    fn test_merge_context_path_invalid() {
+        let current_dir: Path = serde_json::from_str(r#"["t","u"]"#).unwrap();
+        let relative_path: Path =
+            serde_json::from_str(r#"["..","..","..","... on T","prop"]"#).unwrap();
+
+        let result = merge_context_path(&current_dir, &relative_path);
+        match result {
+            Ok(_) => panic!("Expected an error, but got Ok"),
+            Err(e) => match e {
+                ContextBatchingError::InvalidRelativePath => (),
+                _ => panic!("Expected InvalidRelativePath, but got a different error"),
+            },
+        }
+    }
 
     // #[test]
     // fn test_merge_context_path() {
