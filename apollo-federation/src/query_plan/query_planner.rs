@@ -1108,4 +1108,112 @@ type User
         }
         "###);
     }
+
+    #[test]
+    fn test_optimize_basic() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    id
+                    ...userFields
+                },
+                another_user: userById(id: 2) {
+                  name
+                  email
+              }
+            }
+            fragment userFields on User {
+                name
+                email
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+              userById(id: 1) {
+                ...userFields
+                id
+              }      another_user: userById(id: 2) {
+                ...userFields
+              }
+            }
+                fragment userFields on User {
+              name
+              email
+            }
+          },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_optimize_inline_fragment() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    id
+                    ...userFields
+                },
+                partial_optimize: userById(id: 2) {
+                    ... on User {
+                        id
+                        name
+                        email
+                    }
+                },
+                full_optimize: userById(id: 3) {
+                    ... on User {
+                        name
+                        email
+                    }
+                }
+            }
+            fragment userFields on User {
+                name
+                email
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+              userById(id: 1) {
+                ...userFields
+                id
+              }      partial_optimize: userById(id: 2) {
+                ...userFields
+                id
+              }      full_optimize: userById(id: 3) {
+                ...userFields
+              }
+            }
+                fragment userFields on User {
+              name
+              email
+            }
+          },
+        }
+        "###);
+    }
 }

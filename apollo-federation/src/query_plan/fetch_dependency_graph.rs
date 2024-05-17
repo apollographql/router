@@ -1303,7 +1303,7 @@ impl FetchDependencyGraphNode {
         };
         let fragments = fragments
             .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema));
-        operation.optimize(fragments, Default::default());
+        operation.optimize(fragments, Default::default())?;
         let operation_document = operation.try_into()?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {

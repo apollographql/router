@@ -1042,14 +1042,14 @@ impl Fragment {
     }
 
     // PORT NOTE: in JS code this is stored on the fragment
-    fn fragment_usages(&self) -> HashMap<Name, i32> {
+    pub(crate) fn fragment_usages(&self) -> HashMap<Name, i32> {
         let mut usages = HashMap::new();
         self.selection_set.collect_used_fragment_names(&mut usages);
         usages
     }
 
     // PORT NOTE: in JS code this is stored on the fragment
-    fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
         self.selection_set.collect_used_fragment_names(aggregator)
     }
 
@@ -1062,6 +1062,7 @@ mod normalized_field_selection {
     use std::collections::HashSet;
     use std::sync::Arc;
 
+    use apollo_compiler::ast;
     use apollo_compiler::executable;
     use apollo_compiler::executable::Name;
     use apollo_compiler::Node;
@@ -1287,6 +1288,10 @@ mod normalized_field_selection {
 
         pub(crate) fn response_name(&self) -> Name {
             self.alias.clone().unwrap_or_else(|| self.name().clone())
+        }
+
+        pub(crate) fn output_ast_type(&self) -> Result<&ast::Type, FederationError> {
+            Ok(&self.field_position.get(self.schema.schema())?.ty)
         }
 
         pub(crate) fn output_base_type(&self) -> Result<TypeDefinitionPosition, FederationError> {
@@ -1853,27 +1858,6 @@ pub(crate) use normalized_inline_fragment_selection::InlineFragmentSelection;
 
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
-// TODO(@goto-bus-stop): merge this with the other Operation impl block.
-impl Operation {
-    pub(crate) fn optimize(
-        &mut self,
-        fragments: Option<&NamedFragments>,
-        min_usages_to_optimize: Option<u32>,
-    ) {
-        let min_usages_to_optimize = min_usages_to_optimize.unwrap_or(2);
-        let Some(fragments) = fragments else { return };
-        if fragments.is_empty() {
-            return;
-        }
-        assert!(
-            min_usages_to_optimize >= 1,
-            "Expected 'min_usages_to_optimize' to be at least 1, but got {min_usages_to_optimize}"
-        );
-
-        todo!(); // TODO: port JS `Operation.optimize` from `operations.ts`
-    }
-}
-
 /// A simple MultiMap implementation using IndexMap with Vec<V> as its value type.
 /// - Preserves the insertion order of keys and values.
 struct MultiIndexMap<K, V>(IndexMap<K, Vec<V>>);
@@ -1907,7 +1891,7 @@ where
 
 /// the return type of `lazy_map` function's `mapper` closure argument
 #[derive(derive_more::From)]
-enum SelectionMapperReturn {
+pub(crate) enum SelectionMapperReturn {
     None,
     Selection(Selection),
     SelectionList(Vec<Selection>),
@@ -2616,7 +2600,7 @@ impl SelectionSet {
     //   version, but its Rust version doesn't use `lazy_map`.
     // PORT_NOTE #2: Taking ownership of `self` in this method was considered. However, calling
     // `Arc::make_mut` on the `Arc` fields of `self` didn't seem better than cloning Arc instances.
-    fn lazy_map(
+    pub(crate) fn lazy_map(
         &self,
         mut mapper: impl FnMut(&Selection) -> Result<SelectionMapperReturn, FederationError>,
     ) -> Result<SelectionSet, FederationError> {
@@ -2867,7 +2851,7 @@ impl SelectionSet {
         Ok(())
     }
 
-    fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
+    pub(crate) fn collect_used_fragment_names(&self, aggregator: &mut HashMap<Name, i32>) {
         self.selections
             .iter()
             .for_each(|(_, s)| s.collect_used_fragment_names(aggregator));
@@ -4026,6 +4010,26 @@ impl InlineFragmentSelection {
         })
     }
 
+    /// Construct a new InlineFragmentSelection out of a selection set.
+    /// - The new type condition will be the same as the selection set's type.
+    pub(crate) fn from_selection_set(
+        parent_type_position: CompositeTypeDefinitionPosition,
+        selection_set: SelectionSet,
+        directives: Arc<executable::DirectiveList>,
+    ) -> Self {
+        let inline_fragment_data = InlineFragmentData {
+            schema: selection_set.schema.clone(),
+            parent_type_position,
+            type_condition_position: selection_set.type_position.clone().into(),
+            directives,
+            selection_id: SelectionId::new(),
+        };
+        Self {
+            inline_fragment: InlineFragment::new(inline_fragment_data),
+            selection_set,
+        }
+    }
+
     pub(crate) fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -4543,11 +4547,11 @@ impl NamedFragments {
         self.fragments.values()
     }
 
-    pub(crate) fn insert(&mut self, fragment: Fragment) {
+    fn insert(&mut self, fragment: Fragment) {
         Arc::make_mut(&mut self.fragments).insert(fragment.name.clone(), Node::new(fragment));
     }
 
-    pub(crate) fn try_insert(&mut self, fragment: Fragment) -> Result<(), FederationError> {
+    fn try_insert(&mut self, fragment: Fragment) -> Result<(), FederationError> {
         match Arc::make_mut(&mut self.fragments).entry(fragment.name.clone()) {
             indexmap::map::Entry::Occupied(_) => {
                 Err(FederationError::internal("Duplicate fragment name"))
@@ -4565,6 +4569,18 @@ impl NamedFragments {
 
     pub(crate) fn contains(&self, name: &Name) -> bool {
         self.fragments.contains_key(name)
+    }
+
+    // Calls `retain` on the underlying `IndexMap`, but iterates in reverse dependency order.
+    pub(crate) fn retain_rev(&mut self, mut predicate: impl FnMut(&Name, &Node<Fragment>) -> bool) {
+        let underlying = Arc::make_mut(&mut self.fragments);
+        let mut to_remove: HashSet<Name> = HashSet::new();
+        for (name, fragment) in underlying.iter().rev() {
+            if !predicate(name, fragment) {
+                to_remove.insert(name.clone());
+            }
+        }
+        underlying.retain(|name, _| !to_remove.contains(name));
     }
 
     /**
