@@ -139,7 +139,7 @@ fn same_directives(left: &executable::DirectiveList, right: &executable::Directi
 
 /// An analogue of the apollo-compiler type `Operation` with these changes:
 /// - Stores the schema that the operation is queried against.
-/// - Swaps `operation_type` with `root_kind` (using the analogous federation-next type).
+/// - Swaps `operation_type` with `root_kind` (using the analogous apollo-federation type).
 /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
 /// - Stores the fragments used by this operation (the executable document the operation was taken
 ///   from may contain other fragments that are not used by this operation).
