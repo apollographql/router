@@ -1781,7 +1781,7 @@ mod normalized_inline_fragment_selection {
             }
         }
 
-        pub(super) fn casted_type(&self) -> CompositeTypeDefinitionPosition {
+        pub(crate) fn casted_type(&self) -> CompositeTypeDefinitionPosition {
             self.type_condition_position
                 .clone()
                 .unwrap_or_else(|| self.parent_type_position.clone())
@@ -2531,10 +2531,8 @@ impl SelectionSet {
                 "Unable to rebase selection updates",
             ));
         };
-        let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> = match element {
-            OpPathElement::Field(ref field) => field.data().output_base_type()?.try_into().ok(),
-            OpPathElement::InlineFragment(ref inline) => Some(inline.data().casted_type()),
-        };
+        let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
+            element.sub_selection_type_position()?;
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
@@ -2786,6 +2784,9 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
+                let Some(sub_selection_type) = ele.sub_selection_type_position()? else {
+                    return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
+                };
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
@@ -2793,10 +2794,7 @@ impl SelectionSet {
                             OpPathElement::clone(ele),
                             // We immediately add a selection afterward to make this selection set
                             // valid.
-                            Some(SelectionSet::empty(
-                                self.schema.clone(),
-                                self.type_position.clone(),
-                            )),
+                            Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
                         )
                     })?;
                 match &mut selection {
