@@ -422,7 +422,7 @@ impl Exporter {
     }
 
     fn init_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
-        let exporter = self.otlp_exporter.as_ref().unwrap();
+        let exporter = self.otlp_exporter.as_ref().expect("expected an otlp exporter");
         let root_span_data = exporter.prepare_for_export(root_span);
         vec![root_span_data]
     }
