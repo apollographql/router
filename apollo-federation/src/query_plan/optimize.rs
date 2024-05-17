@@ -27,9 +27,6 @@ use std::sync::Arc;
 use apollo_compiler::executable::Name;
 use apollo_compiler::Node;
 
-use crate::error::FederationError;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-
 use super::operation::CollectedFieldInSet;
 use super::operation::Containment;
 use super::operation::ContainmentOptions;
@@ -45,6 +42,8 @@ use super::operation::SelectionId;
 use super::operation::SelectionKey;
 use super::operation::SelectionMap;
 use super::operation::SelectionSet;
+use crate::error::FederationError;
+use crate::schema::position::CompositeTypeDefinitionPosition;
 
 // PORT_NOTE: Not having a validator and having a FieldsConflictValidator with empty
 // `by_response_name` map has no difference in behavior. So, we could drop the `Option` from
