@@ -26,7 +26,7 @@ const IMPLICIT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/fe
 macro_rules! planner {
     (
         $( config = $config: expr, )?
-        $( $subgraph_name: ident: $subgraph_schema: expr),+
+        $( $subgraph_name: tt: $subgraph_schema: expr),+
         $(,)?
     ) => {{
         #[allow(unused_mut)]
@@ -35,9 +35,18 @@ macro_rules! planner {
         $crate::query_plan::build_query_plan_support::api_schema_and_planner(
             insta::_function_name!(),
             config,
-            &[ $( (stringify!($subgraph_name), $subgraph_schema) ),+ ],
+            &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
         )
     }};
+}
+
+macro_rules! subgraph_name {
+    ($x: ident) => {
+        stringify!($x)
+    };
+    ($x: literal) => {
+        $x
+    };
 }
 
 /// Takes a reference to the result of `planner!()`, an operation string, and an expected
@@ -52,7 +61,9 @@ macro_rules! assert_plan {
             "operation.graphql",
         )
         .unwrap();
-        insta::assert_snapshot!(planner.build_query_plan(&document, None).unwrap(), @$expected);
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @$expected);
+        plan
     }};
 }
 

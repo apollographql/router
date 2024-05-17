@@ -1,0 +1,90 @@
+# Composed from subgraphs with hash: 125a036421e2f6b9aa7e2c1bcabc29a4e3aa32cf
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH10 @join__graph(name: "Subgraph10", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
+  SUBGRAPH4 @join__graph(name: "Subgraph4", url: "none")
+  SUBGRAPH5 @join__graph(name: "Subgraph5", url: "none")
+  SUBGRAPH6 @join__graph(name: "Subgraph6", url: "none")
+  SUBGRAPH7 @join__graph(name: "Subgraph7", url: "none")
+  SUBGRAPH8 @join__graph(name: "Subgraph8", url: "none")
+  SUBGRAPH9 @join__graph(name: "Subgraph9", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH10)
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
+  @join__type(graph: SUBGRAPH4)
+  @join__type(graph: SUBGRAPH5)
+  @join__type(graph: SUBGRAPH6)
+  @join__type(graph: SUBGRAPH7)
+  @join__type(graph: SUBGRAPH8)
+  @join__type(graph: SUBGRAPH9)
+{
+  t: T @join__field(graph: SUBGRAPH1)
+}
+
+type T
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH10, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
+  @join__type(graph: SUBGRAPH4, key: "id")
+  @join__type(graph: SUBGRAPH5, key: "id")
+  @join__type(graph: SUBGRAPH6, key: "id")
+  @join__type(graph: SUBGRAPH7, key: "id")
+  @join__type(graph: SUBGRAPH8, key: "id")
+  @join__type(graph: SUBGRAPH9, key: "id")
+{
+  id: ID!
+  v1: Int! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  v9: Int! @join__field(graph: SUBGRAPH10, external: true) @join__field(graph: SUBGRAPH9, requires: "v8")
+  v10: Int! @join__field(graph: SUBGRAPH10, requires: "v9")
+  v2: Int! @join__field(graph: SUBGRAPH2, requires: "v1") @join__field(graph: SUBGRAPH3, external: true)
+  v3: Int! @join__field(graph: SUBGRAPH3, requires: "v2") @join__field(graph: SUBGRAPH4, external: true)
+  v4: Int! @join__field(graph: SUBGRAPH4, requires: "v3") @join__field(graph: SUBGRAPH5, external: true)
+  v5: Int! @join__field(graph: SUBGRAPH5, requires: "v4") @join__field(graph: SUBGRAPH6, external: true)
+  v6: Int! @join__field(graph: SUBGRAPH6, requires: "v5") @join__field(graph: SUBGRAPH7, external: true)
+  v7: Int! @join__field(graph: SUBGRAPH7, requires: "v6") @join__field(graph: SUBGRAPH8, external: true)
+  v8: Int! @join__field(graph: SUBGRAPH8, requires: "v7") @join__field(graph: SUBGRAPH9, external: true)
+}

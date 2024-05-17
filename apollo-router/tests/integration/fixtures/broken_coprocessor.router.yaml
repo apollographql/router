@@ -1,0 +1,6 @@
+# This coprocessor doesn't point to anything
+coprocessor:
+  url: "http://unreachable.example"
+  router:
+    request:
+      body: true

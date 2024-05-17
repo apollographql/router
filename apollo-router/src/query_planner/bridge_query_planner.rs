@@ -255,20 +255,16 @@ impl PlannerMode {
                 })
                 .unwrap_or_else(|panic| {
                     USING_CATCH_UNWIND.set(false);
-                    Err(
-                        apollo_federation::error::FederationError::SingleFederationError(
-                            apollo_federation::error::SingleFederationError::Internal {
-                                message: format!(
-                                    "query planner panicked: {}",
-                                    panic
-                                        .downcast_ref::<String>()
-                                        .map(|s| s.as_str())
-                                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                                        .unwrap_or_default()
-                                ),
-                            },
+                    Err(apollo_federation::error::FederationError::internal(
+                        format!(
+                            "query planner panicked: {}",
+                            panic
+                                .downcast_ref::<String>()
+                                .map(|s| s.as_str())
+                                .or_else(|| panic.downcast_ref::<&str>().copied())
+                                .unwrap_or_default()
                         ),
-                    )
+                    ))
                 });
 
                 let js_result = js
