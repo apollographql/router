@@ -1016,8 +1016,8 @@ impl SpanExporter for Exporter {
     }
 
     fn shutdown(&mut self) {
-        // currently only handled in the OTLP case
-        if let Some(exporter) = self.otlp_exporter.clone() {
+        // Currently only handled in the OTLP case.
+        if let Some(exporter) = &self.otlp_exporter {
             exporter.shutdown()
         };
     }
