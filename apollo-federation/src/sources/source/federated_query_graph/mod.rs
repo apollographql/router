@@ -23,7 +23,24 @@ pub(crate) trait FederatedQueryGraphApi {
 
 #[derive(Debug)]
 pub(crate) struct FederatedQueryGraphs {
-    graphs: IndexMap<SourceKind, FederatedQueryGraph>,
+    pub(crate) graphs: IndexMap<SourceKind, FederatedQueryGraph>,
+}
+
+impl Default for FederatedQueryGraphs {
+    fn default() -> Self {
+        Self {
+            graphs: IndexMap::from([
+                (
+                    SourceKind::Graphql,
+                    FederatedQueryGraph::Graphql(Default::default()),
+                ),
+                (
+                    SourceKind::Connect,
+                    FederatedQueryGraph::Connect(Default::default()),
+                ),
+            ]),
+        }
+    }
 }
 
 #[cfg(test)]

@@ -8,11 +8,13 @@ use indexmap::IndexMap;
 use crate::error::FederationError;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::schema::ValidFederationSchema;
+use crate::source_aware::federated_query_graph::builder::build_federated_query_graph;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::query_plan::QueryPlan;
 use crate::sources::source;
 use crate::sources::source::SourceId;
 use crate::sources::source::SourceKind;
+use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
 pub struct QueryPlanner {
@@ -24,10 +26,28 @@ pub struct QueryPlanner {
 
 impl QueryPlanner {
     pub fn new(
-        _supergraph: &Supergraph,
-        _config: QueryPlannerConfig,
+        supergraph: &Supergraph,
+        config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
-        todo!()
+        config.assert_valid();
+
+        let supergraph_schema = supergraph.schema.clone();
+        let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
+            include_defer: config.incremental_delivery.enable_defer,
+            ..Default::default()
+        })?;
+        let federated_query_graph = Arc::new(build_federated_query_graph(
+            supergraph_schema.clone(),
+            api_schema.clone(),
+            Some(true),
+            Some(true),
+        )?);
+        Ok(QueryPlanner {
+            config,
+            federated_query_graph,
+            supergraph_schema,
+            api_schema,
+        })
     }
 
     pub fn build_query_plan(

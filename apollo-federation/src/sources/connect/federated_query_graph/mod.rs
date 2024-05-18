@@ -19,12 +19,10 @@ use crate::ValidFederationSubgraph;
 
 pub(crate) mod builder;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub(crate) struct FederatedQueryGraph {
     subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
     source_data: IndexMap<ConnectId, models::Connector>,
-    // source_directives_by_name: IndexMap<NodeStr, SourceDirectiveArguments>,
-    // connect_directives_by_source: IndexMap<ConnectId, ConnectDirectiveArguments>,
 }
 
 impl FederatedQueryGraphApi for FederatedQueryGraph {
