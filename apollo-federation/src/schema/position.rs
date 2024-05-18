@@ -620,7 +620,7 @@ impl AbstractTypeDefinitionPosition {
     pub(crate) fn field(
         &self,
         field_name: Name,
-    ) -> Result<FieldDefinitionPosition, FederationError> {
+    ) -> Result<AbstractFieldDefinitionPosition, FederationError> {
         match self {
             AbstractTypeDefinitionPosition::Interface(type_) => Ok(type_.field(field_name).into()),
             AbstractTypeDefinitionPosition::Union(type_) => {
@@ -966,6 +966,15 @@ impl FieldDefinitionPosition {
     }
 }
 
+impl From<AbstractFieldDefinitionPosition> for FieldDefinitionPosition {
+    fn from(value: AbstractFieldDefinitionPosition) -> Self {
+        match value {
+            AbstractFieldDefinitionPosition::Interface(value) => value.into(),
+            AbstractFieldDefinitionPosition::Union(value) => value.into(),
+        }
+    }
+}
+
 impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition {
     fn from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Self {
         match value {
@@ -1023,6 +1032,33 @@ impl AbstractFieldDefinitionPosition {
         match self {
             AbstractFieldDefinitionPosition::Interface(field) => field.get(schema),
             AbstractFieldDefinitionPosition::Union(field) => field.get(schema),
+        }
+    }
+}
+
+impl TryFrom<FieldDefinitionPosition> for AbstractFieldDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            FieldDefinitionPosition::Interface(value) => Ok(value.into()),
+            FieldDefinitionPosition::Union(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an abstract field"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<ObjectOrInterfaceFieldDefinitionPosition> for AbstractFieldDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an abstract field"#
+            ))),
         }
     }
 }
@@ -1116,6 +1152,19 @@ impl TryFrom<FieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPositi
         match value {
             FieldDefinitionPosition::Object(value) => Ok(value.into()),
             FieldDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object/interface field"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<AbstractFieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: AbstractFieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            AbstractFieldDefinitionPosition::Interface(value) => Ok(value.into()),
             _ => Err(FederationError::internal(format!(
                 r#"Type "{value}" was unexpectedly not an object/interface field"#
             ))),

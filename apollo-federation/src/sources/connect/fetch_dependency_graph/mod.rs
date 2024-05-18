@@ -509,7 +509,7 @@ mod tests {
                         node,
                         federated_query_graph::Edge::ConcreteField {
                             supergraph_field: field.clone(),
-                            self_conditions: None,
+                            self_conditions: Default::default(),
                             source_id: source_id.clone(),
                             source_data: ConcreteFieldEdge::Connect {
                                 subgraph_field: field.clone(),
@@ -527,7 +527,7 @@ mod tests {
                             node,
                             federated_query_graph::Edge::SourceEntering {
                                 supergraph_type: node_type.clone(),
-                                self_conditions: None,
+                                self_conditions: Default::default(),
                                 tail_source_id: source_id.clone(),
                                 source_data: SourceEnteringEdge::ConnectParent {
                                     subgraph_type: node_type,
@@ -879,7 +879,7 @@ mod tests {
                 node,
                 federated_query_graph::Edge::ConcreteField {
                     supergraph_field: field_pos.clone(),
-                    self_conditions: None,
+                    self_conditions: Default::default(),
                     source_id: source_id.clone(),
                     source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
                         connect::federated_query_graph::ConcreteFieldEdge::Connect {
@@ -980,7 +980,7 @@ mod tests {
                 node,
                 federated_query_graph::Edge::ConcreteField {
                     supergraph_field: field_pos.clone(),
-                    self_conditions: None,
+                    self_conditions: Default::default(),
                     source_id: source_id.clone(),
                     source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
                         connect::federated_query_graph::ConcreteFieldEdge::Connect {
@@ -1082,7 +1082,7 @@ mod tests {
                 node,
                 federated_query_graph::Edge::ConcreteField {
                     supergraph_field: field_pos.clone(),
-                    self_conditions: None,
+                    self_conditions: Default::default(),
                     source_id: source_id.clone(),
                     source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
                         connect::federated_query_graph::ConcreteFieldEdge::Connect {
@@ -1194,7 +1194,7 @@ mod tests {
                 node,
                 federated_query_graph::Edge::ConcreteField {
                     supergraph_field: field_pos.clone(),
-                    self_conditions: None,
+                    self_conditions: Default::default(),
                     source_id: source_id.clone(),
                     source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
                         connect::federated_query_graph::ConcreteFieldEdge::Selection {

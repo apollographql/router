@@ -3,6 +3,7 @@ use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBu
 use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilderApi;
 use crate::ValidFederationSubgraph;
 
+#[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
 
 impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {

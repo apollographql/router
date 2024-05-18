@@ -31,6 +31,7 @@ use crate::ValidFederationSubgraph;
 /// directives.
 ///
 /// Refer to [SourceSpecDefinition] and [ConnectSpecDefinition] for more info.
+#[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
 
 impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
@@ -81,7 +82,7 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
             // Mark this entrypoint as being externally accessible to other resolvers
             sub_builder.add_source_entering_edge(
                 parent_node,
-                None,
+                Default::default(),
                 SourceEnteringEdge::ConnectParent {
                     subgraph_type: field_def_pos.parent().clone(),
                 }
@@ -968,12 +969,12 @@ mod tests {
         }
 
         /// Mock implementation of [IntraSourceQueryGraphSubBuilder]
-        pub struct MockSourceQueryGraphSubBuilder<'a> {
+        pub struct MockSourceQueryGraphSubBuilder<'builder> {
             source_id: SourceId,
-            builder: &'a mut MockSourceQueryGraphBuilder,
+            builder: &'builder mut MockSourceQueryGraphBuilder,
         }
 
-        impl<'a> IntraSourceQueryGraphSubBuilderApi for MockSourceQueryGraphSubBuilder<'a> {
+        impl<'builder> IntraSourceQueryGraphSubBuilderApi for MockSourceQueryGraphSubBuilder<'builder> {
             fn source_query_graph(
                 &mut self,
             ) -> Result<&mut source::federated_query_graph::FederatedQueryGraph, FederationError>
@@ -1041,7 +1042,7 @@ mod tests {
             fn add_source_entering_edge(
                 &mut self,
                 tail: NodeIndex,
-                _self_conditions: Option<SelfConditionIndex>,
+                _self_conditions: IndexSet<SelfConditionIndex>,
                 source_data: source::federated_query_graph::SourceEnteringEdge,
             ) -> Result<EdgeIndex, FederationError> {
                 let source::federated_query_graph::SourceEnteringEdge::Connect(
@@ -1065,7 +1066,7 @@ mod tests {
             // -- Everything below is todo!() --
             // ---------------------------------
 
-            fn get_source(&self) -> Result<SourceId, FederationError> {
+            fn get_source(&self) -> SourceId {
                 todo!()
             }
 
@@ -1098,7 +1099,6 @@ mod tests {
                 _head: NodeIndex,
                 _tail: NodeIndex,
                 _supergraph_field_name: Name,
-                _self_conditions: IndexSet<SelfConditionIndex>,
                 _source_data: source::federated_query_graph::AbstractFieldEdge,
             ) -> Result<EdgeIndex, FederationError> {
                 todo!()
