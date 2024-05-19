@@ -22,6 +22,7 @@ use super::attributes::HttpServerAttributes;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -32,7 +33,6 @@ use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
-use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
@@ -313,10 +313,6 @@ impl InstrumentsConfig {
             http_client_response_body_size,
             custom: CustomInstruments::new(&self.subgraph.custom),
         }
-    }
-
-    pub(crate) fn new_graphql_instruments(&self) -> GraphQLInstruments {
-        self.graphql.attributes.to_instruments()
     }
 }
 
@@ -655,14 +651,7 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
-    fn on_response_field(
-        &self,
-        _ty: &apollo_compiler::schema::Type,
-        _field: &apollo_compiler::schema::FieldDefinition,
-        _value: &serde_json::Value,
-        _ctx: &Context,
-    ) {
-    }
+    fn on_response_field(&self, _typed_value: &TypedValue, _ctx: &Context) {}
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
@@ -733,6 +722,16 @@ where
 {
     counters: Vec<CustomCounter<Request, Response, Attributes, Select>>,
     histograms: Vec<CustomHistogram<Request, Response, Attributes, Select>>,
+}
+
+impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
+where
+    Attributes: Selectors<Request = Request, Response = Response> + Default,
+    Select: Selector<Request = Request, Response = Response> + Debug,
+{
+    pub(crate) fn is_empty(&self) -> bool {
+        self.counters.is_empty() && self.histograms.is_empty()
+    }
 }
 
 impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
@@ -1077,10 +1076,12 @@ pub(crate) type SubgraphCustomInstruments =
 pub(crate) enum Increment {
     Unit,
     EventUnit,
+    FieldUnit,
     Duration(Instant),
     EventDuration(Instant),
     Custom(Option<i64>),
     EventCustom(Option<i64>),
+    FieldCustom(Option<i64>),
 }
 
 struct CustomCounter<Request, Response, A, T>
@@ -1182,8 +1183,12 @@ where
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
-            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
-                // Nothing to do because we're incrementing on events
+            Increment::EventUnit
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::FieldUnit
+            | Increment::FieldCustom(_) => {
+                // Nothing to do because we're incrementing on events or fields
                 return;
             }
         };
@@ -1260,14 +1265,16 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit => 1f64,
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
             Increment::Duration(instant) | Increment::EventDuration(instant) => {
                 instant.elapsed().as_secs_f64()
             }
-            Increment::Custom(val) | Increment::EventCustom(val) => match val {
-                Some(incr) => incr as f64,
-                None => 0f64,
-            },
+            Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
+                match val {
+                    Some(incr) => incr as f64,
+                    None => 0f64,
+                }
+            }
         };
 
         if let Some(counter) = inner.counter.take() {
@@ -1290,11 +1297,13 @@ where
             }
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit => 1f64,
+                    Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
                     Increment::Duration(instant) | Increment::EventDuration(instant) => {
                         instant.elapsed().as_secs_f64()
                     }
-                    Increment::Custom(val) | Increment::EventCustom(val) => match val {
+                    Increment::Custom(val)
+                    | Increment::EventCustom(val)
+                    | Increment::FieldCustom(val) => match val {
                         Some(incr) => *incr as f64,
                         None => 0f64,
                     },
@@ -1489,8 +1498,12 @@ where
             Increment::Unit => Some(1f64),
             Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
             Increment::Custom(val) => val.map(|incr| incr as f64),
-            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
-                // Nothing to do because we're incrementing on events
+            Increment::EventUnit
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::FieldUnit
+            | Increment::FieldCustom(_) => {
+                // Nothing to do because we're incrementing on events or fields
                 return;
             }
         };
@@ -1545,7 +1558,11 @@ where
                 *val = None;
                 incr
             }
-            Increment::Unit | Increment::Duration(_) | Increment::Custom(_) => {
+            Increment::Unit
+            | Increment::Duration(_)
+            | Increment::Custom(_)
+            | Increment::FieldUnit
+            | Increment::FieldCustom(_) => {
                 // Nothing to do because we're incrementing on events
                 return;
             }
@@ -1566,14 +1583,71 @@ where
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit => Some(1f64),
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
             Increment::Duration(instant) | Increment::EventDuration(instant) => {
                 Some(instant.elapsed().as_secs_f64())
             }
-            Increment::Custom(val) | Increment::EventCustom(val) => val.map(|incr| incr as f64),
+            Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
+                val.map(|incr| incr as f64)
+            }
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+            histogram.record(increment, &attrs);
+        }
+    }
+
+    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+            return;
+        }
+        let mut attrs: Vec<KeyValue> = inner
+            .selectors
+            .as_ref()
+            .map(|s| s.on_response_field(typed_value, ctx).into_iter().collect())
+            .unwrap_or_default();
+        attrs.extend(inner.attributes.clone());
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response_field(typed_value, ctx))
+        {
+            let new_incr = match &inner.increment {
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment: Option<f64> = match &mut inner.increment {
+            Increment::FieldUnit => Some(1f64),
+            Increment::FieldCustom(val) => {
+                let incr = val.map(|incr| incr as f64);
+                // Set it to None again
+                *val = None;
+                incr
+            }
+            Increment::Unit
+            | Increment::Duration(_)
+            | Increment::Custom(_)
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::EventUnit => {
+                // Nothing to do because we're incrementing on fields
+                return;
+            }
+        };
+
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &attrs);
         }
     }
@@ -1593,13 +1667,13 @@ where
             }
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit => Some(1f64),
+                    Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
                     Increment::Duration(instant) | Increment::EventDuration(instant) => {
                         Some(instant.elapsed().as_secs_f64())
                     }
-                    Increment::Custom(val) | Increment::EventCustom(val) => {
-                        val.map(|incr| incr as f64)
-                    }
+                    Increment::Custom(val)
+                    | Increment::EventCustom(val)
+                    | Increment::FieldCustom(val) => val.map(|incr| incr as f64),
                 };
 
                 if let Some(increment) = increment {

@@ -1,10 +1,10 @@
-use apollo_compiler::executable::Field;
-use opentelemetry_api::KeyValue;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
+use crate::Context;
+use opentelemetry_api::{KeyValue, Value};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::graphql::selectors::{
     FieldLength, FieldName, FieldType, GraphQLSelector, TypeName,
 };
@@ -12,6 +12,7 @@ use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::config_new::{DefaultAttributeRequirementLevel, Selector};
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::services::supergraph;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
@@ -29,57 +30,26 @@ pub(crate) struct GraphQLAttributes {
 impl DefaultForLevel for GraphQLAttributes {
     fn defaults_for_level(
         &mut self,
-        _requirement_level: DefaultAttributeRequirementLevel,
-        _kind: TelemetryDataKind,
+        requirement_level: DefaultAttributeRequirementLevel,
+        kind: TelemetryDataKind,
     ) {
-        // No-op?
+        if let TelemetryDataKind::Metrics = kind {
+            if let DefaultAttributeRequirementLevel::Required = requirement_level {
+                self.field_name.get_or_insert(true);
+                self.field_type.get_or_insert(true);
+                self.type_name.get_or_insert(true);
+            }
+        }
     }
 }
 
 impl Selectors for GraphQLAttributes {
-    type Request = Field;
-    type Response = TypedValue;
-    type EventResponse = ();
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
-        let mut attrs = Vec::with_capacity(4);
-        if let Some(true) = self.field_name {
-            if let Some(name) = (GraphQLSelector::FieldName {
-                field_name: FieldName::String,
-            })
-            .on_request(request)
-            {
-                attrs.push(KeyValue::new("graphql.field.name", name));
-            }
-        }
-        if let Some(true) = self.field_type {
-            if let Some(ty) = (GraphQLSelector::FieldType {
-                field_type: FieldType::String,
-            })
-            .on_request(request)
-            {
-                attrs.push(KeyValue::new("graphql.field.type", ty));
-            }
-        }
-        if let Some(true) = self.field_length {
-            if let Some(length) = (GraphQLSelector::FieldLength {
-                field_length: FieldLength::Value,
-            })
-            .on_request(request)
-            {
-                attrs.push(KeyValue::new("graphql.field.length", length));
-            }
-        }
-        if let Some(true) = self.type_name {
-            if let Some(ty) = (GraphQLSelector::TypeName {
-                type_name: TypeName::String,
-            })
-            .on_request(request)
-            {
-                attrs.push(KeyValue::new("graphql.type.name", ty));
-            }
-        }
-        attrs
+        Vec::default()
     }
 
     fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
@@ -88,5 +58,46 @@ impl Selectors for GraphQLAttributes {
 
     fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
         Vec::default()
+    }
+
+    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = Vec::with_capacity(4);
+        if let Some(true) = self.field_name {
+            if let Some(name) = (GraphQLSelector::FieldName {
+                field_name: FieldName::String,
+            })
+            .on_response_field(typed_value, ctx)
+            {
+                attrs.push(KeyValue::new("graphql.field.name", name));
+            }
+        }
+        if let Some(true) = self.field_type {
+            if let Some(ty) = (GraphQLSelector::FieldType {
+                field_type: FieldType::String,
+            })
+            .on_response_field(typed_value, ctx)
+            {
+                attrs.push(KeyValue::new("graphql.field.type", ty));
+            }
+        }
+        if let Some(true) = self.field_length {
+            if let Some(length) = (GraphQLSelector::FieldLength {
+                field_length: FieldLength::Value,
+            })
+            .on_response_field(typed_value, ctx)
+            {
+                attrs.push(KeyValue::new("graphql.field.length", length));
+            }
+        }
+        if let Some(true) = self.type_name {
+            if let Some(ty) = (GraphQLSelector::TypeName {
+                type_name: TypeName::String,
+            })
+            .on_response_field(typed_value, ctx)
+            {
+                attrs.push(KeyValue::new("graphql.type.name", ty));
+            }
+        }
+        attrs
     }
 }

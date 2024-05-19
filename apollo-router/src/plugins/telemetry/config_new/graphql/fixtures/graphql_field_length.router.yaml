@@ -2,23 +2,6 @@ telemetry:
   instrumentation:
     instruments:
       graphql:
-        field.length:
-          attributes:
-            graphql.field.name: false
-            graphql.type.name: false
-            graphql.field.type: false
-        "foo":
-          description: "bar"
-          type: histogram
-          unit: "unit"
-          value:
-            field_length: true
-
-          attributes:
-            graphql.type.name: true
-            graphql.field.type: true
-            graphql.field.name: true
-            graphql.field.length: true
-
+        field.length: true
 
 

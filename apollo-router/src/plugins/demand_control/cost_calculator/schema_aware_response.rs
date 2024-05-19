@@ -50,7 +50,10 @@ impl<'a> SchemaAwareResponse<'a> {
 }
 
 pub(crate) trait Visitor {
-    fn visit(&mut self, value: &TypedValue) {
+    fn visit(&self, value: &TypedValue) {
+        self.visit_value(value);
+    }
+    fn visit_value(&self, value: &TypedValue) {
         match value {
             TypedValue::Null => self.visit_null(),
             TypedValue::Bool(f, b) => self.visit_bool(f, b),
@@ -61,23 +64,22 @@ pub(crate) trait Visitor {
             TypedValue::Root(children) => self.visit_root(children),
         }
     }
+    fn visit_null(&self) {}
+    fn visit_bool(&self, _field: &Field, _value: &bool) {}
+    fn visit_number(&self, _field: &Field, _value: &serde_json::Number) {}
+    fn visit_string(&self, _field: &Field, _value: &str) {}
 
-    fn visit_null(&mut self) {}
-    fn visit_bool(&mut self, field: &Field, value: &bool) {}
-    fn visit_number(&mut self, field: &Field, value: &serde_json::Number) {}
-    fn visit_string(&mut self, field: &Field, value: &str) {}
-
-    fn visit_array(&mut self, field: &Field, items: &Vec<TypedValue>) {
+    fn visit_array(&self, _field: &Field, items: &Vec<TypedValue>) {
         for value in items.iter() {
             self.visit(value);
         }
     }
-    fn visit_object(&mut self, field: &Field, children: &HashMap<String, TypedValue>) {
+    fn visit_object(&self, _field: &Field, children: &HashMap<String, TypedValue>) {
         for value in children.values() {
             self.visit(value);
         }
     }
-    fn visit_root(&mut self, children: &HashMap<String, TypedValue>) {
+    fn visit_root(&self, children: &HashMap<String, TypedValue>) {
         for value in children.values() {
             self.visit(value);
         }

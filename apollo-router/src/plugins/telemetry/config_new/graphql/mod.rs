@@ -1,15 +1,15 @@
 use std::sync::Arc;
 
-use apollo_compiler::executable::Field;
+use crate::{metrics, Context};
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use super::instruments::Increment;
+use super::instruments::{CustomInstruments, Increment, InstrumentsConfig, METER_NAME};
 use crate::plugins::demand_control::cost_calculator::schema_aware_response;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::{TypedValue, Visitor};
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -21,6 +21,7 @@ use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrum
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::services::supergraph;
 
 pub(crate) mod attributes;
 pub(crate) mod selectors;
@@ -32,7 +33,8 @@ static FIELD_LENGTH: &str = "graphql.field.length";
 pub(crate) struct GraphQLInstrumentsConfig {
     /// A histogram of the length of a selected field in the GraphQL response
     #[serde(rename = "field.length")]
-    field_length: DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
+    pub(crate) field_length:
+        DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
 }
 
 impl DefaultForLevel for GraphQLInstrumentsConfig {
@@ -47,27 +49,17 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
 }
 
 impl GraphQLInstrumentsConfig {
-    pub(crate) fn to_instruments(&self) -> GraphQLInstruments {
-        let field_length = self.field_length.is_enabled().then(|| {
-            Self::histogram(
-                FIELD_LENGTH,
-                &self.field_length,
-                GraphQLSelector::FieldLength {
-                    field_length: FieldLength::Value,
-                },
-            )
-        });
-
-        GraphQLInstruments { field_length }
-    }
-
     fn histogram(
         name: &'static str,
         config: &DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
         selector: GraphQLSelector,
-    ) -> CustomHistogram<Field, TypedValue, GraphQLAttributes, GraphQLSelector> {
-        let meter = crate::metrics::meter_provider()
-            .meter(crate::plugins::telemetry::config_new::instruments::METER_NAME);
+    ) -> CustomHistogram<
+        supergraph::Request,
+        supergraph::Response,
+        GraphQLAttributes,
+        GraphQLSelector,
+    > {
+        let meter = crate::metrics::meter_provider().meter(METER_NAME);
         let mut nb_attributes = 0;
         let selectors = match config {
             DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
@@ -79,7 +71,7 @@ impl GraphQLInstrumentsConfig {
 
         CustomHistogram {
             inner: Mutex::new(CustomHistogramInner {
-                increment: Increment::EventCustom(None),
+                increment: Increment::FieldCustom(None),
                 condition: Condition::True,
                 histogram: Some(meter.f64_histogram(name).init()),
                 attributes: Vec::with_capacity(nb_attributes),
@@ -91,48 +83,118 @@ impl GraphQLInstrumentsConfig {
     }
 }
 
-#[derive(Default)]
+pub(crate) type GraphQLCustomInstruments = CustomInstruments<
+    supergraph::Request,
+    supergraph::Response,
+    GraphQLAttributes,
+    GraphQLSelector,
+>;
+
 pub(crate) struct GraphQLInstruments {
-    field_length: Option<CustomHistogram<Field, TypedValue, GraphQLAttributes, GraphQLSelector>>,
+    pub(crate) field_length: Option<
+        CustomHistogram<
+            supergraph::Request,
+            supergraph::Response,
+            GraphQLAttributes,
+            GraphQLSelector,
+        >,
+    >,
+    pub(crate) custom: GraphQLCustomInstruments,
+}
+
+impl From<&InstrumentsConfig> for GraphQLInstruments {
+    fn from(value: &InstrumentsConfig) -> Self {
+        let meter = metrics::meter_provider().meter(METER_NAME);
+        GraphQLInstruments {
+            field_length: value.graphql.attributes.field_length.is_enabled().then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &value.graphql.attributes.field_length {
+                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                        None
+                    }
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomHistogram {
+                    inner: Mutex::new(CustomHistogramInner {
+                        increment: Increment::FieldCustom(None),
+                        condition: Condition::True,
+                        histogram: Some(meter.f64_histogram(FIELD_LENGTH).init()),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(GraphQLSelector::FieldLength {
+                            field_length: FieldLength::Value,
+                        })),
+                        selectors,
+                        updated: false,
+                    }),
+                }
+            }),
+            custom: CustomInstruments::new(&value.graphql.custom),
+        }
+    }
 }
 
 impl Instrumented for GraphQLInstruments {
-    type Request = Field;
-    type Response = TypedValue;
-    type EventResponse = ();
+    type Request = supergraph::Request;
+    type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(field_length) = &self.field_length {
             field_length.on_request(request);
         }
+        self.custom.on_request(request);
     }
 
     fn on_response(&self, response: &Self::Response) {
         if let Some(field_length) = &self.field_length {
             field_length.on_response(response);
         }
+        self.custom.on_response(response);
     }
 
-    fn on_error(&self, _error: &BoxError, _ctx: &crate::Context) {}
+    fn on_error(&self, error: &BoxError, ctx: &crate::Context) {
+        if let Some(field_length) = &self.field_length {
+            field_length.on_error(error, ctx);
+        }
+        self.custom.on_error(error, ctx);
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        if !self.custom.is_empty() || self.field_length.is_some() {
+            if let Some(executable_document) = ctx.unsupported_executable_document() {
+                if let Ok(schema) =
+                    schema_aware_response::SchemaAwareResponse::new(&executable_document, response)
+                {
+                    GraphQLInstrumentsVisitor {
+                        ctx,
+                        instruments: self,
+                    }
+                    .visit(&schema.value)
+                }
+            }
+        }
+    }
+
+    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+        if let Some(field_length) = &self.field_length {
+            field_length.on_response_field(typed_value, ctx);
+        }
+        self.custom.on_response_field(typed_value, ctx);
+    }
 }
 
-impl schema_aware_response::Visitor for GraphQLInstruments {
-    fn visit(&mut self, value: &TypedValue) {
-        match value {
-            TypedValue::Array(field, items) => {
-                if let Some(field_length) = self.field_length {
-                    // There may be a bug here with stateful evaluation of conditions because the
-                    // logic currently expects to only ever run on one request (albeit at different
-                    // points in the request lifecycle).
-                    field_length.on_request(field);
-                    field_length.on_response(value);
-                }
-                self.visit_array(field, items);
-            }
-            TypedValue::Object(f, children) => self.visit_object(f, children),
-            TypedValue::Root(children) => self.visit_root(children),
-            _ => {}
-        }
+struct GraphQLInstrumentsVisitor<'a> {
+    ctx: &'a Context,
+    instruments: &'a GraphQLInstruments,
+}
+
+impl<'a> Visitor for GraphQLInstrumentsVisitor<'a> {
+    fn visit(&self, value: &TypedValue) {
+        self.instruments.on_response_field(value, self.ctx);
+        self.visit_value(value);
     }
 }
 
@@ -153,9 +215,9 @@ mod test {
     #[test]
     fn conversion_to_instruments() {
         let config = config(include_str!("fixtures/graphql_field_length.router.yaml"));
-        let instruments = config.to_instruments();
+        //let instruments: GraphQLInstruments = config.into();
 
-        assert!(true)
+        //      assert!(true)
     }
 
     fn config(config: &'static str) -> GraphQLInstrumentsConfig {

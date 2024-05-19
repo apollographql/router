@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
@@ -263,6 +264,44 @@ where
             Condition::All(all) => all.iter().all(|c| c.evaluate_error(error)),
             Condition::Any(any) => any.iter().any(|c| c.evaluate_error(error)),
             Condition::Not(not) => !not.evaluate_error(error),
+            Condition::True => true,
+            Condition::False => false,
+        }
+    }
+
+    pub(crate) fn evaluate_response_field(&self, typed_value: &TypedValue, ctx: &Context) -> bool {
+        match self {
+            Condition::Eq(eq) => {
+                let left = eq[0].on_response_field(typed_value, ctx);
+                let right = eq[1].on_response_field(typed_value, ctx);
+                left == right
+            }
+            Condition::Gt(gt) => {
+                let left_att = gt[0]
+                    .on_response_field(typed_value, ctx)
+                    .map(AttributeValue::from);
+                let right_att = gt[1]
+                    .on_response_field(typed_value, ctx)
+                    .map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l > r)
+            }
+            Condition::Lt(gt) => {
+                let left_att = gt[0]
+                    .on_response_field(typed_value, ctx)
+                    .map(AttributeValue::from);
+                let right_att = gt[1]
+                    .on_response_field(typed_value, ctx)
+                    .map(AttributeValue::from);
+                left_att.zip(right_att).map_or(false, |(l, r)| l < r)
+            }
+            Condition::Exists(exist) => exist.on_response_field(typed_value, ctx).is_some(),
+            Condition::All(all) => all
+                .iter()
+                .all(|c| c.evaluate_response_field(typed_value, ctx)),
+            Condition::Any(any) => any
+                .iter()
+                .any(|c| c.evaluate_response_field(typed_value, ctx)),
+            Condition::Not(not) => !not.evaluate_response_field(typed_value, ctx),
             Condition::True => true,
             Condition::False => false,
         }
