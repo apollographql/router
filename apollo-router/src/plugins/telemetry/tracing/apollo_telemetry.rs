@@ -241,7 +241,7 @@ pub(crate) struct Exporter {
     #[derivative(Debug = "ignore")]
     otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
     apollo_tracing_protocol: ApolloTracingProtocol,
-    otlp_tracing_pct: f64,
+    otlp_tracing_ratio: f64,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
     use_legacy_request_span: bool,
@@ -279,7 +279,7 @@ impl Exporter {
     pub(crate) fn new<'a>(
         endpoint: &'a Url,
         otlp_endpoint: &'a Url,
-        otlp_tracing_pct: &'a SamplerOption,
+        otlp_tracing_sampler: &'a SamplerOption,
         apollo_key: &'a str,
         apollo_graph_ref: &'a str,
         schema_id: &'a str,
@@ -291,7 +291,7 @@ impl Exporter {
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
 
-        let otlp_tracing_ratio = match otlp_tracing_pct {
+        let otlp_tracing_ratio = match otlp_tracing_sampler {
             SamplerOption::TraceIdRatioBased(ratio) => {
                 // can't use std::cmp::min because f64 is not Ord
                 if *ratio > 1.0 {
@@ -305,10 +305,13 @@ impl Exporter {
                 Sampler::AlwaysOff => 0f64,
             },
         };
-        let apollo_tracing_protocol = 
-            if otlp_tracing_ratio == 0f64 { ApolloTracingProtocol::Apollo }
-            else if otlp_tracing_ratio == 1f64 { ApolloTracingProtocol::Otlp }
-            else { ApolloTracingProtocol::ApolloAndOtlp };
+        let apollo_tracing_protocol = if otlp_tracing_ratio == 0f64 {
+            ApolloTracingProtocol::Apollo
+        } else if otlp_tracing_ratio == 1f64 {
+            ApolloTracingProtocol::Otlp
+        } else {
+            ApolloTracingProtocol::ApolloAndOtlp
+        };
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
             report_exporter: match apollo_tracing_protocol {
@@ -336,7 +339,7 @@ impl Exporter {
                 }
             },
             apollo_tracing_protocol,
-            otlp_tracing_pct: otlp_tracing_ratio,
+            otlp_tracing_ratio,
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
                 SamplerOption::Always(Sampler::AlwaysOff) => 0.0,
@@ -957,9 +960,7 @@ impl SpanExporter for Exporter {
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         let mut otlp_trace_spans: Vec<Vec<SpanData>> = Vec::new();
         let mut rng = rand::thread_rng();
-        let send_otlp = rng.gen_range(0.0..1.0) < self.otlp_tracing_pct;
-        dbg!(send_otlp);
-        dbg!(self.otlp_tracing_pct);
+        let send_otlp = rng.gen_range(0.0..1.0) < self.otlp_tracing_ratio;
 
         for span in batch {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
@@ -1034,12 +1035,16 @@ impl SpanExporter for Exporter {
             let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();
             if send_otlp {
                 exports.push(
-                    otlp_exporter.as_ref().expect("expected an otel exporter")
-                    .export(otlp_trace_spans.into_iter().flatten().collect())
+                    otlp_exporter
+                        .as_ref()
+                        .expect("expected an otel exporter")
+                        .export(otlp_trace_spans.into_iter().flatten().collect()),
                 );
             } else {
                 exports.push(
-                    report_exporter.as_ref().expect("expected an apollo exporter")
+                    report_exporter
+                        .as_ref()
+                        .expect("expected an apollo exporter")
                         .submit_report(report)
                         .map_err(|e| TraceError::ExportFailed(Box::new(e)))
                         .boxed(),
