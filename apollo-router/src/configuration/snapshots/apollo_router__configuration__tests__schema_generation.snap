@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -155,31 +154,6 @@ expression: "&schema"
           "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
           "enum": [
             "both"
-          ],
-          "type": "string"
-        }
-      ]
-    },
-    "ApolloTracingProtocol": {
-      "oneOf": [
-        {
-          "description": "Use only the Apollo usage reporting protobuf over http",
-          "enum": [
-            "apollo"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use only OTLP over GRPC",
-          "enum": [
-            "otlp"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use both the Apollo usage reporting protobuf AND OTLP (note this is a testing mode and not intended for use in production)",
-          "enum": [
-            "apollo_and_otlp"
           ],
           "type": "string"
         }
@@ -1463,9 +1437,9 @@ expression: "&schema"
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
           "type": "string"
         },
-        "experimental_tracing_protocol": {
-          "$ref": "#/definitions/ApolloTracingProtocol",
-          "description": "#/definitions/ApolloTracingProtocol"
+        "experimental_otlp_tracing_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
         },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
