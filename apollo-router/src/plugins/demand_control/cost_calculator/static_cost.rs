@@ -312,7 +312,7 @@ impl StaticCostCalculator {
             TypedValue::Bool(_, _, _) => Ok(0.0),
             TypedValue::Number(_, _, _) => Ok(0.0),
             TypedValue::String(_, _, _) => Ok(0.0),
-            TypedValue::Array(_, _, items) => Self::summed_score_of_values(items),
+            TypedValue::List(_, _, items) => Self::summed_score_of_values(items),
             TypedValue::Object(_, _, children) => {
                 let cost_of_children = Self::summed_score_of_values(children.values())?;
                 Ok(1.0 + cost_of_children)

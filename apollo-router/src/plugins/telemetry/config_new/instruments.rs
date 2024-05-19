@@ -779,7 +779,7 @@ where
                         ),
                         attributes: Vec::new(),
                         selector,
-                        selectors: instrument.attributes.clone(),
+                        selectors: Some(instrument.attributes.clone()),
                         incremented: false,
                     };
 
@@ -1084,27 +1084,27 @@ pub(crate) enum Increment {
     FieldCustom(Option<i64>),
 }
 
-struct CustomCounter<Request, Response, A, T>
+pub(crate) struct CustomCounter<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
+    pub(crate) inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
 }
 
-struct CustomCounterInner<Request, Response, A, T>
+pub(crate) struct CustomCounterInner<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    increment: Increment,
-    selector: Option<Arc<T>>,
-    selectors: Arc<Extendable<A, T>>,
-    counter: Option<Counter<f64>>,
-    condition: Condition<T>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) increment: Increment,
+    pub(crate) selector: Option<Arc<T>>,
+    pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(crate) counter: Option<Counter<f64>>,
+    pub(crate) condition: Condition<T>,
+    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
-    incremented: bool,
+    pub(crate) incremented: bool,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
@@ -1124,7 +1124,10 @@ where
             let _ = inner.counter.take();
             return;
         }
-        inner.attributes = inner.selectors.on_request(request).into_iter().collect();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            inner.attributes = selectors.on_request(request).into_iter().collect();
+        }
+
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
@@ -1153,7 +1156,12 @@ where
             }
             return;
         }
-        let attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
+
+        let attrs: Vec<KeyValue> = inner
+            .selectors
+            .as_ref()
+            .map(|s| s.on_response(response).into_iter().collect())
+            .unwrap_or_default();
         inner.attributes.extend(attrs);
 
         if let Some(selected_value) = inner
@@ -1206,12 +1214,16 @@ where
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
-        let attrs: Vec<KeyValue> = inner
-            .selectors
-            .on_response_event(response, ctx)
-            .into_iter()
-            .collect();
-        inner.attributes.extend(attrs);
+        // Response event may be called multiple times so we don't extend inner.attributes
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_event(response, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
 
         if let Some(selected_value) = inner
             .selector
@@ -1261,8 +1273,11 @@ where
 
     fn on_error(&self, error: &BoxError, _ctx: &Context) {
         let mut inner = self.inner.lock();
-        let mut attrs: Vec<KeyValue> = inner.selectors.on_error(error).into_iter().collect();
-        attrs.append(&mut inner.attributes);
+
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(selectors.on_error(error).into_iter().collect::<Vec<_>>());
+        }
 
         let increment = match inner.increment {
             Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
@@ -1278,6 +1293,67 @@ where
         };
 
         if let Some(counter) = inner.counter.take() {
+            counter.add(increment, &attrs);
+        }
+    }
+
+    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+        let mut inner = self.inner.lock();
+        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+            return;
+        }
+
+        // Response field may be called multiple times so we don't extend inner.attributes
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_field(typed_value, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response_field(typed_value, ctx))
+        {
+            let new_incr = match &inner.increment {
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment: Option<f64> = match &mut inner.increment {
+            Increment::FieldUnit => Some(1f64),
+            Increment::FieldCustom(val) => {
+                let incr = val.map(|incr| incr as f64);
+                // Set it to None again
+                *val = None;
+                incr
+            }
+            Increment::Unit
+            | Increment::Duration(_)
+            | Increment::Custom(_)
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::EventUnit => {
+                // Nothing to do because we're incrementing on fields
+                return;
+            }
+        };
+
+        if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
             counter.add(increment, &attrs);
         }
     }
@@ -1518,12 +1594,18 @@ where
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner
-            .selectors
-            .as_ref()
-            .map(|s| s.on_response_event(response, ctx).into_iter().collect())
-            .unwrap_or_default();
-        attrs.extend(inner.attributes.clone());
+
+        // Response event may be called multiple times so we don't extend inner.attributes
+        let mut attrs: Vec<KeyValue> = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_event(response, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
+
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -1602,12 +1684,18 @@ where
         if !inner.condition.evaluate_response_field(typed_value, ctx) {
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner
-            .selectors
-            .as_ref()
-            .map(|s| s.on_response_field(typed_value, ctx).into_iter().collect())
-            .unwrap_or_default();
-        attrs.extend(inner.attributes.clone());
+
+        // Response field may be called multiple times so we don't extend inner.attributes
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_field(typed_value, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
+
         if let Some(selected_value) = inner
             .selector
             .as_ref()

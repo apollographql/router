@@ -4,7 +4,6 @@ use std::collections::HashMap;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::schema::Type;
 use apollo_compiler::ExecutableDocument;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -53,19 +52,17 @@ impl<'a> SchemaAwareResponse<'a> {
 
 pub(crate) trait Visitor {
     fn visit(&self, value: &TypedValue) {
-        self.visit_value(value);
-    }
-    fn visit_value(&self, value: &TypedValue) {
         match value {
             TypedValue::Null => self.visit_null(),
             TypedValue::Bool(ty, f, b) => self.visit_bool(ty, f, b),
             TypedValue::Number(ty, f, n) => self.visit_number(ty, f, n),
             TypedValue::String(ty, f, s) => self.visit_string(ty, f, s),
-            TypedValue::Array(ty, f, items) => self.visit_array(ty, f, items),
+            TypedValue::List(ty, f, items) => self.visit_array(ty, f, items),
             TypedValue::Object(ty, f, children) => self.visit_object(ty, f, children),
             TypedValue::Root(children) => self.visit_root(children),
         }
     }
+    fn visit_field(&self, value: &TypedValue) {}
     fn visit_null(&self) {}
     fn visit_bool(&self, _ty: &NamedType, _field: &Field, _value: &bool) {}
     fn visit_number(&self, _ty: &NamedType, _field: &Field, _value: &serde_json::Number) {}
@@ -73,9 +70,11 @@ pub(crate) trait Visitor {
 
     fn visit_array(&self, _ty: &NamedType, _field: &Field, items: &Vec<TypedValue>) {
         for value in items.iter() {
+            self.visit_array_element(value);
             self.visit(value);
         }
     }
+    fn visit_array_element(&self, value: &TypedValue) {}
     fn visit_object(
         &self,
         _ty: &NamedType,
@@ -83,11 +82,13 @@ pub(crate) trait Visitor {
         children: &HashMap<String, TypedValue>,
     ) {
         for value in children.values() {
+            self.visit_field(value);
             self.visit(value);
         }
     }
     fn visit_root(&self, children: &HashMap<String, TypedValue>) {
         for value in children.values() {
+            self.visit_field(value);
             self.visit(value);
         }
     }
@@ -99,7 +100,7 @@ pub(crate) enum TypedValue<'a> {
     Bool(&'a NamedType, &'a Field, &'a bool),
     Number(&'a NamedType, &'a Field, &'a serde_json::Number),
     String(&'a NamedType, &'a Field, &'a str),
-    Array(&'a NamedType, &'a Field, Vec<TypedValue<'a>>),
+    List(&'a NamedType, &'a Field, Vec<TypedValue<'a>>),
     Object(&'a NamedType, &'a Field, HashMap<String, TypedValue<'a>>),
     Root(HashMap<String, TypedValue<'a>>),
 }
@@ -121,7 +122,7 @@ impl<'a> TypedValue<'a> {
                 for item in items {
                     typed_items.push(TypedValue::zip_field(request, ty, field, item)?);
                 }
-                Ok(TypedValue::Array(ty, field, typed_items))
+                Ok(TypedValue::List(ty, field, typed_items))
             }
             Value::Object(children) => {
                 let typed_children = Self::zip_selections(request, &field.selection_set, children)?;

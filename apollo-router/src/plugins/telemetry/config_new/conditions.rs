@@ -343,6 +343,13 @@ where
             SelectorOrValue::Selector(selector) => selector.on_error(error),
         }
     }
+
+    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) -> Option<Value> {
+        match self {
+            SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Selector(selector) => selector.on_response_field(typed_value, ctx),
+        }
+    }
 }
 
 #[cfg(test)]

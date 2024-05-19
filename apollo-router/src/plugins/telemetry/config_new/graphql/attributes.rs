@@ -1,6 +1,6 @@
 use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::Context;
-use opentelemetry_api::{KeyValue, Value};
+use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -48,7 +48,7 @@ impl Selectors for GraphQLAttributes {
     type Response = supergraph::Response;
     type EventResponse = crate::graphql::Response;
 
-    fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
+    fn on_request(&self, _request: &Self::Request) -> Vec<KeyValue> {
         Vec::default()
     }
 
@@ -73,7 +73,7 @@ impl Selectors for GraphQLAttributes {
         }
         if let Some(true) = self.field_type {
             if let Some(ty) = (GraphQLSelector::FieldType {
-                field_type: FieldType::String,
+                field_type: FieldType::Name,
             })
             .on_response_field(typed_value, ctx)
             {

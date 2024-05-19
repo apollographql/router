@@ -1,3 +1,6 @@
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::executable::Field;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{metrics, Context};
@@ -7,14 +10,19 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use super::instruments::{CustomInstruments, Increment, InstrumentsConfig, METER_NAME};
+use super::instruments::{
+    CustomCounter, CustomCounterInner, CustomInstruments, Increment, InstrumentsConfig, METER_NAME,
+};
 use crate::plugins::demand_control::cost_calculator::schema_aware_response;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response::{TypedValue, Visitor};
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::conditions::{Condition, SelectorOrValue};
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::{ArrayLength, GraphQLSelector};
+use crate::plugins::telemetry::config_new::graphql::selectors::{
+    ArrayLength, FieldType, GraphQLSelector,
+};
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
@@ -27,6 +35,7 @@ pub(crate) mod attributes;
 pub(crate) mod selectors;
 
 static FIELD_LENGTH: &str = "graphql.field.length";
+static FIELD_EXECUTION: &str = "graphql.field.execution";
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -34,6 +43,11 @@ pub(crate) struct GraphQLInstrumentsConfig {
     /// A histogram of the length of a selected field in the GraphQL response
     #[serde(rename = "field.length")]
     pub(crate) field_length:
+        DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
+
+    /// A counter of the number of times a field is used.
+    #[serde(rename = "field.execution")]
+    pub(crate) field_execution:
         DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
 }
 
@@ -45,41 +59,8 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
     ) {
         self.field_length
             .defaults_for_level(requirement_level, kind);
-    }
-}
-
-impl GraphQLInstrumentsConfig {
-    fn histogram(
-        name: &'static str,
-        config: &DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
-        selector: GraphQLSelector,
-    ) -> CustomHistogram<
-        supergraph::Request,
-        supergraph::Response,
-        GraphQLAttributes,
-        GraphQLSelector,
-    > {
-        let meter = crate::metrics::meter_provider().meter(METER_NAME);
-        let mut nb_attributes = 0;
-        let selectors = match config {
-            DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => None,
-            DefaultedStandardInstrument::Extendable { attributes } => {
-                nb_attributes = attributes.custom.len();
-                Some(attributes.clone())
-            }
-        };
-
-        CustomHistogram {
-            inner: Mutex::new(CustomHistogramInner {
-                increment: Increment::FieldCustom(None),
-                condition: Condition::True,
-                histogram: Some(meter.f64_histogram(name).init()),
-                attributes: Vec::with_capacity(nb_attributes),
-                selector: Some(Arc::new(selector)),
-                selectors,
-                updated: false,
-            }),
-        }
+        self.field_execution
+            .defaults_for_level(requirement_level, kind);
     }
 }
 
@@ -93,6 +74,14 @@ pub(crate) type GraphQLCustomInstruments = CustomInstruments<
 pub(crate) struct GraphQLInstruments {
     pub(crate) field_length: Option<
         CustomHistogram<
+            supergraph::Request,
+            supergraph::Response,
+            GraphQLAttributes,
+            GraphQLSelector,
+        >,
+    >,
+    pub(crate) field_execution: Option<
+        CustomCounter<
             supergraph::Request,
             supergraph::Response,
             GraphQLAttributes,
@@ -131,6 +120,33 @@ impl From<&InstrumentsConfig> for GraphQLInstruments {
                     }),
                 }
             }),
+            field_execution: value
+                .graphql
+                .attributes
+                .field_execution
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &value.graphql.attributes.field_execution {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomCounter {
+                        inner: Mutex::new(CustomCounterInner {
+                            increment: Increment::FieldUnit,
+                            condition: Condition::True,
+                            counter: Some(meter.f64_counter(FIELD_EXECUTION).init()),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: None,
+                            selectors,
+                            incremented: false,
+                        }),
+                    }
+                }),
             custom: CustomInstruments::new(&value.graphql.custom),
         }
     }
@@ -145,12 +161,18 @@ impl Instrumented for GraphQLInstruments {
         if let Some(field_length) = &self.field_length {
             field_length.on_request(request);
         }
+        if let Some(field_execution) = &self.field_execution {
+            field_execution.on_request(request);
+        }
         self.custom.on_request(request);
     }
 
     fn on_response(&self, response: &Self::Response) {
         if let Some(field_length) = &self.field_length {
             field_length.on_response(response);
+        }
+        if let Some(field_execution) = &self.field_execution {
+            field_execution.on_response(response);
         }
         self.custom.on_response(response);
     }
@@ -159,11 +181,15 @@ impl Instrumented for GraphQLInstruments {
         if let Some(field_length) = &self.field_length {
             field_length.on_error(error, ctx);
         }
+        if let Some(field_execution) = &self.field_execution {
+            field_execution.on_error(error, ctx);
+        }
         self.custom.on_error(error, ctx);
     }
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
-        if !self.custom.is_empty() || self.field_length.is_some() {
+        if !self.custom.is_empty() || self.field_length.is_some() || self.field_execution.is_some()
+        {
             if let Some(executable_document) = ctx.unsupported_executable_document() {
                 if let Ok(schema) =
                     schema_aware_response::SchemaAwareResponse::new(&executable_document, response)
@@ -182,6 +208,9 @@ impl Instrumented for GraphQLInstruments {
         if let Some(field_length) = &self.field_length {
             field_length.on_response_field(typed_value, ctx);
         }
+        if let Some(field_execution) = &self.field_execution {
+            field_execution.on_response_field(typed_value, ctx);
+        }
         self.custom.on_response_field(typed_value, ctx);
     }
 }
@@ -192,9 +221,8 @@ struct GraphQLInstrumentsVisitor<'a> {
 }
 
 impl<'a> Visitor for GraphQLInstrumentsVisitor<'a> {
-    fn visit(&self, value: &TypedValue) {
+    fn visit_field(&self, value: &TypedValue) {
         self.instruments.on_response_field(value, self.ctx);
-        self.visit_value(value);
     }
 }
 
