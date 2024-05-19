@@ -8,7 +8,7 @@ use crate::plugins::telemetry::config_new::Selector;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum FieldLength {
+pub(crate) enum ArrayLength {
     Value,
 }
 
@@ -33,10 +33,10 @@ pub(crate) enum TypeName {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum GraphQLSelector {
-    /// The length of the field
-    FieldLength {
+    /// The length of the array
+    ArrayLength {
         #[allow(dead_code)]
-        field_length: FieldLength,
+        field_length: ArrayLength,
     },
     FieldName {
         #[allow(dead_code)]
@@ -75,8 +75,7 @@ impl Selector for GraphQLSelector {
         ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
-            GraphQLSelector::FieldLength { .. } => match typed_value {
-                TypedValue::String(_, _, string) => Some((string.len() as i64).into()),
+            GraphQLSelector::ArrayLength { .. } => match typed_value {
                 TypedValue::Array(_, _, array) => Some((array.len() as i64).into()),
                 _ => None,
             },

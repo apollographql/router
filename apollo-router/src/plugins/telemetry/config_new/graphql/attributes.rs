@@ -6,7 +6,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config_new::graphql::selectors::{
-    FieldLength, FieldName, FieldType, GraphQLSelector, TypeName,
+    ArrayLength, FieldName, FieldType, GraphQLSelector, TypeName,
 };
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selectors;
@@ -81,8 +81,8 @@ impl Selectors for GraphQLAttributes {
             }
         }
         if let Some(true) = self.field_length {
-            if let Some(length) = (GraphQLSelector::FieldLength {
-                field_length: FieldLength::Value,
+            if let Some(length) = (GraphQLSelector::ArrayLength {
+                field_length: ArrayLength::Value,
             })
             .on_response_field(typed_value, ctx)
             {

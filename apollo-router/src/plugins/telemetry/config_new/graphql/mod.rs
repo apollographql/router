@@ -14,7 +14,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::{FieldLength, GraphQLSelector};
+use crate::plugins::telemetry::config_new::graphql::selectors::{ArrayLength, GraphQLSelector};
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
@@ -123,8 +123,8 @@ impl From<&InstrumentsConfig> for GraphQLInstruments {
                         condition: Condition::True,
                         histogram: Some(meter.f64_histogram(FIELD_LENGTH).init()),
                         attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(GraphQLSelector::FieldLength {
-                            field_length: FieldLength::Value,
+                        selector: Some(Arc::new(GraphQLSelector::ArrayLength {
+                            field_length: ArrayLength::Value,
                         })),
                         selectors,
                         updated: false,
