@@ -1,8 +1,10 @@
+use apollo_compiler::ast::NamedType;
 use std::collections::HashMap;
 
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::Type;
 use apollo_compiler::ExecutableDocument;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -56,25 +58,30 @@ pub(crate) trait Visitor {
     fn visit_value(&self, value: &TypedValue) {
         match value {
             TypedValue::Null => self.visit_null(),
-            TypedValue::Bool(f, b) => self.visit_bool(f, b),
-            TypedValue::Number(f, n) => self.visit_number(f, n),
-            TypedValue::String(f, s) => self.visit_string(f, s),
-            TypedValue::Array(f, items) => self.visit_array(f, items),
-            TypedValue::Object(f, children) => self.visit_object(f, children),
+            TypedValue::Bool(ty, f, b) => self.visit_bool(ty, f, b),
+            TypedValue::Number(ty, f, n) => self.visit_number(ty, f, n),
+            TypedValue::String(ty, f, s) => self.visit_string(ty, f, s),
+            TypedValue::Array(ty, f, items) => self.visit_array(ty, f, items),
+            TypedValue::Object(ty, f, children) => self.visit_object(ty, f, children),
             TypedValue::Root(children) => self.visit_root(children),
         }
     }
     fn visit_null(&self) {}
-    fn visit_bool(&self, _field: &Field, _value: &bool) {}
-    fn visit_number(&self, _field: &Field, _value: &serde_json::Number) {}
-    fn visit_string(&self, _field: &Field, _value: &str) {}
+    fn visit_bool(&self, _ty: &NamedType, _field: &Field, _value: &bool) {}
+    fn visit_number(&self, _ty: &NamedType, _field: &Field, _value: &serde_json::Number) {}
+    fn visit_string(&self, _ty: &NamedType, _field: &Field, _value: &str) {}
 
-    fn visit_array(&self, _field: &Field, items: &Vec<TypedValue>) {
+    fn visit_array(&self, _ty: &NamedType, _field: &Field, items: &Vec<TypedValue>) {
         for value in items.iter() {
             self.visit(value);
         }
     }
-    fn visit_object(&self, _field: &Field, children: &HashMap<String, TypedValue>) {
+    fn visit_object(
+        &self,
+        _ty: &NamedType,
+        _field: &Field,
+        children: &HashMap<String, TypedValue>,
+    ) {
         for value in children.values() {
             self.visit(value);
         }
@@ -89,35 +96,36 @@ pub(crate) trait Visitor {
 #[derive(Debug)]
 pub(crate) enum TypedValue<'a> {
     Null,
-    Bool(&'a Field, &'a bool),
-    Number(&'a Field, &'a serde_json::Number),
-    String(&'a Field, &'a str),
-    Array(&'a Field, Vec<TypedValue<'a>>),
-    Object(&'a Field, HashMap<String, TypedValue<'a>>),
+    Bool(&'a NamedType, &'a Field, &'a bool),
+    Number(&'a NamedType, &'a Field, &'a serde_json::Number),
+    String(&'a NamedType, &'a Field, &'a str),
+    Array(&'a NamedType, &'a Field, Vec<TypedValue<'a>>),
+    Object(&'a NamedType, &'a Field, HashMap<String, TypedValue<'a>>),
     Root(HashMap<String, TypedValue<'a>>),
 }
 
 impl<'a> TypedValue<'a> {
     fn zip_field(
         request: &'a ExecutableDocument,
+        ty: &'a NamedType,
         field: &'a Field,
         value: &'a Value,
     ) -> Result<TypedValue<'a>, DemandControlError> {
         match value {
             Value::Null => Ok(TypedValue::Null),
-            Value::Bool(b) => Ok(TypedValue::Bool(field, b)),
-            Value::Number(n) => Ok(TypedValue::Number(field, n)),
-            Value::String(s) => Ok(TypedValue::String(field, s.as_str())),
+            Value::Bool(b) => Ok(TypedValue::Bool(ty, field, b)),
+            Value::Number(n) => Ok(TypedValue::Number(ty, field, n)),
+            Value::String(s) => Ok(TypedValue::String(ty, field, s.as_str())),
             Value::Array(items) => {
                 let mut typed_items = Vec::new();
                 for item in items {
-                    typed_items.push(TypedValue::zip_field(request, field, item)?);
+                    typed_items.push(TypedValue::zip_field(request, ty, field, item)?);
                 }
-                Ok(TypedValue::Array(field, typed_items))
+                Ok(TypedValue::Array(ty, field, typed_items))
             }
             Value::Object(children) => {
                 let typed_children = Self::zip_selections(request, &field.selection_set, children)?;
-                Ok(TypedValue::Object(field, typed_children))
+                Ok(TypedValue::Object(ty, field, typed_children))
             }
         }
     }
@@ -134,7 +142,12 @@ impl<'a> TypedValue<'a> {
                     if let Some(value) = fields.get(inner_field.name.as_str()) {
                         typed_children.insert(
                             inner_field.name.to_string(),
-                            TypedValue::zip_field(request, inner_field.as_ref(), value)?,
+                            TypedValue::zip_field(
+                                request,
+                                &selection_set.ty,
+                                inner_field.as_ref(),
+                                value,
+                            )?,
                         );
                     } else {
                         tracing::warn!("The response did not include a field corresponding to query field {:?}", inner_field);

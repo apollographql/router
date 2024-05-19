@@ -76,31 +76,39 @@ impl Selector for GraphQLSelector {
     ) -> Option<opentelemetry::Value> {
         match self {
             GraphQLSelector::FieldLength { .. } => match typed_value {
-                TypedValue::String(_, string) => Some((string.len() as i64).into()),
-                TypedValue::Array(_, array) => Some((array.len() as i64).into()),
+                TypedValue::String(_, _, string) => Some((string.len() as i64).into()),
+                TypedValue::Array(_, _, array) => Some((array.len() as i64).into()),
                 _ => None,
             },
             GraphQLSelector::FieldName { .. } => match typed_value {
                 TypedValue::Null => None,
-                TypedValue::Bool(f, _)
-                | TypedValue::Number(f, _)
-                | TypedValue::String(f, _)
-                | TypedValue::Array(f, _)
-                | TypedValue::Object(f, _) => Some(f.name.to_string().into()),
+                TypedValue::Bool(_, f, _)
+                | TypedValue::Number(_, f, _)
+                | TypedValue::String(_, f, _)
+                | TypedValue::Array(_, f, _)
+                | TypedValue::Object(_, f, _) => Some(f.name.to_string().into()),
                 TypedValue::Root(_) => None,
             },
             GraphQLSelector::FieldType { .. } => match typed_value {
                 TypedValue::Null => None,
-                TypedValue::Bool(f, _)
-                | TypedValue::Number(f, _)
-                | TypedValue::String(f, _)
-                | TypedValue::Array(f, _)
-                | TypedValue::Object(f, _) => {
+                TypedValue::Bool(_, f, _)
+                | TypedValue::Number(_, f, _)
+                | TypedValue::String(_, f, _)
+                | TypedValue::Array(_, f, _)
+                | TypedValue::Object(_, f, _) => {
                     Some(f.definition.ty.inner_named_type().to_string().into())
                 }
                 TypedValue::Root(_) => None,
             },
-            GraphQLSelector::TypeName { .. } => None,
+            GraphQLSelector::TypeName { .. } => match typed_value {
+                TypedValue::Null => None,
+                TypedValue::Bool(ty, _, _)
+                | TypedValue::Number(ty, _, _)
+                | TypedValue::String(ty, _, _)
+                | TypedValue::Array(ty, _, _)
+                | TypedValue::Object(ty, _, _) => Some(ty.to_string().into()),
+                TypedValue::Root(_) => None,
+            },
         }
     }
 }
