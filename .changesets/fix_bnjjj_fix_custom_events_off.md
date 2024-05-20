@@ -1,8 +1,8 @@
-### Do not create custom events in telemetry if level is off ([PR #5165](https://github.com/apollographql/router/pull/5165))
+### Custom telemetry events not created when logging is disabled ([PR #5165](https://github.com/apollographql/router/pull/5165))
 
-Don't create custom events and attributes if you set the level to `off` 
+The router has been fixed to not create custom telemetry events when the log level is set to `off`. 
 
-example of configuration:
+An example configuration with `level` set to `off` for a custom event:
 
 ```yaml
 telemetry:
