@@ -1,23 +1,27 @@
-//! Subgraph query optimization.
+//! # GraphQL subgraph query optimization.
 //!
 //! This module contains the logic to optimize (or "compress") a subgraph query by using fragments
 //! (either reusing existing ones in the original query or generating new ones).
+//!
+//! ## Selection/SelectionSet intersection/minus operations
+//! These set-theoretic operation methods are used to compute the optimized selection set.
+//!
+//! ## Collect applicable fragments at given type.
+//! This is only the first filtering step. Further validation is needed to check if they can merge
+//! with other fields and fragment selections.
 //!
 //! ## Field validation
 //! `FieldsConflictMultiBranchValidator` (and `FieldsConflictValidator`) are used to check if
 //! modified subgraph GraphQL queries are still valid, since adding fragments can introduce
 //! conflicts.
 //!
-//! ## Fragment expansion
-//! Once all applicable fragments are collected, they are expanded into selection sets in order to
-//! match them against given selection set.
-//!
-//! ## Re-using existing fragments (`try_optimize_with_fragments`)
-//! This is the first strategy to optimize the selection set. It tries to re-use existing
-//! fragments. Set-intersection/-minus/-containment operations are used to narrow down to fewer
-//! number of fragments that can be used to optimize the selection set. If there is a single
-//! fragment that covers the full selection set, then that fragment is used. Otherwise, we
-//! attempted to reduce the number of fragments applied, but optimality is not guaranteed, yet.
+//! ## Matching fragments with selection set (`try_optimize_with_fragments`)
+//! This is one strategy to optimize the selection set. It tries to match all applicable fragments.
+//! Then, they are expanded into selection sets in order to match them against given selection set.
+//! Set-intersection/-minus/-containment operations are used to narrow down to fewer number of
+//! fragments that can be used to optimize the selection set. If there is a single fragment that
+//! covers the full selection set, then that fragment is used. Otherwise, we attempted to reduce
+//! the number of fragments applied, but optimality is not guaranteed, yet.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -32,18 +36,180 @@ use super::operation::Containment;
 use super::operation::ContainmentOptions;
 use super::operation::Field;
 use super::operation::Fragment;
-use super::operation::FragmentSpread;
-use super::operation::FragmentSpreadData;
 use super::operation::FragmentSpreadSelection;
 use super::operation::NamedFragments;
 use super::operation::NormalizeSelectionOption;
 use super::operation::Selection;
-use super::operation::SelectionId;
 use super::operation::SelectionKey;
 use super::operation::SelectionMap;
 use super::operation::SelectionSet;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+
+//=============================================================================
+// Selection/SelectionSet intersection/minus operations
+
+impl Selection {
+    // PORT_NOTE: The definition of `minus` and `intersection` functions when either `self` or
+    // `other` has no sub-selection seems unintuitive. Why `apple.minus(orange) = None` and
+    // `apple.intersection(orange) = apple`?
+
+    /// Computes the set-subtraction (self - other) and returns the result (the difference between
+    /// self and other).
+    /// If there are respective sub-selections, then we compute their diffs and add them (if not
+    /// empty). Otherwise, we have no diff.
+    fn minus(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
+        if let (Some(self_sub_selection), Some(other_sub_selection)) =
+            (self.selection_set()?, other.selection_set()?)
+        {
+            let diff = self_sub_selection
+                .selections
+                .minus(&other_sub_selection.selections)?;
+            if !diff.is_empty() {
+                return self
+                    .with_updated_selections(
+                        self_sub_selection.type_position.clone(),
+                        diff.into_iter().map(|(_, v)| v),
+                    )
+                    .map(Some);
+            }
+        }
+        Ok(None)
+    }
+
+    /// Computes the set-intersection of self and other
+    /// - If there are respective sub-selections, then we compute their intersections and add them
+    ///   (if not empty).
+    /// - Otherwise, the intersection is same as `self`.
+    fn intersection(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
+        if let (Some(self_sub_selection), Some(other_sub_selection)) =
+            (self.selection_set()?, other.selection_set()?)
+        {
+            let common = self_sub_selection
+                .selections
+                .intersection(&other_sub_selection.selections)?;
+            if !common.is_empty() {
+                return self
+                    .with_updated_selections(
+                        self_sub_selection.type_position.clone(),
+                        common.into_iter().map(|(_, v)| v),
+                    )
+                    .map(Some);
+            }
+        }
+        Ok(Some(self.clone()))
+    }
+}
+
+impl SelectionMap {
+    /// Performs set-subtraction (self - other) and returns the result (the difference between self
+    /// and other).
+    fn minus(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
+        let iter = self
+            .iter()
+            .map(|(k, v)| {
+                if let Some(other_v) = other.get(k) {
+                    v.minus(other_v)
+                } else {
+                    Ok(Some(v.clone()))
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()? // early break in case of Err
+            .into_iter()
+            .flatten();
+        Ok(SelectionMap::from_iter(iter))
+    }
+
+    /// Computes the set-intersection of self and other
+    fn intersection(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
+        if self.is_empty() {
+            return Ok(self.clone());
+        }
+        if other.is_empty() {
+            return Ok(other.clone());
+        }
+
+        let iter = self
+            .iter()
+            .map(|(k, v)| {
+                if let Some(other_v) = other.get(k) {
+                    v.intersection(other_v)
+                } else {
+                    Ok(None)
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()? // early break in case of Err
+            .into_iter()
+            .flatten();
+        Ok(SelectionMap::from_iter(iter))
+    }
+}
+
+//=============================================================================
+// Filtering applicable fragments
+
+impl Fragment {
+    /// Whether this fragment may apply _directly_ at the provided type, meaning that the fragment
+    /// sub-selection (_without_ the fragment condition, hence the "directly") can be normalized at
+    /// `ty` without overly "widening" the runtime types.
+    ///
+    /// * `ty` - the type at which we're looking at applying the fragment
+    //
+    // The runtime types of the fragment condition must be at least as general as those of the
+    // provided `ty`. Otherwise, putting it at `ty` without its condition would "generalize"
+    // more than the fragment meant to (and so we'd "widen" the runtime types more than what the
+    // query meant to.
+    fn can_apply_directly_at_type(
+        &self,
+        ty: &CompositeTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        // Short-circuit #1: the same type => trivially true.
+        if self.type_condition_position == *ty {
+            return Ok(true);
+        }
+
+        // Short-circuit #2: The type condition is a (different) object type (too restrictive).
+        // - It will never cover all of the runtime types of `ty` unless it's the same type, which is
+        //   already checked.
+        if self.type_condition_position.is_object_type() {
+            return Ok(false);
+        }
+
+        // Short-circuit #3: The type condition is an interface type, but the `ty` is more general.
+        // - The type condition is an interface but `ty` is a (different) interface or a union.
+        if self.type_condition_position.is_interface_type() && !ty.is_object_type() {
+            return Ok(false);
+        }
+
+        // Check if the type condition is a superset of the provided type.
+        // - The fragment condition must be at least as general as the provided type.
+        let condition_types = self
+            .schema
+            .possible_runtime_types(self.type_condition_position.clone())?;
+        let ty_types = self.schema.possible_runtime_types(ty.clone())?;
+        Ok(condition_types.is_superset(&ty_types))
+    }
+}
+
+impl NamedFragments {
+    /// Returns a list of fragments that can be applied directly at the given type.
+    fn get_all_may_apply_directly_at_type(
+        &self,
+        ty: &CompositeTypeDefinitionPosition,
+    ) -> Result<Vec<Node<Fragment>>, FederationError> {
+        self.iter()
+            .filter_map(|fragment| {
+                fragment
+                    .can_apply_directly_at_type(ty)
+                    .map(|can_apply| can_apply.then_some(fragment.clone()))
+                    .transpose()
+            })
+            .collect::<Result<Vec<_>, _>>()
+    }
+}
+
+//=============================================================================
+// Field validation
 
 // PORT_NOTE: Not having a validator and having a FieldsConflictValidator with empty
 // `by_response_name` map has no difference in behavior. So, we could drop the `Option` from
@@ -190,7 +356,7 @@ impl FieldsConflictValidator {
     }
 }
 
-pub(crate) struct FieldsConflictMultiBranchValidator {
+struct FieldsConflictMultiBranchValidator {
     validators: Vec<Arc<FieldsConflictValidator>>,
     used_spread_trimmed_part_at_level: Vec<Arc<FieldsConflictValidator>>,
 }
@@ -271,6 +437,10 @@ impl FieldsConflictMultiBranchValidator {
     }
 }
 
+//=============================================================================
+// Matching fragments with selection set (`try_optimize_with_fragments`)
+
+/// Return type for `expanded_selection_set_at_type` method.
 struct FragmentRestrictionAtType {
     /// Selections that are expanded from a given fragment at a given type and then normalized.
     /// - This represents the part of given type's sub-selections that are covered by the fragment.
@@ -318,48 +488,10 @@ impl FragmentRestrictionAtType {
 }
 
 impl Fragment {
-    /// Whether this fragment may apply _directly_ at the provided type, meaning that the fragment
-    /// sub-selection (_without_ the fragment condition, hence the "directly") can be normalized at
-    /// `ty` without overly "widening" the runtime types.
-    ///
-    /// * `ty` - the type at which we're looking at applying the fragment
-    //
-    // The runtime types of the fragment condition must be at least as general as those of the
-    // provided `ty`. Otherwise, putting it at `ty` without its condition would "generalize"
-    // more than the fragment meant to (and so we'd "widen" the runtime types more than what the
-    // query meant to.
-    fn can_apply_directly_at_type(
-        &self,
-        ty: &CompositeTypeDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        // Short-circuit #1: the same type => trivially true.
-        if self.type_condition_position == *ty {
-            return Ok(true);
-        }
-
-        // Short-circuit #2: The type condition is a (different) object type (too restrictive).
-        // - It will never cover all of the runtime types of `ty` unless it's the same type, which is
-        //   already checked.
-        if self.type_condition_position.is_object_type() {
-            return Ok(false);
-        }
-
-        // Short-circuit #3: The type condition is an interface type, but the `ty` is more general.
-        // - The type condition is an interface but `ty` is a (different) interface or a union.
-        if self.type_condition_position.is_interface_type() && !ty.is_object_type() {
-            return Ok(false);
-        }
-
-        // Check if the type condition is a superset of the provided type.
-        // - The fragment condition must be at least as general as the provided type.
-        let condition_types = self
-            .schema
-            .possible_runtime_types(self.type_condition_position.clone())?;
-        let ty_types = self.schema.possible_runtime_types(ty.clone())?;
-        Ok(condition_types.is_superset(&ty_types))
-    }
-
-    // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port does not.
+    /// Computes the expanded selection set of this fragment along with its validator to check
+    /// against other fragments applied under the same selection set.
+    // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port
+    // does not.
     fn expanded_selection_set_at_type(
         &self,
         ty: &CompositeTypeDefinitionPosition,
@@ -417,7 +549,8 @@ impl Fragment {
     // Note: This is a heuristic looking for the other named fragment used directly in the
     //       selection set. It may not return `true` even though the other fragment's selections
     //       are actually covered by self's selection set.
-    // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port does not.
+    // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port
+    // does not.
     fn includes(&self, other_fragment_name: &Name) -> bool {
         if self.name == *other_fragment_name {
             return false;
@@ -432,119 +565,9 @@ impl Fragment {
     }
 }
 
-impl NamedFragments {
-    /// Returns a list of fragments that can be applied directly at the given type.
-    fn get_all_may_apply_directly_at_type(
-        &self,
-        ty: &CompositeTypeDefinitionPosition,
-    ) -> Result<Vec<Node<Fragment>>, FederationError> {
-        self.iter()
-            .filter_map(|fragment| {
-                fragment
-                    .can_apply_directly_at_type(ty)
-                    .map(|can_apply| can_apply.then_some(fragment.clone()))
-                    .transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()
-    }
-}
-
-impl Selection {
-    // PORT_NOTE: The definition of `minus` and `intersection` functions when either `self` or
-    // `other` has no sub-selection seems unintuitive. Why are `apple.minus(orange) = None` and
-    // `apple.intersection(orange) = apple`?
-
-    /// Performs set-subtraction (self - other) and returns the result (the difference between self
-    /// and other).
-    /// If there are respective sub-selections, then we compute their diffs and add them (if not
-    /// empty). Otherwise, we have no diff.
-    fn minus(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
-        if let (Some(self_sub_selection), Some(other_sub_selection)) =
-            (self.selection_set()?, other.selection_set()?)
-        {
-            let diff = self_sub_selection
-                .selections
-                .minus(&other_sub_selection.selections)?;
-            if !diff.is_empty() {
-                return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        diff.into_iter().map(|(_, v)| v),
-                    )
-                    .map(Some);
-            }
-        }
-        Ok(None)
-    }
-
-    // If there are respective sub-selections, then we compute their intersections and add them
-    // (if not empty). Otherwise, the intersection is same as `self`.
-    fn intersection(&self, other: &Selection) -> Result<Option<Selection>, FederationError> {
-        if let (Some(self_sub_selection), Some(other_sub_selection)) =
-            (self.selection_set()?, other.selection_set()?)
-        {
-            let common = self_sub_selection
-                .selections
-                .intersection(&other_sub_selection.selections)?;
-            if !common.is_empty() {
-                return self
-                    .with_updated_selections(
-                        self_sub_selection.type_position.clone(),
-                        common.into_iter().map(|(_, v)| v),
-                    )
-                    .map(Some);
-            }
-        }
-        Ok(Some(self.clone()))
-    }
-}
-
-impl SelectionMap {
-    /// Performs set-subtraction (self - other) and returns the result (the difference between self
-    /// and other).
-    fn minus(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
-        let iter = self
-            .iter()
-            .map(|(k, v)| {
-                if let Some(other_v) = other.get(k) {
-                    v.minus(other_v)
-                } else {
-                    Ok(Some(v.clone()))
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()? // early break in case of Err
-            .into_iter()
-            .flatten();
-        Ok(SelectionMap::from_iter(iter))
-    }
-
-    fn intersection(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
-        if self.is_empty() {
-            return Ok(self.clone());
-        }
-        if other.is_empty() {
-            return Ok(other.clone());
-        }
-
-        let iter = self
-            .iter()
-            .map(|(k, v)| {
-                if let Some(other_v) = other.get(k) {
-                    v.intersection(other_v)
-                } else {
-                    Ok(None)
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()? // early break in case of Err
-            .into_iter()
-            .flatten();
-        Ok(SelectionMap::from_iter(iter))
-    }
-}
-
 /// The return type for `SelectionSet::try_optimize_with_fragments`.
 #[derive(derive_more::From)]
-pub(crate) enum SelectionSetOrFragment {
+enum SelectionSetOrFragment {
     //Selection(Selection),
     SelectionSet(SelectionSet),
     Fragment(Node<Fragment>),
@@ -625,11 +648,12 @@ impl SelectionSet {
     /// - a new selection set partially optimized by re-using given `fragments`, or
     /// - a single fragment that covers the full selection set.
     // PORT_NOTE: Moved from `Selection` class in JS code to SelectionSet struct in Rust.
-    pub(crate) fn try_optimize_with_fragments(
+    // PORT_NOTE: `parent_type` argument seems always to be the same as `self.type_position`.
+    fn try_optimize_with_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         fragments: &NamedFragments,
-        mut validator: FieldsConflictMultiBranchValidator,
+        validator: &mut FieldsConflictMultiBranchValidator,
         can_use_full_matching_fragment: impl Fn(&Fragment) -> bool,
     ) -> Result<SelectionSetOrFragment, FederationError> {
         // We limit to fragments whose selection could be applied "directly" at `parent_type`,
@@ -709,18 +733,13 @@ impl SelectionSet {
             let not_covered = self.selections.minus(&at_type.selections)?;
             not_covered_so_far = not_covered_so_far.intersection(&not_covered)?;
 
-            let fragment_spread_data = FragmentSpreadData {
-                schema: self.schema.clone(),
-                fragment_name: fragment.name.clone(),
-                type_condition_position: parent_type.clone(),
-                directives: Default::default(), // No directives added to the spread
-                fragment_directives: fragment.directives.clone(), // Directives from the fragment definition
-                selection_id: SelectionId::new(),
-            };
-            let fragment_selection = FragmentSpreadSelection {
-                spread: FragmentSpread::new(fragment_spread_data),
-                selection_set: fragment.selection_set.clone(),
-            };
+            // PORT_NOTE: The JS version uses `parent_type` as the "sourceType", which may be
+            //            different from `fragment.type_condition_position`. But, Rust version does
+            //            not have "sourceType" field for `FragmentSpreadSelection`.
+            let fragment_selection = FragmentSpreadSelection::from_fragment(
+                &fragment,
+                /*directives*/ &Default::default(),
+            );
             optimized.insert(fragment_selection.into());
         }
 

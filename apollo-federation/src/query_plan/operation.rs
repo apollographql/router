@@ -1672,6 +1672,17 @@ impl FragmentSpreadSelection {
         })
     }
 
+    pub(crate) fn from_fragment(
+        fragment: &Node<Fragment>,
+        directives: &executable::DirectiveList,
+    ) -> Self {
+        let spread_data = FragmentSpreadData::from_fragment(fragment, directives);
+        Self {
+            spread: FragmentSpread::new(spread_data),
+            selection_set: fragment.selection_set.clone(),
+        }
+    }
+
     pub(crate) fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
