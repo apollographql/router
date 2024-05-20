@@ -338,7 +338,7 @@ impl QueryPlanner {
                 let node = FetchNode {
                     subgraph_name: subgraph_name.clone(),
                     operation_document: document.clone(),
-                    operation_name: operation_name.as_deref().cloned(),
+                    operation_name: operation.name.as_deref().cloned(),
                     operation_kind: operation.operation_type,
                     id: None,
                     variable_usages: operation
@@ -416,7 +416,7 @@ impl QueryPlanner {
         let processor = FetchDependencyGraphToQueryPlanProcessor::new(
             operation.variables.clone(),
             Some(RebasedFragments::new(&normalized_operation.named_fragments)),
-            operation_name.clone(),
+            operation.name.clone(),
             assigned_defer_labels,
         );
         let mut parameters = QueryPlanningParameters {
@@ -926,7 +926,7 @@ type User
             },
             Parallel {
               Sequence {
-                Flatten(path: "bestRatedProducts.*") {
+                Flatten(path: "bestRatedProducts.@") {
                   Fetch(service: "products") {
                     {
                       ... on Movie {
@@ -944,7 +944,7 @@ type User
                     }
                   },
                 },
-                Flatten(path: "bestRatedProducts.*.vendor") {
+                Flatten(path: "bestRatedProducts.@.vendor") {
                   Fetch(service: "accounts") {
                     {
                       ... on User {
@@ -961,7 +961,7 @@ type User
                 },
               },
               Sequence {
-                Flatten(path: "bestRatedProducts.*") {
+                Flatten(path: "bestRatedProducts.@") {
                   Fetch(service: "products") {
                     {
                       ... on Book {
@@ -979,7 +979,7 @@ type User
                     }
                   },
                 },
-                Flatten(path: "bestRatedProducts.*.vendor") {
+                Flatten(path: "bestRatedProducts.@.vendor") {
                   Fetch(service: "accounts") {
                     {
                       ... on User {

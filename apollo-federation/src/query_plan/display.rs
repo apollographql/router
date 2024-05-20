@@ -355,11 +355,12 @@ fn write_selections(
     state.write("}")
 }
 
+/// PORT_NOTE: Corresponds to `GroupPath.updatedResponsePath` in `buildPlan.ts`
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Key(name) => f.write_str(name),
-            Self::AnyIndex => f.write_str("*"),
+            Self::AnyIndex => f.write_str("@"),
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
         }
     }

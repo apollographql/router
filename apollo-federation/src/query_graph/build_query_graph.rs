@@ -1339,10 +1339,10 @@ impl FederatedQueryGraphBuilder {
             // like this way in the JS codebase, so we'll mimic the behavior for now.
             //
             // TODO: This is an optimization to avoid unnecessary inter-conversion between
-            // the apollo-rs operation representation and the federation-next one. This wasn't a
+            // the apollo-rs operation representation and the apollo-federation one. This wasn't a
             // problem in the JS codebase, as it would use its own operation representation from
             // the start. Eventually when operation processing code is ready and we make the switch
-            // to using the federation-next representation everywhere, we can probably simplify
+            // to using the apollo-federation representation everywhere, we can probably simplify
             // this.
             let new_conditions = if all_conditions.len() == 1 {
                 all_conditions
@@ -1410,10 +1410,10 @@ impl FederatedQueryGraphBuilder {
             // merge the selection sets before into one.
             //
             // TODO: This is an optimization to avoid unnecessary inter-conversion between
-            // the apollo-rs operation representation and the federation-next one. This wasn't a
+            // the apollo-rs operation representation and the apollo-federation one. This wasn't a
             // problem in the JS codebase, as it would use its own operation representation from
             // the start. Eventually when operation processing code is ready and we make the switch
-            // to using the federation-next representation everywhere, we can probably simplify
+            // to using the apollo-federation representation everywhere, we can probably simplify
             // this.
             let new_conditions = if all_conditions.len() == 1 {
                 all_conditions
