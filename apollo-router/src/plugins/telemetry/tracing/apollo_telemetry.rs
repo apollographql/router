@@ -1035,14 +1035,14 @@ impl SpanExporter for Exporter {
 
         let fut = async move {
             let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();
-            if send_otlp && otlp_trace_spans.len() > 0 {
+            if send_otlp && !otlp_trace_spans.is_empty() {
                 exports.push(
                     otlp_exporter
                         .as_ref()
                         .expect("expected an otel exporter")
                         .export(otlp_trace_spans.into_iter().flatten().collect()),
                 );
-            } else if send_reports && traces.len() > 0 {
+            } else if send_reports && !traces.is_empty() {
                 let mut report = telemetry::apollo::Report::default();
                 report += SingleReport::Traces(TracesReport { traces });
                 exports.push(
