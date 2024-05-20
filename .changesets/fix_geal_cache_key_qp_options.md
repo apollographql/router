@@ -1,23 +1,24 @@
 ### Prevent query plan cache collision when planning options change ([Issue #5093](https://github.com/apollographql/router/issues/5093))
 
+The router's hashing algorithm has been updated to prevent cache collisions when the router's configuration changes.
+
 > [!IMPORTANT]  
 > If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
-When query planning takes place there are a number of options such as:
+The router supports multiple options that affect the generated query plans, including:
 * `defer_support`
 * `generate_query_fragments`
 * `experimental_reuse_query_fragments`
 * `experimental_type_conditioned_fetching`
 * `experimental_query_planner_mode`
 
-that will affect the generated query plans.
+If distributed query plan caching is enabled, changing any of these options results in different query plans being generated and cached.
 
-If distributed query plan caching is also enabled, then changing any of these will result in different query plans being generated and entering the cache.
+This could be problematic in the following scenarios:
 
-This could cause issue in the following scenarios:
-1. The Router configuration changes and a query plan is loaded from cache which is incompatible with the new configuration.
-2. Routers with differing configuration are sharing the same cache causing them to cache and load incompatible query plans. 
+1. The router configuration changes and a query plan is loaded from cache which is incompatible with the new configuration.
+2. Routers with different configurations share the same cache, which causes them to cache and load incompatible query plans. 
 
-Now a hash for the entire query planner configuration is included in the cache key to prevent this from happening.
+To prevent these from happening, the router now creates a hash for the entire query planner configuration and includes it in the cache key.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5100

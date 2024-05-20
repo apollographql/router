@@ -1,4 +1,4 @@
-### Strip dashes from trace_id in CustomTraceIdPropagator ([Issue #4892](https://github.com/apollographql/router/issues/4892))
+### Strip dashes from `trace_id` in `CustomTraceIdPropagator` ([Issue #4892](https://github.com/apollographql/router/issues/4892))
 
 
 The router now strips dashes from trace IDs to ensure conformance with OpenTelemetry.
