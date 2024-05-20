@@ -959,8 +959,10 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         let mut otlp_trace_spans: Vec<Vec<SpanData>> = Vec::new();
-        let mut rng = rand::thread_rng();
-        let send_otlp = rng.gen_range(0.0..1.0) < self.otlp_tracing_ratio;
+        
+        // Decide whether to send via OTLP or reports proto based on the sampling config.  Roll dice if using a percentage rollout.
+        let send_otlp = self.otlp_exporter.is_some() && rand::thread_rng().gen_range(0.0..1.0) < self.otlp_tracing_ratio;
+        let send_reports = self.report_exporter.is_some() && !send_otlp;
 
         for span in batch {
             if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
@@ -968,14 +970,12 @@ impl SpanExporter for Exporter {
             {
                 let root_span: LightSpanData =
                     LightSpanData::from_span_data(span, &self.include_attr_names);
-                if send_otlp && self.otlp_exporter.is_some() {
+                if send_otlp {
                     let pop_cache = true; // pct rollout, if we are sending otlp then always pop
                     let grouped_trace_spans = self.group_by_trace(&root_span, pop_cache);
                     // TBD(tim): do we need to filter out traces w/o signatures?  What scenario(s) would cause that to happen?
                     otlp_trace_spans.push(grouped_trace_spans);
-                }
-
-                if !send_otlp && self.report_exporter.is_some() {
+                } else if send_reports {
                     match self.extract_traces(root_span) {
                         Ok(extracted_traces) => {
                             for mut trace in extracted_traces {
@@ -1018,8 +1018,6 @@ impl SpanExporter for Exporter {
             }
         }
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
-        let mut report = telemetry::apollo::Report::default();
-        report += SingleReport::Traces(TracesReport { traces });
         #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
         let report_exporter = match self.report_exporter.as_ref() {
             Some(exporter) => Some(exporter.clone()),
@@ -1033,14 +1031,16 @@ impl SpanExporter for Exporter {
 
         let fut = async move {
             let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();
-            if send_otlp {
+            if send_otlp && otlp_trace_spans.len() > 0 {
                 exports.push(
                     otlp_exporter
                         .as_ref()
                         .expect("expected an otel exporter")
                         .export(otlp_trace_spans.into_iter().flatten().collect()),
                 );
-            } else {
+            } else if send_reports && traces.len() > 0 {
+                let mut report = telemetry::apollo::Report::default();
+                report += SingleReport::Traces(TracesReport { traces });
                 exports.push(
                     report_exporter
                         .as_ref()
