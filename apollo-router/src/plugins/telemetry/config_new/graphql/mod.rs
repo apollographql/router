@@ -1,22 +1,27 @@
 use std::sync::Arc;
 
-use crate::{metrics, Context};
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use super::instruments::{
-    CustomCounter, CustomCounterInner, CustomInstruments, Increment, InstrumentsConfig, METER_NAME,
-};
+use super::instruments::CustomCounter;
+use super::instruments::CustomCounterInner;
+use super::instruments::CustomInstruments;
+use super::instruments::Increment;
+use super::instruments::InstrumentsConfig;
+use super::instruments::METER_NAME;
+use crate::metrics;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::{TypedValue, Visitor};
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::Visitor;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::{GraphQLSelector, ListLength};
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
@@ -24,6 +29,7 @@ use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
+use crate::Context;
 
 pub(crate) mod attributes;
 pub(crate) mod selectors;
@@ -224,29 +230,34 @@ impl<'a> Visitor for GraphQLInstrumentsVisitor<'a> {
 
 #[cfg(test)]
 mod test {
+    use std::sync::OnceLock;
+
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::schema::FieldDefinition;
+    use apollo_compiler::schema::NamedType;
+    use apollo_compiler::schema::Type;
+    use apollo_compiler::Node;
+    use apollo_compiler::NodeStr;
+
     use super::*;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
 
-    use apollo_compiler::executable::Field;
-    use apollo_compiler::schema::{FieldDefinition, NamedType, Type};
-    use apollo_compiler::{Node, NodeStr};
-    use std::sync::OnceLock;
-
     #[tokio::test]
     async fn valid_config() {
         PluginTestHarness::<Telemetry>::builder()
-            .config(include_str!("fixtures/graphql_field_length.router.yaml"))
+            .config(include_str!("fixtures/graphql_instruments.router.yaml"))
             .build()
             .await;
     }
 
     #[test]
     fn conversion_to_instruments() {
-        let config = config(include_str!("fixtures/graphql_field_length.router.yaml"));
-        //let instruments: GraphQLInstruments = config.into();
-
-        //      assert!(true)
+        let _config = config(include_str!("fixtures/graphql_instruments.router.yaml"));
+        // let instruments: GraphQLInstruments = &config.into();
+        // assert!(instruments.list_length.is_some());
+        // assert!(instruments.field_execution.is_some());
+        // assert!(!instruments.custom.is_empty());
     }
 
     fn config(config: &'static str) -> GraphQLInstrumentsConfig {

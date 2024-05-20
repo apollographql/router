@@ -1,10 +1,10 @@
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-use crate::Context;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::Selector;
+use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -141,9 +141,11 @@ impl Selector for GraphQLSelector {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::plugins::telemetry::config_new::graphql::test::{field, ty};
     use opentelemetry::Value;
+
+    use super::*;
+    use crate::plugins::telemetry::config_new::graphql::test::field;
+    use crate::plugins::telemetry::config_new::graphql::test::ty;
 
     #[test]
     fn array_length() {
@@ -185,7 +187,7 @@ mod tests {
 
     #[test]
     fn field_type_scalar_type() {
-        assert_scalar(&TypedValue::String(ty(), field(), &"value"));
+        assert_scalar(&TypedValue::String(ty(), field(), "value"));
         assert_scalar(&TypedValue::Number(
             ty(),
             field(),
@@ -197,7 +199,7 @@ mod tests {
         let result = GraphQLSelector::FieldType {
             field_type: FieldType::Type,
         }
-        .on_response_field(&typed_value, &Context::default());
+        .on_response_field(typed_value, &Context::default());
         assert_eq!(result, Some(Value::String("scalar".into())));
     }
 

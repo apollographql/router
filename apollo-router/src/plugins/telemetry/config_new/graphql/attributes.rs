@@ -1,18 +1,21 @@
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-use crate::Context;
 use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::telemetry::config_new::graphql::selectors::{
-    FieldName, FieldType, GraphQLSelector, ListLength, TypeName,
-};
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
+use crate::plugins::telemetry::config_new::graphql::selectors::FieldName;
+use crate::plugins::telemetry::config_new::graphql::selectors::FieldType;
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
+use crate::plugins::telemetry::config_new::graphql::selectors::TypeName;
+use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
+use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
-use crate::plugins::telemetry::config_new::{DefaultAttributeRequirementLevel, Selector};
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::supergraph;
+use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
@@ -109,8 +112,10 @@ impl Selectors for GraphQLAttributes {
 #[cfg(test)]
 mod test {
     use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-    use crate::plugins::telemetry::config_new::graphql::test::{field, ty};
-    use crate::plugins::telemetry::config_new::{DefaultForLevel, Selectors};
+    use crate::plugins::telemetry::config_new::graphql::test::field;
+    use crate::plugins::telemetry::config_new::graphql::test::ty;
+    use crate::plugins::telemetry::config_new::DefaultForLevel;
+    use crate::plugins::telemetry::config_new::Selectors;
 
     #[test]
     fn test_default_for_level() {

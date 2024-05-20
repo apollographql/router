@@ -1,0 +1,16 @@
+telemetry:
+  instrumentation:
+    instruments:
+      graphql:
+        list.length: true
+        field.execution: true
+        "custom":
+          condition:
+            eq:
+              - field_name: string
+              - "name"
+          value: field_unit
+          type: counter
+          description: "test"
+          unit: "count"
+

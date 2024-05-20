@@ -1,7 +1,0 @@
-telemetry:
-  instrumentation:
-    instruments:
-      graphql:
-        list.length: true
-
-

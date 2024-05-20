@@ -1,6 +1,6 @@
-use apollo_compiler::ast::NamedType;
 use std::collections::HashMap;
 
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
@@ -68,7 +68,7 @@ pub(crate) trait Visitor {
     fn visit_number(&self, _ty: &NamedType, _field: &Field, _value: &serde_json::Number) {}
     fn visit_string(&self, _ty: &NamedType, _field: &Field, _value: &str) {}
 
-    fn visit_array(&self, _ty: &NamedType, _field: &Field, items: &Vec<TypedValue>) {
+    fn visit_array(&self, _ty: &NamedType, _field: &Field, items: &[TypedValue]) {
         for value in items.iter() {
             self.visit_array_element(value);
             self.visit(value);
@@ -188,7 +188,6 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-
     use crate::graphql::Response;
 
     #[test]
