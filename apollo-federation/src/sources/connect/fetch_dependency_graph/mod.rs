@@ -17,9 +17,12 @@ use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
 use crate::sources::connect;
+use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::Key;
+use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::PathSelection;
+use crate::sources::connect::json_selection::StarSelection;
 use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::source;
 use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
@@ -93,10 +96,231 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
     fn add_path(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _source_path: source::fetch_dependency_graph::Path,
-        _source_data: &mut source::fetch_dependency_graph::Node,
+        source_path: source::fetch_dependency_graph::Path,
+        source_data: &mut source::fetch_dependency_graph::Node,
     ) -> Result<(), FederationError> {
-        todo!()
+        // Since we are handling connect code, we should make sure that we actually have connect data
+        let source::fetch_dependency_graph::Path::Connect(source_path) = source_path else {
+            return Err(FederationError::internal("expected connect path"));
+        };
+        let source::fetch_dependency_graph::Node::Connect(source_data) = source_data else {
+            return Err(FederationError::internal("expected connect path"));
+        };
+
+        // We should be at the same merge level
+        // Note: This should be a fast comparison (pointer-level)
+        if source_path.merge_at != source_data.merge_at {
+            return Err(FederationError::internal(
+                "expected to have matching merge elements",
+            ));
+        }
+
+        // The given edge should be one that connects to both the source_path and source_data
+        // Note: Comparison of two numbers is fast
+        if source_path.source_entering_edge != source_data.source_entering_edge {
+            return Err(FederationError::internal(
+                "expected to have matching entering edges",
+            ));
+        }
+
+        // If we don't have any field selections in the source_path, then there is nothing to do.
+        let Some(source_path_field) = source_path.field else {
+            return Ok(());
+        };
+
+        // Enforce that the field contains properties shared with the source data
+        if source_path_field.response_name != source_data.field_response_name {
+            return Err(FederationError::internal(
+                "expected path and source data to have the same field name",
+            ));
+        }
+        if source_path_field.arguments != source_data.field_arguments {
+            return Err(FederationError::internal(
+                "expected path and source data to have the same field arguments",
+            ));
+        }
+
+        // Ensure that we have a selection, inserting an initial value if not.
+        let selection =
+            source_data
+                .selection
+                .get_or_insert_with(|| match &source_path_field.selections {
+                    // Construct a new selection from the supplied path properties
+                    PathSelections::Selections {
+                        head_property_path,
+                        tail_selection,
+                        ..
+                    } => {
+                        if head_property_path.is_empty() {
+                            JSONSelection::Named(SubSelection::default())
+                        } else if let Some((_name, _tail)) = tail_selection {
+                            JSONSelection::Path(PathSelection::from_slice(
+                                head_property_path,
+                                Some(SubSelection::default()),
+                            ))
+                        } else {
+                            JSONSelection::Path(PathSelection::from_slice(head_property_path, None))
+                        }
+                    }
+
+                    // Pass through the supplied selection
+                    PathSelections::CustomScalarRoot { selection } => selection.clone(),
+                });
+
+        // TODO: Matching twice seems sad, but how can we separate the selection logic from the traversal?
+        // If figured out, remove clone above
+        if let PathSelections::Selections {
+            named_selections,
+            tail_selection,
+            ..
+        } = source_path_field.selections
+        {
+            // We can short out if there's nothing to select
+            let Some((tail_name, tail_subselection)) = tail_selection else {
+                return Ok(());
+            };
+
+            // If we are adding a path and have a selection, then the selection _must_ have a subselection.
+            let subselection =
+                selection
+                    .next_mut_subselection()
+                    .ok_or(FederationError::internal(
+                        "expecting a subselection in our selection",
+                    ))?;
+
+            // Helper method for finding existing references of names within a vec of keys
+            fn name_matches(seen_selection: &NamedSelection, name: &Name) -> bool {
+                match seen_selection {
+                    NamedSelection::Field(Some(Alias { name: ident }), _, _)
+                    | NamedSelection::Field(None, ident, _)
+                    | NamedSelection::Quoted(Alias { name: ident }, _, _)
+                    | NamedSelection::Path(Alias { name: ident }, _)
+                    | NamedSelection::Group(Alias { name: ident }, _) => ident == name.as_str(),
+                }
+            }
+
+            // Now we need to traverse the hierarchy behind the supplied node, updating its JSONSelections
+            // along the way as we find missing members needed by the new source path.
+            let mut subselection_ref = subselection;
+            for (name, keys) in named_selections {
+                // If we have a selection already, we'll need to make sure that it includes the new field,
+                // then we process the next subselection in the path chain.
+                // TODO: This is probably not very performant, but we only have a Vec to work with...
+                subselection_ref = if let Some(matching_selection_position) = subselection_ref
+                    .selections
+                    .iter()
+                    .position(|s| name_matches(s, &name))
+                {
+                    let macthing_selection = subselection_ref.selections.get_mut(matching_selection_position).ok_or(FederationError::internal("matched position does not actually exist in selections. This should not happen"))?;
+                    macthing_selection
+                        .next_mut_subselection()
+                        .ok_or(FederationError::internal(
+                            "expected existing selection to have a subselection",
+                        ))?
+                } else if keys.is_empty() {
+                    subselection_ref.selections.push(NamedSelection::Group(
+                        Alias {
+                            name: name.to_string(),
+                        },
+                        SubSelection::default(),
+                    ));
+
+                    subselection_ref
+                        .selections
+                        .last_mut()
+                        .ok_or(FederationError::internal(
+                            "recently added group named selection disappeared. This should not happen",
+                        ))?
+                        .next_mut_subselection()
+                        .ok_or(FederationError::internal(
+                            "recently added group named selection's subselection disappeared. This should not happen",
+                        ))?
+                } else {
+                    // TODO: You could technically detect whether a shorthand enum variant of NamedSelection
+                    // is usable based on the Name and Keys to make the overall JSONSelection appear cleaner,
+                    // though this isn't necessary.
+                    subselection_ref.selections.push(NamedSelection::Path(
+                        Alias {
+                            name: name.to_string(),
+                        },
+                        PathSelection::from_slice(&keys, Some(SubSelection::default())),
+                    ));
+
+                    subselection_ref
+                        .selections
+                        .last_mut()
+                        .ok_or(FederationError::internal(
+                            "recently added path named selection disappeared. This should not happen",
+                        ))?
+                        .next_mut_subselection()
+                        .ok_or(FederationError::internal(
+                            "recently added path named selection's subselection disappeared. This should not happen",
+                        ))?
+                };
+            }
+
+            // Now that we've merged in the JSON selection into the node, add in the final tail subselection
+            // Note: The subselection_ref here is now the furthest down in the chain, which is where we need
+            // it to be.
+            match tail_subselection {
+                // TODO: This is probably not very performant, but we only have a Vec to work with...
+                PathTailSelection::Selection { property_path } => {
+                    if !subselection_ref
+                        .selections
+                        .iter()
+                        .any(|s| name_matches(s, &tail_name))
+                    {
+                        subselection_ref.selections.push(NamedSelection::Path(
+                            Alias {
+                                name: tail_name.to_string(),
+                            },
+                            PathSelection::from_slice(&property_path, None),
+                        ));
+                    }
+                }
+                PathTailSelection::CustomScalarPathSelection { path_selection } => {
+                    if !subselection_ref
+                        .selections
+                        .iter()
+                        .any(|s| name_matches(s, &tail_name))
+                    {
+                        subselection_ref.selections.push(NamedSelection::Path(
+                            Alias {
+                                name: tail_name.to_string(),
+                            },
+                            path_selection,
+                        ));
+                    }
+                }
+
+                PathTailSelection::CustomScalarStarSelection {
+                    star_subselection,
+                    excluded_properties,
+                } => {
+                    if subselection_ref.star.is_none() {
+                        // Initialize the star
+                        subselection_ref.star = Some(StarSelection(
+                            Some(Alias {
+                                name: tail_name.to_string(),
+                            }),
+                            star_subselection.map(Box::new),
+                        ));
+
+                        // Keep track of which props we've excluded
+                        for (index, key) in excluded_properties.into_iter().enumerate() {
+                            let alias = format!("____excluded_star_key__{index}");
+                            subselection_ref.selections.push(NamedSelection::Quoted(
+                                Alias { name: alias },
+                                key.as_string(),
+                                None,
+                            ));
+                        }
+                    }
+                }
+            };
+        }
+
+        Ok(())
     }
 
     fn to_cost(
@@ -423,12 +647,17 @@ mod tests {
         use crate::schema::position::ObjectTypeDefinitionPosition;
         use crate::source_aware::federated_query_graph;
         use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+        use crate::sources::connect;
         use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
         use crate::sources::connect::federated_query_graph::ConcreteNode;
         use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
         use crate::sources::connect::fetch_dependency_graph::FetchDependencyGraph;
+        use crate::sources::connect::json_selection::Alias;
         use crate::sources::connect::json_selection::Key;
+        use crate::sources::connect::json_selection::NamedSelection;
         use crate::sources::connect::ConnectId;
+        use crate::sources::connect::JSONSelection;
+        use crate::sources::source;
         use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
         use crate::sources::source::SourceId;
 
@@ -756,6 +985,451 @@ mod tests {
             Details: Edge unexpectedly missing
             "###
             );
+        }
+
+        #[test]
+        fn it_adds_a_simple_path() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                source_id,
+                ..
+            } = setup();
+
+            let arguments = IndexMap::from([]);
+            let merge_at = Arc::new([]);
+            let source_entering_edge = *source_entry_edges.last().unwrap();
+            let response_name = name!("_simple_path_test");
+
+            let (unmatched, selection) = JSONSelection::parse("a b c").unwrap();
+            assert!(unmatched.is_empty());
+
+            let mut node = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: merge_at.clone(),
+                    source_entering_edge,
+                    field_response_name: response_name.clone(),
+                    field_arguments: arguments.clone(),
+                    selection: Some(selection),
+                },
+            );
+
+            fetch_graph
+                .add_path(
+                    query_graph,
+                    source::fetch_dependency_graph::Path::Connect(
+                        connect::fetch_dependency_graph::Path {
+                            merge_at,
+                            source_entering_edge,
+                            source_id,
+                            field: Some(connect::fetch_dependency_graph::PathField {
+                                response_name,
+                                arguments,
+                                selections:
+                                    connect::fetch_dependency_graph::PathSelections::Selections {
+                                        head_property_path: Vec::new(),
+                                        named_selections: Vec::new(),
+                                        tail_selection: None,
+                                    },
+                            }),
+                        },
+                    ),
+                    &mut node,
+                )
+                .unwrap();
+
+            let source::fetch_dependency_graph::Node::Connect(result) = node else {
+                unreachable!()
+            };
+            assert_debug_snapshot!(result, @r###"
+            Node {
+                merge_at: [],
+                source_entering_edge: EdgeIndex(3),
+                field_response_name: "_simple_path_test",
+                field_arguments: {},
+                selection: Some(
+                    Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    "a",
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    "b",
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    "c",
+                                    None,
+                                ),
+                            ],
+                            star: None,
+                        },
+                    ),
+                ),
+            }
+            "###);
+        }
+
+        #[test]
+        fn it_adds_a_nested_path() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                source_id,
+                ..
+            } = setup();
+
+            let arguments = IndexMap::from([]);
+            let merge_at = Arc::new([]);
+            let source_entering_edge = *source_entry_edges.last().unwrap();
+            let response_name = name!("_nested_path_test");
+
+            let (unmatched, selection) =
+                JSONSelection::parse("a b { x y z { one two three } } c: last").unwrap();
+            assert!(unmatched.is_empty());
+
+            let mut node = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: merge_at.clone(),
+                    source_entering_edge,
+                    field_response_name: response_name.clone(),
+                    field_arguments: arguments.clone(),
+                    selection: Some(selection),
+                },
+            );
+
+            fetch_graph
+                .add_path(
+                    query_graph,
+                    source::fetch_dependency_graph::Path::Connect(
+                        connect::fetch_dependency_graph::Path {
+                            merge_at,
+                            source_entering_edge,
+                            source_id,
+                            field: Some(connect::fetch_dependency_graph::PathField {
+                                response_name,
+                                arguments,
+                                selections:
+                                    connect::fetch_dependency_graph::PathSelections::Selections {
+                                        head_property_path: Vec::new(),
+                                        named_selections: Vec::new(),
+                                        tail_selection: None,
+                                    },
+                            }),
+                        },
+                    ),
+                    &mut node,
+                )
+                .unwrap();
+
+            let source::fetch_dependency_graph::Node::Connect(result) = node else {
+                unreachable!()
+            };
+            assert_debug_snapshot!(result, @r###"
+            Node {
+                merge_at: [],
+                source_entering_edge: EdgeIndex(3),
+                field_response_name: "_nested_path_test",
+                field_arguments: {},
+                selection: Some(
+                    Named(
+                        SubSelection {
+                            selections: [
+                                Field(
+                                    None,
+                                    "a",
+                                    None,
+                                ),
+                                Field(
+                                    None,
+                                    "b",
+                                    Some(
+                                        SubSelection {
+                                            selections: [
+                                                Field(
+                                                    None,
+                                                    "x",
+                                                    None,
+                                                ),
+                                                Field(
+                                                    None,
+                                                    "y",
+                                                    None,
+                                                ),
+                                                Field(
+                                                    None,
+                                                    "z",
+                                                    Some(
+                                                        SubSelection {
+                                                            selections: [
+                                                                Field(
+                                                                    None,
+                                                                    "one",
+                                                                    None,
+                                                                ),
+                                                                Field(
+                                                                    None,
+                                                                    "two",
+                                                                    None,
+                                                                ),
+                                                                Field(
+                                                                    None,
+                                                                    "three",
+                                                                    None,
+                                                                ),
+                                                            ],
+                                                            star: None,
+                                                        },
+                                                    ),
+                                                ),
+                                            ],
+                                            star: None,
+                                        },
+                                    ),
+                                ),
+                                Field(
+                                    Some(
+                                        Alias {
+                                            name: "c",
+                                        },
+                                    ),
+                                    "last",
+                                    None,
+                                ),
+                            ],
+                            star: None,
+                        },
+                    ),
+                ),
+            }
+            "###);
+        }
+
+        /// Tests merging in of a new path.
+        ///
+        /// This test ensures that nodes which already contain a portion of the new path
+        /// will correctly have the new additions merged in from a separate path, including
+        /// nesting.
+        ///
+        /// - Node's selection: a b { x z { three } } c: last
+        /// - Path's selection: b { y z { one two } } d
+        #[test]
+        fn it_merges_a_nested_path() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                source_id,
+                ..
+            } = setup();
+
+            let arguments = IndexMap::from([]);
+            let merge_at = Arc::new([]);
+            let source_entering_edge = *source_entry_edges.last().unwrap();
+            let response_name = name!("_merge_nested_path_test");
+
+            let (unmatched, selection) = JSONSelection::parse(
+                ".foo.bar {
+                    qux: .qaax
+                    qax: .qaax {
+                      baz
+                    }
+                }",
+            )
+            .unwrap();
+            assert!(unmatched.is_empty());
+
+            let mut node = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: merge_at.clone(),
+                    source_entering_edge,
+                    field_response_name: response_name.clone(),
+                    field_arguments: arguments.clone(),
+                    selection: Some(selection),
+                },
+            );
+
+            fetch_graph
+                .add_path(
+                    query_graph,
+                    source::fetch_dependency_graph::Path::Connect(
+                        connect::fetch_dependency_graph::Path {
+                            merge_at,
+                            source_entering_edge,
+                            source_id,
+                            field: Some(connect::fetch_dependency_graph::PathField {
+                                response_name,
+                                arguments,
+                                selections:
+                                    connect::fetch_dependency_graph::PathSelections::Selections {
+                                        head_property_path: vec![
+                                            Key::Field("foo".to_string()),
+                                            Key::Field("bar".to_string()),
+                                        ],
+                                        named_selections: vec![
+                                            // - Node's selection: a b { x z { three } } c: last
+                                            (name!("qax"), vec![Key::Field("qaax".to_string())]),
+                                            (
+                                                name!("baaz"),
+                                                vec![
+                                                    Key::Field("baz".to_string()),
+                                                    Key::Field("buzz".to_string()),
+                                                ],
+                                            ),
+                                        ],
+                                        tail_selection: Some((
+                                            name!("biz"),
+                                            connect::fetch_dependency_graph::PathTailSelection::CustomScalarPathSelection {
+                                                path_selection: connect::fetch_dependency_graph::PathSelection::Selection(connect::SubSelection {
+                                                    selections: vec![
+                                                        NamedSelection::Group(
+                                                            Alias { name: "blah".to_string() },
+                                                            connect::SubSelection {
+                                                                selections: vec![
+                                                                    NamedSelection::Field(None, "x".to_string(), None),
+                                                                    NamedSelection::Field(None, "y".to_string(), None)
+                                                                ],
+                                                                star: None
+                                                            })
+                                                    ],
+                                                    star: None
+                                                })
+                                            },
+                                        )),
+                                    },
+                            }),
+                        },
+                    ),
+                    &mut node,
+                )
+                .unwrap();
+
+            let source::fetch_dependency_graph::Node::Connect(result) = node else {
+                unreachable!()
+            };
+            assert_debug_snapshot!(result, @r###"
+            Node {
+                merge_at: [],
+                source_entering_edge: EdgeIndex(3),
+                field_response_name: "_merge_nested_path_test",
+                field_arguments: {},
+                selection: Some(
+                    Path(
+                        Key(
+                            Field(
+                                "foo",
+                            ),
+                            Key(
+                                Field(
+                                    "bar",
+                                ),
+                                Selection(
+                                    SubSelection {
+                                        selections: [
+                                            Path(
+                                                Alias {
+                                                    name: "qux",
+                                                },
+                                                Key(
+                                                    Field(
+                                                        "qaax",
+                                                    ),
+                                                    Empty,
+                                                ),
+                                            ),
+                                            Path(
+                                                Alias {
+                                                    name: "qax",
+                                                },
+                                                Key(
+                                                    Field(
+                                                        "qaax",
+                                                    ),
+                                                    Selection(
+                                                        SubSelection {
+                                                            selections: [
+                                                                Field(
+                                                                    None,
+                                                                    "baz",
+                                                                    None,
+                                                                ),
+                                                                Path(
+                                                                    Alias {
+                                                                        name: "baaz",
+                                                                    },
+                                                                    Key(
+                                                                        Field(
+                                                                            "baz",
+                                                                        ),
+                                                                        Key(
+                                                                            Field(
+                                                                                "buzz",
+                                                                            ),
+                                                                            Selection(
+                                                                                SubSelection {
+                                                                                    selections: [
+                                                                                        Path(
+                                                                                            Alias {
+                                                                                                name: "biz",
+                                                                                            },
+                                                                                            Selection(
+                                                                                                SubSelection {
+                                                                                                    selections: [
+                                                                                                        Group(
+                                                                                                            Alias {
+                                                                                                                name: "blah",
+                                                                                                            },
+                                                                                                            SubSelection {
+                                                                                                                selections: [
+                                                                                                                    Field(
+                                                                                                                        None,
+                                                                                                                        "x",
+                                                                                                                        None,
+                                                                                                                    ),
+                                                                                                                    Field(
+                                                                                                                        None,
+                                                                                                                        "y",
+                                                                                                                        None,
+                                                                                                                    ),
+                                                                                                                ],
+                                                                                                                star: None,
+                                                                                                            },
+                                                                                                        ),
+                                                                                                    ],
+                                                                                                    star: None,
+                                                                                                },
+                                                                                            ),
+                                                                                        ),
+                                                                                    ],
+                                                                                    star: None,
+                                                                                },
+                                                                            ),
+                                                                        ),
+                                                                    ),
+                                                                ),
+                                                            ],
+                                                            star: None,
+                                                        },
+                                                    ),
+                                                ),
+                                            ),
+                                        ],
+                                        star: None,
+                                    },
+                                ),
+                            ),
+                        ),
+                    ),
+                ),
+            }
+            "###);
         }
     }
 

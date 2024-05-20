@@ -48,6 +48,20 @@ impl JSONSelection {
             all_consuming(map(PathSelection::parse, Self::Path)),
         ))(input)
     }
+
+    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
+        match self {
+            JSONSelection::Named(subselect) => Some(subselect),
+            JSONSelection::Path(path) => path.next_subselection(),
+        }
+    }
+
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match self {
+            JSONSelection::Named(subselect) => Some(subselect),
+            JSONSelection::Path(path) => path.next_mut_subselection(),
+        }
+    }
 }
 
 // NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
@@ -154,6 +168,21 @@ impl NamedSelection {
             _ => None,
         }
     }
+
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match self {
+            // Paths are complicated because they can have a subselection deeply nested
+            NamedSelection::Path(_, path) => path.next_mut_subselection(),
+
+            // The other options have it at the root
+            NamedSelection::Field(_, _, Some(sub))
+            | NamedSelection::Quoted(_, _, Some(sub))
+            | NamedSelection::Group(_, sub) => Some(sub),
+
+            // Every other option does not have a subselection
+            _ => None,
+        }
+    }
 }
 
 // PathSelection ::= (VarPath | KeyPath) SubSelection?
@@ -244,7 +273,7 @@ impl PathSelection {
         Ok((input, Self::Empty))
     }
 
-    fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
+    pub(crate) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
             [head, tail @ ..] => {
@@ -280,11 +309,21 @@ impl PathSelection {
             PathSelection::Empty => None,
         }
     }
+
+    /// Find the next subselection, traversing nested chains if needed. Returns a mutable reference
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match self {
+            PathSelection::Var(_, path) => path.next_mut_subselection(),
+            PathSelection::Key(_, path) => path.next_mut_subselection(),
+            PathSelection::Selection(sub) => Some(sub),
+            PathSelection::Empty => None,
+        }
+    }
 }
 
 // SubSelection ::= "{" NakedSubSelection "}"
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Default)]
 pub struct SubSelection {
     pub selections: Vec<NamedSelection>,
     pub star: Option<StarSelection>,
