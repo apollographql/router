@@ -1,8 +1,10 @@
-### Add support for response status_code to rhai ([Issue #5042](https://github.com/apollographql/router/issues/5042))
+### Add support for `status_code` response to Rhai ([Issue #5042](https://github.com/apollographql/router/issues/5042))
 
-Added support for `response.status_code` on `Response` interface in rhai.
+The router now supports `response.status_code` on the `Response` interface in Rhai.
 
-Convert response status code to a string.
+Examples using the response status code:
+
+- Converting a response status code to a string:
 
 ```rhai
 if response.status_code.to_string() == "200" {
@@ -10,7 +12,7 @@ if response.status_code.to_string() == "200" {
 }
 ```
 
-Also useful if you want to convert response status code to a number
+- Converting a response status code to a number:
 
 ```rhai
 if parse_int(response.status_code.to_string()) == 200 {

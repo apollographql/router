@@ -1,8 +1,9 @@
-### Add support of event responses and critical errors for selectors and instrument in telemetry ([Issue #5027](https://github.com/apollographql/router/issues/5027))
+### Support telemetry selectors with errors ([Issue #5027](https://github.com/apollographql/router/issues/5027))
 
-Giving the ability to compute new attributes everytime we receive a new event in supergraph response. Would be really helpful to create observability for subscriptions and defer.
+The router now supports telemetry selectors that take into account the occurrence of errors. This capability enables you to create metrics, events, or span attributes that contain error messages. 
 
-I also added the support of `on_error` for selectors and especially `error` selector I added for every services. Which will let you create some metrics,events or span attributes containing error message. By adding this we will now have to ability to create a counter of request timed out for subgraphs for example:
+For example, you can create a counter for the number of timed-out requests for subgraphs:
+ 
 
 ```yaml
 telemetry:
@@ -22,7 +23,7 @@ telemetry:
               - error: reason
 ```
 
-And thanks to the event support for selectors you'll be able to fetch data directly from the supergraph response body:
+The router also can now compute new attributes upon receiving a new event in a supergraph response. With this capability, you can fetch data directly from the supergraph response body:
 
 ```yaml
 telemetry:
