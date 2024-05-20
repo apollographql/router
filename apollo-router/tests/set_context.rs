@@ -220,7 +220,7 @@ async fn test_set_context_with_null() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_type_mismatch() {
     static QUERY: &str = r#"
-        query Query_fetch_failure {
+        query Query_type_mismatch {
             t {
                 id
                 u {
