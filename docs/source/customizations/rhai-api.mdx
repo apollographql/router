@@ -541,6 +541,7 @@ The `response` object includes the following fields:
 ```
 response.context
 response.id
+response.status_code
 response.headers
 response.body.label
 response.body.data
@@ -618,4 +619,30 @@ let error_to_add = #{
 // Add this error to any existing errors
 response.body.errors += error_to_add;
 print(`${response.body.errors}`); // logs the response errors
+```
+
+### `response.status_code.to_string()`
+
+Convert response status code to a string.
+
+```rhai
+if response.status_code.to_string() == "200" {
+    print(`ok`);
+}
+```
+
+Also useful if you want to convert response status code to a number
+
+```rhai
+if parse_int(response.status_code.to_string()) == 200 {
+    print(`ok`);
+}
+```
+
+You can also create your own status code from an integer:
+
+```rhai
+if response.status_code == status_code_from_int(200) {
+    print(`ok`);
+}
 ```

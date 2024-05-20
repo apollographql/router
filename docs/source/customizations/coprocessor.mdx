@@ -88,7 +88,6 @@ coprocessor:
   router:
     request:
       headers: false
-      # url: http://127.0.0.1:8082 # the URL can be overriden per coprocessor stage
 ```
 
 In this case, the `RouterService` only sends a coprocessor request whenever it receives a client request. The coprocessor request body includes _no_ data related to the client request (only "control" data, which is [covered below](#coprocessor-request-format)).

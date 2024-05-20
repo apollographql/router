@@ -1,0 +1,96 @@
+# Composed from subgraphs with hash: 722cd56dba6c8500f961ba2c48cc9f643b2fda98
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type Inner3Type
+  @join__type(graph: SUBGRAPH4, key: "k3")
+  @join__type(graph: SUBGRAPH5, key: "k3")
+{
+  k3: ID!
+  inner3_nested: Int! @join__field(graph: SUBGRAPH5)
+}
+
+type Inner4Type
+  @join__type(graph: SUBGRAPH4, key: "k4")
+  @join__type(graph: SUBGRAPH5, key: "k4")
+  @join__type(graph: SUBGRAPH6, key: "k4")
+{
+  k4: ID!
+  inner4_required: Int! @join__field(graph: SUBGRAPH4) @join__field(graph: SUBGRAPH5, external: true)
+  inner4_nested: Int! @join__field(graph: SUBGRAPH5, requires: "inner4_required")
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
+  SUBGRAPH4 @join__graph(name: "Subgraph4", url: "none")
+  SUBGRAPH5 @join__graph(name: "Subgraph5", url: "none")
+  SUBGRAPH6 @join__graph(name: "Subgraph6", url: "none")
+  SUBGRAPH7 @join__graph(name: "Subgraph7", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
+  @join__type(graph: SUBGRAPH4)
+  @join__type(graph: SUBGRAPH5)
+  @join__type(graph: SUBGRAPH6)
+  @join__type(graph: SUBGRAPH7)
+{
+  t: T @join__field(graph: SUBGRAPH1)
+}
+
+type T
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
+  @join__type(graph: SUBGRAPH4, key: "id")
+  @join__type(graph: SUBGRAPH5, key: "id")
+  @join__type(graph: SUBGRAPH6, key: "id")
+  @join__type(graph: SUBGRAPH7, key: "id")
+{
+  id: ID!
+  inner1: Int! @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH5, external: true)
+  inner2_required: Int! @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3, external: true)
+  inner2: Int! @join__field(graph: SUBGRAPH3, requires: "inner2_required") @join__field(graph: SUBGRAPH5, external: true)
+  inner3: Inner3Type! @join__field(graph: SUBGRAPH4) @join__field(graph: SUBGRAPH5, external: true)
+  inner4: Inner4Type! @join__field(graph: SUBGRAPH5, external: true) @join__field(graph: SUBGRAPH6)
+  inner5: Int! @join__field(graph: SUBGRAPH5, external: true) @join__field(graph: SUBGRAPH7)
+  outer: Int! @join__field(graph: SUBGRAPH5, requires: "inner1 inner2 inner3 { inner3_nested } inner4 { inner4_nested } inner5")
+}
