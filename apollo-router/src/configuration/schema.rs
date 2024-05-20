@@ -3,6 +3,7 @@
 use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::Write;
+use std::mem;
 use std::sync::OnceLock;
 
 use itertools::Itertools;
@@ -10,7 +11,12 @@ use jsonschema::error::ValidationErrorKind;
 use jsonschema::Draft;
 use jsonschema::JSONSchema;
 use schemars::gen::SchemaSettings;
+use schemars::schema::Metadata;
 use schemars::schema::RootSchema;
+use schemars::schema::SchemaObject;
+use schemars::visit::visit_root_schema;
+use schemars::visit::visit_schema_object;
+use schemars::visit::Visitor;
 use yaml_rust::scanner::Marker;
 
 use super::expansion::coerce;
@@ -25,12 +31,39 @@ pub(crate) use crate::configuration::upgrade::upgrade_configuration;
 
 const NUMBER_OF_PREVIOUS_LINES_TO_DISPLAY: usize = 5;
 
+/// This needs to exist because Schemars incorrectly generates references with spaces in them.
+/// We just rename them.
+#[derive(Debug, Clone)]
+struct RefRenameVisitor;
+
+impl Visitor for RefRenameVisitor {
+    fn visit_root_schema(&mut self, root: &mut RootSchema) {
+        visit_root_schema(self, root);
+        root.definitions = mem::take(&mut root.definitions)
+            .into_iter()
+            .map(|(k, v)| (k.replace(' ', "_"), v))
+            .collect();
+    }
+    fn visit_schema_object(&mut self, schema: &mut SchemaObject) {
+        if let Some(reference) = &mut schema.reference {
+            schema.metadata = Some(Box::new(Metadata {
+                description: Some(reference.clone()),
+                ..Default::default()
+            }));
+            *reference = reference.replace(' ', "_");
+        }
+
+        visit_schema_object(self, schema);
+    }
+}
+
 /// Generate a JSON schema for the configuration.
 pub(crate) fn generate_config_schema() -> RootSchema {
     let settings = SchemaSettings::draft07().with(|s| {
         s.option_nullable = true;
         s.option_add_null_type = false;
-        s.inline_subschemas = true;
+        s.inline_subschemas = false;
+        s.visitors = vec![Box::new(RefRenameVisitor)]
     });
 
     // Manually patch up the schema
@@ -89,10 +122,15 @@ pub(crate) fn validate_yaml_configuration(
         let config_schema = serde_json::to_value(generate_config_schema())
             .expect("failed to parse configuration schema");
 
-        JSONSchema::options()
+        let result = JSONSchema::options()
             .with_draft(Draft::Draft7)
-            .compile(&config_schema)
-            .expect("failed to compile configuration schema")
+            .compile(&config_schema);
+        match result {
+            Ok(schema) => schema,
+            Err(e) => {
+                panic!("failed to compile configuration schema: {}", e)
+            }
+        }
     });
 
     if migration == Mode::Upgrade {

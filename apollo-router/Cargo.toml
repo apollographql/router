@@ -57,6 +57,9 @@ docs_rs = ["router-bridge/docs_rs"]
 # and not yet ready for production use.
 telemetry_next = []
 
+# is set when ci builds take place. It allows us to disable some tests when CI is running on certain platforms.
+ci = []
+
 [package.metadata.docs.rs]
 features = ["docs_rs"]
 
@@ -65,7 +68,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.80"
 apollo-compiler.workspace = true
-apollo-federation = "=0.0.11"
+apollo-federation = { path = "../apollo-federation", version = "=1.46.0" }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [
@@ -103,7 +106,7 @@ flate2 = "1.0.28"
 fred = { version = "7.1.2", features = ["enable-rustls"] }
 futures = { version = "0.3.30", features = ["thread-pool"] }
 graphql_client = "0.13.0"
-hex = { version = "0.4.3", features = ["serde"] }
+hex.workspace = true
 http.workspace = true
 http-body = "0.4.6"
 heck = "0.4.1"
@@ -146,7 +149,9 @@ once_cell = "1.19.0"
 # https://github.com/apollographql/router/pull/1509.  A comment which exists
 # there (and on `tracing` packages below) should be updated should this change.
 opentelemetry = { version = "0.20.0", features = ["trace", "metrics"] }
-opentelemetry_sdk = { version = "0.20.0", default-features = false, features = ["trace"] }
+opentelemetry_sdk = { version = "0.20.0", default-features = false, features = [
+    "trace",
+] }
 opentelemetry_api = "0.20.0"
 opentelemetry-aws = "0.8.0"
 opentelemetry-datadog = { version = "0.8.0", features = ["reqwest-client"] }
@@ -254,7 +259,7 @@ aws-credential-types = "1.1.6"
 aws-config = "1.1.6"
 aws-types = "1.1.6"
 aws-smithy-runtime-api = { version = "1.1.6", features = ["client"] }
-sha1 = "0.10.6"
+sha1.workspace = true
 tracing-serde = "0.1.3"
 time = { version = "0.3.34", features = ["serde"] }
 similar = { version = "2.4.0", features = ["inline"] }
@@ -283,7 +288,7 @@ axum = { version = "0.6.20", features = [
 ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "7.1.2", features = ["enable-rustls", "mocks"] }
 futures-test = "0.3.30"
-insta = { version = "1.35.1", features = ["json", "redactions", "yaml"] }
+insta.workspace = true
 maplit = "1.0.2"
 memchr = { version = "2.7.1", default-features = false }
 mockall = "0.11.4"
@@ -311,7 +316,7 @@ rhai = { version = "1.17.1", features = [
     "testing-environ",
 ] }
 serial_test = { version = "3.0.0" }
-tempfile = "3.10.0"
+tempfile.workspace = true
 test-log = { version = "0.2.14", default-features = false, features = [
     "trace",
 ] }
@@ -329,6 +334,7 @@ tracing-opentelemetry = "0.21.0"
 tracing-test = "0.2.4"
 walkdir = "2.4.0"
 wiremock = "0.5.22"
+libtest-mimic = "0.7.2"
 
 [target.'cfg(target_os = "linux")'.dev-dependencies]
 rstack = { version = "0.3.3", features = ["dw"], default-features = false }
@@ -347,6 +353,11 @@ serde_json.workspace = true
 [[test]]
 name = "integration_tests"
 path = "tests/integration_tests.rs"
+
+[[test]]
+name = "samples"
+path = "tests/samples_tests.rs"
+harness = false
 
 [[bench]]
 name = "huge_requests"
