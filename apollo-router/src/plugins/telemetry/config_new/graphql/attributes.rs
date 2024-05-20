@@ -25,7 +25,7 @@ pub(crate) struct GraphQLAttributes {
     pub(crate) field_type: Option<bool>,
     /// If the field is a list, the length of the list
     #[serde(rename = "graphql.list.length")]
-    pub(crate) field_list_length: Option<bool>,
+    pub(crate) list_length: Option<bool>,
     /// The GraphQL type name
     #[serde(rename = "graphql.type.name")]
     pub(crate) type_name: Option<bool>,
@@ -84,15 +84,6 @@ impl Selectors for GraphQLAttributes {
                 attrs.push(KeyValue::new("graphql.field.type", ty));
             }
         }
-        if let Some(true) = self.field_list_length {
-            if let Some(length) = (GraphQLSelector::ListLength {
-                list_length: ListLength::Value,
-            })
-            .on_response_field(typed_value, ctx)
-            {
-                attrs.push(KeyValue::new("graphql.list.length", length));
-            }
-        }
         if let Some(true) = self.type_name {
             if let Some(ty) = (GraphQLSelector::TypeName {
                 type_name: TypeName::String,
@@ -102,6 +93,85 @@ impl Selectors for GraphQLAttributes {
                 attrs.push(KeyValue::new("graphql.type.name", ty));
             }
         }
+        if let Some(true) = self.list_length {
+            if let Some(length) = (GraphQLSelector::ListLength {
+                list_length: ListLength::Value,
+            })
+            .on_response_field(typed_value, ctx)
+            {
+                attrs.push(KeyValue::new("graphql.list.length", length));
+            }
+        }
         attrs
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
+    use crate::plugins::telemetry::config_new::graphql::test::{field, ty};
+    use crate::plugins::telemetry::config_new::{DefaultForLevel, Selectors};
+
+    #[test]
+    fn test_default_for_level() {
+        let mut attributes = super::GraphQLAttributes::default();
+        attributes.defaults_for_level(
+            super::DefaultAttributeRequirementLevel::Required,
+            super::TelemetryDataKind::Metrics,
+        );
+        assert_eq!(attributes.field_name, Some(true));
+        assert_eq!(attributes.field_type, Some(true));
+        assert_eq!(attributes.type_name, Some(true));
+        assert_eq!(attributes.list_length, None);
+    }
+
+    #[test]
+    fn test_on_response_field_non_list() {
+        let attributes = super::GraphQLAttributes {
+            field_name: Some(true),
+            field_type: Some(true),
+            list_length: Some(true),
+            type_name: Some(true),
+        };
+        let typed_value = TypedValue::Bool(ty(), field(), &true);
+        let ctx = Default::default();
+        let result = attributes.on_response_field(&typed_value, &ctx);
+        assert_eq!(result.len(), 3);
+        assert_eq!(result[0].key.as_str(), "graphql.field.name");
+        assert_eq!(result[0].value.as_str(), "field_name");
+        assert_eq!(result[1].key.as_str(), "graphql.field.type");
+        assert_eq!(result[1].value.as_str(), "field_type");
+        assert_eq!(result[2].key.as_str(), "graphql.type.name");
+        assert_eq!(result[2].value.as_str(), "type_name");
+    }
+
+    #[test]
+    fn test_on_response_field_list() {
+        let attributes = super::GraphQLAttributes {
+            field_name: Some(true),
+            field_type: Some(true),
+            list_length: Some(true),
+            type_name: Some(true),
+        };
+        let typed_value = TypedValue::List(
+            ty(),
+            field(),
+            vec![
+                TypedValue::Bool(ty(), field(), &true),
+                TypedValue::Bool(ty(), field(), &true),
+                TypedValue::Bool(ty(), field(), &true),
+            ],
+        );
+        let ctx = Default::default();
+        let result = attributes.on_response_field(&typed_value, &ctx);
+        assert_eq!(result.len(), 4);
+        assert_eq!(result[0].key.as_str(), "graphql.field.name");
+        assert_eq!(result[0].value.as_str(), "field_name");
+        assert_eq!(result[1].key.as_str(), "graphql.field.type");
+        assert_eq!(result[1].value.as_str(), "field_type");
+        assert_eq!(result[2].key.as_str(), "graphql.type.name");
+        assert_eq!(result[2].value.as_str(), "type_name");
+        assert_eq!(result[3].key.as_str(), "graphql.list.length");
+        assert_eq!(result[3].value.as_str(), "3");
     }
 }

@@ -142,12 +142,8 @@ impl Selector for GraphQLSelector {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use apollo_compiler::ast::FieldDefinition;
-    use apollo_compiler::executable::Field;
-    use apollo_compiler::schema::{NamedType, Type};
-    use apollo_compiler::{Node, NodeStr};
+    use crate::plugins::telemetry::config_new::graphql::test::{field, ty};
     use opentelemetry::Value;
-    use std::sync::OnceLock;
 
     #[test]
     fn array_length() {
@@ -244,27 +240,5 @@ mod tests {
         let typed_value = TypedValue::Bool(ty(), field(), &true);
         let result = selector.on_response_field(&typed_value, &Context::default());
         assert_eq!(result, Some(Value::String("type_name".into())));
-    }
-
-    fn field() -> &'static Field {
-        static FIELD: OnceLock<Field> = OnceLock::new();
-        FIELD.get_or_init(|| {
-            Field::new(
-                NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
-                Node::new(FieldDefinition {
-                    description: None,
-                    name: NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
-                    arguments: vec![],
-                    ty: Type::Named(NamedType::new_unchecked(NodeStr::from_static(
-                        &"field_type",
-                    ))),
-                    directives: Default::default(),
-                }),
-            )
-        })
-    }
-    fn ty() -> &'static NamedType {
-        static TYPE: NamedType = NamedType::new_unchecked(NodeStr::from_static(&"type_name"));
-        &TYPE
     }
 }

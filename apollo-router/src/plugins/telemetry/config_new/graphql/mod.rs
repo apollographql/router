@@ -228,6 +228,11 @@ mod test {
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
 
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::schema::{FieldDefinition, NamedType, Type};
+    use apollo_compiler::{Node, NodeStr};
+    use std::sync::OnceLock;
+
     #[tokio::test]
     async fn valid_config() {
         PluginTestHarness::<Telemetry>::builder()
@@ -250,5 +255,27 @@ mod test {
 
         serde_json::from_value((*graphql_instruments.unwrap().first().unwrap()).clone())
             .expect("config")
+    }
+
+    pub(crate) fn field() -> &'static Field {
+        static FIELD: OnceLock<Field> = OnceLock::new();
+        FIELD.get_or_init(|| {
+            Field::new(
+                NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                Node::new(FieldDefinition {
+                    description: None,
+                    name: NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                    arguments: vec![],
+                    ty: Type::Named(NamedType::new_unchecked(NodeStr::from_static(
+                        &"field_type",
+                    ))),
+                    directives: Default::default(),
+                }),
+            )
+        })
+    }
+    pub(crate) fn ty() -> &'static NamedType {
+        static TYPE: NamedType = NamedType::new_unchecked(NodeStr::from_static(&"type_name"));
+        &TYPE
     }
 }
