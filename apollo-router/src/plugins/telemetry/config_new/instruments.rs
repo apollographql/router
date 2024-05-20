@@ -618,6 +618,7 @@ pub(crate) enum InstrumentType {
 pub(crate) enum InstrumentValue<T> {
     Standard(Standard),
     Chunked(Event<T>),
+    Field(Field<T>),
     Custom(T),
 }
 
@@ -640,6 +641,16 @@ pub(crate) enum Event<T> {
     Unit,
     /// For every supergraph response payload (including subscription events and defer events)
     #[serde(rename = "event_custom")]
+    Custom(T),
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Field<T> {
+    #[serde(rename = "field_unit")]
+    Unit,
+    /// For every field
+    #[serde(rename = "field_custom")]
     Custom(T),
 }
 
@@ -766,6 +777,13 @@ where
                                 Increment::EventCustom(None),
                             ),
                         },
+                        InstrumentValue::Field(incr) => match incr {
+                            Field::Unit => (None, Increment::FieldUnit),
+                            Field::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::FieldCustom(None),
+                            ),
+                        },
                     };
                     let counter = CustomCounterInner {
                         increment,
@@ -805,6 +823,13 @@ where
                             Event::Custom(selector) => (
                                 Some(Arc::new(selector.clone())),
                                 Increment::EventCustom(None),
+                            ),
+                        },
+                        InstrumentValue::Field(incr) => match incr {
+                            Field::Unit => (None, Increment::FieldUnit),
+                            Field::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::FieldCustom(None),
                             ),
                         },
                     };
@@ -882,6 +907,15 @@ where
         }
         for histogram in &self.histograms {
             histogram.on_response_event(response, ctx);
+        }
+    }
+
+    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+        for counter in &self.counters {
+            counter.on_response_field(typed_value, ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_response_field(typed_value, ctx);
         }
     }
 }

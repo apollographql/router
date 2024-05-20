@@ -1,6 +1,3 @@
-use apollo_compiler::ast::NamedType;
-use apollo_compiler::executable::Field;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::{metrics, Context};
@@ -15,14 +12,11 @@ use super::instruments::{
 };
 use crate::plugins::demand_control::cost_calculator::schema_aware_response;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response::{TypedValue, Visitor};
-use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::{Condition, SelectorOrValue};
+use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::{
-    ArrayLength, FieldType, GraphQLSelector,
-};
+use crate::plugins::telemetry::config_new::graphql::selectors::{ArrayLength, GraphQLSelector};
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
@@ -57,10 +51,14 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
         requirement_level: DefaultAttributeRequirementLevel,
         kind: TelemetryDataKind,
     ) {
-        self.field_length
-            .defaults_for_level(requirement_level, kind);
-        self.field_execution
-            .defaults_for_level(requirement_level, kind);
+        if self.field_length.is_enabled() {
+            self.field_length
+                .defaults_for_level(requirement_level, kind);
+        }
+        if self.field_execution.is_enabled() {
+            self.field_execution
+                .defaults_for_level(requirement_level, kind);
+        }
     }
 }
 

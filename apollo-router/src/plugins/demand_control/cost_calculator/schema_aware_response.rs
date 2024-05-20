@@ -62,7 +62,7 @@ pub(crate) trait Visitor {
             TypedValue::Root(children) => self.visit_root(children),
         }
     }
-    fn visit_field(&self, value: &TypedValue) {}
+    fn visit_field(&self, _value: &TypedValue) {}
     fn visit_null(&self) {}
     fn visit_bool(&self, _ty: &NamedType, _field: &Field, _value: &bool) {}
     fn visit_number(&self, _ty: &NamedType, _field: &Field, _value: &serde_json::Number) {}
@@ -74,7 +74,7 @@ pub(crate) trait Visitor {
             self.visit(value);
         }
     }
-    fn visit_array_element(&self, value: &TypedValue) {}
+    fn visit_array_element(&self, _value: &TypedValue) {}
     fn visit_object(
         &self,
         _ty: &NamedType,
