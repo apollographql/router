@@ -2,12 +2,10 @@ use std::fmt::Display;
 use std::fmt::{self};
 use std::hash::Hash;
 use std::num::NonZeroUsize;
-use std::sync::Arc;
 
-use lru::LruCache;
+use moka::future::Cache;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use tokio::sync::Mutex;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -15,18 +13,18 @@ use super::redis::*;
 use crate::configuration::RedisCache;
 
 pub(crate) trait KeyType:
-    Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync
+    Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync + 'static
 {
 }
 pub(crate) trait ValueType:
-    Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned
+    Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned + 'static
 {
 }
 
 // Blanket implementation which satisfies the compiler
 impl<K> KeyType for K
 where
-    K: Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync,
+    K: Clone + fmt::Debug + fmt::Display + Hash + Eq + Send + Sync + 'static,
 {
     // Nothing to implement, since K already supports the other traits.
     // It has the functions it needs already
@@ -35,13 +33,13 @@ where
 // Blanket implementation which satisfies the compiler
 impl<V> ValueType for V
 where
-    V: Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned,
+    V: Clone + fmt::Debug + Send + Sync + Serialize + DeserializeOwned + 'static,
 {
     // Nothing to implement, since V already supports the other traits.
     // It has the functions it needs already
 }
 
-pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
+pub(crate) type InMemoryCache<K, V> = Cache<K, V>;
 
 // placeholder storage module
 //
@@ -50,7 +48,7 @@ pub(crate) type InMemoryCache<K, V> = Arc<Mutex<LruCache<K, V>>>;
 #[derive(Clone)]
 pub(crate) struct CacheStorage<K: KeyType, V: ValueType> {
     caller: String,
-    inner: Arc<Mutex<LruCache<K, V>>>,
+    inner: Cache<K, V>,
     redis: Option<RedisCacheStorage>,
 }
 
@@ -66,7 +64,7 @@ where
     ) -> Result<Self, BoxError> {
         Ok(Self {
             caller: caller.to_string(),
-            inner: Arc::new(Mutex::new(LruCache::new(max_capacity))),
+            inner: Cache::new(max_capacity.get() as u64),
             redis: if let Some(config) = config {
                 let required_to_start = config.required_to_start;
                 match RedisCacheStorage::new(config).await {
@@ -91,7 +89,7 @@ where
 
     pub(crate) async fn get(&self, key: &K) -> Option<V> {
         let instant_memory = Instant::now();
-        let res = self.inner.lock().await.get(key).cloned();
+        let res = self.inner.get(key).await;
 
         match res {
             Some(v) => {
@@ -126,7 +124,7 @@ where
                     let inner_key = RedisKey(key.clone());
                     match redis.get::<K, V>(inner_key).await {
                         Some(v) => {
-                            self.inner.lock().await.put(key.clone(), v.0.clone());
+                            self.inner.insert(key.clone(), v.0.clone()).await;
 
                             tracing::info!(
                                 monotonic_counter.apollo_router_cache_hit_count = 1u64,
@@ -170,9 +168,8 @@ where
                 .await;
         }
 
-        let mut in_memory = self.inner.lock().await;
-        in_memory.put(key, value);
-        let size = in_memory.len() as u64;
+        self.inner.insert(key, value).await;
+        let size = self.inner.weighted_size();
         tracing::info!(
             value.apollo_router_cache_size = size,
             kind = %self.caller,
@@ -181,9 +178,8 @@ where
     }
 
     pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
-        let mut in_memory = self.inner.lock().await;
-        in_memory.put(key, value);
-        let size = in_memory.len() as u64;
+        self.inner.insert(key, value).await;
+        let size = self.inner.weighted_size();
         tracing::info!(
             value.apollo_router_cache_size = size,
             kind = %self.caller,
@@ -197,7 +193,7 @@ where
 
     #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
-        self.inner.lock().await.len()
+        self.inner.weighted_size() as usize
     }
 }
 

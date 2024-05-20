@@ -154,35 +154,21 @@ where
         );
 
         let mut cache_keys = {
-            let cache = previous_cache.lock().await;
+            let cache = previous_cache.clone();
 
-            let count = count.unwrap_or(cache.len() / 3);
+            let count = count.unwrap_or(cache.weighted_size() as usize / 3);
 
             cache
                 .iter()
-                .map(
-                    |(
-                        CachingQueryKey {
-                            query,
-                            operation,
-                            hash,
-                            metadata,
-                            plan_options,
-                            config_mode: _,
-                            sdl: _,
-                            introspection: _,
-                        },
-                        _,
-                    )| WarmUpCachingQueryKey {
-                        query: query.clone(),
-                        operation: operation.clone(),
-                        hash: Some(hash.clone()),
-                        metadata: metadata.clone(),
-                        plan_options: plan_options.clone(),
-                        config_mode: self.config_mode.clone(),
-                        introspection: self.introspection,
-                    },
-                )
+                .map(|(k, _v)| WarmUpCachingQueryKey {
+                    query: k.query.clone(),
+                    operation: k.operation.clone(),
+                    hash: Some(k.hash.clone()),
+                    metadata: k.metadata.clone(),
+                    plan_options: k.plan_options.clone(),
+                    config_mode: self.config_mode.clone(),
+                    introspection: self.introspection,
+                })
                 .take(count)
                 .collect::<Vec<_>>()
         };
@@ -253,9 +239,7 @@ where
                 // if the query hash did not change with the schema update, we can reuse the previously cached entry
                 if let Some(hash) = hash {
                     if hash == doc.hash {
-                        if let Some(entry) =
-                            { previous_cache.lock().await.get(&caching_key).cloned() }
-                        {
+                        if let Some(entry) = previous_cache.get(&caching_key).await {
                             self.cache.insert_in_memory(caching_key, entry).await;
                             reused += 1;
                             continue;
