@@ -9,44 +9,57 @@ use crate::plugins::telemetry::config_new::Selector;
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ArrayLength {
+    /// The length of the array
     Value,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum FieldName {
+    /// The GraphQL field name
     String,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum FieldType {
+    /// The GraphQL field name
     Name,
+    /// The GraphQL field type
+    /// - `bool`
+    /// - `number`
+    /// - `scalar`
+    /// - `object`
+    /// - `list`
     Type,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum TypeName {
+    /// The GraphQL type name
     String,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum GraphQLSelector {
-    /// The length of the array
+    /// If the field is an array, the length of the array
     ArrayLength {
         #[allow(dead_code)]
         field_length: ArrayLength,
     },
+    /// The GraphQL field name
     FieldName {
         #[allow(dead_code)]
         field_name: FieldName,
     },
+    /// The GraphQL field type
     FieldType {
         #[allow(dead_code)]
         field_type: FieldType,
     },
+    /// The GraphQL type name
     TypeName {
         #[allow(dead_code)]
         type_name: TypeName,

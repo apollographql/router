@@ -17,12 +17,16 @@ use crate::services::supergraph;
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GraphQLAttributes {
+    /// The GraphQL field name
     #[serde(rename = "graphql.field.name")]
     pub(crate) field_name: Option<bool>,
+    /// The GraphQL field type
     #[serde(rename = "graphql.field.type")]
     pub(crate) field_type: Option<bool>,
+    /// If the field is an array, the length of the array
     #[serde(rename = "graphql.field.length")]
     pub(crate) field_length: Option<bool>,
+    /// The GraphQL type name
     #[serde(rename = "graphql.type.name")]
     pub(crate) type_name: Option<bool>,
 }
