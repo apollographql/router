@@ -19,6 +19,7 @@ use super::config::Sampler;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
+use super::otlp::Protocol;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_vec_header_name;
@@ -77,6 +78,12 @@ pub(crate) struct Config {
 
     /// Percentage of traces to send via the OTel protocol when sending to Apollo Studio.
     pub(crate) experimental_otlp_tracing_sampler: SamplerOption,
+
+    /// OTLP protocol used for OTel traces.
+    /// Note this only applies if OTel traces are enabled.
+    /// TBD(tim): we're only using this for integration tests to send HTTP instead of GRPC.  We could either port the tests to GRPC or 
+    /// consider just checking some kind of "is_in_test" flag instead of providing this at the config level.
+    pub(crate) experimental_otlp_tracing_protocol: Protocol,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
@@ -180,6 +187,7 @@ impl Default for Config {
         Self {
             endpoint: endpoint_default(),
             experimental_otlp_endpoint: otlp_endpoint_default(),
+            experimental_otlp_tracing_protocol: Protocol::default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),

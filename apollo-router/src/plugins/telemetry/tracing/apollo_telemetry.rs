@@ -61,6 +61,7 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
+use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::BoxError;
@@ -280,6 +281,7 @@ impl Exporter {
         endpoint: &'a Url,
         otlp_endpoint: &'a Url,
         otlp_tracing_sampler: &'a SamplerOption,
+        otlp_tracing_protocol: &'a Protocol,
         apollo_key: &'a str,
         apollo_graph_ref: &'a str,
         schema_id: &'a str,
@@ -331,6 +333,7 @@ impl Exporter {
                 ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => {
                     Some(Arc::new(ApolloOtlpExporter::new(
                         otlp_endpoint,
+                        otlp_tracing_protocol,
                         batch_config,
                         apollo_key,
                         apollo_graph_ref,

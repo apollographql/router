@@ -24,6 +24,7 @@ use tower::BoxError;
 use url::Url;
 use uuid::Uuid;
 
+use super::otlp::Protocol;
 use super::tracing::apollo_telemetry::LightSpanData;
 use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
@@ -46,6 +47,7 @@ pub(crate) struct ApolloOtlpExporter {
 impl ApolloOtlpExporter {
     pub(crate) fn new(
         endpoint: &Url,
+        protocol: &Protocol,
         batch_config: &BatchProcessorConfig,
         apollo_key: &str,
         apollo_graph_ref: &str,
@@ -55,6 +57,32 @@ impl ApolloOtlpExporter {
 
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
+        let otlp_exporter = match protocol {
+            Protocol::Grpc => Arc::new(Mutex::new(
+                SpanExporterBuilder::from(
+                    opentelemetry_otlp::new_exporter()
+                        .tonic()
+                        .with_timeout(batch_config.max_export_timeout)
+                        .with_endpoint(endpoint.to_string())
+                        .with_metadata(metadata),
+                    // TBD(tim): figure out why compression seems to be turned off on our collector
+                    // .with_compression(opentelemetry_otlp::Compression::Gzip),
+                )
+                // TBD(tim): do we need another batch processor for this?
+                // Seems like we've already set up a batcher earlier in the pipe but not quite sure.
+                .build_span_exporter()?,
+            )),
+            // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
+            Protocol::Http => Arc::new(Mutex::new(
+                SpanExporterBuilder::from(
+                    opentelemetry_otlp::new_exporter()
+                        .http()
+                        .with_timeout(batch_config.max_export_timeout)
+                        .with_endpoint(endpoint.to_string())
+                )
+                .build_span_exporter()?,
+            ))
+        };
 
         return Ok(Self {
             endpoint: endpoint.clone(),
@@ -88,20 +116,7 @@ impl ApolloOtlpExporter {
                 Option::<String>::None,
                 None,
             ),
-            otlp_exporter: Arc::new(Mutex::new(
-                SpanExporterBuilder::from(
-                    opentelemetry_otlp::new_exporter()
-                        .tonic()
-                        .with_timeout(batch_config.max_export_timeout)
-                        .with_endpoint(endpoint.to_string())
-                        .with_metadata(metadata),
-                    // TBD(tim): figure out why compression seems to be turned off on our collector
-                    // .with_compression(opentelemetry_otlp::Compression::Gzip),
-                )
-                .build_span_exporter()?,
-            )),
-            // TBD(tim): do we need another batch processor for this?
-            // Seems like we've already set up a batcher earlier in the pipe but not quite sure.
+            otlp_exporter,
         });
     }
 
