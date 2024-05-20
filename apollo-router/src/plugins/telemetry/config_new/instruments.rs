@@ -1184,7 +1184,11 @@ where
         if !inner.condition.evaluate_response(response) {
             if !matches!(
                 &inner.increment,
-                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+                Increment::EventCustom(_)
+                    | Increment::EventDuration(_)
+                    | Increment::EventUnit
+                    | Increment::FieldCustom(_)
+                    | Increment::FieldUnit
             ) {
                 let _ = inner.counter.take();
             }
