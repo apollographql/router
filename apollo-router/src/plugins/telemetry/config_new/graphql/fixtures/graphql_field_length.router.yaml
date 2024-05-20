@@ -2,6 +2,6 @@ telemetry:
   instrumentation:
     instruments:
       graphql:
-        field.length: true
+        field.list.length: true
 
 

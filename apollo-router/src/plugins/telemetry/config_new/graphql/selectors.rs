@@ -8,7 +8,7 @@ use crate::plugins::telemetry::config_new::Selector;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum ArrayLength {
+pub(crate) enum ListLength {
     /// The length of the array
     Value,
 }
@@ -45,9 +45,9 @@ pub(crate) enum TypeName {
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum GraphQLSelector {
     /// If the field is an array, the length of the array
-    ArrayLength {
+    ListLength {
         #[allow(dead_code)]
-        field_length: ArrayLength,
+        list_length: ListLength,
     },
     /// The GraphQL field name
     FieldName {
@@ -89,7 +89,7 @@ impl Selector for GraphQLSelector {
         _ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
-            GraphQLSelector::ArrayLength { .. } => match typed_value {
+            GraphQLSelector::ListLength { .. } => match typed_value {
                 TypedValue::List(_, _, array) => Some((array.len() as i64).into()),
                 _ => None,
             },
@@ -119,8 +119,8 @@ impl Selector for GraphQLSelector {
                 field_type: FieldType::Type,
             } => match typed_value {
                 TypedValue::Null => None,
-                TypedValue::Bool(_, _, _) => Some("bool".into()),
-                TypedValue::Number(_, _, _) => Some("number".into()),
+                TypedValue::Bool(_, _, _) => Some("scalar".into()),
+                TypedValue::Number(_, _, _) => Some("scalar".into()),
                 TypedValue::String(_, _, _) => Some("scalar".into()),
                 TypedValue::Object(_, _, _) => Some("object".into()),
                 TypedValue::List(_, _, _) => Some("list".into()),
@@ -136,5 +136,135 @@ impl Selector for GraphQLSelector {
                 TypedValue::Root(_) => None,
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::schema::{NamedType, Type};
+    use apollo_compiler::{Node, NodeStr};
+    use opentelemetry::Value;
+    use std::sync::OnceLock;
+
+    #[test]
+    fn array_length() {
+        let selector = GraphQLSelector::ListLength {
+            list_length: ListLength::Value,
+        };
+        let typed_value = TypedValue::List(
+            ty(),
+            field(),
+            vec![
+                TypedValue::Bool(ty(), field(), &true),
+                TypedValue::Bool(ty(), field(), &true),
+                TypedValue::Bool(ty(), field(), &true),
+            ],
+        );
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::I64(3)));
+    }
+
+    #[test]
+    fn field_name() {
+        let selector = GraphQLSelector::FieldName {
+            field_name: FieldName::String,
+        };
+        let typed_value = TypedValue::Bool(ty(), field(), &true);
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("field_name".into())));
+    }
+
+    #[test]
+    fn field_type() {
+        let selector = GraphQLSelector::FieldType {
+            field_type: FieldType::Name,
+        };
+        let typed_value = TypedValue::Bool(ty(), field(), &true);
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("field_type".into())));
+    }
+
+    #[test]
+    fn field_type_scalar_type() {
+        assert_scalar(&TypedValue::String(ty(), field(), &"value"));
+        assert_scalar(&TypedValue::Number(
+            ty(),
+            field(),
+            &serde_json::Number::from(1),
+        ));
+    }
+
+    fn assert_scalar(typed_value: &TypedValue) {
+        let result = GraphQLSelector::FieldType {
+            field_type: FieldType::Type,
+        }
+        .on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("scalar".into())));
+    }
+
+    #[test]
+    fn field_type_object_type() {
+        let selector = GraphQLSelector::FieldType {
+            field_type: FieldType::Type,
+        };
+        let typed_value = TypedValue::Object(ty(), field(), [].into());
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("object".into())));
+    }
+
+    #[test]
+    fn field_type_root_object_type() {
+        let selector = GraphQLSelector::FieldType {
+            field_type: FieldType::Type,
+        };
+        let typed_value = TypedValue::Root(Default::default());
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("object".into())));
+    }
+
+    #[test]
+    fn field_type_list_type() {
+        let selector = GraphQLSelector::FieldType {
+            field_type: FieldType::Type,
+        };
+        let typed_value =
+            TypedValue::List(ty(), field(), vec![TypedValue::Bool(ty(), field(), &true)]);
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("list".into())));
+    }
+
+    #[test]
+    fn type_name() {
+        let selector = GraphQLSelector::TypeName {
+            type_name: TypeName::String,
+        };
+        let typed_value = TypedValue::Bool(ty(), field(), &true);
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("type_name".into())));
+    }
+
+    fn field() -> &'static Field {
+        static FIELD: OnceLock<Field> = OnceLock::new();
+        FIELD.get_or_init(|| {
+            Field::new(
+                NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                Node::new(FieldDefinition {
+                    description: None,
+                    name: NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                    arguments: vec![],
+                    ty: Type::Named(NamedType::new_unchecked(NodeStr::from_static(
+                        &"field_type",
+                    ))),
+                    directives: Default::default(),
+                }),
+            )
+        })
+    }
+    fn ty() -> &'static NamedType {
+        static TYPE: NamedType = NamedType::new_unchecked(NodeStr::from_static(&"type_name"));
+        &TYPE
     }
 }

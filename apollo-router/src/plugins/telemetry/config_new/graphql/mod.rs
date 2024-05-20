@@ -16,7 +16,7 @@ use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequireme
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::{ArrayLength, GraphQLSelector};
+use crate::plugins::telemetry::config_new::graphql::selectors::{GraphQLSelector, ListLength};
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
@@ -28,14 +28,14 @@ use crate::services::supergraph;
 pub(crate) mod attributes;
 pub(crate) mod selectors;
 
-static FIELD_LENGTH: &str = "graphql.field.length";
+static FIELD_LENGTH: &str = "graphql.field.list.length";
 static FIELD_EXECUTION: &str = "graphql.field.execution";
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GraphQLInstrumentsConfig {
     /// A histogram of the length of a selected field in the GraphQL response
-    #[serde(rename = "field.length")]
+    #[serde(rename = "field.list.length")]
     pub(crate) field_length:
         DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
 
@@ -110,8 +110,8 @@ impl From<&InstrumentsConfig> for GraphQLInstruments {
                         condition: Condition::True,
                         histogram: Some(meter.f64_histogram(FIELD_LENGTH).init()),
                         attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(GraphQLSelector::ArrayLength {
-                            field_length: ArrayLength::Value,
+                        selector: Some(Arc::new(GraphQLSelector::ListLength {
+                            list_length: ListLength::Value,
                         })),
                         selectors,
                         updated: false,
