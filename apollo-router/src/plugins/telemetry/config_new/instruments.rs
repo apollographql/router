@@ -1559,6 +1559,9 @@ where
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
@@ -1576,7 +1579,11 @@ where
         if !inner.condition.evaluate_response(response) {
             if !matches!(
                 &inner.increment,
-                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+                Increment::EventCustom(_)
+                    | Increment::EventDuration(_)
+                    | Increment::EventUnit
+                    | Increment::FieldCustom(_)
+                    | Increment::FieldUnit
             ) {
                 let _ = inner.histogram.take();
             }
@@ -1596,6 +1603,9 @@ where
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
                 }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
