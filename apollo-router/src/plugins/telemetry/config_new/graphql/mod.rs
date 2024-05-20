@@ -240,32 +240,207 @@ mod test {
     use apollo_compiler::NodeStr;
 
     use super::*;
+    use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
+    use crate::Configuration;
 
-    #[tokio::test]
-    async fn valid_config() {
-        PluginTestHarness::<Telemetry>::builder()
-            .config(include_str!("fixtures/graphql_instruments.router.yaml"))
-            .build()
-            .await;
+    #[test_log::test(tokio::test)]
+    async fn basic_metric_publishing() {
+        async {
+            let schema_str = include_str!(
+                "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
+            );
+            let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_named_query.graphql");
+
+
+            let request = supergraph::Request::fake_builder()
+                .query(query_str)
+                .context(context(schema_str, query_str))
+                .build()
+                .unwrap();
+
+            let harness = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("fixtures/field_length_enabled.router.yaml"))
+                .schema(schema_str)
+                .build()
+                .await;
+
+            harness
+                .call_supergraph(request, |req| {
+                    let response: serde_json::Value = serde_json::from_str(include_str!(
+                        "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
+                    ))
+                    .unwrap();
+                    supergraph::Response::builder()
+                        .data(response["data"].clone())
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+
+            assert_histogram_sum!(
+                "graphql.field.list.length",
+                2.0,
+                "graphql.field.name" = "users",
+                "graphql.field.type" = "User",
+                "graphql.type.name" = "Query"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
-    #[test]
-    fn conversion_to_instruments() {
-        let _config = config(include_str!("fixtures/graphql_instruments.router.yaml"));
-        // let instruments: GraphQLInstruments = &config.into();
-        // assert!(instruments.list_length.is_some());
-        // assert!(instruments.field_execution.is_some());
-        // assert!(!instruments.custom.is_empty());
+    #[test_log::test(tokio::test)]
+    async fn multiple_fields_metric_publishing() {
+        async {
+            let schema_str = include_str!(
+                "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
+            );
+            let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_query.graphql");
+
+
+            let request = supergraph::Request::fake_builder()
+                .query(query_str)
+                .context(context(schema_str, query_str))
+                .build()
+                .unwrap();
+
+            let harness = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("fixtures/field_length_enabled.router.yaml"))
+                .schema(schema_str)
+                .build()
+                .await;
+
+            harness
+                .call_supergraph(request, |req| {
+                    let response: serde_json::Value = serde_json::from_str(include_str!(
+                        "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
+                    ))
+                    .unwrap();
+                    supergraph::Response::builder()
+                        .data(response["data"].clone())
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+
+            assert_histogram_sum!(
+                "graphql.field.list.length",
+                2.0,
+                "graphql.field.name" = "ships",
+                "graphql.field.type" = "Ship",
+                "graphql.type.name" = "Query" // TODO: I think this is wrong
+            );
+            assert_histogram_sum!(
+                "graphql.field.list.length",
+                2.0,
+                "graphql.field.name" = "users",
+                "graphql.field.type" = "User",
+                "graphql.type.name" = "Query"
+            );
+        }
+        .with_metrics()
+        .await;
     }
 
-    fn config(config: &'static str) -> GraphQLInstrumentsConfig {
-        let config: serde_json::Value = serde_yaml::from_str(config).expect("config");
-        let graphql_instruments = jsonpath_lib::select(&config, "$..graphql");
+    #[test_log::test(tokio::test)]
+    async fn disabled_metric_publishing() {
+        async {
+            let schema_str = include_str!(
+                "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
+            );
+            let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_named_query.graphql");
 
-        serde_json::from_value((*graphql_instruments.unwrap().first().unwrap()).clone())
-            .expect("config")
+
+            let request = supergraph::Request::fake_builder()
+                .query(query_str)
+                .context(context(schema_str, query_str))
+                .build()
+                .unwrap();
+
+            let harness = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("fixtures/field_length_disabled.router.yaml"))
+                .schema(schema_str)
+                .build()
+                .await;
+
+            harness
+                .call_supergraph(request, |req| {
+                    let response: serde_json::Value = serde_json::from_str(include_str!(
+                        "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
+                    ))
+                    .unwrap();
+                    supergraph::Response::builder()
+                        .data(response["data"].clone())
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+
+            assert_histogram_not_exists!("graphql.field.list.length", f64);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[test_log::test(tokio::test)]
+    async fn filtered_metric_publishing() {
+        async {
+            let schema_str = include_str!(
+                "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
+            );
+            let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_query.graphql");
+
+
+            let request = supergraph::Request::fake_builder()
+                .query(query_str)
+                .context(context(schema_str, query_str))
+                .build()
+                .unwrap();
+
+            let harness = PluginTestHarness::<Telemetry>::builder()
+                .config(include_str!("fixtures/filtered_field_length.router.yaml"))
+                .schema(schema_str)
+                .build()
+                .await;
+
+            harness
+                .call_supergraph(request, |req| {
+                    let response: serde_json::Value = serde_json::from_str(include_str!(
+                        "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
+                    ))
+                    .unwrap();
+                    supergraph::Response::builder()
+                        .data(response["data"].clone())
+                        .context(req.context)
+                        .build()
+                        .unwrap()
+                })
+                .await
+                .unwrap();
+
+            assert_histogram_sum!("ships.list.length", 2.0);
+        }
+        .with_metrics()
+        .await;
+    }
+
+    fn context(schema_str: &str, query_str: &str) -> Context {
+        let schema = crate::spec::Schema::parse_test(schema_str, &Default::default()).unwrap();
+        let query =
+            crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
+                .unwrap();
+        let context = Context::new();
+        context.extensions().lock().insert(query);
+
+        context
     }
 
     pub(crate) fn field() -> &'static Field {

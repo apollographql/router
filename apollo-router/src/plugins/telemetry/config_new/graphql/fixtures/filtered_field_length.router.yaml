@@ -1,0 +1,13 @@
+telemetry:
+  instrumentation:
+    instruments:
+      graphql:
+        "ships.list.length":
+          description: test
+          type: histogram
+          unit: count
+          value: field_unit
+          condition:
+            eq:
+              - field_name: string
+              - "ships"
