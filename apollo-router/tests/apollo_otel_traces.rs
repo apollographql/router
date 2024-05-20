@@ -28,9 +28,7 @@ use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::subgraph;
 use apollo_router::services::supergraph;
 use apollo_router::TestHarness;
-use axum::
-    routing::post
-;
+use axum::routing::post;
 use axum::Extension;
 use axum::Json;
 use base64::prelude::BASE64_STANDARD;
@@ -92,17 +90,23 @@ async fn config(
         Some(serde_json::Value::String(format!("http://{addr}")))
     })
     .expect("Could not sub in endpoint");
-    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.experimental_otlp_endpoint", &mut |_| {
-        Some(serde_json::Value::String(format!("http://{addr}")))
-    })
+    config = jsonpath_lib::replace_with(
+        config,
+        "$.telemetry.apollo.experimental_otlp_endpoint",
+        &mut |_| Some(serde_json::Value::String(format!("http://{addr}"))),
+    )
     .expect("Could not sub in endpoint");
-    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.experimental_otlp_tracing_sampler", &mut |_| {
-        Some(serde_json::Value::String("always_on".to_string()))
-    })
+    config = jsonpath_lib::replace_with(
+        config,
+        "$.telemetry.apollo.experimental_otlp_tracing_sampler",
+        &mut |_| Some(serde_json::Value::String("always_on".to_string())),
+    )
     .expect("Could not sub in otlp sampler");
-    config = jsonpath_lib::replace_with(config, "$.telemetry.apollo.experimental_otlp_tracing_protocol", &mut |_| {
-        Some(serde_json::Value::String("http".to_string()))
-    })
+    config = jsonpath_lib::replace_with(
+        config,
+        "$.telemetry.apollo.experimental_otlp_tracing_protocol",
+        &mut |_| Some(serde_json::Value::String("http".to_string())),
+    )
     .expect("Could not sub in otlp protocol");
     config =
         jsonpath_lib::replace_with(config, "$.telemetry.spans.legacy_request_span", &mut |_| {
@@ -234,7 +238,7 @@ async fn traces_handler(
     if let Ok(traces_request) = ExportTraceServiceRequest::decode(&*bytes) {
         state.lock().await.push(traces_request);
         // TBD(tim): Seems like we always receive some other unparseable data before receiving the request.
-        // Maybe it's a handshake or something but not sure.  Should we log an error in the "else" branch?  
+        // Maybe it's a handshake or something but not sure.  Should we log an error in the "else" branch?
     }
     Ok(Json(()))
 }
@@ -289,7 +293,10 @@ async fn get_batch_trace_report(
     .await
 }
 
-async fn get_traces<Fut, T: Fn(&&ExportTraceServiceRequest) -> bool + Send + Sync + Copy + 'static>(
+async fn get_traces<
+    Fut,
+    T: Fn(&&ExportTraceServiceRequest) -> bool + Send + Sync + Copy + 'static,
+>(
     service_fn: impl FnOnce(Arc<Mutex<Vec<ExportTraceServiceRequest>>>, bool, bool) -> Fut,
     reports: Arc<Mutex<Vec<ExportTraceServiceRequest>>>,
     use_legacy_request_span: bool,

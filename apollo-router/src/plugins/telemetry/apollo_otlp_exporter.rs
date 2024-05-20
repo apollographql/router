@@ -78,10 +78,10 @@ impl ApolloOtlpExporter {
                     opentelemetry_otlp::new_exporter()
                         .http()
                         .with_timeout(batch_config.max_export_timeout)
-                        .with_endpoint(endpoint.to_string())
+                        .with_endpoint(endpoint.to_string()),
                 )
                 .build_span_exporter()?,
-            ))
+            )),
         };
 
         return Ok(Self {

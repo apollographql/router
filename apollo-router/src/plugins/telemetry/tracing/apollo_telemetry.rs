@@ -962,9 +962,10 @@ impl SpanExporter for Exporter {
         // We may get spans that simply don't complete. These need to be cleaned up after a period. It's the price of using ftv1.
         let mut traces: Vec<(String, proto::reports::Trace)> = Vec::new();
         let mut otlp_trace_spans: Vec<Vec<SpanData>> = Vec::new();
-        
+
         // Decide whether to send via OTLP or reports proto based on the sampling config.  Roll dice if using a percentage rollout.
-        let send_otlp = self.otlp_exporter.is_some() && rand::thread_rng().gen_range(0.0..1.0) < self.otlp_tracing_ratio;
+        let send_otlp = self.otlp_exporter.is_some()
+            && rand::thread_rng().gen_range(0.0..1.0) < self.otlp_tracing_ratio;
         let send_reports = self.report_exporter.is_some() && !send_otlp;
 
         for span in batch {
