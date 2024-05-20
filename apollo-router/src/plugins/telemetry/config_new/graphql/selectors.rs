@@ -9,7 +9,7 @@ use crate::plugins::telemetry::config_new::Selector;
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ListLength {
-    /// The length of the array
+    /// The length of the list
     Value,
 }
 
@@ -44,7 +44,7 @@ pub(crate) enum TypeName {
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum GraphQLSelector {
-    /// If the field is an array, the length of the array
+    /// If the field is a list, the length of the list
     ListLength {
         #[allow(dead_code)]
         list_length: ListLength,

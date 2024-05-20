@@ -35,8 +35,8 @@ static FIELD_EXECUTION: &str = "graphql.field.execution";
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct GraphQLInstrumentsConfig {
     /// A histogram of the length of a selected field in the GraphQL response
-    #[serde(rename = "field.list.length")]
-    pub(crate) field_length:
+    #[serde(rename = "list.length")]
+    pub(crate) list_length:
         DefaultedStandardInstrument<Extendable<GraphQLAttributes, GraphQLSelector>>,
 
     /// A counter of the number of times a field is used.
@@ -51,9 +51,8 @@ impl DefaultForLevel for GraphQLInstrumentsConfig {
         requirement_level: DefaultAttributeRequirementLevel,
         kind: TelemetryDataKind,
     ) {
-        if self.field_length.is_enabled() {
-            self.field_length
-                .defaults_for_level(requirement_level, kind);
+        if self.list_length.is_enabled() {
+            self.list_length.defaults_for_level(requirement_level, kind);
         }
         if self.field_execution.is_enabled() {
             self.field_execution
@@ -70,7 +69,7 @@ pub(crate) type GraphQLCustomInstruments = CustomInstruments<
 >;
 
 pub(crate) struct GraphQLInstruments {
-    pub(crate) field_length: Option<
+    pub(crate) list_length: Option<
         CustomHistogram<
             supergraph::Request,
             supergraph::Response,
@@ -93,9 +92,9 @@ impl From<&InstrumentsConfig> for GraphQLInstruments {
     fn from(value: &InstrumentsConfig) -> Self {
         let meter = metrics::meter_provider().meter(METER_NAME);
         GraphQLInstruments {
-            field_length: value.graphql.attributes.field_length.is_enabled().then(|| {
+            list_length: value.graphql.attributes.list_length.is_enabled().then(|| {
                 let mut nb_attributes = 0;
-                let selectors = match &value.graphql.attributes.field_length {
+                let selectors = match &value.graphql.attributes.list_length {
                     DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
                         None
                     }
@@ -156,7 +155,7 @@ impl Instrumented for GraphQLInstruments {
     type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &Self::Request) {
-        if let Some(field_length) = &self.field_length {
+        if let Some(field_length) = &self.list_length {
             field_length.on_request(request);
         }
         if let Some(field_execution) = &self.field_execution {
@@ -166,7 +165,7 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_response(&self, response: &Self::Response) {
-        if let Some(field_length) = &self.field_length {
+        if let Some(field_length) = &self.list_length {
             field_length.on_response(response);
         }
         if let Some(field_execution) = &self.field_execution {
@@ -176,7 +175,7 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_error(&self, error: &BoxError, ctx: &crate::Context) {
-        if let Some(field_length) = &self.field_length {
+        if let Some(field_length) = &self.list_length {
             field_length.on_error(error, ctx);
         }
         if let Some(field_execution) = &self.field_execution {
@@ -186,8 +185,7 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
-        if !self.custom.is_empty() || self.field_length.is_some() || self.field_execution.is_some()
-        {
+        if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
             if let Some(executable_document) = ctx.unsupported_executable_document() {
                 if let Ok(schema) =
                     schema_aware_response::SchemaAwareResponse::new(&executable_document, response)
@@ -203,7 +201,7 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
-        if let Some(field_length) = &self.field_length {
+        if let Some(field_length) = &self.list_length {
             field_length.on_response_field(typed_value, ctx);
         }
         if let Some(field_execution) = &self.field_execution {

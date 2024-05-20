@@ -23,9 +23,9 @@ pub(crate) struct GraphQLAttributes {
     /// The GraphQL field type
     #[serde(rename = "graphql.field.type")]
     pub(crate) field_type: Option<bool>,
-    /// If the field is an array, the length of the array
-    #[serde(rename = "graphql.field.length")]
-    pub(crate) field_length: Option<bool>,
+    /// If the field is a list, the length of the list
+    #[serde(rename = "graphql.list.length")]
+    pub(crate) field_list_length: Option<bool>,
     /// The GraphQL type name
     #[serde(rename = "graphql.type.name")]
     pub(crate) type_name: Option<bool>,
@@ -84,13 +84,13 @@ impl Selectors for GraphQLAttributes {
                 attrs.push(KeyValue::new("graphql.field.type", ty));
             }
         }
-        if let Some(true) = self.field_length {
+        if let Some(true) = self.field_list_length {
             if let Some(length) = (GraphQLSelector::ListLength {
                 list_length: ListLength::Value,
             })
             .on_response_field(typed_value, ctx)
             {
-                attrs.push(KeyValue::new("graphql.field.length", length));
+                attrs.push(KeyValue::new("graphql.list.length", length));
             }
         }
         if let Some(true) = self.type_name {

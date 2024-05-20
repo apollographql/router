@@ -179,17 +179,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "ArrayLength": {
-      "oneOf": [
-        {
-          "description": "The length of the array",
-          "enum": [
-            "value"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "AssumeRoleProvider": {
       "additionalProperties": false,
       "description": "Specify assumed role configuration.",
@@ -2785,11 +2774,6 @@ expression: "&schema"
     "GraphQLAttributes": {
       "additionalProperties": false,
       "properties": {
-        "graphql.field.length": {
-          "description": "If the field is an array, the length of the array",
-          "nullable": true,
-          "type": "boolean"
-        },
         "graphql.field.name": {
           "description": "The GraphQL field name",
           "nullable": true,
@@ -2797,6 +2781,11 @@ expression: "&schema"
         },
         "graphql.field.type": {
           "description": "The GraphQL field type",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.list.length": {
+          "description": "If the field is a list, the length of the list",
           "nullable": true,
           "type": "boolean"
         },
@@ -2815,7 +2804,7 @@ expression: "&schema"
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
         },
-        "field.length": {
+        "list.length": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
         }
@@ -2826,15 +2815,15 @@ expression: "&schema"
       "anyOf": [
         {
           "additionalProperties": false,
-          "description": "If the field is an array, the length of the array",
+          "description": "If the field is a list, the length of the list",
           "properties": {
-            "field_length": {
-              "$ref": "#/definitions/ArrayLength",
-              "description": "#/definitions/ArrayLength"
+            "list_length": {
+              "$ref": "#/definitions/ListLength",
+              "description": "#/definitions/ListLength"
             }
           },
           "required": [
-            "field_length"
+            "list_length"
           ],
           "type": "object"
         },
@@ -3691,6 +3680,17 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ListLength": {
+      "oneOf": [
+        {
+          "description": "The length of the list",
+          "enum": [
+            "value"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "ListenAddr": {
       "anyOf": [
@@ -7424,7 +7424,7 @@ expression: "&schema"
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
         },
-        "field.length": {
+        "list.length": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
         }
@@ -7437,11 +7437,6 @@ expression: "&schema"
         "description": "#/definitions/GraphQLSelector"
       },
       "properties": {
-        "graphql.field.length": {
-          "description": "If the field is an array, the length of the array",
-          "nullable": true,
-          "type": "boolean"
-        },
         "graphql.field.name": {
           "description": "The GraphQL field name",
           "nullable": true,
@@ -7449,6 +7444,11 @@ expression: "&schema"
         },
         "graphql.field.type": {
           "description": "The GraphQL field type",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.list.length": {
+          "description": "If the field is a list, the length of the list",
           "nullable": true,
           "type": "boolean"
         },

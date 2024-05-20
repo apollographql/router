@@ -72,7 +72,7 @@ telemetry:
           subgraph.graphql.document: true
     instruments:
       graphql:
-        field.length: true
+        list.length: true
 
 preview_file_uploads:
   enabled: true
