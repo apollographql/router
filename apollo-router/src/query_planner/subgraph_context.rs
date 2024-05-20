@@ -208,66 +208,91 @@ pub(crate) fn build_operation_with_aliasing(
     contextual_arguments: &ContextualArguments,
     subgraph_schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
-    let mut selections: Vec<Selection> = vec![];
     let ContextualArguments { arguments, count } = contextual_arguments;
     let parsed_document = subgraph_operation.as_parsed(subgraph_schema);
+
+    let mut ed = ExecutableDocument::new();
+    
+    // for every operation in the document, go ahead and transform even though it's likely that only one exists
     if let Ok(document) = parsed_document {
-        // TODO: Can there be more than one named operation?
-        //       Can there be an anonymous operation?
-        if let Some((_, op)) = document.named_operations.first() {
-            let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
-            op.variables.iter().for_each(|v| {
-                if arguments.contains(v.name.as_str()) {
-                    for i in 0..*count {
-                        new_variables.push(Node::new(VariableDefinition {
-                            name: Name::new_unchecked(format!("{}_{}", v.name.as_str(), i).into()),
-                            ty: v.ty.clone(),
-                            default_value: v.default_value.clone(),
-                            directives: v.directives.clone(),
-                        }));
-                    }
-                } else {
-                    new_variables.push(v.clone());
-                }
-            });
-
-            for i in 0..*count {
-                // If we are aliasing, we know that there is only one selection in the top level SelectionSet
-                // it is a field selection for _entities, so it's ok to reach in and give it an alias
-                let mut selection_set = op.selection_set.clone();
-                transform_selection_set(&mut selection_set, arguments, i, true);
-                if let Some(selection) = selection_set.selections.get_mut(0) {
-                    if let Selection::Field(f) = selection {
-                        let field = f.make_mut();
-                        field.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
-                    }
-                    selections.push(selection.clone());
-                };
-            }
-
-            let mut ed = ExecutableDocument::new();
-            ed.insert_operation(Operation {
-                operation_type: op.operation_type,
-                name: op.name.clone(),
-                directives: op.directives.clone(),
-                variables: new_variables,
-                selection_set: SelectionSet {
-                    ty: op.selection_set.ty.clone(),
-                    selections,
-                },
-            });
-
-            return ed
-                .validate(subgraph_schema)
-                .map_err(ContextBatchingError::InvalidDocumentGenerated);
+        if let Some(anonymous_op) = &document.anonymous_operation {
+            let mut cloned = anonymous_op.clone();
+            transform_operation(&mut cloned, arguments, count)?;
+            ed.insert_operation(cloned);
         }
+
+        for (_, op) in &document.named_operations {
+            let mut cloned = op.clone();
+            transform_operation(&mut cloned, arguments, count)?;
+            ed.insert_operation(cloned);
+        }
+        
+        return ed
+            .validate(subgraph_schema)
+            .map_err(ContextBatchingError::InvalidDocumentGenerated);
     }
     Err(ContextBatchingError::NoSelectionSet)
 }
 
-// adds an alias that aligns with the index for this selection
-fn add_alias_to_selection(selection: &mut executable::Field, index: usize) {
-    selection.alias = Some(Name::new_unchecked(format!("_{}", index).into()));
+fn transform_operation(operation: &mut Node<Operation>, arguments: &HashSet<String>, count: &usize) -> Result<(), ContextBatchingError> {
+    let mut selections: Vec<Selection> = vec![];
+    let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
+    operation.variables.iter().for_each(|v| {
+        if arguments.contains(v.name.as_str()) {
+            for i in 0..*count {
+                new_variables.push(Node::new(VariableDefinition {
+                    name: Name::new_unchecked(format!("{}_{}", v.name.as_str(), i).into()),
+                    ty: v.ty.clone(),
+                    default_value: v.default_value.clone(),
+                    directives: v.directives.clone(),
+                }));
+            }
+        } else {
+            new_variables.push(v.clone());
+        }
+    });
+    
+    // there should only be one selection that is a field selection that we're going to rename, but let's count to be sure
+    // and error if that's not the case
+    // also it's possible that there could be an inline fragment, so if that's the case, just add those to the new selections once
+    let mut field_selection: Option<Node<executable::Field>> = None;
+    for selection in &operation.selection_set.selections {
+        match selection {
+            Selection::Field(f) => {
+                if field_selection != None {
+                    // if we get here, there is more than one field selection, which should not be the case
+                    // at the top level of a _entities selection set
+                    return Err(ContextBatchingError::UnexpectedSelection);
+                }
+                field_selection = Some(f.clone());
+            },
+            _ => {
+                // again, if we get here, something is wrong. _entities selection sets should have just one field selection
+                return Err(ContextBatchingError::UnexpectedSelection);
+            }
+        }
+    };
+    
+    let field_selection = field_selection.ok_or(ContextBatchingError::UnexpectedSelection)?;
+    
+    for i in 0..*count {
+        // If we are aliasing, we know that there is only one selection in the top level SelectionSet
+        // it is a field selection for _entities, so it's ok to reach in and give it an alias
+        let mut cloned = field_selection.clone();
+        let cfs = cloned.make_mut();
+        cfs.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
+        
+        transform_field_arguments(&mut cfs.arguments, arguments, i);
+        transform_selection_set(&mut cfs.selection_set, arguments, i);
+        selections.push(Selection::Field(cloned));
+    }
+    let operation = operation.make_mut();
+    operation.variables = new_variables;
+    operation.selection_set = SelectionSet {
+        ty: operation.selection_set.ty.clone(),
+        selections,
+    };
+    Ok(())
 }
 
 // This function will take the selection set (which has been cloned from the original)
@@ -277,7 +302,6 @@ fn transform_selection_set(
     selection_set: &mut SelectionSet,
     arguments: &HashSet<String>,
     index: usize,
-    add_alias: bool, // at the top level, we'll add an alias to field selections
 ) {
     selection_set
         .selections
@@ -286,14 +310,11 @@ fn transform_selection_set(
             executable::Selection::Field(node) => {
                 let node = node.make_mut();
                 transform_field_arguments(&mut node.arguments, arguments, index);
-                transform_selection_set(&mut node.selection_set, arguments, index, false);
-                if add_alias {
-                    add_alias_to_selection(node, index);
-                }
+                transform_selection_set(&mut node.selection_set, arguments, index);
             }
             executable::Selection::InlineFragment(node) => {
                 let node = node.make_mut();
-                transform_selection_set(&mut node.selection_set, arguments, index, false);
+                transform_selection_set(&mut node.selection_set, arguments, index);
             }
             _ => (),
         });
@@ -322,6 +343,7 @@ pub(crate) enum ContextBatchingError {
     NoSelectionSet,
     InvalidDocumentGenerated(WithErrors<ExecutableDocument>),
     InvalidRelativePath,
+    UnexpectedSelection,
 }
 
 #[cfg(test)]
@@ -400,7 +422,7 @@ mod subgraph_context_unit_tests {
         hash_set.insert("two".to_string());
         hash_set.insert("param".to_string());
         let mut clone = selection_set.clone();
-        transform_selection_set(&mut clone, &hash_set, 7, false);
+        transform_selection_set(&mut clone, &hash_set, 7);
         assert_eq!(
             "{ f(param: $variable) }",
             clone.serialize().no_indent().to_string()
@@ -409,18 +431,26 @@ mod subgraph_context_unit_tests {
         // add variable that will hit and cause a rewrite
         hash_set.insert("variable".to_string());
         let mut clone = selection_set.clone();
-        transform_selection_set(&mut clone, &hash_set, 7, false);
+        transform_selection_set(&mut clone, &hash_set, 7);
         assert_eq!(
             "{ f(param: $variable_7) }",
             clone.serialize().no_indent().to_string()
         );
 
         // add_alias = true will add a "_3:" alias
-        let mut clone = selection_set.clone();
-        transform_selection_set(&mut clone, &hash_set, 3, true);
+        let clone = selection_set.clone();
+        let mut operation = Node::new(executable::Operation {
+            operation_type: executable::OperationType::Query,
+            name: None,
+            variables: vec![],
+            directives: ast::DirectiveList(vec![]),
+            selection_set: clone,
+        });
+        let count = 3;
+        transform_operation(&mut operation, &hash_set, &count).unwrap();
         assert_eq!(
-            "{ _3: f(param: $variable_3) }",
-            clone.serialize().no_indent().to_string()
+            "{ _0: f(param: $variable_0) _1: f(param: $variable_1) _2: f(param: $variable_2) }",
+            operation.serialize().no_indent().to_string()
         );
     }
 }
