@@ -156,7 +156,13 @@ where
         let mut cache_keys = {
             let cache = previous_cache.clone();
 
-            let count = count.unwrap_or(cache.weighted_size() as usize / 3);
+            let count = match count {
+                Some(c) => c,
+                None => {
+                    cache.run_pending_tasks().await;
+                    cache.entry_count() as usize / 3
+                }
+            };
 
             cache
                 .iter()

@@ -169,7 +169,7 @@ where
         }
 
         self.inner.insert(key, value).await;
-        let size = self.inner.weighted_size();
+        let size = self.len().await;
         tracing::info!(
             value.apollo_router_cache_size = size,
             kind = %self.caller,
@@ -179,7 +179,7 @@ where
 
     pub(crate) async fn insert_in_memory(&self, key: K, value: V) {
         self.inner.insert(key, value).await;
-        let size = self.inner.weighted_size();
+        let size = self.len().await;
         tracing::info!(
             value.apollo_router_cache_size = size,
             kind = %self.caller,
@@ -191,9 +191,9 @@ where
         self.inner.clone()
     }
 
-    #[cfg(test)]
     pub(crate) async fn len(&self) -> usize {
-        self.inner.weighted_size() as usize
+        self.inner.run_pending_tasks().await;
+        self.inner.entry_count() as usize
     }
 }
 
