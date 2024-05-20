@@ -220,7 +220,60 @@ async fn test_set_context_with_null() {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_set_context_type_mismatch() {
     static QUERY: &str = r#"
-        query Query_type_mismatch {
+        query Query_fetch_failure {
+            t {
+                id
+                u {
+                    field
+                }
+            }
+        }"#;
+
+    let response = run_single_request(
+        QUERY,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
+
+    snap!(response);
+}
+
+// fetch from unrelated (to context) subgraph fails
+// validates that the error propagation is correct
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_context_unrelated_fetch_failure() {
+    static QUERY: &str = r#"
+        query Query_fetch_failure {
+            t {
+                id
+                u {
+                    field
+                    b
+                }
+            }
+        }"#;
+
+    let response = run_single_request(
+        QUERY,
+        &[
+            ("Subgraph1", include_str!("fixtures/set_context/one.json")),
+            ("Subgraph2", include_str!("fixtures/set_context/two.json")),
+        ],
+    )
+    .await;
+
+    snap!(response);
+}
+
+// subgraph fetch fails where context depends on results of fetch.
+// validates that no fetch will get called that passes context
+#[tokio::test(flavor = "multi_thread")]
+async fn test_set_context_dependent_fetch_failure() {
+    static QUERY: &str = r#"
+        query Query_fetch_dependent_failure {
             t {
                 id
                 u {

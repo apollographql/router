@@ -395,7 +395,6 @@ impl FetchNode {
 
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
-            // TODO: subgraph_schemas should be a HashMap of NodeStr or Name.
             if let Some(subgraph_schema) =
                 parameters.subgraph_schemas.get(&service_name.to_string())
             {

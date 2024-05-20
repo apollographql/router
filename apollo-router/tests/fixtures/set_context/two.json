@@ -15,6 +15,29 @@
           ]
         }
       }
+    },
+    {
+      "request": {
+        "query": "query Query_fetch_failure__Subgraph2__1($representations:[_Any!]!){_entities(representations:$representations){...on U{b}}}",
+        "operationName": "Query_fetch_failure__Subgraph2__1",
+        "variables": {
+          "representations": [{ "__typename": "U", "id": "1" }]
+        }
+      },
+      "response": {
+        "data": null,
+        "errors": [{
+          "message": "Some error",
+          "locations": [
+            {
+              "line": 3,
+              "column": 5
+            }
+          ],
+          "path": ["t", "u"]    
+        }
+        ]
+      }
     }
   ]
 }
