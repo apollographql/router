@@ -98,3 +98,10 @@
             '''^apollo-router\/src\/.+\/testdata\/.+''',
             '''^examples/telemetry/jaeger-collector.router.yaml$'''
         ]
+
+[[ rules ]]
+    id = "snapshots"
+    [ rules.allowlist ]
+        paths = [
+            '''^apollo-router\/src\/tests\/snapshots\/apollo_otel_traces''',
+        ]
