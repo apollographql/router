@@ -1,6 +1,6 @@
+use apollo_compiler::name;
 use apollo_compiler::schema::Name;
 use apollo_compiler::schema::NamedType;
-use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
@@ -15,6 +15,7 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::EnumTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::Edge;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
@@ -23,29 +24,6 @@ use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::sources::source;
 use crate::sources::source::SourceId;
 use crate::sources::source::SourceKind;
-use crate::ValidFederationSubgraph;
-
-struct FederatedQueryGraphBuilder {
-    supergraph_schema: ValidFederationSchema,
-    api_schema: ValidFederationSchema,
-    subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
-    is_for_query_planning: bool,
-    source_data: source::federated_query_graph::builder::FederatedQueryGraphBuilders,
-}
-
-impl FederatedQueryGraphBuilder {
-    pub(crate) fn new(
-        _supergraph_schema: ValidFederationSchema,
-        _api_schema: ValidFederationSchema,
-        _is_for_query_planning: bool,
-    ) -> Result<Self, FederationError> {
-        todo!()
-    }
-
-    pub(crate) fn build(self) -> Result<FederatedQueryGraph, FederationError> {
-        todo!()
-    }
-}
 
 pub(crate) fn build_federated_query_graph(
     supergraph_schema: ValidFederationSchema,
@@ -56,12 +34,51 @@ pub(crate) fn build_federated_query_graph(
     let is_for_query_planning = is_for_query_planning.unwrap_or(true);
     let subgraphs =
         extract_subgraphs_from_supergraph(&supergraph_schema, validate_extracted_subgraphs)?;
+
     let mut intra_source_builder =
         IntraSourceQueryGraphBuilder::new(supergraph_schema, api_schema, is_for_query_planning);
     let builders: source::federated_query_graph::builder::FederatedQueryGraphBuilders =
         Default::default();
     builders.process_subgraph_schemas(subgraphs, &mut intra_source_builder)?;
-    Ok(intra_source_builder.graph)
+    let mut graph = intra_source_builder.graph;
+
+    let supergraph_query_type_pos = ObjectTypeDefinitionPosition {
+        type_name: name!("Query"),
+    };
+    if graph
+        .supergraph_types_to_root_nodes
+        .contains_key(&supergraph_query_type_pos)
+    {
+        graph
+            .supergraph_root_kinds_to_types
+            .insert(SchemaRootDefinitionKind::Query, supergraph_query_type_pos);
+    }
+    let supergraph_mutation_type_pos = ObjectTypeDefinitionPosition {
+        type_name: name!("Mutation"),
+    };
+    if graph
+        .supergraph_types_to_root_nodes
+        .contains_key(&supergraph_mutation_type_pos)
+    {
+        graph.supergraph_root_kinds_to_types.insert(
+            SchemaRootDefinitionKind::Mutation,
+            supergraph_mutation_type_pos,
+        );
+    }
+    let supergraph_subscription_type_pos = ObjectTypeDefinitionPosition {
+        type_name: name!("Subscription"),
+    };
+    if graph
+        .supergraph_types_to_root_nodes
+        .contains_key(&supergraph_subscription_type_pos)
+    {
+        graph.supergraph_root_kinds_to_types.insert(
+            SchemaRootDefinitionKind::Subscription,
+            supergraph_subscription_type_pos,
+        );
+    }
+
+    Ok(graph)
 }
 
 pub(crate) struct IntraSourceQueryGraphBuilder {
