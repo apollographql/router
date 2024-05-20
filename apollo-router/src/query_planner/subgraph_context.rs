@@ -212,7 +212,7 @@ pub(crate) fn build_operation_with_aliasing(
     let parsed_document = subgraph_operation.as_parsed(subgraph_schema);
 
     let mut ed = ExecutableDocument::new();
-    
+
     // for every operation in the document, go ahead and transform even though it's likely that only one exists
     if let Ok(document) = parsed_document {
         if let Some(anonymous_op) = &document.anonymous_operation {
@@ -226,7 +226,7 @@ pub(crate) fn build_operation_with_aliasing(
             transform_operation(&mut cloned, arguments, count)?;
             ed.insert_operation(cloned);
         }
-        
+
         return ed
             .validate(subgraph_schema)
             .map_err(ContextBatchingError::InvalidDocumentGenerated);
@@ -234,7 +234,11 @@ pub(crate) fn build_operation_with_aliasing(
     Err(ContextBatchingError::NoSelectionSet)
 }
 
-fn transform_operation(operation: &mut Node<Operation>, arguments: &HashSet<String>, count: &usize) -> Result<(), ContextBatchingError> {
+fn transform_operation(
+    operation: &mut Node<Operation>,
+    arguments: &HashSet<String>,
+    count: &usize,
+) -> Result<(), ContextBatchingError> {
     let mut selections: Vec<Selection> = vec![];
     let mut new_variables: Vec<Node<VariableDefinition>> = vec![];
     operation.variables.iter().for_each(|v| {
@@ -251,7 +255,7 @@ fn transform_operation(operation: &mut Node<Operation>, arguments: &HashSet<Stri
             new_variables.push(v.clone());
         }
     });
-    
+
     // there should only be one selection that is a field selection that we're going to rename, but let's count to be sure
     // and error if that's not the case
     // also it's possible that there could be an inline fragment, so if that's the case, just add those to the new selections once
@@ -259,29 +263,29 @@ fn transform_operation(operation: &mut Node<Operation>, arguments: &HashSet<Stri
     for selection in &operation.selection_set.selections {
         match selection {
             Selection::Field(f) => {
-                if field_selection != None {
+                if field_selection.is_some() {
                     // if we get here, there is more than one field selection, which should not be the case
                     // at the top level of a _entities selection set
                     return Err(ContextBatchingError::UnexpectedSelection);
                 }
                 field_selection = Some(f.clone());
-            },
+            }
             _ => {
                 // again, if we get here, something is wrong. _entities selection sets should have just one field selection
                 return Err(ContextBatchingError::UnexpectedSelection);
             }
         }
-    };
-    
+    }
+
     let field_selection = field_selection.ok_or(ContextBatchingError::UnexpectedSelection)?;
-    
+
     for i in 0..*count {
         // If we are aliasing, we know that there is only one selection in the top level SelectionSet
         // it is a field selection for _entities, so it's ok to reach in and give it an alias
         let mut cloned = field_selection.clone();
         let cfs = cloned.make_mut();
         cfs.alias = Some(Name::new_unchecked(format!("_{}", i).into()));
-        
+
         transform_field_arguments(&mut cfs.arguments, arguments, i);
         transform_selection_set(&mut cfs.selection_set, arguments, i);
         selections.push(Selection::Field(cloned));
