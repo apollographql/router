@@ -21,4 +21,4 @@ path = "junit.xml"
 # This filter applies only to to the integration tests in the apollo-router package.
 [[profile.ci.overrides]]
 filter = 'test(/^apollo-router::/)'
-threads-required = 2
+threads-required = 4
