@@ -202,7 +202,7 @@ impl EventDynAttribute for ::tracing::Span {
                             },
                             None => {
                                 // Can't use ::tracing::error! because it could create deadlock on extensions
-                                eprintln!("no EventsAttributes, this is a bug");
+                                eprintln!("no OtelData, this is a bug");
                             }
                         }
                     }
@@ -238,7 +238,7 @@ impl EventDynAttribute for ::tracing::Span {
                             },
                             None => {
                                 // Can't use ::tracing::error! because it could create deadlock on extensions
-                                eprintln!("no EventsAttributes, this is a bug");
+                                eprintln!("no OtelData, this is a bug");
                             }
                         }
                     }

@@ -446,7 +446,7 @@ subgraph:
             fmt::Subscriber::new().with(fmt_layer),
             generate_simple_span,
         );
-        insta::assert_display_snapshot!(buff);
+        insta::assert_snapshot!(buff);
     }
 
     #[tokio::test]
@@ -464,7 +464,7 @@ subgraph:
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -481,7 +481,7 @@ subgraph:
             fmt::Subscriber::new().with(fmt_layer),
             generate_simple_span,
         );
-        insta::assert_display_snapshot!(buff);
+        insta::assert_snapshot!(buff);
     }
 
     #[tokio::test]
@@ -499,7 +499,7 @@ subgraph:
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -523,7 +523,7 @@ subgraph:
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -548,7 +548,7 @@ subgraph:
             generate_nested_spans,
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -593,7 +593,7 @@ subgraph:
             },
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -640,7 +640,7 @@ subgraph:
             },
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -772,7 +772,7 @@ subgraph:
             },
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     #[tokio::test]
@@ -905,7 +905,7 @@ subgraph:
             },
         );
 
-        insta::assert_display_snapshot!(buff.to_string());
+        insta::assert_snapshot!(buff.to_string());
     }
 
     // TODO add test using on_request/on_reponse/on_error

@@ -12,7 +12,10 @@ use crate::query_planner::subscription;
 
 impl From<&'_ next::QueryPlan> for bridge::QueryPlan {
     fn from(value: &'_ next::QueryPlan) -> Self {
-        let next::QueryPlan { node } = value;
+        let next::QueryPlan {
+            node,
+            statistics: _,
+        } = value;
         Self { node: option(node) }
     }
 }
@@ -26,7 +29,7 @@ impl From<&'_ next::TopLevelPlanNode> for plan::PlanNode {
             next::TopLevelPlanNode::Parallel(node) => node.into(),
             next::TopLevelPlanNode::Flatten(node) => node.into(),
             next::TopLevelPlanNode::Defer(node) => node.into(),
-            next::TopLevelPlanNode::Condition(node) => node.into(),
+            next::TopLevelPlanNode::Condition(node) => node.as_ref().into(),
         }
     }
 }
@@ -34,13 +37,18 @@ impl From<&'_ next::TopLevelPlanNode> for plan::PlanNode {
 impl From<&'_ next::PlanNode> for plan::PlanNode {
     fn from(value: &'_ next::PlanNode) -> Self {
         match value {
-            next::PlanNode::Fetch(node) => node.as_ref().into(),
-            next::PlanNode::Sequence(node) => node.as_ref().into(),
-            next::PlanNode::Parallel(node) => node.as_ref().into(),
-            next::PlanNode::Flatten(node) => node.as_ref().into(),
-            next::PlanNode::Defer(node) => node.as_ref().into(),
+            next::PlanNode::Fetch(node) => node.into(),
+            next::PlanNode::Sequence(node) => node.into(),
+            next::PlanNode::Parallel(node) => node.into(),
+            next::PlanNode::Flatten(node) => node.into(),
+            next::PlanNode::Defer(node) => node.into(),
             next::PlanNode::Condition(node) => node.as_ref().into(),
         }
+    }
+}
+impl From<&'_ Box<next::PlanNode>> for plan::PlanNode {
+    fn from(value: &'_ Box<next::PlanNode>) -> Self {
+        value.as_ref().into()
     }
 }
 
@@ -48,14 +56,14 @@ impl From<&'_ next::SubscriptionNode> for plan::PlanNode {
     fn from(value: &'_ next::SubscriptionNode) -> Self {
         let next::SubscriptionNode { primary, rest } = value;
         Self::Subscription {
-            primary: primary.into(),
+            primary: primary.as_ref().into(),
             rest: option(rest).map(Box::new),
         }
     }
 }
 
-impl From<&'_ next::FetchNode> for plan::PlanNode {
-    fn from(value: &'_ next::FetchNode) -> Self {
+impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
+    fn from(value: &'_ Box<next::FetchNode>) -> Self {
         let next::FetchNode {
             subgraph_name,
             id,
@@ -66,16 +74,16 @@ impl From<&'_ next::FetchNode> for plan::PlanNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
-        } = value;
+        } = &**value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
-            requires: vec(requires),
+            requires: requires.as_deref().map(vec).unwrap_or_default(),
             variable_usages: variable_usages.iter().map(|v| v.clone().into()).collect(),
             // TODO: use Arc in apollo_federation to avoid this clone
             operation: SubgraphOperation::from_parsed(Arc::new(operation_document.clone())),
             operation_name: operation_name.clone(),
             operation_kind: (*operation_kind).into(),
-            id: id.clone(),
+            id: id.map(|id| id.to_string().into()),
             input_rewrites: option_vec(input_rewrites),
             output_rewrites: option_vec(output_rewrites),
             schema_aware_hash: Default::default(),
@@ -241,7 +249,11 @@ impl From<&'_ executable::Field> for selection::Field {
         Self {
             alias: alias.clone(),
             name: name.clone(),
-            selections: option_vec(&selection_set.selections),
+            selections: if selection_set.selections.is_empty() {
+                None
+            } else {
+                Some(vec(&selection_set.selections))
+            },
         }
     }
 }
@@ -260,9 +272,9 @@ impl From<&'_ executable::InlineFragment> for selection::InlineFragment {
     }
 }
 
-impl From<&'_ next::FetchDataRewrite> for rewrites::DataRewrite {
-    fn from(value: &'_ next::FetchDataRewrite) -> Self {
-        match value {
+impl From<&'_ Arc<next::FetchDataRewrite>> for rewrites::DataRewrite {
+    fn from(value: &'_ Arc<next::FetchDataRewrite>) -> Self {
+        match value.as_ref() {
             next::FetchDataRewrite::ValueSetter(setter) => Self::ValueSetter(setter.into()),
             next::FetchDataRewrite::KeyRenamer(renamer) => Self::KeyRenamer(renamer.into()),
         }
