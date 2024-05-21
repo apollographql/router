@@ -395,12 +395,13 @@ pub(crate) enum PathSelections {
         /// Note: [Name] here can refer to aliased fields as well.
         named_selections: Vec<(Name, Vec<Key>)>,
 
-        /// The (optional) final selection.
+        /// The (optional) final selection for this chain.
         ///
         /// This selection is assumed to be from the context of the node accessable from
         /// the chain of [head_property_path] followed by the chain of [named_selections].
         ///
-        /// A value of `None` here means to stop traversal at the current selection.
+        /// A value of `None` here means to stop traversal at the current selection, while any
+        /// other value signals that there might be further sections to traverse.
         tail_selection: Option<(Name, PathTailSelection)>,
     },
 
