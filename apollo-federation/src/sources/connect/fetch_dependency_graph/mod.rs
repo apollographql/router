@@ -180,7 +180,8 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
                 return Ok(());
             };
 
-            // If we are adding a path and have a selection, then the selection _must_ have a subselection.
+            // If we are adding a path and have a tail selection, then the selection _must_ have a subselection to account
+            // for the extra tail.
             let subselection =
                 selection
                     .next_mut_subselection()
@@ -211,8 +212,8 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
                     .iter()
                     .position(|s| name_matches(s, &name))
                 {
-                    let macthing_selection = subselection_ref.selections.get_mut(matching_selection_position).ok_or(FederationError::internal("matched position does not actually exist in selections. This should not happen"))?;
-                    macthing_selection
+                    let matching_selection = subselection_ref.selections.get_mut(matching_selection_position).ok_or(FederationError::internal("matched position does not actually exist in selections. This should not happen"))?;
+                    matching_selection
                         .next_mut_subselection()
                         .ok_or(FederationError::internal(
                             "expected existing selection to have a subselection",
@@ -371,28 +372,74 @@ pub(crate) struct PathField {
     selections: PathSelections,
 }
 
+/// A path to a specific selection
+///
+/// This enum encompasses a set of directions for reaching a target property
+/// within a JSON selection.
 #[derive(Debug, Clone)]
 pub(crate) enum PathSelections {
+    /// Set of selections assuming a starting point of the root.
     Selections {
+        /// Property path from the head
+        ///
+        /// This is a list of properties to traverse starting from the root (or head)
+        /// of the corresponding selection. These should be simple paths that can be
+        /// chained together.
         head_property_path: Vec<Key>,
+
+        /// Named selections from the root reachable through [head_property_path]
+        ///
+        /// Each member in this list is of the form ([Name], [Keys](Vec<Key>)) and is
+        /// a chain of named selections to apply iteratively to reach the leaf of our selection.
+        ///
+        /// Note: [Name] here can refer to aliased fields as well.
         named_selections: Vec<(Name, Vec<Key>)>,
+
+        /// The (optional) final selection.
+        ///
+        /// This selection is assumed to be from the context of the node accessable from
+        /// the chain of [head_property_path] followed by the chain of [named_selections].
+        ///
+        /// A value of `None` here means to stop traversal at the current selection.
         tail_selection: Option<(Name, PathTailSelection)>,
     },
+
+    /// The full selection from a (potentially) different root
     CustomScalarRoot {
+        /// The full selection
         selection: JSONSelection,
     },
 }
 
+/// A path to a specific selection, not from the root.
+///
+/// This enum describes different ways to perform a final selection of a path
+/// from the context of any selection in the tree.
 #[derive(Debug, Clone)]
 pub(crate) enum PathTailSelection {
+    /// Simple selection using a chain of keys.
     Selection {
+        /// The chain of [Key]s to traverse
         property_path: Vec<Key>,
     },
-    CustomScalarPathSelection {
-        path_selection: PathSelection,
-    },
+
+    /// Custom selection using a [PathSelection]
+    ///
+    /// Note: This is useful when a simple [PathTailSelection::Selection] is not
+    /// complex enough to describe the traversal path, such as when using variables
+    /// or custom [SubSelection]s.
+    CustomScalarPathSelection { path_selection: PathSelection },
+
+    /// Custom selection using a star (*) subselection.
+    ///
+    /// Note: This is useful when needing to collect all other possible values
+    /// in a selection into a singular property.
     CustomScalarStarSelection {
+        /// The subselection including the star
         star_subselection: Option<SubSelection>,
+
+        /// All other known properties that _shouldn't_ be collected into the
+        /// star selection.
         excluded_properties: IndexSet<Key>,
     },
 }
@@ -987,6 +1034,13 @@ mod tests {
             );
         }
 
+        /// Tests adding in a new path.
+        ///
+        /// This test ensures that nodes which have no existing JSONSelection will correctly
+        /// have the new additions merged in from a separate path.
+        ///
+        /// - Node's selection: _
+        /// - Path's selection: { a b c }
         #[test]
         fn it_adds_a_simple_path() {
             let SetupInfo {
@@ -1042,40 +1096,39 @@ mod tests {
             let source::fetch_dependency_graph::Node::Connect(result) = node else {
                 unreachable!()
             };
-            assert_debug_snapshot!(result, @r###"
-            Node {
-                merge_at: [],
-                source_entering_edge: EdgeIndex(3),
-                field_response_name: "_simple_path_test",
-                field_arguments: {},
-                selection: Some(
-                    Named(
-                        SubSelection {
-                            selections: [
-                                Field(
-                                    None,
-                                    "a",
-                                    None,
-                                ),
-                                Field(
-                                    None,
-                                    "b",
-                                    None,
-                                ),
-                                Field(
-                                    None,
-                                    "c",
-                                    None,
-                                ),
-                            ],
-                            star: None,
-                        },
-                    ),
-                ),
+            assert_eq!(*result.merge_at, []);
+            assert_eq!(result.source_entering_edge, source_entering_edge);
+            assert_eq!(result.field_response_name.as_str(), "_simple_path_test");
+            assert_eq!(result.field_arguments, IndexMap::new());
+            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            {
+              a
+              b
+              c
             }
             "###);
         }
 
+        /// Tests adding in a new nested path.
+        ///
+        /// This test ensures that nodes which have no existing JSONSelection will correctly
+        /// have the new additions merged in from a separate path, including nesting.
+        ///
+        /// - Node's selection: _
+        /// - Path's selection:
+        /// {
+        ///   a
+        ///   b {
+        ///     x
+        ///     y
+        ///     z {
+        ///       one
+        ///       two
+        ///       three
+        ///     }
+        ///   }
+        ///   c: last
+        /// }
         #[test]
         fn it_adds_a_nested_path() {
             let SetupInfo {
@@ -1132,82 +1185,23 @@ mod tests {
             let source::fetch_dependency_graph::Node::Connect(result) = node else {
                 unreachable!()
             };
-            assert_debug_snapshot!(result, @r###"
-            Node {
-                merge_at: [],
-                source_entering_edge: EdgeIndex(3),
-                field_response_name: "_nested_path_test",
-                field_arguments: {},
-                selection: Some(
-                    Named(
-                        SubSelection {
-                            selections: [
-                                Field(
-                                    None,
-                                    "a",
-                                    None,
-                                ),
-                                Field(
-                                    None,
-                                    "b",
-                                    Some(
-                                        SubSelection {
-                                            selections: [
-                                                Field(
-                                                    None,
-                                                    "x",
-                                                    None,
-                                                ),
-                                                Field(
-                                                    None,
-                                                    "y",
-                                                    None,
-                                                ),
-                                                Field(
-                                                    None,
-                                                    "z",
-                                                    Some(
-                                                        SubSelection {
-                                                            selections: [
-                                                                Field(
-                                                                    None,
-                                                                    "one",
-                                                                    None,
-                                                                ),
-                                                                Field(
-                                                                    None,
-                                                                    "two",
-                                                                    None,
-                                                                ),
-                                                                Field(
-                                                                    None,
-                                                                    "three",
-                                                                    None,
-                                                                ),
-                                                            ],
-                                                            star: None,
-                                                        },
-                                                    ),
-                                                ),
-                                            ],
-                                            star: None,
-                                        },
-                                    ),
-                                ),
-                                Field(
-                                    Some(
-                                        Alias {
-                                            name: "c",
-                                        },
-                                    ),
-                                    "last",
-                                    None,
-                                ),
-                            ],
-                            star: None,
-                        },
-                    ),
-                ),
+            assert_eq!(*result.merge_at, []);
+            assert_eq!(result.source_entering_edge, source_entering_edge);
+            assert_eq!(result.field_response_name.as_str(), "_nested_path_test");
+            assert_eq!(result.field_arguments, IndexMap::new());
+            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            {
+              a
+              b {
+                x
+                y
+                z {
+                  one
+                  two
+                  three
+                }
+              }
+              c: last
             }
             "###);
         }
@@ -1218,8 +1212,25 @@ mod tests {
         /// will correctly have the new additions merged in from a separate path, including
         /// nesting.
         ///
-        /// - Node's selection: a b { x z { three } } c: last
-        /// - Path's selection: b { y z { one two } } d
+        /// - Node's selection:
+        /// .foo.bar {
+        ///   qux: .qaax
+        ///   qax: .qaax {
+        ///     baz
+        ///   }
+        /// }
+        ///
+        /// - Path's selection:
+        /// .foo.bar {
+        ///   qax: .qaax {
+        ///     baaz: .baz.buzz {
+        ///       biz: .blah {
+        ///         x
+        ///         y
+        ///       }
+        ///     }
+        ///   }
+        /// }
         #[test]
         fn it_merges_a_nested_path() {
             let SetupInfo {
@@ -1274,7 +1285,6 @@ mod tests {
                                             Key::Field("bar".to_string()),
                                         ],
                                         named_selections: vec![
-                                            // - Node's selection: a b { x z { three } } c: last
                                             (name!("qax"), vec![Key::Field("qaax".to_string())]),
                                             (
                                                 name!("baaz"),
@@ -1314,120 +1324,28 @@ mod tests {
             let source::fetch_dependency_graph::Node::Connect(result) = node else {
                 unreachable!()
             };
-            assert_debug_snapshot!(result, @r###"
-            Node {
-                merge_at: [],
-                source_entering_edge: EdgeIndex(3),
-                field_response_name: "_merge_nested_path_test",
-                field_arguments: {},
-                selection: Some(
-                    Path(
-                        Key(
-                            Field(
-                                "foo",
-                            ),
-                            Key(
-                                Field(
-                                    "bar",
-                                ),
-                                Selection(
-                                    SubSelection {
-                                        selections: [
-                                            Path(
-                                                Alias {
-                                                    name: "qux",
-                                                },
-                                                Key(
-                                                    Field(
-                                                        "qaax",
-                                                    ),
-                                                    Empty,
-                                                ),
-                                            ),
-                                            Path(
-                                                Alias {
-                                                    name: "qax",
-                                                },
-                                                Key(
-                                                    Field(
-                                                        "qaax",
-                                                    ),
-                                                    Selection(
-                                                        SubSelection {
-                                                            selections: [
-                                                                Field(
-                                                                    None,
-                                                                    "baz",
-                                                                    None,
-                                                                ),
-                                                                Path(
-                                                                    Alias {
-                                                                        name: "baaz",
-                                                                    },
-                                                                    Key(
-                                                                        Field(
-                                                                            "baz",
-                                                                        ),
-                                                                        Key(
-                                                                            Field(
-                                                                                "buzz",
-                                                                            ),
-                                                                            Selection(
-                                                                                SubSelection {
-                                                                                    selections: [
-                                                                                        Path(
-                                                                                            Alias {
-                                                                                                name: "biz",
-                                                                                            },
-                                                                                            Selection(
-                                                                                                SubSelection {
-                                                                                                    selections: [
-                                                                                                        Group(
-                                                                                                            Alias {
-                                                                                                                name: "blah",
-                                                                                                            },
-                                                                                                            SubSelection {
-                                                                                                                selections: [
-                                                                                                                    Field(
-                                                                                                                        None,
-                                                                                                                        "x",
-                                                                                                                        None,
-                                                                                                                    ),
-                                                                                                                    Field(
-                                                                                                                        None,
-                                                                                                                        "y",
-                                                                                                                        None,
-                                                                                                                    ),
-                                                                                                                ],
-                                                                                                                star: None,
-                                                                                                            },
-                                                                                                        ),
-                                                                                                    ],
-                                                                                                    star: None,
-                                                                                                },
-                                                                                            ),
-                                                                                        ),
-                                                                                    ],
-                                                                                    star: None,
-                                                                                },
-                                                                            ),
-                                                                        ),
-                                                                    ),
-                                                                ),
-                                                            ],
-                                                            star: None,
-                                                        },
-                                                    ),
-                                                ),
-                                            ),
-                                        ],
-                                        star: None,
-                                    },
-                                ),
-                            ),
-                        ),
-                    ),
-                ),
+
+            assert_eq!(*result.merge_at, []);
+            assert_eq!(result.source_entering_edge, source_entering_edge);
+            assert_eq!(
+                result.field_response_name.as_str(),
+                "_merge_nested_path_test"
+            );
+            assert_eq!(result.field_arguments, IndexMap::new());
+            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            .foo.bar {
+              qux: .qaax
+              qax: .qaax {
+                baz
+                baaz: .baz.buzz {
+                  biz: {
+                    blah: {
+                      x
+                      y
+                    }
+                  }
+                }
+              }
             }
             "###);
         }

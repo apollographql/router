@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::fmt::Write;
 
 use nom::branch::alt;
 use nom::character::complete::char;
@@ -61,6 +62,22 @@ impl JSONSelection {
             JSONSelection::Named(subselect) => Some(subselect),
             JSONSelection::Path(path) => path.next_mut_subselection(),
         }
+    }
+
+    /// Prints the JSON selection as though it were a prettified string
+    pub fn pretty_print(&self, indentation: Option<usize>) -> Result<String, std::fmt::Error> {
+        let mut result = String::new();
+
+        match self {
+            JSONSelection::Named(named) => {
+                write!(result, "{}", named.pretty_print(indentation)?)
+            }
+            JSONSelection::Path(path) => {
+                write!(result, "{}", path.pretty_print(indentation)?)
+            }
+        }?;
+
+        Ok(result)
     }
 }
 
@@ -182,6 +199,48 @@ impl NamedSelection {
             // Every other option does not have a subselection
             _ => None,
         }
+    }
+
+    pub fn pretty_print(&self, indentation: Option<usize>) -> Result<String, std::fmt::Error> {
+        let mut result = String::new();
+        let indentation = indentation.unwrap_or_default();
+        let indent_chars = (0..indentation * 2).map(|_| ' ').collect::<String>();
+
+        write!(result, "{indent_chars}")?;
+        match self {
+            NamedSelection::Field(Some(Alias { name }), ident, Some(sub)) => {
+                let sub = sub.pretty_print(Some(indentation))?;
+                write!(result, "{name}: {ident} {sub}")
+            }
+            NamedSelection::Field(Some(Alias { name }), ident, None) => {
+                writeln!(result, "{name}: {ident}")
+            }
+            NamedSelection::Field(None, ident, Some(sub)) => {
+                let sub = sub.pretty_print(Some(indentation))?;
+                write!(result, "{ident} {sub}")
+            }
+            NamedSelection::Field(None, ident, None) => writeln!(result, "{ident}"),
+
+            NamedSelection::Quoted(Alias { name }, literal, Some(sub)) => {
+                let sub = sub.pretty_print(Some(indentation))?;
+                write!(result, r#"{name}: "{literal}" {sub}"#)
+            }
+            NamedSelection::Quoted(Alias { name }, literal, None) => {
+                writeln!(result, r#"{name}: "{literal}""#)
+            }
+
+            NamedSelection::Path(Alias { name }, path) => {
+                let path = path.pretty_print(Some(indentation))?;
+                write!(result, "{name}: {}", path.trim_start())
+            }
+
+            NamedSelection::Group(Alias { name }, sub) => {
+                let sub = sub.pretty_print(Some(indentation))?;
+                write!(result, "{name}: {sub}")
+            }
+        }?;
+
+        Ok(result)
     }
 }
 
@@ -319,6 +378,28 @@ impl PathSelection {
             PathSelection::Empty => None,
         }
     }
+
+    pub fn pretty_print(&self, indentation: Option<usize>) -> Result<String, std::fmt::Error> {
+        let mut result = String::new();
+
+        match self {
+            PathSelection::Var(var, path) => {
+                let rest = path.pretty_print(indentation)?;
+                write!(result, "${var}{rest}")?;
+            }
+            PathSelection::Key(key, path) => {
+                let rest = path.pretty_print(indentation)?;
+                write!(result, "{key}{rest}")?;
+            }
+            PathSelection::Selection(sub) => {
+                let sub = sub.pretty_print(indentation)?;
+                write!(result, " {sub}")?;
+            }
+            PathSelection::Empty => {}
+        }
+
+        Ok(result)
+    }
 }
 
 // SubSelection ::= "{" NakedSubSelection "}"
@@ -346,6 +427,29 @@ impl SubSelection {
         ))(input)
         .map(|(input, (_, _, selections, star, _, _, _))| (input, Self { selections, star }))
     }
+
+    pub fn pretty_print(&self, indentation: Option<usize>) -> Result<String, std::fmt::Error> {
+        let mut result = String::new();
+        let indentation = indentation.unwrap_or_default();
+        let indent_chars = (0..indentation * 2).map(|_| ' ').collect::<String>();
+
+        // Note: We purposefully do not indent the opening brace
+        writeln!(result, "{{")?;
+        for selection in &self.selections {
+            let selection = selection.pretty_print(Some(indentation + 1))?;
+
+            // Indent the lines to match our level of indentation
+            writeln!(result, "{}", selection.trim_end())?;
+        }
+
+        if let Some(star) = self.star.as_ref() {
+            let star = star.pretty_print(Some(indentation + 1))?;
+            writeln!(result, "{star}")?;
+        }
+
+        writeln!(result, "{indent_chars}}}")?;
+        Ok(result)
+    }
 }
 
 // StarSelection ::= Alias? "*" SubSelection?
@@ -368,6 +472,26 @@ impl StarSelection {
         .map(|(remainder, (alias, _, _, _, selection))| {
             (remainder, Self(alias, selection.map(Box::new)))
         })
+    }
+
+    pub fn pretty_print(&self, indentation: Option<usize>) -> Result<String, std::fmt::Error> {
+        let mut result = String::new();
+        let indentation = indentation.unwrap_or_default();
+        let indent_chars = (0..indentation * 2).map(|_| ' ').collect::<String>();
+
+        write!(result, "{indent_chars}")?;
+        if let Some(alias) = self.0.as_ref() {
+            write!(result, "{}: ", alias.name)?;
+        }
+
+        write!(result, "*")?;
+
+        if let Some(sub) = self.1.as_ref() {
+            let sub = sub.pretty_print(Some(indentation + 1))?;
+            write!(result, " {sub}")?;
+        }
+
+        Ok(result)
     }
 }
 
