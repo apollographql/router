@@ -27,6 +27,8 @@ use crate::sources::source::federated_query_graph::EnumNode;
 use crate::sources::source::federated_query_graph::ScalarNode;
 use crate::ValidFederationSubgraph;
 
+use super::{ConcreteFieldEdge, TypeConditionEdge};
+
 #[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
 
