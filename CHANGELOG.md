@@ -4,6 +4,200 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.47.0] - 2024-05-21
+
+## 🚀 Features
+
+### Support telemetry selectors with errors ([Issue #5027](https://github.com/apollographql/router/issues/5027))
+
+The router now supports telemetry selectors that take into account the occurrence of errors. This capability enables you to create metrics, events, or span attributes that contain error messages. 
+
+For example, you can create a counter for the number of timed-out requests for subgraphs:
+ 
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        requests.timeout:
+          value: unit
+          type: counter
+          unit: request
+          description: "subgraph requests containing subgraph timeout"
+          attributes:
+            subgraph.name: true
+          condition:
+            eq:
+              - "request timed out"
+              - error: reason
+```
+
+The router also can now compute new attributes upon receiving a new event in a supergraph response. With this capability, you can fetch data directly from the supergraph response body:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      acme.request.on_graphql_error:
+        value: event_unit
+        type: counter
+        unit: error
+        description: my description
+        condition:
+          eq:
+          - MY_ERROR_CODE
+          - response_errors: "$.[0].extensions.code"
+        attributes:
+          response_errors:
+            response_errors: "$.*"
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5022
+
+### Add support for `status_code` response to Rhai ([Issue #5042](https://github.com/apollographql/router/issues/5042))
+
+The router now supports `response.status_code` on the `Response` interface in Rhai.
+
+Examples using the response status code:
+
+- Converting a response status code to a string:
+
+```rhai
+if response.status_code.to_string() == "200" {
+    print(`ok`);
+}
+```
+
+- Converting a response status code to a number:
+
+```rhai
+if parse_int(response.status_code.to_string()) == 200 {
+    print(`ok`);
+}
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5045
+
+### Add gt and lt operators for telemetry conditions ([PR #5048](https://github.com/apollographql/router/pull/5048))
+
+The router supports greater than (`gt`) and less than (`lt`) operators for telemetry conditions. Similar to the `eq` operator, the configuration for both `gt` and `lt` takes two arguments as a list. The `gt` operator checks that the first argument is greater than the second, and the `lt` operator checks that the first argument is less than the second. Other conditions such as `gte`, `lte`, and `range` can be made from combinations of `gt`, `lt`, `eq`, and `all`.
+
+By [@tninesling](https://github.com/tninesling) in https://github.com/apollographql/router/pull/5048
+
+### Expose busy timer APIs ([PR #4989](https://github.com/apollographql/router/pull/4989))
+
+The router supports public APIs that native plugins can use to control when the router's busy timer is run.
+
+The router's busy timer measures the time spent working on a request outside of waiting for external calls, like coprocessors and subgraph calls. It includes the time spent waiting for other concurrent requests to be handled (the wait time in the executor) to show the actual router overhead when handling requests.
+
+The public methods are `Context::enter_active_request` and `Context::busy_time`.  The result is reported in the `apollo_router_processing_time` metric
+
+For details on using the APIs, see the documentation for [`enter_active_request`](https://www.apollographql.com/docs/router/customizations/native#enter_active_request).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4989
+
+## 🐛 Fixes
+
+### Reduce JSON schema size and Router memory footprint ([PR #5061](https://github.com/apollographql/router/pull/5061))
+
+As we add more features to the Router the size of the JSON schema for the router configuration file continutes to grow.  In particular, adding [conditionals to telemetry](https://github.com/apollographql/router/pull/4987) in v1.46.0 significantly increased this size of the schema. This has a noticeable impact on initial memory footprint, although it does not impact service of requests.
+
+The JSON schema for the router configuration file has been optimized from approximately 100k lines down to just over 7k.
+
+This reduces the startup time of the Router and a smaller schema is more friendly for code editors.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5061
+
+### Prevent query plan cache collision when planning options change ([Issue #5093](https://github.com/apollographql/router/issues/5093))
+
+The router's hashing algorithm has been updated to prevent cache collisions when the router's configuration changes.
+
+> [!IMPORTANT]  
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+The router supports multiple options that affect the generated query plans, including:
+* `defer_support`
+* `generate_query_fragments`
+* `experimental_reuse_query_fragments`
+* `experimental_type_conditioned_fetching`
+* `experimental_query_planner_mode`
+
+If distributed query plan caching is enabled, changing any of these options results in different query plans being generated and cached.
+
+This could be problematic in the following scenarios:
+
+1. The router configuration changes and a query plan is loaded from cache which is incompatible with the new configuration.
+2. Routers with different configurations share the same cache, which causes them to cache and load incompatible query plans. 
+
+To prevent these from happening, the router now creates a hash for the entire query planner configuration and includes it in the cache key.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5100
+
+### 5xx internal server error responses returned as GraphQL structured errors ([PR #5159](https://github.com/apollographql/router/pull/5159))
+
+Previously, the router returned internal server errors (5xx class) as plaintext to clients. Now in this release, the router returns these 5xx errors as structured GraphQL (for example, `{"errors": [...]}`). 
+
+Internal server errors are returned upon unexpected or unrecoverable disruptions to the GraphQL request lifecycle execution. When these occur, the underlying error messages are logged at an `ERROR` level to the router's logs.
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5159
+
+### Custom telemetry events not created when logging is disabled ([PR #5165](https://github.com/apollographql/router/pull/5165))
+
+The router has been fixed to not create custom telemetry events when the log level is set to `off`. 
+
+An example configuration with `level` set to `off` for a custom event:
+
+```yaml
+telemetry:
+  instrumentation:
+    events:
+      router:
+        # Standard events
+        request: info
+        response: info
+        error: info
+
+        # Custom events
+        my.disabled_request_event:
+          message: "my event message"
+          level: off # Disabled because we set the level to off
+          on: request
+          attributes:
+            http.request.body.size: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5165
+
+### Ensure that batch entry contexts are correctly preserved ([PR #5162](https://github.com/apollographql/router/pull/5162))
+
+Previously, the router didn't use contexts correctly when processing batches. A representative context was chosen (the first item in a batch of items) and used to provide context functionality for all the generated responses.
+
+The router now correctly preserves request contexts and uses them during response creation.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5162
+
+### Validate enum values in input variables ([Issue #4633](https://github.com/apollographql/router/issues/4633))
+
+The router now validates enum values provided in JSON variables. Invalid enum values result in `GRAPHQL_VALIDATION_FAILED` errors.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/4753
+
+### Strip dashes from `trace_id` in `CustomTraceIdPropagator` ([Issue #4892](https://github.com/apollographql/router/issues/4892))
+
+
+The router now strips dashes from trace IDs to ensure conformance with OpenTelemetry.
+
+In OpenTelemetry, trace IDs are 128-bit values represented as hex strings without dashes, and they're based on W3C's trace ID format.
+
+This has been applied within the router to `trace_id` in `CustomTraceIdPropagator`.
+
+Note, if raw trace IDs from headers are represented by uuid4 and contain dashes, the dashes should be stripped so that the raw trace ID value can be parsed into a valid `trace_id`.
+
+
+By [@kindermax](https://github.com/kindermax) in https://github.com/apollographql/router/pull/5071
+
+
+
 # [1.46.0] - 2024-05-07
 
 ## 🚀 Features
