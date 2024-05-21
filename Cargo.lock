@@ -435,10 +435,28 @@ dependencies = [
  "cargo-scaffold",
  "clap",
  "copy_dir",
+ "dircmp",
  "regex",
+ "similar",
  "str_inflector",
  "tempfile",
  "toml",
+]
+
+[[package]]
+name = "apollo-router-scaffold-test"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "apollo-router",
+ "async-trait",
+ "futures",
+ "schemars",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tower",
+ "tracing",
 ]
 
 [[package]]
@@ -2273,6 +2291,18 @@ dependencies = [
  "const-oid",
  "crypto-common",
  "subtle",
+]
+
+[[package]]
+name = "dircmp"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c3ca7fa3ba397980657070e679f412acddb7a372f1793ff68ef0bbe708680f0f"
+dependencies = [
+ "regex",
+ "sha2",
+ "thiserror",
+ "walkdir",
 ]
 
 [[package]]
@@ -6344,9 +6374,9 @@ dependencies = [
 
 [[package]]
 name = "similar"
-version = "2.4.0"
+version = "2.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "32fea41aca09ee824cc9724996433064c89f7777e60762749a4170a14abbfa21"
+checksum = "fa42c91313f1d05da9b26f267f931cf178d4aba455b4c4622dd7355eb80c6640"
 
 [[package]]
 name = "simple_asn1"

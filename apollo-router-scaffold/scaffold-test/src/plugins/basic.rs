@@ -1,36 +1,16 @@
-{{#if type_auth}}
-use std::ops::ControlFlow;
-
-use apollo_router::layers::ServiceBuilderExt;
-{{/if}}
-{{#if type_tracing}}
-use apollo_router::layers::ServiceBuilderExt;
-{{/if}}
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
-{{#if type_basic}}
 use apollo_router::services::execution;
-{{/if}}
-{{#if type_basic}}
 use apollo_router::services::router;
 use apollo_router::services::subgraph;
-{{/if}}
 use apollo_router::services::supergraph;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
-{{#if type_auth}}
-use tower::ServiceBuilder;
-use tower::ServiceExt;
-{{/if}}
-{{#if type_tracing}}
-use tower::ServiceBuilder;
-use tower::ServiceExt;
-{{/if}}
 
 #[derive(Debug)]
-struct {{pascal_name}} {
+struct Basic {
     #[allow(dead_code)]
     configuration: Conf,
 }
@@ -42,15 +22,14 @@ struct Conf {
     // otherwise the yaml to enable the plugin will be confusing.
     message: String,
 }
-{{#if type_basic}}
 // This is a bare bones plugin that can be duplicated when creating your own.
 #[async_trait::async_trait]
-impl Plugin for {{pascal_name}} {
+impl Plugin for Basic {
     type Config = Conf;
 
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         tracing::info!("{}", init.config.message);
-        Ok({{pascal_name}} {
+        Ok(Basic {
             configuration: init.config,
         })
     }
@@ -91,65 +70,10 @@ impl Plugin for {{pascal_name}} {
         service
     }
 }
-{{/if}}
-{{#if type_auth}}
-// This plugin is a skeleton for doing authentication that requires a remote call.
-#[async_trait::async_trait]
-impl Plugin for {{pascal_name}} {
-    type Config = Conf;
-
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        tracing::info!("{}", init.config.message);
-        Ok({{pascal_name}} {
-            configuration: init.config,
-        })
-    }
-
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        ServiceBuilder::new()
-            .oneshot_checkpoint_async(|request: supergraph::Request| async {
-                // Do some async call here to auth, and decide if to continue or not.
-                Ok(ControlFlow::Continue(request))
-            })
-            .service(service)
-            .boxed()
-    }
-}
-{{/if}}
-{{#if type_tracing}}
-// This plugin adds a span and an error to the logs.
-#[async_trait::async_trait]
-impl Plugin for {{pascal_name}} {
-    type Config = Conf;
-
-    async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
-        tracing::info!("{}", init.config.message);
-        Ok({{pascal_name}} {
-            configuration: init.config,
-        })
-    }
-
-    fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
-        ServiceBuilder::new()
-            .instrument(|_request| {
-                // Optionally take information from the request and insert it into the span as attributes
-                // See https://docs.rs/tracing/latest/tracing/ for more information
-                tracing::info_span!("my_custom_span")
-            })
-            .map_request(|request| {
-                // Add a log message, this will appear within the context of the current span
-                tracing::error!("error detected");
-                request
-            })
-            .service(service)
-            .boxed()
-    }
-}
-{{/if}}
 
 // This macro allows us to use it in our plugin registry!
 // register_plugin takes a group name, and a plugin name.
-register_plugin!("{{project_name}}", "{{snake_name}}", {{pascal_name}});
+register_plugin!("acme", "basic", Basic);
 
 #[cfg(test)]
 mod tests {
@@ -164,7 +88,7 @@ mod tests {
         let test_harness = TestHarness::builder()
             .configuration_json(serde_json::json!({
                 "plugins": {
-                    "{{project_name}}.{{snake_name}}": {
+                    "acme.basic": {
                         "message" : "Starting my plugin"
                     }
                 }

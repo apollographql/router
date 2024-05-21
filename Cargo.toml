@@ -5,6 +5,7 @@ members = [
     "apollo-router",
     "apollo-router-benchmarks",
     "apollo-router-scaffold",
+    "apollo-router-scaffold/scaffold-test",
     "examples/add-timestamp-header/rhai",
     "examples/async-auth/rust",
     "examples/cache-control/rhai",
