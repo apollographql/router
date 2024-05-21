@@ -39,7 +39,6 @@ members = [
 filter = 'test(/^apollo-router::/)'
 threads-required = 2
 
-
 # this makes build scripts and proc macros faster to compile
 [profile.dev.build-override]
 # If you un-comment the next line with 1.60.0, compile fails on circle-ci linux
