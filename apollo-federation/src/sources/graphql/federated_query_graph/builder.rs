@@ -15,13 +15,12 @@ use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::builder::{
     IntraSourceQueryGraphBuilderApi, IntraSourceQueryGraphSubBuilderApi,
 };
+use crate::sources::graphql::federated_query_graph::{ConcreteFieldEdge, TypeConditionEdge};
 use crate::sources::graphql::GraphqlId;
 use crate::sources::source;
 use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilderApi;
 use crate::sources::source::federated_query_graph::{EnumNode, ScalarNode};
 use crate::ValidFederationSubgraph;
-
-use super::{ConcreteFieldEdge, TypeConditionEdge};
 
 #[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
