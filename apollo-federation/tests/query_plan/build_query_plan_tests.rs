@@ -195,23 +195,22 @@ fn field_covariance_and_type_explosion() {
         }
         "#,
         @r###"
-          QueryPlan {
-            Fetch(service: "Subgraph1") {
-              {
-                dummy {
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          dummy {
+            field {
+              __typename
+              ... on Object {
+                field {
                   __typename
-                  field {
-                    __typename
-                    ... on Object {
-                      field {
-                        __typename
-                      }
-                    }
-                  }
                 }
               }
-            },
+            }
           }
-        "###
+        }
+      },
+    }
+    "###
     );
 }
