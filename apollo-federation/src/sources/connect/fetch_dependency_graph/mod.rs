@@ -37,12 +37,67 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
     fn can_reuse_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
-        _source_entering_edge: EdgeIndex,
-        _path_tree_edges: Vec<&'path_tree path_tree::ChildKey>,
-        _source_data: &source::fetch_dependency_graph::Node,
+        merge_at: &[FetchDataPathElement],
+        source_entering_edge: EdgeIndex,
+        path_tree_edges: Vec<&'path_tree path_tree::ChildKey>,
+        source_data: &source::fetch_dependency_graph::Node,
     ) -> Result<Vec<&'path_tree path_tree::ChildKey>, FederationError> {
-        todo!()
+        // We are within the context of connect, so ensure that's the case
+        let source::fetch_dependency_graph::Node::Connect(source_data) = source_data else {
+            return Err(FederationError::internal("expected connect node"));
+        };
+
+        // If we have distinct merge positions, or if the entering edge is different from the supplied node,
+        // then there is nothing in common and thus nothing reusable.
+        if source_entering_edge != source_data.source_entering_edge
+            || merge_at
+                .iter()
+                .zip(source_data.merge_at.iter())
+                .any(|(lhs, rhs)| lhs != rhs)
+        {
+            return Ok(Vec::new());
+        }
+
+        // Start collecting as many reusable portions as possible
+        let mut reusable_edges = Vec::new();
+        for edge in path_tree_edges {
+            // Grab the field from the edge's operation element, shorting out with an error if it
+            // isn't present.
+            let op_elem = edge
+                .operation_element
+                .as_ref()
+                .ok_or(FederationError::internal(
+                    "a child edge must have an operation element in order to reuse a node",
+                ))?;
+            let OperationPathElement::Field(op_elem) = op_elem.as_ref() else {
+                return Err(FederationError::internal(
+                    "a child edge's operation element must be a field in order to reuse a node",
+                ));
+            };
+
+            // If the names differ, then it isn't usable
+            let op_data = op_elem.data();
+            if op_data.response_name() != source_data.field_response_name {
+                continue;
+            }
+
+            // If the arguments differ, then we can't reuse the edge
+            if op_data
+                .arguments
+                .iter()
+                .zip(source_data.field_arguments.iter())
+                .any(|(op_arg, (source_arg_name, source_arg_value))| {
+                    op_arg.name != *source_arg_name || op_arg.value != *source_arg_value
+                })
+            {
+                continue;
+            }
+
+            // If we've gotten this far, then we can reuse the edge
+            reusable_edges.push(edge);
+        }
+
+        Ok(reusable_edges)
     }
 
     fn add_node<'path_tree>(

@@ -29,6 +29,6 @@ pub(crate) struct Child {
 
 #[derive(Debug)]
 pub(crate) struct ChildKey {
-    operation_element: Option<Arc<OperationPathElement>>,
-    edge: Option<EdgeIndex>,
+    pub(crate) operation_element: Option<Arc<OperationPathElement>>,
+    pub(crate) edge: Option<EdgeIndex>,
 }
