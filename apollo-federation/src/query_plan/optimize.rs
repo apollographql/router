@@ -173,16 +173,25 @@ impl Fragment {
             return Ok(true);
         }
 
-        // Short-circuit #2: The type condition is a (different) object type (too restrictive).
+        // Short-circuit #2: The type condition is not an abstract type (too restrictive).
         // - It will never cover all of the runtime types of `ty` unless it's the same type, which is
-        //   already checked.
-        if self.type_condition_position.is_object_type() {
+        //   already checked by short-circuit #1.
+        if !self.type_condition_position.is_abstract_type() {
             return Ok(false);
         }
 
-        // Short-circuit #3: The type condition is an interface type, but the `ty` is more general.
-        // - The type condition is an interface but `ty` is a (different) interface or a union.
-        if self.type_condition_position.is_interface_type() && !ty.is_object_type() {
+        // Short-circuit #3: The type condition is not an object (due to short-circuit #2) nor a
+        // union type, but the `ty` may be too general.
+        // - In other words, the type condition must be an interface but `ty` is a (different)
+        //   interface or a union.
+        // PORT_NOTE: In JS, this check was later on the return statement (negated). But, this
+        //            should be checked before `possible_runtime_types` check, since this is
+        //            cheaper to execute.
+        // PORT_NOTE: This condition may be too restrictive (potentially a bug leading to
+        //            suboptimal compression). If ty is a union whose members all implements the
+        //            type condition (interface). Then, this function should've returned true.
+        //            Thus, `!ty.is_union_type()` might be needed.
+        if !self.type_condition_position.is_union_type() && !ty.is_object_type() {
             return Ok(false);
         }
 
