@@ -36,7 +36,6 @@ use base64::Engine as _;
 use bytes::Bytes;
 use http::header::ACCEPT;
 use once_cell::sync::Lazy;
-use opentelemetry::KeyValue;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use prost_types::Timestamp;
