@@ -15,13 +15,13 @@
 //! modified subgraph GraphQL queries are still valid, since adding fragments can introduce
 //! conflicts.
 //!
-//! ## Matching fragments with selection set (`try_optimize_with_fragments`)
-//! This is one strategy to optimize the selection set. It tries to match all applicable fragments.
-//! Then, they are expanded into selection sets in order to match them against given selection set.
+//! ## Matching fragments with selection set
+//! `try_optimize_with_fragments` tries to match all applicable fragments one by one.
+//! They are expanded into selection sets in order to match against given selection set.
 //! Set-intersection/-minus/-containment operations are used to narrow down to fewer number of
 //! fragments that can be used to optimize the selection set. If there is a single fragment that
 //! covers the full selection set, then that fragment is used. Otherwise, we attempted to reduce
-//! the number of fragments applied, but optimality is not guaranteed, yet.
+//! the number of fragments applied (but optimality is not guaranteed yet).
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -254,8 +254,8 @@ impl FieldsConflictValidator {
             } else {
                 // Note that whether a `FieldSelection` has a sub-selection set or not is entirely
                 // determined by whether the field type is a composite type or not, so even if
-                // we've seen a previous version of `field` before, we know it's guarantee to have
-                // had no selection set here, either. So the `set` below may overwrite a previous
+                // we've seen a previous version of `field` before, we know it's guaranteed to have
+                // no selection set here, either. So the `set` below may overwrite a previous
                 // entry, but it would be a `None` so no harm done.
                 at_response_name.insert(collected_field.field().field.clone(), None);
             }
@@ -580,7 +580,6 @@ impl Fragment {
 /// The return type for `SelectionSet::try_optimize_with_fragments`.
 #[derive(derive_more::From)]
 enum SelectionSetOrFragment {
-    //Selection(Selection),
     SelectionSet(SelectionSet),
     Fragment(Node<Fragment>),
 }
@@ -691,6 +690,7 @@ impl SelectionSet {
                 continue;
             }
             if !validator.check_can_reuse_fragment_and_track_it(&at_type)? {
+                // We cannot use it at all, so no point in adding to `applicable_fragments`.
                 continue;
             }
 
