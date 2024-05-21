@@ -8,9 +8,8 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
-use lru::LruCache;
+use moka::future::Cache;
 use router_bridge::planner::UsageReporting;
-use tokio::sync::Mutex;
 
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -34,7 +33,7 @@ use crate::Context;
 pub(crate) struct QueryAnalysisLayer {
     pub(crate) schema: Arc<Schema>,
     configuration: Arc<Configuration>,
-    cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
+    cache: Cache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>,
     enable_authorization_directives: bool,
 }
 
@@ -50,14 +49,15 @@ impl QueryAnalysisLayer {
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
         Self {
             schema,
-            cache: Arc::new(Mutex::new(LruCache::new(
+            cache: Cache::new(
                 configuration
                     .supergraph
                     .query_planning
                     .cache
                     .in_memory
-                    .limit,
-            ))),
+                    .limit
+                    .get() as u64,
+            ),
             enable_authorization_directives,
             configuration,
         }
@@ -107,26 +107,26 @@ impl QueryAnalysisLayer {
             .expect("query presence was already checked");
         let entry = self
             .cache
-            .lock()
-            .await
             .get(&QueryAnalysisKey {
                 query: query.clone(),
                 operation_name: op_name.clone(),
             })
-            .cloned();
+            .await;
 
         let res = match entry {
             None => {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
                 match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
                     Err(errors) => {
-                        (*self.cache.lock().await).put(
-                            QueryAnalysisKey {
-                                query,
-                                operation_name: op_name,
-                            },
-                            Err(errors.clone()),
-                        );
+                        self.cache
+                            .insert(
+                                QueryAnalysisKey {
+                                    query,
+                                    operation_name: op_name,
+                                },
+                                Err(errors.clone()),
+                            )
+                            .await;
                         let errors = match errors.into_graphql_errors() {
                             Ok(v) => v,
                             Err(errors) => vec![Error::builder()
@@ -168,13 +168,15 @@ impl QueryAnalysisLayer {
                             .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
                             .expect("cannot insert operation kind in the context; this is a bug");
 
-                        (*self.cache.lock().await).put(
-                            QueryAnalysisKey {
-                                query,
-                                operation_name: op_name,
-                            },
-                            Ok((context.clone(), doc.clone())),
-                        );
+                        self.cache
+                            .insert(
+                                QueryAnalysisKey {
+                                    query,
+                                    operation_name: op_name,
+                                },
+                                Ok((context.clone(), doc.clone())),
+                            )
+                            .await;
 
                         Ok((context, doc))
                     }
