@@ -35,7 +35,7 @@ members = [
 # nextest is sometimes a bit too agressive on parallelism,
 # expecially when running integration tests
 # https://nexte.st/book/threads-required
-[[profile.default.overrides]]
+[[profile.dev.overrides]]
 filter = 'test(/^apollo-router::/)'
 threads-required = 2
 
