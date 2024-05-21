@@ -335,6 +335,7 @@ where
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
     task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
 
     found_report
         .expect("failed to get report")
