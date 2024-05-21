@@ -5,24 +5,18 @@ expression: report
 resourceSpans:
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -31,25 +25,25 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: ef102069777e692c
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: ""
+            parentSpanId: "[span_id]"
             flags: 0
             name: query
             kind: 2
-            startTimeUnixNano: 1716210417794843000
-            endTimeUnixNano: 1716210419327098000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
-              - key: http.request.method
-                value:
-                  stringValue: POST
               - key: apollo_private.request
                 value:
                   boolValue: true
               - key: graphql.operation.type
                 value:
                   stringValue: query
+              - key: http.request.method
+                value:
+                  stringValue: POST
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -62,24 +56,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -88,40 +76,40 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: d2db13811507fe3a
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: ef102069777e692c
+            parentSpanId: "[span_id]"
             flags: 0
             name: router
             kind: 1
-            startTimeUnixNano: 1716210417794971000
-            endTimeUnixNano: 1716210419326885000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
-              - key: trace_id
-                value:
-                  stringValue: 0ad31b97640db3219ed548acc7fe09b4
-              - key: apollo_private.http.response_headers
-                value:
-                  stringValue: "{\"my_trace_id\":[\"0ad31b97640db3219ed548acc7fe09b4\"]}"
-              - key: http.request.method
-                value:
-                  stringValue: POST
-              - key: http.response.status_code
-                value:
-                  intValue: 200
               - key: apollo_private.duration_ns
                 value:
-                  intValue: 1531255000
+                  intValue: 816993542
               - key: apollo_private.http.request_headers
                 value:
                   stringValue: "{}"
+              - key: apollo_private.http.response_headers
+                value:
+                  stringValue: "{\"my_trace_id\":[\"ccdd9d8636cc6fdf914dadf50232d130\"]}"
               - key: client.name
                 value:
                   stringValue: ""
               - key: client.version
                 value:
                   stringValue: ""
+              - key: http.request.method
+                value:
+                  stringValue: POST
+              - key: http.response.status_code
+                value:
+                  intValue: 200
+              - key: trace_id
+                value:
+                  stringValue: ccdd9d8636cc6fdf914dadf50232d130
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -134,24 +122,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -160,15 +142,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: c1563f1f02e8fada
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: d2db13811507fe3a
+            parentSpanId: "[span_id]"
             flags: 0
             name: rhai_plugin
             kind: 1
-            startTimeUnixNano: 1716210417795274000
-            endTimeUnixNano: 1716210419326331000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -182,24 +164,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -208,15 +184,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: d2acf27eb5696ad8
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: c1563f1f02e8fada
+            parentSpanId: "[span_id]"
             flags: 0
             name: parse_query
             kind: 1
-            startTimeUnixNano: 1716210417795492000
-            endTimeUnixNano: 1716210417795992000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -230,24 +206,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -256,15 +226,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 676f19d131ad8254
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: c1563f1f02e8fada
+            parentSpanId: "[span_id]"
             flags: 0
             name: supergraph
             kind: 1
-            startTimeUnixNano: 1716210417796193000
-            endTimeUnixNano: 1716210419326190000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo_private.graphql.variables
                 value:
@@ -284,24 +254,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -310,15 +274,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 9c52335d76201276
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 676f19d131ad8254
+            parentSpanId: "[span_id]"
             flags: 0
             name: rhai_plugin
             kind: 1
-            startTimeUnixNano: 1716210417796252000
-            endTimeUnixNano: 1716210419326107000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -332,24 +296,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -358,15 +316,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 559d91b37af1f9ec
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 9c52335d76201276
+            parentSpanId: "[span_id]"
             flags: 0
             name: query_planning
             kind: 1
-            startTimeUnixNano: 1716210417796388000
-            endTimeUnixNano: 1716210417811633000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -380,24 +338,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -406,15 +358,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 88a6959076db55f7
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 9c52335d76201276
+            parentSpanId: "[span_id]"
             flags: 0
             name: execution
             kind: 1
-            startTimeUnixNano: 1716210417811929000
-            endTimeUnixNano: 1716210419326030000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.operation.type
                 value:
@@ -431,24 +383,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -457,15 +403,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: a0702edb88a4f050
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 88a6959076db55f7
+            parentSpanId: "[span_id]"
             flags: 0
             name: rhai_plugin
             kind: 1
-            startTimeUnixNano: 1716210417811966000
-            endTimeUnixNano: 1716210419325825000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -479,24 +425,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -505,15 +445,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 7c46a47c82372506
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: a0702edb88a4f050
+            parentSpanId: "[span_id]"
             flags: 0
             name: sequence
             kind: 1
-            startTimeUnixNano: 1716210417812092000
-            endTimeUnixNano: 1716210419323494000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -527,24 +467,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -553,22 +487,22 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 583777953e5ed513
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 7c46a47c82372506
+            parentSpanId: "[span_id]"
             flags: 0
             name: fetch
             kind: 1
-            startTimeUnixNano: 1716210417812128000
-            endTimeUnixNano: 1716210418046891000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo_private.sent_time_offset
-                value:
-                  intValue: 9706225875
               - key: apollo.subgraph.name
                 value:
                   stringValue: products
+              - key: apollo_private.sent_time_offset
+                value:
+                  intValue: 14874422084
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -581,24 +515,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -607,25 +535,25 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 26a949bdc605755a
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 583777953e5ed513
+            parentSpanId: "[span_id]"
             flags: 0
             name: subgraph
             kind: 1
-            startTimeUnixNano: 1716210417812315000
-            endTimeUnixNano: 1716210418046846000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo_private.ftv1
-                value:
-                  stringValue: GgsI8pWtsgYQwOSDXCILCPKVrbIGEIDgxltY3JwzcvwBYvkBCgt0b3BQcm9kdWN0cxoJW1Byb2R1Y3RdQMivEkiqlRliRBAAYh8KA3VwYxoHU3RyaW5nIUC8zh1IiMwfagdQcm9kdWN0Yh8KBG5hbWUaBlN0cmluZ0D82yBIvtchagdQcm9kdWN0YkQQAWIfCgN1cGMaB1N0cmluZyFAiI0lSJ7vJmoHUHJvZHVjdGIfCgRuYW1lGgZTdHJpbmdAkoQoSJqQLGoHUHJvZHVjdGJEEAJiHwoDdXBjGgdTdHJpbmchQO6CLkjEki9qB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQPDaL0iujjBqB1Byb2R1Y3RqBVF1ZXJ5+QEAAAAAAADwPw==
-              - key: graphql.operation.name
-                value:
-                  stringValue: ""
               - key: apollo.subgraph.name
                 value:
                   stringValue: products
+              - key: apollo_private.ftv1
+                value:
+                  stringValue: GgwIxPevsgYQgM+JigIiDAjE96+yBhDAysyJAlibzxxy/AFi+QEKC3RvcFByb2R1Y3RzGglbUHJvZHVjdF1AsYYQSOXeEWJEEABiHwoDdXBjGgdTdHJpbmchQK+6FEidlRVqB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQJ/mFUj1mxZqB1Byb2R1Y3RiRBABYh8KA3VwYxoHU3RyaW5nIUD3qBdIleAXagdQcm9kdWN0Yh8KBG5hbWUaBlN0cmluZ0DpmRhI980YagdQcm9kdWN0YkQQAmIfCgN1cGMaB1N0cmluZyFAq7MZSO/zGWoHUHJvZHVjdGIfCgRuYW1lGgZTdHJpbmdA/54aSK/LGmoHUHJvZHVjdGoFUXVlcnn5AQAAAAAAAPA/
+              - key: graphql.operation.name
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -638,24 +566,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -664,15 +586,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: b8d1c71652dbaba4
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 26a949bdc605755a
+            parentSpanId: "[span_id]"
             flags: 0
             name: rhai_plugin
             kind: 1
-            startTimeUnixNano: 1716210417812435000
-            endTimeUnixNano: 1716210418046426000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -686,24 +608,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -712,15 +628,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: c423d9864902f740
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: b8d1c71652dbaba4
+            parentSpanId: "[span_id]"
             flags: 0
             name: subgraph_request
             kind: 3
-            startTimeUnixNano: 1716210417812616000
-            endTimeUnixNano: 1716210418046324000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
                 value:
@@ -740,24 +656,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -766,15 +676,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 2705f88eb86f6ec3
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: c423d9864902f740
+            parentSpanId: "[span_id]"
             flags: 0
             name: http_request
             kind: 3
-            startTimeUnixNano: 1716210417812657000
-            endTimeUnixNano: 1716210418045795000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -788,24 +698,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -814,15 +718,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 379c0c5435e5e080
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 7c46a47c82372506
+            parentSpanId: "[span_id]"
             flags: 0
             name: flatten
             kind: 1
-            startTimeUnixNano: 1716210418046945000
-            endTimeUnixNano: 1716210418701088000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.path
                 value:
@@ -839,24 +743,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -865,22 +763,22 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 0fb61541d339e60e
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 379c0c5435e5e080
+            parentSpanId: "[span_id]"
             flags: 0
             name: fetch
             kind: 1
-            startTimeUnixNano: 1716210418046978000
-            endTimeUnixNano: 1716210418700994000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
                 value:
                   stringValue: reviews
               - key: apollo_private.sent_time_offset
                 value:
-                  intValue: 9941084500
+                  intValue: 14960992792
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -893,24 +791,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -919,22 +811,22 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: c80fc8ae01cf3bde
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 0fb61541d339e60e
+            parentSpanId: "[span_id]"
             flags: 0
             name: subgraph
             kind: 1
-            startTimeUnixNano: 1716210418047272000
-            endTimeUnixNano: 1716210418700773000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
                 value:
                   stringValue: reviews
               - key: apollo_private.ftv1
                 value:
-                  stringValue: GgwI8pWtsgYQwLezywIiDAjyla2yBhCAs/bKAlj2/RJynQNimgMKCV9lbnRpdGllcxoKW19FbnRpdHldIUDs7ghIzLkRYqMBEABingEKB3Jldmlld3MaCFtSZXZpZXddQKLoC0j0oAxiOxAAYjcKBmF1dGhvchoEVXNlckDukA1Ipq0NYhcKAmlkGgNJRCFA5OUNSLqMDmoEVXNlcmoGUmV2aWV3YjsQAWI3CgZhdXRob3IaBFVzZXJA4LgOSN7LDmIXCgJpZBoDSUQhQLLiDkie+w5qBFVzZXJqBlJldmlld2oHUHJvZHVjdGJlEAFiYQoHcmV2aWV3cxoIW1Jldmlld11A/KAPSNSvD2I7EABiNwoGYXV0aG9yGgRVc2VyQK7TD0jg5w9iFwoCaWQaA0lEIUCM/g9IwooQagRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiZRACYmEKB3Jldmlld3MaCFtSZXZpZXddQK63EEiUzRBiOxAAYjcKBmF1dGhvchoEVXNlckC45BBI8PYQYhcKAmlkGgNJRCFA3osRSJSiEWoEVXNlcmoGUmV2aWV3agdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8=
+                  stringValue: GgwIxPevsgYQwOeW+QIiDAjE96+yBhDA55b5AljO3hNynQNimgMKCV9lbnRpdGllcxoKW19FbnRpdHldIUC3gglIv74RYqMBEABingEKB3Jldmlld3MaCFtSZXZpZXddQIvqC0jZowxiOxAAYjcKBmF1dGhvchoEVXNlckDp9gxI8YcNYhcKAmlkGgNJRCFA9NQNSKTvDWoEVXNlcmoGUmV2aWV3YjsQAWI3CgZhdXRob3IaBFVzZXJAiaYOSL6wDmIXCgJpZBoDSUQhQN7VDkj04w5qBFVzZXJqBlJldmlld2oHUHJvZHVjdGJlEAFiYQoHcmV2aWV3cxoIW1Jldmlld11Aq5MPSOOjD2I7EABiNwoGYXV0aG9yGgRVc2VyQMXLD0jv1Q9iFwoCaWQaA0lEIUDI+Q9I+4cQagRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiZRACYmEKB3Jldmlld3MaCFtSZXZpZXddQJW3EEjuxBBiOxAAYjcKBmF1dGhvchoEVXNlckCy6BBI5/IQYhcKAmlkGgNJRCFApZMRSKSgEWoEVXNlcmoGUmV2aWV3agdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8=
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -950,24 +842,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -976,15 +862,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 565ed58bd39ad95e
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: c80fc8ae01cf3bde
+            parentSpanId: "[span_id]"
             flags: 0
             name: rhai_plugin
             kind: 1
-            startTimeUnixNano: 1716210418047364000
-            endTimeUnixNano: 1716210418699802000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -998,24 +884,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1024,15 +904,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 65af411d74051529
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 565ed58bd39ad95e
+            parentSpanId: "[span_id]"
             flags: 0
             name: subgraph_request
             kind: 3
-            startTimeUnixNano: 1716210418047594000
-            endTimeUnixNano: 1716210418699414000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
                 value:
@@ -1052,24 +932,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1078,15 +952,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 4738f9f7d3003d09
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 65af411d74051529
+            parentSpanId: "[span_id]"
             flags: 0
             name: http_request
             kind: 3
-            startTimeUnixNano: 1716210418047639000
-            endTimeUnixNano: 1716210418697444000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -1100,24 +974,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1126,15 +994,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: c691e05ac5ab0086
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 7c46a47c82372506
+            parentSpanId: "[span_id]"
             flags: 0
             name: flatten
             kind: 1
-            startTimeUnixNano: 1716210418701276000
-            endTimeUnixNano: 1716210419323352000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.path
                 value:
@@ -1151,24 +1019,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1177,22 +1039,22 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: fec516039c00182e
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: c691e05ac5ab0086
+            parentSpanId: "[span_id]"
             flags: 0
             name: fetch
             kind: 1
-            startTimeUnixNano: 1716210418701371000
-            endTimeUnixNano: 1716210419323259000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
                 value:
                   stringValue: accounts
               - key: apollo_private.sent_time_offset
                 value:
-                  intValue: 10595459167
+                  intValue: 15337735375
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1205,24 +1067,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1231,22 +1087,22 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 50ef7defe25c9173
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: fec516039c00182e
+            parentSpanId: "[span_id]"
             flags: 0
             name: subgraph
             kind: 1
-            startTimeUnixNano: 1716210418702501000
-            endTimeUnixNano: 1716210419323037000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
-              - key: apollo_private.ftv1
-                value:
-                  stringValue: GgwI85WtsgYQwNrkngEiDAjzla2yBhDA2uSeAVj1hw9ybGJqCglfZW50aXRpZXMaCltfRW50aXR5XSFAqJ8JSLSqDWIgEABiHAoEbmFtZRoGU3RyaW5nQOeBDEjywAxqBFVzZXJiIBABYhwKBG5hbWUaBlN0cmluZ0CM8AxIsooNagRVc2VyagVRdWVyefkBAAAAAAAA8D8=
               - key: apollo.subgraph.name
                 value:
                   stringValue: accounts
+              - key: apollo_private.ftv1
+                value:
+                  stringValue: GgsIxfevsgYQgKy9SCILCMX3r7IGEICsvUhYlI4WcmxiagoJX2VudGl0aWVzGgpbX0VudGl0eV0hQPaKDUiYqhRiIBAAYhwKBG5hbWUaBlN0cmluZ0CQ9RFIgNsSagRVc2VyYiAQAWIcCgRuYW1lGgZTdHJpbmdAmMsTSLKFFGoEVXNlcmoFUXVlcnn5AQAAAAAAAPA/
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -1262,24 +1118,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1288,15 +1138,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: d0665a10b3e5223f
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 50ef7defe25c9173
+            parentSpanId: "[span_id]"
             flags: 0
             name: rhai_plugin
             kind: 1
-            startTimeUnixNano: 1716210418702894000
-            endTimeUnixNano: 1716210419322184000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []
@@ -1310,24 +1160,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1336,22 +1180,22 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 3d384dc54a00b9d8
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: d0665a10b3e5223f
+            parentSpanId: "[span_id]"
             flags: 0
             name: subgraph_request
             kind: 3
-            startTimeUnixNano: 1716210418703611000
-            endTimeUnixNano: 1716210419321975000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes:
-              - key: graphql.operation.name
-                value:
-                  stringValue: ""
               - key: apollo.subgraph.name
                 value:
                   stringValue: accounts
+              - key: graphql.operation.name
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1364,24 +1208,18 @@ resourceSpans:
     schemaUrl: ""
   - resource:
       attributes:
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.schema.id
-          value:
-            stringValue: 5abb5fecf7df056396fb90fdf38d430b8c1fec55ec132fde878161608af18b76
-        - key: apollo.client.uname
-          value:
-            stringValue: "Darwin, Tims-MBP.modem, 22.6.0, Darwin Kernel Version 22.6.0: Mon Feb 19 19:43:41 PST 2024; root:xnu-8796.141.3.704.6~1/RELEASE_ARM64_T8103, arm64,"
-        - key: apollo.user.agent
-          value:
-            stringValue: apollo-router@1.46.0
         - key: apollo.client.host
-          value:
-            stringValue: Tims-MBP.modem
+          value: "[redacted]"
+        - key: apollo.client.uname
+          value: "[redacted]"
+        - key: apollo.graph.ref
+          value: "[redacted]"
         - key: apollo.router.id
-          value:
-            stringValue: 2b88be85-c1c5-4139-b00a-6fd2b81a2fc9
+          value: "[redacted]"
+        - key: apollo.schema.id
+          value: "[redacted]"
+        - key: apollo.user.agent
+          value: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1390,15 +1228,15 @@ resourceSpans:
           attributes: []
           droppedAttributesCount: 0
         spans:
-          - traceId: 0ad31b97640db3219ed548acc7fe09b4
-            spanId: 67bbecbd2bb8c030
+          - traceId: "[trace_id]"
+            spanId: "[span_id]"
             traceState: ""
-            parentSpanId: 3d384dc54a00b9d8
+            parentSpanId: "[span_id]"
             flags: 0
             name: http_request
             kind: 3
-            startTimeUnixNano: 1716210418703655000
-            endTimeUnixNano: 1716210419321558000
+            startTimeUnixNano: "[start_time]"
+            endTimeUnixNano: "[end_time]"
             attributes: []
             droppedAttributesCount: 0
             events: []

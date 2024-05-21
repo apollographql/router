@@ -36,6 +36,7 @@ use base64::Engine as _;
 use bytes::Bytes;
 use http::header::ACCEPT;
 use once_cell::sync::Lazy;
+use opentelemetry::KeyValue;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceRequest;
 use prost::Message;
 use prost_types::Timestamp;
@@ -174,22 +175,13 @@ macro_rules! assert_report {
         ($report: expr)=> {
             insta::with_settings!({sort_maps => true}, {
                     insta::assert_yaml_snapshot!($report, {
-                        ".**.agent_version" => "[agent_version]",
-                        ".**.executable_schema_id" => "[executable_schema_id]",
-                        ".header.hostname" => "[hostname]",
-                        ".header.uname" => "[uname]",
-                        ".**.seconds" => "[seconds]",
-                        ".**.nanos" => "[nanos]",
-                        ".**.duration_ns" => "[duration_ns]",
-                        ".**.child[].start_time" => "[start_time]",
-                        ".**.child[].end_time" => "[end_time]",
-                        ".**.trace_id.value[]" => "[trace_id]",
-                        ".**.sent_time_offset" => "[sent_time_offset]",
-                        ".**.my_trace_id" => "[my_trace_id]",
-                        ".**.latency_count" => "[latency_count]",
-                        ".**.cache_latency_count" => "[cache_latency_count]",
-                        ".**.public_cache_ttl_count" => "[public_cache_ttl_count]",
-                        ".**.private_cache_ttl_count" => "[private_cache_ttl_count]",
+                        ".**.attributes" => insta::sorted_redaction(),
+                        ".resourceSpans[].resource.attributes[].value" => "[redacted]",
+                        ".**.traceId" => "[trace_id]",
+                        ".**.spanId" => "[span_id]",
+                        ".**.parentSpanId" => "[span_id]",
+                        ".**.startTimeUnixNano" => "[start_time]",
+                        ".**.endTimeUnixNano" => "[end_time]",
                     });
                 });
         }
