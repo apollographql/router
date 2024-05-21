@@ -21,6 +21,7 @@ use std::hash::Hash;
 use std::ops::Deref;
 use std::sync::atomic;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_compiler::executable;
 use apollo_compiler::executable::Name;
@@ -248,7 +249,6 @@ pub(crate) mod normalized_selection_map {
     use std::iter::Map;
     use std::ops::Deref;
     use std::sync::Arc;
-    use std::sync::OnceLock;
 
     use apollo_compiler::ast::Name;
     use indexmap::IndexMap;
@@ -258,15 +258,10 @@ pub(crate) mod normalized_selection_map {
     use crate::query_plan::operation::normalized_field_selection::FieldSelection;
     use crate::query_plan::operation::normalized_fragment_spread_selection::FragmentSpreadSelection;
     use crate::query_plan::operation::normalized_inline_fragment_selection::InlineFragmentSelection;
-    use crate::query_plan::operation::CollectedFieldInSet;
-    use crate::query_plan::operation::Containment;
-    use crate::query_plan::operation::ContainmentOptions;
     use crate::query_plan::operation::HasSelectionKey;
     use crate::query_plan::operation::Selection;
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
-    use crate::query_plan::operation::TYPENAME_FIELD;
-    use crate::query_plan::FetchDataPathElement;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -423,111 +418,6 @@ pub(crate) mod normalized_selection_map {
                 }
             }
             Ok(Cow::Owned(Self(new_map)))
-        }
-
-        pub(crate) fn has_top_level_typename_field(&self) -> bool {
-            // Needs to be behind a OnceLock because `Arc::new` is non-const.
-            // XXX(@goto-bus-stop): Note this does *not* count `__typename @include(if: true)`.
-            // This seems wrong? But it's what JS does, too.
-            static TYPENAME_KEY: OnceLock<SelectionKey> = OnceLock::new();
-            let key = TYPENAME_KEY.get_or_init(|| SelectionKey::Field {
-                response_name: TYPENAME_FIELD,
-                directives: Arc::new(Default::default()),
-            });
-
-            self.contains_key(key)
-        }
-
-        pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
-            let mut fields = Vec::new();
-
-            for (_key, selection) in self.iter() {
-                match selection {
-                    Selection::Field(field) => fields.push(CollectedFieldInSet {
-                        path: Vec::new(),
-                        field: field.clone(),
-                    }),
-                    Selection::FragmentSpread(_fragment) => {
-                        todo!()
-                    }
-                    Selection::InlineFragment(inline_fragment) => {
-                        let condition = inline_fragment
-                            .inline_fragment
-                            .data()
-                            .type_condition_position
-                            .as_ref();
-                        let header = match condition {
-                            Some(cond) => vec![FetchDataPathElement::TypenameEquals(
-                                cond.type_name().clone().into(),
-                            )],
-                            None => vec![],
-                        };
-                        for CollectedFieldInSet { path, field } in inline_fragment
-                            .selection_set
-                            .selections
-                            .fields_in_set()
-                            .into_iter()
-                        {
-                            let mut new_path = header.clone();
-                            new_path.extend(path);
-                            fields.push(CollectedFieldInSet {
-                                path: new_path,
-                                field,
-                            })
-                        }
-                    }
-                }
-            }
-            fields
-        }
-
-        pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
-            if other.len() > self.len() {
-                // If `other` has more selections but we're ignoring missing __typename, then in the case where
-                // `other` has a __typename but `self` does not, then we need the length of `other` to be at
-                // least 2 more than other of `self` to be able to conclude there is no contains.
-                if !options.ignore_missing_typename
-                    || other.len() > self.len() + 1
-                    || self.has_top_level_typename_field()
-                    || !other.has_top_level_typename_field()
-                {
-                    return Containment::NotContained;
-                }
-            }
-
-            let mut is_equal = true;
-            let mut did_ignore_typename = false;
-
-            for (key, other_selection) in other.iter() {
-                if key.is_typename_field() && options.ignore_missing_typename {
-                    if !self.has_top_level_typename_field() {
-                        did_ignore_typename = true;
-                    }
-                    continue;
-                }
-
-                let Some(self_selection) = self.get(key) else {
-                    return Containment::NotContained;
-                };
-
-                match self_selection.containment(other_selection, options) {
-                    Containment::NotContained => return Containment::NotContained,
-                    Containment::StrictlyContained if is_equal => is_equal = false,
-                    Containment::StrictlyContained | Containment::Equal => {}
-                }
-            }
-
-            let expected_len = if did_ignore_typename {
-                self.len() + 1
-            } else {
-                self.len()
-            };
-
-            if is_equal && other.len() == expected_len {
-                Containment::Equal
-            } else {
-                Containment::StrictlyContained
-            }
         }
     }
 
@@ -2153,7 +2043,7 @@ impl SelectionSet {
         SelectionSet::from_selection_set(&selection_set, &named_fragments, &schema)
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.selections.is_empty()
     }
 
@@ -2862,7 +2752,16 @@ impl SelectionSet {
     }
 
     fn has_top_level_typename_field(&self) -> bool {
-        self.selections.has_top_level_typename_field()
+        // Needs to be behind a OnceLock because `Arc::new` is non-const.
+        // XXX(@goto-bus-stop): Note this does *not* count `__typename @include(if: true)`.
+        // This seems wrong? But it's what JS does, too.
+        static TYPENAME_KEY: OnceLock<SelectionKey> = OnceLock::new();
+        let key = TYPENAME_KEY.get_or_init(|| SelectionKey::Field {
+            response_name: TYPENAME_FIELD,
+            directives: Arc::new(Default::default()),
+        });
+
+        self.selections.contains_key(key)
     }
 
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
@@ -3238,6 +3137,46 @@ impl SelectionSet {
         })
     }
 
+    pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
+        let mut fields = Vec::new();
+
+        for (_key, selection) in self.selections.iter() {
+            match selection {
+                Selection::Field(field) => fields.push(CollectedFieldInSet {
+                    path: Vec::new(),
+                    field: field.clone(),
+                }),
+                Selection::FragmentSpread(_fragment) => {
+                    todo!()
+                }
+                Selection::InlineFragment(inline_fragment) => {
+                    let condition = inline_fragment
+                        .inline_fragment
+                        .data()
+                        .type_condition_position
+                        .as_ref();
+                    let header = match condition {
+                        Some(cond) => vec![FetchDataPathElement::TypenameEquals(
+                            cond.type_name().clone().into(),
+                        )],
+                        None => vec![],
+                    };
+                    for CollectedFieldInSet { path, field } in
+                        inline_fragment.selection_set.fields_in_set().into_iter()
+                    {
+                        let mut new_path = header.clone();
+                        new_path.extend(path);
+                        fields.push(CollectedFieldInSet {
+                            path: new_path,
+                            field,
+                        })
+                    }
+                }
+            }
+        }
+        fields
+    }
+
     pub(crate) fn used_variables(&self) -> Result<Vec<Name>, FederationError> {
         let mut variables = HashSet::new();
         self.collect_variables(&mut variables)?;
@@ -3274,12 +3213,66 @@ impl SelectionSet {
     }
 
     pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
-        self.selections.containment(&other.selections, options)
+        if other.selections.len() > self.selections.len() {
+            // If `other` has more selections but we're ignoring missing __typename, then in the case where
+            // `other` has a __typename but `self` does not, then we need the length of `other` to be at
+            // least 2 more than other of `self` to be able to conclude there is no contains.
+            if !options.ignore_missing_typename
+                || other.selections.len() > self.selections.len() + 1
+                || self.has_top_level_typename_field()
+                || !other.has_top_level_typename_field()
+            {
+                return Containment::NotContained;
+            }
+        }
+
+        let mut is_equal = true;
+        let mut did_ignore_typename = false;
+
+        for (key, other_selection) in other.selections.iter() {
+            if key.is_typename_field() && options.ignore_missing_typename {
+                if !self.has_top_level_typename_field() {
+                    did_ignore_typename = true;
+                }
+                continue;
+            }
+
+            let Some(self_selection) = self.selections.get(key) else {
+                return Containment::NotContained;
+            };
+
+            match self_selection.containment(other_selection, options) {
+                Containment::NotContained => return Containment::NotContained,
+                Containment::StrictlyContained if is_equal => is_equal = false,
+                Containment::StrictlyContained | Containment::Equal => {}
+            }
+        }
+
+        let expected_len = if did_ignore_typename {
+            self.selections.len() + 1
+        } else {
+            self.selections.len()
+        };
+
+        if is_equal && other.selections.len() == expected_len {
+            Containment::Equal
+        } else {
+            Containment::StrictlyContained
+        }
     }
 
     /// Returns true if this selection is a superset of the other selection.
     pub(crate) fn contains(&self, other: &Self) -> bool {
         self.containment(other, Default::default()).is_contained()
+    }
+}
+
+impl IntoIterator for SelectionSet {
+    type Item = <IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
+    type IntoIter = <IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Arc::unwrap_or_clone(self.selections).into_iter()
     }
 }
 
@@ -3326,8 +3319,7 @@ fn compute_aliases_for_non_merging_fields(
 
     fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
         s.selections.iter().flat_map(|s2| {
-            s2.selections
-                .fields_in_set()
+            s2.fields_in_set()
                 .into_iter()
                 .map(|CollectedFieldInSet { path, field }| {
                     let mut new_path = s.path.clone();

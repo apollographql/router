@@ -41,7 +41,6 @@ use super::operation::NamedFragments;
 use super::operation::NormalizeSelectionOption;
 use super::operation::Selection;
 use super::operation::SelectionKey;
-use super::operation::SelectionMap;
 use super::operation::SelectionSet;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -62,9 +61,7 @@ impl Selection {
         if let (Some(self_sub_selection), Some(other_sub_selection)) =
             (self.selection_set()?, other.selection_set()?)
         {
-            let diff = self_sub_selection
-                .selections
-                .minus(&other_sub_selection.selections)?;
+            let diff = self_sub_selection.minus(other_sub_selection)?;
             if !diff.is_empty() {
                 return self
                     .with_updated_selections(
@@ -85,9 +82,7 @@ impl Selection {
         if let (Some(self_sub_selection), Some(other_sub_selection)) =
             (self.selection_set()?, other.selection_set()?)
         {
-            let common = self_sub_selection
-                .selections
-                .intersection(&other_sub_selection.selections)?;
+            let common = self_sub_selection.intersection(other_sub_selection)?;
             if !common.is_empty() {
                 return self
                     .with_updated_selections(
@@ -101,14 +96,15 @@ impl Selection {
     }
 }
 
-impl SelectionMap {
+impl SelectionSet {
     /// Performs set-subtraction (self - other) and returns the result (the difference between self
     /// and other).
-    fn minus(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
+    fn minus(&self, other: &SelectionSet) -> Result<SelectionSet, FederationError> {
         let iter = self
+            .selections
             .iter()
             .map(|(k, v)| {
-                if let Some(other_v) = other.get(k) {
+                if let Some(other_v) = other.selections.get(k) {
                     v.minus(other_v)
                 } else {
                     Ok(Some(v.clone()))
@@ -117,11 +113,15 @@ impl SelectionMap {
             .collect::<Result<Vec<_>, _>>()? // early break in case of Err
             .into_iter()
             .flatten();
-        Ok(SelectionMap::from_iter(iter))
+        Ok(SelectionSet::from_raw_selections(
+            self.schema.clone(),
+            self.type_position.clone(),
+            iter,
+        ))
     }
 
     /// Computes the set-intersection of self and other
-    fn intersection(&self, other: &SelectionMap) -> Result<SelectionMap, FederationError> {
+    fn intersection(&self, other: &SelectionSet) -> Result<SelectionSet, FederationError> {
         if self.is_empty() {
             return Ok(self.clone());
         }
@@ -130,9 +130,10 @@ impl SelectionMap {
         }
 
         let iter = self
+            .selections
             .iter()
             .map(|(k, v)| {
-                if let Some(other_v) = other.get(k) {
+                if let Some(other_v) = other.selections.get(k) {
                     v.intersection(other_v)
                 } else {
                     Ok(None)
@@ -141,7 +142,11 @@ impl SelectionMap {
             .collect::<Result<Vec<_>, _>>()? // early break in case of Err
             .into_iter()
             .flatten();
-        Ok(SelectionMap::from_iter(iter))
+        Ok(SelectionSet::from_raw_selections(
+            self.schema.clone(),
+            self.type_position.clone(),
+            iter,
+        ))
     }
 }
 
@@ -220,8 +225,8 @@ struct FieldsConflictValidator {
 }
 
 impl FieldsConflictValidator {
-    fn from_selection_map(selection_map: &SelectionMap) -> Self {
-        Self::for_level(&selection_map.fields_in_set())
+    fn from_selection_set(selection_set: &SelectionSet) -> Self {
+        Self::for_level(&selection_set.fields_in_set())
     }
 
     fn for_level(level: &[CollectedFieldInSet]) -> Self {
@@ -236,7 +241,7 @@ impl FieldsConflictValidator {
                     .entry(collected_field.field().field.clone())
                     .or_default()
                     .get_or_insert_with(Default::default)
-                    .extend(field_selection_set.selections.fields_in_set());
+                    .extend(field_selection_set.fields_in_set());
             } else {
                 // Note that whether a `FieldSelection` has a sub-selection set or not is entirely
                 // determined by whether the field type is a composite type or not, so even if
@@ -444,7 +449,7 @@ impl FieldsConflictMultiBranchValidator {
 struct FragmentRestrictionAtType {
     /// Selections that are expanded from a given fragment at a given type and then normalized.
     /// - This represents the part of given type's sub-selections that are covered by the fragment.
-    selections: SelectionMap,
+    selections: SelectionSet,
 
     /// A runtime validator to check the fragment selections against other fields.
     /// - `None` means that there is nothing to check.
@@ -453,7 +458,7 @@ struct FragmentRestrictionAtType {
 }
 
 impl FragmentRestrictionAtType {
-    fn new(selections: SelectionMap, validator: Option<FieldsConflictValidator>) -> Self {
+    fn new(selections: SelectionSet, validator: Option<FieldsConflictValidator>) -> Self {
         Self {
             selections,
             validator: validator.map(Arc::new),
@@ -479,7 +484,7 @@ impl FragmentRestrictionAtType {
     // Using `F` in those cases is, while not 100% incorrect, at least not productive, and so we
     // skip it that case. This is essentially an optimization.
     fn is_useless(&self) -> bool {
-        match self.selections.as_slice().split_first() {
+        match self.selections.selections.as_slice().split_first() {
             None => true,
 
             Some((first, rest)) => rest.is_empty() && first.0.is_typename_field(),
@@ -510,9 +515,9 @@ impl Fragment {
             // Thus, we have to use the full validator in this case. (see
             // https://github.com/graphql/graphql-spec/issues/1085 for details.)
             return Ok(FragmentRestrictionAtType::new(
-                normalized_selection_set.selections.as_ref().clone(),
-                Some(FieldsConflictValidator::from_selection_map(
-                    &expanded_selection_set.selections,
+                normalized_selection_set.clone(),
+                Some(FieldsConflictValidator::from_selection_set(
+                    &expanded_selection_set,
                 )),
             ));
         }
@@ -526,15 +531,13 @@ impl Fragment {
         // validator because we know the non-trimmed parts cannot create field conflict issues so
         // we're trying to build a smaller validator, but it's ok if trimmed is not as small as it
         // theoretically can be.
-        let trimmed = expanded_selection_set
-            .selections
-            .minus(&normalized_selection_set.selections)?;
+        let trimmed = expanded_selection_set.minus(&normalized_selection_set)?;
         let validator = trimmed
             .is_empty()
             .not()
-            .then(|| FieldsConflictValidator::from_selection_map(&trimmed));
+            .then(|| FieldsConflictValidator::from_selection_set(&trimmed));
         Ok(FragmentRestrictionAtType::new(
-            normalized_selection_set.selections.as_ref().clone(),
+            normalized_selection_set.clone(),
             validator,
         ))
     }
@@ -697,7 +700,7 @@ impl SelectionSet {
             // all interfaces), but the selection itself, which only deals with object type,
             // may not have __typename requested; using the fragment might still be a good
             // idea, and querying __typename needlessly is a very small price to pay for that).
-            let res = self.selections.containment(
+            let res = self.containment(
                 &at_type.selections,
                 ContainmentOptions {
                     ignore_missing_typename: true,
@@ -727,10 +730,10 @@ impl SelectionSet {
         Self::reduce_applicable_fragments(&mut applicable_fragments);
 
         // Build a new optimized selection set.
-        let mut not_covered_so_far = self.selections.as_ref().clone();
-        let mut optimized = SelectionMap::new();
+        let mut not_covered_so_far = self.clone();
+        let mut optimized = SelectionSet::empty(self.schema.clone(), self.type_position.clone());
         for (fragment, at_type) in applicable_fragments {
-            let not_covered = self.selections.minus(&at_type.selections)?;
+            let not_covered = self.minus(&at_type.selections)?;
             not_covered_so_far = not_covered_so_far.intersection(&not_covered)?;
 
             // PORT_NOTE: The JS version uses `parent_type` as the "sourceType", which may be
@@ -740,14 +743,14 @@ impl SelectionSet {
                 &fragment,
                 /*directives*/ &Default::default(),
             );
-            optimized.insert(fragment_selection.into());
+            Arc::make_mut(&mut optimized.selections).insert(fragment_selection.into());
         }
 
-        optimized.extend_ref(&not_covered_so_far);
+        Arc::make_mut(&mut optimized.selections).extend_ref(&not_covered_so_far.selections);
         Ok(SelectionSet::make_selection_set(
             &self.schema,
             parent_type,
-            optimized.values().map(std::iter::once),
+            optimized.selections.values().map(std::iter::once),
             fragments,
         )?
         .into())
