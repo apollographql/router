@@ -1495,7 +1495,7 @@ impl IntoIterator for FederationSubgraphs {
 
 // TODO(@goto-bus-stop): consider an appropriate name for this in the public API
 // TODO(@goto-bus-stop): should this exist separately from the `crate::subgraph::Subgraph` type?
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ValidFederationSubgraph {
     pub name: String,
     pub url: String,

@@ -7,7 +7,7 @@ pub(crate) mod federated_query_graph;
 pub(crate) mod fetch_dependency_graph;
 pub mod query_plan;
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, derive_more::From)]
 pub struct GraphqlId {
     pub subgraph_name: NodeStr,
 }

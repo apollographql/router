@@ -1,5 +1,6 @@
 use std::fmt::Display;
 use std::fmt::Formatter;
+use apollo_compiler::NodeStr;
 
 use crate::sources::connect::ConnectId;
 use crate::sources::graphql::GraphqlId;
@@ -18,10 +19,16 @@ pub enum SourceKind {
     Connect,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Clone, Hash, PartialEq, Eq, derive_more::From)]
 pub enum SourceId {
     Graphql(GraphqlId),
     Connect(ConnectId),
+}
+
+impl From<NodeStr> for SourceId {
+    fn from(value: NodeStr) -> Self {
+        Self::Graphql(value.into())
+    }
 }
 
 impl SourceId {

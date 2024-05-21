@@ -224,6 +224,7 @@ version = "1.47.0"
 dependencies = [
  "apollo-compiler",
  "derive_more",
+ "either",
  "enum_dispatch",
  "hex",
  "indexmap 2.2.3",
@@ -2429,9 +2430,9 @@ dependencies = [
 
 [[package]]
 name = "either"
-version = "1.9.0"
+version = "1.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a26ae43d7bcc3b814de94796a5e736d4029efb0ee900c12e2d54c993ad1a1e07"
+checksum = "3dca9240753cf90908d7e4aac30f630662b02aebaa1b58a3cadabdb23385b58b"
 
 [[package]]
 name = "elliptic-curve"

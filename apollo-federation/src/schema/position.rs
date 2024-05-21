@@ -224,7 +224,9 @@ impl From<ObjectOrInterfaceTypeDefinitionPosition> for TypeDefinitionPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(
+    Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, derive_more::IsVariant,
+)]
 pub(crate) enum OutputTypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
     Object(ObjectTypeDefinitionPosition),
@@ -254,6 +256,10 @@ impl OutputTypeDefinitionPosition {
             OutputTypeDefinitionPosition::Union(type_) => &type_.type_name,
             OutputTypeDefinitionPosition::Enum(type_) => &type_.type_name,
         }
+    }
+
+    pub(crate) fn is_abstract(&self) -> bool {
+        matches!(self, Self::Union(_) | Self::Interface(_))
     }
 
     pub(crate) fn get<'schema>(
@@ -1370,6 +1376,10 @@ pub(crate) struct SchemaRootDefinitionPosition {
 }
 
 impl SchemaRootDefinitionPosition {
+    fn new(root_kind: SchemaRootDefinitionKind) -> Self {
+        Self { root_kind }
+    }
+
     pub(crate) fn parent(&self) -> SchemaDefinitionPosition {
         SchemaDefinitionPosition
     }
@@ -1903,6 +1913,19 @@ impl ObjectTypeDefinitionPosition {
 
     pub(crate) fn introspection_type_field(&self) -> ObjectFieldDefinitionPosition {
         self.field(name!("__type"))
+    }
+
+    /// Attempts to construct an iterator that yields the field definition positions for this
+    /// objects's fields.
+    // TODO: The lifetime capturing rules for RTIPs will change in Rust edition 2024. When they do,
+    // the bounds on this function can be changed to have 'a be the only lifetime (and still be
+    // correct).
+    pub(crate) fn field_positions<'b, 'a: 'b>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<impl 'b + Iterator<Item = ObjectFieldDefinitionPosition>, FederationError> {
+        self.get(schema)
+            .map(|node| node.fields.keys().map(|name| self.field(name.clone())))
     }
 
     pub(crate) fn get<'schema>(
