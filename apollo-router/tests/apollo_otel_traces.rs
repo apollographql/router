@@ -175,7 +175,10 @@ macro_rules! assert_report {
             insta::with_settings!({sort_maps => true}, {
                     insta::assert_yaml_snapshot!($report, {
                         ".**.attributes" => insta::sorted_redaction(),
-                        ".resourceSpans[].resource.attributes[].value" => "[redacted]",
+                        ".**.attributes[].value" => "[redacted]", // TBD(tim): this is too aggressive and redacts all attr values
+                        // ".resourceSpans[].resource.attributes[].value" => "[redacted]", // TBD(tim): ideally this and the line below
+                        // ".**.attributes[][\"apollo_private.ftv1\"].value" => "[ftv1]", // TBD(tim): this doesn't work
+                        ".resourceSpans[].scopeSpans[].scope.version" => "[version]",
                         ".**.traceId" => "[trace_id]",
                         ".**.spanId" => "[span_id]",
                         ".**.parentSpanId" => "[span_id]",

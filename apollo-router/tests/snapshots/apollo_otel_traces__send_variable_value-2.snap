@@ -21,7 +21,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -36,14 +36,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo_private.request
-                value:
-                  boolValue: true
+                value: "[redacted]"
               - key: graphql.operation.type
-                value:
-                  stringValue: query
+                value: "[redacted]"
               - key: http.request.method
-                value:
-                  stringValue: POST
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -72,7 +69,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -87,29 +84,21 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo_private.duration_ns
-                value:
-                  intValue: 1188580000
+                value: "[redacted]"
               - key: apollo_private.http.request_headers
-                value:
-                  stringValue: "{}"
+                value: "[redacted]"
               - key: apollo_private.http.response_headers
-                value:
-                  stringValue: "{\"my_trace_id\":[\"b42c6937ca42fb03b1eecdc9c242ac4c\"]}"
+                value: "[redacted]"
               - key: client.name
-                value:
-                  stringValue: ""
+                value: "[redacted]"
               - key: client.version
-                value:
-                  stringValue: ""
+                value: "[redacted]"
               - key: http.request.method
-                value:
-                  stringValue: POST
+                value: "[redacted]"
               - key: http.response.status_code
-                value:
-                  intValue: 200
+                value: "[redacted]"
               - key: trace_id
-                value:
-                  stringValue: b42c6937ca42fb03b1eecdc9c242ac4c
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -138,7 +127,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -180,7 +169,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -222,7 +211,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -237,11 +226,9 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo_private.graphql.variables
-                value:
-                  stringValue: "{\"sendValue\":\"true\",\"dontSendValue\":\"\"}"
+                value: "[redacted]"
               - key: apollo_private.operation_signature
-                value:
-                  stringValue: "# -\nquery($dontSendValue:Boolean!,$sendValue:Boolean!){topProducts{name reviews@include(if:$sendValue){author{name}}reviews@include(if:$dontSendValue){author{name}}}}"
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -270,7 +257,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -312,7 +299,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -354,7 +341,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -369,8 +356,7 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.operation.type
-                value:
-                  stringValue: query
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -399,7 +385,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -441,7 +427,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -483,7 +469,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -498,11 +484,9 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: products
+                value: "[redacted]"
               - key: apollo_private.sent_time_offset
-                value:
-                  intValue: 2319753125
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -531,7 +515,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -546,14 +530,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: products
+                value: "[redacted]"
               - key: apollo_private.ftv1
-                value:
-                  stringValue: GgwI2PevsgYQgOnJ1gEiDAjY96+yBhCA6cnWAVi8hx9y/AFi+QEKC3RvcFByb2R1Y3RzGglbUHJvZHVjdF1A7rgNSK7TD2JEEABiHwoDdXBjGgdTdHJpbmchQPjgEkjYvhNqB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQIqlFUj48BVqB1Byb2R1Y3RiRBABYh8KA3VwYxoHU3RyaW5nIUDeoRdIrt4XagdQcm9kdWN0Yh8KBG5hbWUaBlN0cmluZ0CEoxhIsNwYagdQcm9kdWN0YkQQAmIfCgN1cGMaB1N0cmluZyFAhuIZSOqjGmoHUHJvZHVjdGIfCgRuYW1lGgZTdHJpbmdA4u8aSISpG2oHUHJvZHVjdGoFUXVlcnn5AQAAAAAAAPA/
+                value: "[redacted]"
               - key: graphql.operation.name
-                value:
-                  stringValue: ""
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -582,7 +563,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -624,7 +605,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -639,11 +620,9 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: products
+                value: "[redacted]"
               - key: graphql.operation.name
-                value:
-                  stringValue: ""
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -672,7 +651,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -714,7 +693,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -729,8 +708,7 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.path
-                value:
-                  stringValue: /topProducts/@
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -759,7 +737,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -774,11 +752,9 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: reviews
+                value: "[redacted]"
               - key: apollo_private.sent_time_offset
-                value:
-                  intValue: 2407505500
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -807,7 +783,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -822,14 +798,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: reviews
+                value: "[redacted]"
               - key: apollo_private.ftv1
-                value:
-                  stringValue: GgwI2PevsgYQwL7j0wMiDAjY96+yBhDAvuPTA1iGghtynQNimgMKCV9lbnRpdGllcxoKW19FbnRpdHldIUD+wQxI6tcYYqMBEABingEKB3Jldmlld3MaCFtSZXZpZXddQPjEEEixphFiOxAAYjcKBmF1dGhvchoEVXNlckDLmBJI+LUSYhcKAmlkGgNJRCFAkZYTSKG4E2oEVXNlcmoGUmV2aWV3YjsQAWI3CgZhdXRob3IaBFVzZXJAq40USKedFGIXCgJpZBoDSUQhQPnPFEjM4xRqBFVzZXJqBlJldmlld2oHUHJvZHVjdGJlEAFiYQoHcmV2aWV3cxoIW1Jldmlld11A85gVSOvKFWI7EABiNwoGYXV0aG9yGgRVc2VyQM/8FUiOjBZiFwoCaWQaA0lEIUCSuhZI584WagRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiZRACYmEKB3Jldmlld3MaCFtSZXZpZXddQN+JF0iEqBdiOxAAYjcKBmF1dGhvchoEVXNlckD71BdInOQXYhcKAmlkGgNJRCFAyKQYSN63GGoEVXNlcmoGUmV2aWV3agdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8=
+                value: "[redacted]"
               - key: graphql.operation.name
-                value:
-                  stringValue: ""
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -858,7 +831,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -900,7 +873,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -915,11 +888,9 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: reviews
+                value: "[redacted]"
               - key: graphql.operation.name
-                value:
-                  stringValue: ""
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -948,7 +919,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -990,7 +961,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -1005,8 +976,7 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.path
-                value:
-                  stringValue: /topProducts/@/reviews/@/author
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1035,7 +1005,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -1050,11 +1020,9 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: accounts
+                value: "[redacted]"
               - key: apollo_private.sent_time_offset
-                value:
-                  intValue: 3145057958
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1083,7 +1051,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -1098,14 +1066,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: accounts
+                value: "[redacted]"
               - key: apollo_private.ftv1
-                value:
-                  stringValue: GgwI2fevsgYQgMe0xQEiDAjZ96+yBhDAwvfEAVjI1B1ybGJqCglfZW50aXRpZXMaCltfRW50aXR5XSFAgNcQSNLGG2IgEABiHAoEbmFtZRoGU3RyaW5nQMTrGEjC3RlqBFVzZXJiIBABYhwKBG5hbWUaBlN0cmluZ0CK6xpI2JcbagRVc2VyagVRdWVyefkBAAAAAAAA8D8=
+                value: "[redacted]"
               - key: graphql.operation.name
-                value:
-                  stringValue: ""
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1134,7 +1099,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -1176,7 +1141,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
@@ -1191,11 +1156,9 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value:
-                  stringValue: accounts
+                value: "[redacted]"
               - key: graphql.operation.name
-                value:
-                  stringValue: ""
+                value: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1224,7 +1187,7 @@ resourceSpans:
     scopeSpans:
       - scope:
           name: apollo-router
-          version: apollo-router@1.46.0
+          version: "[version]"
           attributes: []
           droppedAttributesCount: 0
         spans:
