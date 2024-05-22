@@ -1,25 +1,29 @@
 use std::collections::HashMap;
 
-use apollo_compiler::{name, NodeStr};
+use apollo_compiler::name;
+use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use itertools::Either;
 use petgraph::prelude::NodeIndex;
 use strum::IntoEnumIterator;
 
 use crate::error::FederationError;
-use crate::schema::position::{
-    AbstractTypeDefinitionPosition, FieldDefinitionPosition, ObjectTypeDefinitionPosition,
-    OutputTypeDefinitionPosition, SchemaRootDefinitionKind, SchemaRootDefinitionPosition,
-};
+use crate::schema::position::AbstractTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-use crate::source_aware::federated_query_graph::builder::{
-    IntraSourceQueryGraphBuilderApi, IntraSourceQueryGraphSubBuilderApi,
-};
-use crate::sources::graphql::federated_query_graph::{ConcreteFieldEdge, TypeConditionEdge};
+use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphSubBuilderApi;
+use crate::sources::graphql::federated_query_graph::ConcreteFieldEdge;
+use crate::sources::graphql::federated_query_graph::TypeConditionEdge;
 use crate::sources::graphql::GraphqlId;
 use crate::sources::source;
 use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilderApi;
-use crate::sources::source::federated_query_graph::{EnumNode, ScalarNode};
+use crate::sources::source::federated_query_graph::EnumNode;
+use crate::sources::source::federated_query_graph::ScalarNode;
 use crate::ValidFederationSubgraph;
 
 #[derive(Default)]
