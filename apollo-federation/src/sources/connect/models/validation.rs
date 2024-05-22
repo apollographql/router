@@ -61,7 +61,6 @@
 */
 
 use std::collections::HashMap;
-use std::error::Error;
 use std::fmt::Display;
 
 use apollo_compiler::ast::Value;
@@ -70,6 +69,7 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::Node;
 use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
+use apollo_compiler::SourceMap;
 use url::Url;
 
 use crate::link::Link;
@@ -82,7 +82,7 @@ use crate::sources::connect::ConnectSpecDefinition;
 ///
 /// This function attempts to collect as many validation errors as possible, so it does not bail
 /// out as soon as it encounters one.
-pub fn validate(schema: Schema) -> Vec<ValidationError> {
+pub fn validate(schema: Schema) -> Vec<Error> {
     let connect_identity = ConnectSpecDefinition::identity();
     let link = schema
         .schema_definition
@@ -99,30 +99,36 @@ pub fn validate(schema: Schema) -> Vec<ValidationError> {
     let Some(link) = link else {
         return vec![]; // There are no connectors-related directives to validate
     };
+    let source_map = schema.sources;
     let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
     let source_directives: Vec<SourceDirective> = schema
         .schema_definition
         .directives
         .iter()
         .filter(|directive| directive.name == source_directive_name)
-        .map(validate_source)
+        .map(|directive| validate_source(directive, &source_map))
         .collect();
 
     let mut errors = Vec::new();
     let mut names = HashMap::new();
     for directive in source_directives {
         errors.extend(directive.errors);
-        match directive.name.into_value_or_error() {
+        match directive.name.into_value_or_error(&source_map) {
             Err(error) => errors.push(error),
-            Ok(name) => names
-                .entry(name)
-                .or_insert_with(Vec::new)
-                .extend(directive.directive.node.location().into_iter()),
+            Ok(name) => {
+                names
+                    .entry(name)
+                    .or_insert_with(Vec::new)
+                    .extend(GraphQLLocation::from_node(
+                        directive.directive.node.location(),
+                        &source_map,
+                    ))
+            }
         }
     }
     for (name, locations) in names {
         if locations.len() > 1 {
-            errors.push(ValidationError {
+            errors.push(Error {
                 message: format!("every @{source_directive_name} name must be unique; found duplicate source name {name}"),
                 code: ErrorCode::DuplicateSourceName,
                 locations,
@@ -132,7 +138,7 @@ pub fn validate(schema: Schema) -> Vec<ValidationError> {
     errors
 }
 
-fn validate_source(directive: &Component<Directive>) -> SourceDirective {
+fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> SourceDirective {
     let name = SourceName::from_directive(directive);
     let url_error = directive
         .arguments
@@ -149,24 +155,28 @@ fn validate_source(directive: &Component<Directive>) -> SourceDirective {
                 .as_str()?;
             let url = match Url::parse(value) {
                 Err(inner) => {
-                    return Some(ValidationError {
+                    return Some(Error {
                         code: ErrorCode::SourceUrl,
                         message: format!(
                             "baseURL argument for {name} was not a valid URL: {inner}"
                         ),
-                        locations: arg.location().into_iter().collect(),
+                        locations: GraphQLLocation::from_node(arg.location(), sources)
+                            .into_iter()
+                            .collect(),
                     })
                 }
                 Ok(url) => url,
             };
             let scheme = url.scheme();
             if scheme != "http" && scheme != "https" {
-                return Some(ValidationError {
+                return Some(Error {
                     code: ErrorCode::SourceScheme,
                     message: format!(
                         "baseURL argument for {name} must be http or https, got {scheme}"
                     ),
-                    locations: arg.value.location().into_iter().collect(),
+                    locations: GraphQLLocation::from_node(arg.value.location(), sources)
+                        .into_iter()
+                        .collect(),
                 });
             }
             None
@@ -185,7 +195,7 @@ fn validate_source(directive: &Component<Directive>) -> SourceDirective {
 /// A `@source` directive along with any errors related to it.
 struct SourceDirective {
     name: SourceName,
-    errors: Vec<ValidationError>,
+    errors: Vec<Error>,
     directive: Component<Directive>,
 }
 
@@ -255,28 +265,28 @@ impl SourceName {
         }
     }
 
-    pub fn into_value_or_error(self) -> Result<Node<Value>, ValidationError> {
+    pub fn into_value_or_error(self, sources: &SourceMap) -> Result<Node<Value>, Error> {
         match self {
             Self::Valid { value, ..} => Ok(value),
             Self::Invalid {
                 value,
                 directive_name,
-            } => Err(ValidationError {
+            } => Err(Error {
                 message: format!("invalid characters in @{directive_name} name {value}, only alphanumeric and underscores are allowed"),
                 code: ErrorCode::InvalidSourceName,
-                locations: value.location().into_iter().collect(),
+                locations: GraphQLLocation::from_node(value.location(), sources).into_iter().collect(),
             }),
             Self::Empty { directive_name, value } => {
-                Err(ValidationError {
+                Err(Error {
                     code: ErrorCode::EmptySourceName,
                     message: format!("name argument to @{directive_name} can't be empty"),
-                    locations: value.location().into_iter().collect(),
+                    locations: GraphQLLocation::from_node(value.location(), sources).into_iter().collect(),
                 })
             }
-            Self::Missing { directive_name, ast_node } => Err(ValidationError {
+            Self::Missing { directive_name, ast_node } => Err(Error {
                 code: ErrorCode::GraphQLError,
                 message: format!("missing name argument to @{directive_name}"),
-                locations: ast_node.location().into_iter().collect()
+                locations: GraphQLLocation::from_node(ast_node.location(), sources).into_iter().collect()
             }),
         }
     }
@@ -301,19 +311,47 @@ impl Display for SourceName {
 }
 
 #[derive(Debug)]
-pub struct ValidationError {
+pub struct Error {
     pub code: ErrorCode,
     pub message: String,
-    pub locations: Vec<NodeLocation>,
+    pub locations: Vec<GraphQLLocation>,
 }
 
-impl Display for ValidationError {
+#[derive(Debug)]
+pub struct GraphQLLocation {
+    pub start_line: usize,
+    pub start_column: usize,
+    pub end_line: usize,
+    pub end_column: usize,
+}
+
+impl GraphQLLocation {
+    // TODO: This is a ripoff of GraphQLLocation::from_node in apollo_compiler, contribute it back
+    fn from_node(node: Option<NodeLocation>, sources: &SourceMap) -> Option<Self> {
+        let node = node?;
+        let source = sources.get(&node.file_id())?;
+        let (start_line, start_column) = source
+            .get_line_column(node.offset())
+            .map(|(line, column)| (line + 1, column + 1))?;
+        let (end_line, end_column) = source
+            .get_line_column(node.end_offset())
+            .map(|(line, column)| (line + 1, column + 1))?;
+        Some(Self {
+            start_line,
+            start_column,
+            end_line,
+            end_column,
+        })
+    }
+}
+
+impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.message)
     }
 }
 
-impl Error for ValidationError {}
+impl std::error::Error for Error {}
 
 #[derive(Clone, Copy, Debug)]
 pub enum ErrorCode {
