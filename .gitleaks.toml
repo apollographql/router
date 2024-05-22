@@ -102,6 +102,11 @@
 [[ rules ]]
     id = "snapshots"
     [ rules.allowlist ]
+        commits = [
+            "be3b24c7e27ac0a063a9a506920d0797358a9f31",
+            "b6eb5b5758fd457edcadfd28a6a98a620000e7a9",
+        ]
+        
         paths = [
-            '''^apollo-router\/src\/tests\/snapshots\/apollo_otel_traces''',
+            '''^apollo-router/tests/snapshots/apollo_otel_traces.*''',
         ]
