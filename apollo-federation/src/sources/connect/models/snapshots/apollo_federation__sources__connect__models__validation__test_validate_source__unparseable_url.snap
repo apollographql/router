@@ -2,4 +2,4 @@
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "errors[0].to_string()"
 ---
-invalid characters in @source name "u$ers", only alphanumeric and underscores are allowed
+baseURL argument for @source "v1" was not a valid URL: relative URL without a base

@@ -2,4 +2,4 @@
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "errors[0].to_string()"
 ---
-every @source name must be unique; found duplicate source name v1
+every @source name must be unique; found duplicate source name "v1"
