@@ -1,5 +1,3 @@
-#![allow(unused, unconditional_panic, clippy::diverging_sub_expression)]
-use apollo_compiler::name;
 use enum_dispatch::enum_dispatch;
 use indexmap::IndexMap;
 
