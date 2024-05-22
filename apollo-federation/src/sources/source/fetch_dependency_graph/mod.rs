@@ -27,7 +27,7 @@ pub(crate) enum FetchDependencyGraph {
 
 #[enum_dispatch]
 pub(crate) trait FetchDependencyGraphApi {
-    fn can_reuse_node<'path_tree>(
+    fn edges_that_can_reuse_node<'path_tree>(
         &self,
         query_graph: Arc<FederatedQueryGraph>,
         merge_at: &[FetchDataPathElement],
