@@ -639,7 +639,7 @@ pub(crate) enum SelectionKey {
 }
 
 impl SelectionKey {
-    fn is_typename_field(&self) -> bool {
+    pub(crate) fn is_typename_field(&self) -> bool {
         matches!(self, SelectionKey::Field { response_name, .. } if *response_name == TYPENAME_FIELD)
     }
 }
@@ -918,6 +918,16 @@ impl Selection {
                 Err(FederationError::internal("unexpected fragment spread"))
             }
         }
+    }
+
+    pub(crate) fn with_updated_selections<S: Into<Selection>>(
+        &self,
+        type_position: CompositeTypeDefinitionPosition,
+        selections: impl IntoIterator<Item = S>,
+    ) -> Result<Self, FederationError> {
+        let new_sub_selection =
+            SelectionSet::from_raw_selections(self.schema().clone(), type_position, selections);
+        self.with_updated_selection_set(Some(new_sub_selection))
     }
 
     pub(crate) fn containment(
@@ -1537,6 +1547,17 @@ impl FragmentSpreadSelection {
         })
     }
 
+    pub(crate) fn from_fragment(
+        fragment: &Node<Fragment>,
+        directives: &executable::DirectiveList,
+    ) -> Self {
+        let spread_data = FragmentSpreadData::from_fragment(fragment, directives);
+        Self {
+            spread: FragmentSpread::new(spread_data),
+            selection_set: fragment.selection_set.clone(),
+        }
+    }
+
     pub(crate) fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -2007,7 +2028,7 @@ impl SelectionSet {
         SelectionSet::from_selection_set(&selection_set, &named_fragments, &schema)
     }
 
-    fn is_empty(&self) -> bool {
+    pub(crate) fn is_empty(&self) -> bool {
         self.selections.is_empty()
     }
 
@@ -2500,6 +2521,7 @@ impl SelectionSet {
         schema: &ValidFederationSchema,
         parent_type: &CompositeTypeDefinitionPosition,
         selections: impl Iterator<Item = &'a Selection>,
+        named_fragments: &NamedFragments,
     ) -> Result<Selection, FederationError> {
         let mut iter = selections;
         let Some(first) = iter.next() else {
@@ -2514,7 +2536,7 @@ impl SelectionSet {
             return first
                 .rebase_on(
                     parent_type,
-                    /*named_fragments*/ &Default::default(),
+                    named_fragments,
                     schema,
                     RebaseErrorHandlingOption::ThrowError,
                 )?
@@ -2556,6 +2578,7 @@ impl SelectionSet {
             schema,
             sub_selection_parent_type,
             sub_selection_updates.values().map(|v| v.iter()),
+            named_fragments,
         )?);
         Selection::from_element(element, updated_sub_selection)
     }
@@ -2564,14 +2587,15 @@ impl SelectionSet {
     /// - Assumes each item (slice) from the iterator has the same selection key within the slice.
     /// - Note that if the same selection key repeats in a later group, the previous group will be
     ///   ignored and replaced by the new group.
-    fn make_selection_set<'a>(
+    pub(crate) fn make_selection_set<'a>(
         schema: &ValidFederationSchema,
         parent_type: &CompositeTypeDefinitionPosition,
         selection_key_groups: impl Iterator<Item = impl Iterator<Item = &'a Selection>>,
+        named_fragments: &NamedFragments,
     ) -> Result<SelectionSet, FederationError> {
         let mut result = SelectionMap::new();
         for group in selection_key_groups {
-            let selection = Self::make_selection(schema, parent_type, group)?;
+            let selection = Self::make_selection(schema, parent_type, group, named_fragments)?;
             result.insert(selection);
         }
         Ok(SelectionSet {
@@ -2642,6 +2666,7 @@ impl SelectionSet {
             &self.schema,
             &self.type_position,
             updated_selections.values().map(|v| v.iter()),
+            /*named_fragments*/ &Default::default(),
         )
     }
 
@@ -2741,7 +2766,12 @@ impl SelectionSet {
                 let to_merge = [existing_selection, selection];
                 // `existing_selection` and `selection` both have the same selection key,
                 // so the merged selection will also have the same selection key.
-                let selection = SelectionSet::make_selection(schema, parent_type, to_merge.iter())?;
+                let selection = SelectionSet::make_selection(
+                    schema,
+                    parent_type,
+                    to_merge.iter(),
+                    /*named_fragments*/ &Default::default(),
+                )?;
                 selections.insert_at(index, selection);
             }
             None => {
@@ -3222,6 +3252,15 @@ impl SelectionSet {
     }
 }
 
+impl IntoIterator for SelectionSet {
+    type Item = <IndexMap<SelectionKey, Selection> as IntoIterator>::Item;
+    type IntoIter = <IndexMap<SelectionKey, Selection> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        Arc::unwrap_or_clone(self.selections).into_iter()
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct SelectionSetAtPath {
     path: Vec<FetchDataPathElement>,
@@ -3243,6 +3282,12 @@ pub(crate) struct SeenResponseName {
 pub(crate) struct CollectedFieldInSet {
     path: Vec<FetchDataPathElement>,
     field: Arc<FieldSelection>,
+}
+
+impl CollectedFieldInSet {
+    pub(crate) fn field(&self) -> &Arc<FieldSelection> {
+        &self.field
+    }
 }
 
 struct FieldInPath {
@@ -3875,6 +3920,20 @@ impl Field {
             None
         }
     }
+
+    pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
+        self.data().field_position.parent()
+    }
+
+    pub(crate) fn types_can_be_merged(&self, other: &Self) -> Result<bool, FederationError> {
+        let self_definition = self.data().field_position.get(self.schema().schema())?;
+        let other_definition = other.data().field_position.get(self.schema().schema())?;
+        types_can_be_merged(
+            &self_definition.ty,
+            &other_definition.ty,
+            self.schema().schema(),
+        )
+    }
 }
 
 impl<'a> FragmentSpreadSelectionValue<'a> {
@@ -4478,6 +4537,10 @@ impl NamedFragments {
 
     pub(crate) fn size(&self) -> usize {
         self.fragments.len()
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Node<Fragment>> {
+        self.fragments.values()
     }
 
     pub(crate) fn insert(&mut self, fragment: Fragment) {
@@ -7148,6 +7211,7 @@ type T {
                 &schema,
                 &foo.element().unwrap().parent_type_position(),
                 [foo_with_c, foo_with_b, foo_with_a].iter(),
+                /*named_fragments*/ &Default::default(),
             )
             .unwrap();
             // Make sure the ordering of c, b and a is preserved.
