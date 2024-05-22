@@ -1073,7 +1073,6 @@ mod normalized_field_selection {
     use crate::query_plan::operation::SelectionKey;
     use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
-    use crate::schema::definitions::types_can_be_merged;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::TypeDefinitionPosition;
@@ -1229,20 +1228,6 @@ mod normalized_field_selection {
             for dir in self.data().directives.iter() {
                 collect_variables_from_directive(dir, variables)
             }
-        }
-
-        pub(crate) fn types_can_be_merged(&self, other: &Self) -> Result<bool, FederationError> {
-            let self_definition = self.data().field_position.get(self.schema().schema())?;
-            let other_definition = other.data().field_position.get(self.schema().schema())?;
-            types_can_be_merged(
-                &self_definition.ty,
-                &other_definition.ty,
-                self.schema().schema(),
-            )
-        }
-
-        pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
-            self.data().field_position.parent()
         }
     }
 
@@ -3934,6 +3919,20 @@ impl Field {
         } else {
             None
         }
+    }
+
+    pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
+        self.data().field_position.parent()
+    }
+
+    pub(crate) fn types_can_be_merged(&self, other: &Self) -> Result<bool, FederationError> {
+        let self_definition = self.data().field_position.get(self.schema().schema())?;
+        let other_definition = other.data().field_position.get(self.schema().schema())?;
+        types_can_be_merged(
+            &self_definition.ty,
+            &other_definition.ty,
+            self.schema().schema(),
+        )
     }
 }
 
