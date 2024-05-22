@@ -364,7 +364,7 @@ impl QueryGraph {
         &self,
         edge: EdgeIndex,
     ) -> Result<&QueryGraphNode, FederationError> {
-        let (_, head_id) = self.edge_endpoints(edge)?;
+        let (head_id, _) = self.edge_endpoints(edge)?;
         self.node_weight(head_id)
     }
 

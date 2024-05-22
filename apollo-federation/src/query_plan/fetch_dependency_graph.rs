@@ -1713,7 +1713,10 @@ impl FetchDependencyGraphNode {
     }
 
     fn remove_inputs_from_selection(&mut self) {
-        todo!()
+        if let Some(inputs) = &mut self.inputs {
+            self.cached_cost = None;
+            Arc::make_mut(inputs).selection_sets_per_parent_type.clear();
+        }
     }
 
     fn is_top_level(&self) -> bool {
@@ -3373,7 +3376,6 @@ fn handle_requires(
             return Ok((fetch_node_id, fetch_node_path.clone()));
         }
 
-        // TODO
         // We need to create a new name, on the same subgraph `group`, where we resume fetching the field for
         // which we handle the @requires _after_ we've dealt with the `requires_conditions_nodes`.
         // Note that we know the conditions will include a key for our node so we can resume properly.
@@ -3473,20 +3475,20 @@ fn inputs_for_require(
         _ => (false, entity_type_position.type_name.clone()),
     };
 
-    let input_type: CompositeTypeDefinitionPosition = fetch_dependency_graph
-        .supergraph_schema
-        .get_type(input_type_name)?
-        .try_into()?;
-
-    let mut full_selection_set = SelectionSet::for_composite_type(
-        fetch_dependency_graph.supergraph_schema.clone(),
-        input_type.clone(),
-    );
     let Some(edge_conditions) = &edge.conditions else {
         return Err(FederationError::internal(
             "Missing edge conditions for @requires",
         ));
     };
+
+    let input_type: CompositeTypeDefinitionPosition = edge_conditions
+        .schema
+        .get_type(input_type_name)?
+        .try_into()?;
+    let mut full_selection_set = SelectionSet::for_composite_type(
+        edge_conditions.schema.clone(),
+        input_type.clone(),
+    );
     full_selection_set.merge_into(iter::once(edge_conditions.deref()))?;
     if include_key_inputs {
         let Some(key_condition) = fetch_dependency_graph
@@ -3541,7 +3543,7 @@ fn inputs_for_require(
         // should just use `entity_type` (that @interfaceObject type), not input type which will be an implementation the
         // subgraph does not know in that particular case.
         let mut key_inputs = SelectionSet::for_composite_type(
-            fetch_dependency_graph.supergraph_schema.clone(),
+            edge_conditions.schema.clone(),
             input_type.clone(),
         );
         key_inputs.merge_into(iter::once(&key_condition))?;
