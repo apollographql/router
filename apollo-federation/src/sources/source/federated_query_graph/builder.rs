@@ -1,3 +1,5 @@
+#![allow(unused, unconditional_panic, clippy::diverging_sub_expression)]
+use apollo_compiler::name;
 use enum_dispatch::enum_dispatch;
 use indexmap::IndexMap;
 
@@ -32,10 +34,32 @@ pub(crate) struct FederatedQueryGraphBuilders {
 impl FederatedQueryGraphBuilders {
     pub(crate) fn process_subgraph_schemas(
         &self,
-        _subgraphs: ValidFederationSubgraphs,
-        _builder: &mut IntraSourceQueryGraphBuilder,
+        subgraphs: ValidFederationSubgraphs,
+        builder: &mut IntraSourceQueryGraphBuilder,
     ) -> Result<(), FederationError> {
-        todo!()
+        subgraphs.into_iter().try_for_each(|(_name, graph)| {
+            let src_kind = extract_source_kind(&graph);
+            builder.set_source_kind(src_kind);
+            self.get_builder(src_kind)
+                .process_subgraph_schema(graph, builder)
+        })
+    }
+
+    fn get_builder(&self, src_kind: SourceKind) -> &FederatedQueryGraphBuilder {
+        self.builders.get(&src_kind).unwrap()
+    }
+}
+
+fn extract_source_kind(graph: &ValidFederationSubgraph) -> SourceKind {
+    // TODO: There has to be a better way of doing this... right??
+    if graph
+        .schema
+        .get_directive_definitions()
+        .any(|dir| dir.directive_name == name!("connect"))
+    {
+        SourceKind::Connect
+    } else {
+        SourceKind::Graphql
     }
 }
 
