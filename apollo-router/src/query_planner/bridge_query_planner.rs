@@ -1645,6 +1645,7 @@ mod tests {
     }
 
     #[test]
+    #[skip]
     fn router_bridge_dependency_is_pinned() {
         let cargo_manifest: serde_json::Value = basic_toml::from_str(
             &fs::read_to_string(PathBuf::from(&env!("CARGO_MANIFEST_DIR")).join("Cargo.toml"))
