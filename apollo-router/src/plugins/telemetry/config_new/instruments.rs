@@ -1474,8 +1474,9 @@ where
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &inner.attributes);
+            inner.updated = true;
         }
     }
 
@@ -1529,9 +1530,9 @@ where
                 return;
             }
         };
-        inner.updated = true;
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &attrs);
+            inner.updated = true;
         }
     }
 
