@@ -96,7 +96,7 @@ const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: Key =
     Key::from_static_str("apollo_private.http.response_headers");
 pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
-const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
+pub(crate) const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const PATH: Key = Key::from_static_str("graphql.path");
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
 pub(crate) const CLIENT_NAME_KEY: Key = Key::from_static_str("client.name");
@@ -802,7 +802,7 @@ fn extract_json<T: DeserializeOwned>(v: &Value) -> Option<T> {
         .unwrap_or(None)
 }
 
-fn extract_string(v: &Value) -> Option<String> {
+pub(crate) fn extract_string(v: &Value) -> Option<String> {
     if let Value::String(v) = v {
         Some(v.to_string())
     } else {
@@ -847,7 +847,24 @@ fn extract_i64(v: &Value) -> Option<i64> {
     }
 }
 
-fn extract_ftv1_trace(
+pub(crate) fn extract_ftv1_trace_with_error_count(
+    v: &Value,
+    error_config: &ErrorConfiguration,
+) -> Option<Result<(Box<proto::reports::Trace>, u64), Error>> {
+    let mut error_count: u64 = 0;
+    if let Value::String(s) = v {
+        if let Some(mut t) = decode_ftv1_trace(s.as_str()) {
+            if let Some(root) = &mut t.root {
+                error_count += preprocess_errors(root, error_config);
+            }
+            return Some(Ok((Box::new(t), error_count)));
+        }
+        return Some(Err(Error::TraceParsingFailed));
+    }
+    None
+}
+
+pub(crate) fn extract_ftv1_trace(
     v: &Value,
     error_config: &ErrorConfiguration,
 ) -> Option<Result<Box<proto::reports::Trace>, Error>> {
@@ -863,7 +880,8 @@ fn extract_ftv1_trace(
     None
 }
 
-fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorConfiguration) {
+fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorConfiguration) -> u64  {
+    let mut error_count: u64 = 0;
     if error_config.send {
         if error_config.redact {
             t.error.iter_mut().for_each(|err| {
@@ -872,17 +890,23 @@ fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorCo
                 err.json = String::new();
             });
         }
+        error_count += u64::try_from(t.error.len()).expect("expected u64");
     } else {
         t.error = Vec::new();
     }
     t.child
         .iter_mut()
-        .for_each(|n| preprocess_errors(n, error_config));
+        .for_each(|n| error_count += preprocess_errors(n, error_config));
+    return error_count;
 }
 
 pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
     let bytes = BASE64_STANDARD.decode(string).ok()?;
     proto::reports::Trace::decode(Cursor::new(bytes)).ok()
+}
+
+pub(crate) fn encode_ftv1_trace(trace: &proto::reports::Trace) -> String {
+    BASE64_STANDARD.encode(trace.encode_to_vec())
 }
 
 fn extract_http_data(span: &LightSpanData) -> Http {
@@ -1134,17 +1158,14 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
-    use base64::prelude::BASE64_STANDARD;
-    use base64::Engine as _;
     use opentelemetry::Value;
-    use prost::Message;
     use serde_json::json;
     use crate::plugins::telemetry::apollo::ErrorConfiguration;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{ChildNodes, extract_ftv1_trace, extract_i64, extract_json, extract_path, extract_string, TreeData, preprocess_errors};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1297,7 +1318,7 @@ mod test {
     #[test]
     fn test_extract_ftv1_trace() {
         let trace = Trace::default();
-        let encoded = BASE64_STANDARD.encode(trace.encode_to_vec());
+        let encoded = encode_ftv1_trace(&trace);
         assert_eq!(
             *extract_ftv1_trace(
                 &Value::String(encoded.into()),
@@ -1305,8 +1326,24 @@ mod test {
             )
             .expect("there was a trace here")
             .expect("the trace must be decoded"),
-            trace
+            trace,
         );
+    }
+
+    #[test]
+    fn test_extract_ftv1_trace_with_error_count() {
+        // TBD(tim): this should use subgraph mocks as we have them in the integration tests.
+        // Where is a good place for them to live if they were shared?
+        let trace = Trace::default();
+        let encoded = encode_ftv1_trace(&trace);
+        let extracted = extract_ftv1_trace_with_error_count(
+                &Value::String(encoded.into()),
+                &ErrorConfiguration::default()
+            )
+            .expect("there was a trace here")
+            .expect("the trace must be decoded");
+        assert_eq!(*extracted.0, trace);
+        assert_eq!(extracted.1, 0u64);
     }
 
     #[test]

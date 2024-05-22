@@ -24,8 +24,15 @@ use tower::BoxError;
 use url::Url;
 use uuid::Uuid;
 
+use super::apollo::ErrorsConfiguration;
+use super::config_new::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
+use super::tracing::apollo_telemetry::encode_ftv1_trace;
+use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
+use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
+use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
+use super::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
@@ -120,7 +127,59 @@ impl ApolloOtlpExporter {
         });
     }
 
-    pub(crate) fn prepare_for_export(&self, span: &LightSpanData) -> SpanData {
+    pub(crate) fn prepare_for_export(&self, span: LightSpanData, errors_config: &ErrorsConfiguration) -> SpanData {
+        match span.name.as_ref() {
+            SUBGRAPH_SPAN_NAME => {
+                self.prepare_subgraph_span(span, &errors_config)
+            },
+            _ => SpanData {
+                span_context: SpanContext::new(
+                    span.trace_id,
+                    span.span_id,
+                    TraceFlags::default().with_sampled(true),
+                    true,
+                    TraceState::default(),
+                ), 
+                parent_span_id: span.parent_span_id,
+                span_kind: span.span_kind.clone(),
+                name: span.name.clone(),
+                start_time: span.start_time,
+                end_time: span.end_time,
+                attributes: span.attributes.clone(),
+                events: EvictedQueue::new(0),
+                links: EvictedQueue::new(0),
+                status: Status::Unset,
+                resource: Cow::Owned(self.resource_template.to_owned()),
+                instrumentation_lib: self.intrumentation_library.clone(),
+            }
+        }
+    }
+
+    fn prepare_subgraph_span(&self, span: LightSpanData, errors_config: &ErrorsConfiguration) -> SpanData {
+        let mut new_attrs = span.attributes.clone();
+        let mut status = Status::Unset;
+
+        // If there is an FTV1 attribute, process it for error redaction and replace it
+        if let Some(ftv1) = new_attrs.get(&APOLLO_PRIVATE_FTV1) {
+            let subgraph_name = span
+            .attributes
+            .get(&SUBGRAPH_NAME)
+            .and_then(extract_string)
+            .unwrap_or_default();
+            let subgraph_error_config = errors_config
+                .subgraph
+                .get_error_config(&subgraph_name);
+            if let Some(trace) = extract_ftv1_trace_with_error_count(ftv1, &subgraph_error_config) {
+                if let Ok((trace_result, error_count)) = trace {
+                    if error_count > 0 {
+                        status = Status::error("ftv1")
+                    }
+                    let encoded = encode_ftv1_trace(&*trace_result);
+                    new_attrs.insert(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
+                }
+            }
+        }
+        
         SpanData {
             span_context: SpanContext::new(
                 span.trace_id,
@@ -128,7 +187,7 @@ impl ApolloOtlpExporter {
                 TraceFlags::default().with_sampled(true),
                 true,
                 TraceState::default(),
-            ),
+            ), 
             parent_span_id: span.parent_span_id,
             span_kind: span.span_kind.clone(),
             name: span.name.clone(),
@@ -137,11 +196,12 @@ impl ApolloOtlpExporter {
             attributes: span.attributes.clone(),
             events: EvictedQueue::new(0),
             links: EvictedQueue::new(0),
-            status: Status::Unset,
+            status,
             resource: Cow::Owned(self.resource_template.to_owned()),
             instrumentation_lib: self.intrumentation_library.clone(),
         }
     }
+    
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         let mut exporter = self.otlp_exporter.lock();
