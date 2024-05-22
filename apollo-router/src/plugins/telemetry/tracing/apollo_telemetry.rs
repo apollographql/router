@@ -453,43 +453,29 @@ impl Exporter {
         Ok(results)
     }
 
-    fn init_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
+    fn init_spans_for_tree(&self, root_span: LightSpanData) -> Vec<SpanData> {
         let exporter = self
             .otlp_exporter
             .as_ref()
             .expect("expected an otlp exporter");
-        let root_span_data = exporter.prepare_for_export(root_span);
+        let root_span_data = exporter.prepare_for_export(
+            root_span, 
+            &self.errors_configuration
+        );
         vec![root_span_data]
     }
 
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
     /// all spans in the tree.
-    fn pop_spans_for_tree(&mut self, root_span: &LightSpanData) -> Vec<SpanData> {
+    fn pop_spans_for_tree(&mut self, root_span: LightSpanData) -> Vec<SpanData> {
         let root_span_id = root_span.span_id;
         let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {
             Some(spans) => spans
                 .into_iter()
-                .flat_map(|(_, span)| self.pop_spans_for_tree(&span))
+                .flat_map(|(_, span)| self.pop_spans_for_tree(span))
                 .collect(),
             None => Vec::new(),
         };
-        let mut spans_for_tree = self.init_spans_for_tree(root_span);
-        spans_for_tree.append(&mut child_spans);
-        spans_for_tree
-    }
-
-    /// Collects the subtree for a trace by calling peek() on the LRU cache for
-    /// all spans in the tree.
-    fn peek_spans_for_tree(&self, root_span: &LightSpanData) -> Vec<SpanData> {
-        let root_span_id = root_span.span_id;
-        let mut child_spans = match self.spans_by_parent_id.peek(&root_span_id) {
-            Some(spans) => spans
-                .into_iter()
-                .flat_map(|(_, span)| self.peek_spans_for_tree(span))
-                .collect(),
-            None => Vec::new(),
-        };
-
         let mut spans_for_tree = self.init_spans_for_tree(root_span);
         spans_for_tree.append(&mut child_spans);
         spans_for_tree
@@ -497,20 +483,10 @@ impl Exporter {
 
     /// Used by the OTLP exporter to build up a complete trace given an initial "root span".
     /// Iterates over all children and recursively collect the entire subtree.
-    /// The pop_cache flag indicates whether we should pop() or peek() when reading from the LRU cache.
-    /// When we are running in ApolloAndOtlp mode, only the Apollo side will pop and the Otlp side will peek & clone.
     /// TBD(tim): For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
     /// groups based on trace ID instead of connecting recursively by parent ID.
-    fn group_by_trace(&mut self, span: &LightSpanData, pop_cache: bool) -> Vec<SpanData> {
-        if pop_cache {
-            // We're going to use "pop" here b/c it's ok to remove the spans from the cache
-            // when the apollo exporter is not enabled.
-            self.pop_spans_for_tree(span)
-        } else {
-            // We're going to use "peek" here b/c it would otherwise remove the spans from the cache
-            // and prevent the apollo exporter from finding them.
-            self.peek_spans_for_tree(span)
-        }
+    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<SpanData> {
+        self.pop_spans_for_tree(span)
     }
 
     fn extract_data_from_spans(&mut self, span: &LightSpanData) -> Result<Vec<TreeData>, Error> {
@@ -975,8 +951,7 @@ impl SpanExporter for Exporter {
                 let root_span: LightSpanData =
                     LightSpanData::from_span_data(span, &self.include_attr_names);
                 if send_otlp {
-                    let pop_cache = true; // pct rollout, if we are sending otlp then always pop
-                    let grouped_trace_spans = self.group_by_trace(&root_span, pop_cache);
+                    let grouped_trace_spans = self.group_by_trace(root_span);
                     // TBD(tim): do we need to filter out traces w/o signatures?  What scenario(s) would cause that to happen?
                     otlp_trace_spans.push(grouped_trace_spans);
                 } else if send_reports {
