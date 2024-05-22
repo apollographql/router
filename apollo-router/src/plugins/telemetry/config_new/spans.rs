@@ -347,7 +347,7 @@ mod test {
             "test".to_string(),
             Conditional {
                 selector: RouterSelector::StaticField {
-                    r#static: "my-static-value".to_string(),
+                    r#static: "my-static-value".to_string().into(),
                 },
                 condition: Some(Arc::new(Mutex::new(Condition::Eq([
                     SelectorOrValue::Value(AttributeValue::Bool(true)),

@@ -951,7 +951,17 @@ impl Telemetry {
                 let ctx = context.clone();
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
+                let config_cloned = config.clone();
                 let stream = stream.inspect(move |resp| {
+                    let span = Span::current();
+                    span.set_span_dyn_attributes(
+                        config_cloned
+                            .instrumentation
+                            .spans
+                            .supergraph
+                            .attributes
+                            .on_response_event(resp, &ctx),
+                    );
                     custom_instruments.on_response_event(resp, &ctx);
                     custom_events.on_response_event(resp, &ctx);
                 });
