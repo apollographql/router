@@ -108,5 +108,5 @@
         ]
         
         paths = [
-            '''^apollo-router/tests/snapshots/apollo_otel_traces.*''',
+            '''^apollo-router\/tests\/snapshots\/apollo_otel_traces__.+\.snap$''',
         ]
