@@ -7,6 +7,7 @@ use crate::error::FederationError;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilder;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
 use crate::sources::connect;
+use crate::sources::connect::ConnectSpecDefinition;
 use crate::sources::graphql;
 use crate::sources::source::SourceKind;
 use crate::ValidFederationSubgraph;
@@ -51,11 +52,11 @@ impl FederatedQueryGraphBuilders {
 }
 
 fn extract_source_kind(graph: &ValidFederationSubgraph) -> SourceKind {
-    // TODO: There has to be a better way of doing this... right??
     if graph
         .schema
-        .get_directive_definitions()
-        .any(|dir| dir.directive_name == name!("connect"))
+        .metadata()
+        .and_then(|metadata| metadata.for_identity(&ConnectSpecDefinition::identity()))
+        .is_some()
     {
         SourceKind::Connect
     } else {
