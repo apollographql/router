@@ -127,11 +127,13 @@ impl ApolloOtlpExporter {
         });
     }
 
-    pub(crate) fn prepare_for_export(&self, span: LightSpanData, errors_config: &ErrorsConfiguration) -> SpanData {
+    pub(crate) fn prepare_for_export(
+        &self,
+        span: LightSpanData,
+        errors_config: &ErrorsConfiguration,
+    ) -> SpanData {
         match span.name.as_ref() {
-            SUBGRAPH_SPAN_NAME => {
-                self.prepare_subgraph_span(span, &errors_config)
-            },
+            SUBGRAPH_SPAN_NAME => self.prepare_subgraph_span(span, &errors_config),
             _ => SpanData {
                 span_context: SpanContext::new(
                     span.trace_id,
@@ -139,7 +141,7 @@ impl ApolloOtlpExporter {
                     TraceFlags::default().with_sampled(true),
                     true,
                     TraceState::default(),
-                ), 
+                ),
                 parent_span_id: span.parent_span_id,
                 span_kind: span.span_kind.clone(),
                 name: span.name.clone(),
@@ -151,24 +153,26 @@ impl ApolloOtlpExporter {
                 status: Status::Unset,
                 resource: Cow::Owned(self.resource_template.to_owned()),
                 instrumentation_lib: self.intrumentation_library.clone(),
-            }
+            },
         }
     }
 
-    fn prepare_subgraph_span(&self, span: LightSpanData, errors_config: &ErrorsConfiguration) -> SpanData {
+    fn prepare_subgraph_span(
+        &self,
+        span: LightSpanData,
+        errors_config: &ErrorsConfiguration,
+    ) -> SpanData {
         let mut new_attrs = span.attributes.clone();
         let mut status = Status::Unset;
 
         // If there is an FTV1 attribute, process it for error redaction and replace it
         if let Some(ftv1) = new_attrs.get(&APOLLO_PRIVATE_FTV1) {
             let subgraph_name = span
-            .attributes
-            .get(&SUBGRAPH_NAME)
-            .and_then(extract_string)
-            .unwrap_or_default();
-            let subgraph_error_config = errors_config
-                .subgraph
-                .get_error_config(&subgraph_name);
+                .attributes
+                .get(&SUBGRAPH_NAME)
+                .and_then(extract_string)
+                .unwrap_or_default();
+            let subgraph_error_config = errors_config.subgraph.get_error_config(&subgraph_name);
             if let Some(trace) = extract_ftv1_trace_with_error_count(ftv1, &subgraph_error_config) {
                 if let Ok((trace_result, error_count)) = trace {
                     if error_count > 0 {
@@ -179,7 +183,7 @@ impl ApolloOtlpExporter {
                 }
             }
         }
-        
+
         SpanData {
             span_context: SpanContext::new(
                 span.trace_id,
@@ -187,7 +191,7 @@ impl ApolloOtlpExporter {
                 TraceFlags::default().with_sampled(true),
                 true,
                 TraceState::default(),
-            ), 
+            ),
             parent_span_id: span.parent_span_id,
             span_kind: span.span_kind.clone(),
             name: span.name.clone(),
@@ -201,7 +205,6 @@ impl ApolloOtlpExporter {
             instrumentation_lib: self.intrumentation_library.clone(),
         }
     }
-    
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         let mut exporter = self.otlp_exporter.lock();

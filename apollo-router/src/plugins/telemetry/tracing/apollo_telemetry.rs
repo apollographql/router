@@ -458,10 +458,7 @@ impl Exporter {
             .otlp_exporter
             .as_ref()
             .expect("expected an otlp exporter");
-        let root_span_data = exporter.prepare_for_export(
-            root_span, 
-            &self.errors_configuration
-        );
+        let root_span_data = exporter.prepare_for_export(root_span, &self.errors_configuration);
         vec![root_span_data]
     }
 
@@ -880,7 +877,10 @@ pub(crate) fn extract_ftv1_trace(
     None
 }
 
-fn preprocess_errors(t: &mut proto::reports::trace::Node, error_config: &ErrorConfiguration) -> u64  {
+fn preprocess_errors(
+    t: &mut proto::reports::trace::Node,
+    error_config: &ErrorConfiguration,
+) -> u64 {
     let mut error_count: u64 = 0;
     if error_config.send {
         if error_config.redact {
@@ -1337,11 +1337,11 @@ mod test {
         let trace = Trace::default();
         let encoded = encode_ftv1_trace(&trace);
         let extracted = extract_ftv1_trace_with_error_count(
-                &Value::String(encoded.into()),
-                &ErrorConfiguration::default()
-            )
-            .expect("there was a trace here")
-            .expect("the trace must be decoded");
+            &Value::String(encoded.into()),
+            &ErrorConfiguration::default(),
+        )
+        .expect("there was a trace here")
+        .expect("the trace must be decoded");
         assert_eq!(*extracted.0, trace);
         assert_eq!(extracted.1, 0u64);
     }
