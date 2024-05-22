@@ -4610,7 +4610,9 @@ impl NamedFragments {
             depends_on: Vec<Name>,
         }
 
-        let mut fragments_map: HashMap<Name, FragmentDependencies> = HashMap::new();
+        // Note: We use IndexMap to stabilize the ordering of the result, which influences
+        //       the outcome of `map_to_expanded_selection_sets`.
+        let mut fragments_map: IndexMap<Name, FragmentDependencies> = IndexMap::new();
         for fragment in fragments.values() {
             let mut fragment_usages: HashMap<Name, i32> = HashMap::new();
             NamedFragments::collect_fragment_usages(&fragment.selection_set, &mut fragment_usages);
@@ -4758,7 +4760,7 @@ impl NamedFragments {
                 NormalizeSelectionOption::NormalizeRecursively,
             )?;
             let mapped_selection_set = mapper(&expanded_selection_set)?;
-            let optimized_selection_set = mapped_selection_set; // TODO: call SelectionSet::optimize (FED-191)
+            let optimized_selection_set = mapped_selection_set.optimize_at_root(&result)?;
             let updated = Fragment {
                 selection_set: optimized_selection_set,
                 schema: fragment.schema.clone(),
