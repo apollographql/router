@@ -1,0 +1,68 @@
+# Composed from subgraphs with hash: c6a3588d5bfe556f3de3cf2f3fa2165704f9206d
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  A @join__graph(name: "A", url: "none")
+  B @join__graph(name: "B", url: "none")
+  C @join__graph(name: "C", url: "none")
+  D @join__graph(name: "D", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: A)
+  @join__type(graph: B)
+  @join__type(graph: C)
+  @join__type(graph: D)
+{
+  t: T @join__field(graph: A)
+}
+
+type T
+  @join__type(graph: A, key: "id1")
+  @join__type(graph: B, key: "id1")
+  @join__type(graph: B, key: "id2")
+  @join__type(graph: C, key: "id1")
+  @join__type(graph: D, key: "id2")
+{
+  id1: ID! @join__field(graph: A) @join__field(graph: B) @join__field(graph: C)
+  id2: ID! @join__field(graph: B) @join__field(graph: D)
+  v1: Int @join__field(graph: B)
+  v2: Int @join__field(graph: B)
+  v3: Int @join__field(graph: C) @join__field(graph: D, external: true)
+  v4: Int @join__field(graph: D, requires: "v3")
+}
