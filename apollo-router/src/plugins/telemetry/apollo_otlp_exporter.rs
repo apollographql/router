@@ -133,7 +133,7 @@ impl ApolloOtlpExporter {
         errors_config: &ErrorsConfiguration,
     ) -> SpanData {
         match span.name.as_ref() {
-            SUBGRAPH_SPAN_NAME => self.prepare_subgraph_span(span, &errors_config),
+            SUBGRAPH_SPAN_NAME => self.prepare_subgraph_span(span, errors_config),
             _ => SpanData {
                 span_context: SpanContext::new(
                     span.trace_id,
@@ -173,14 +173,14 @@ impl ApolloOtlpExporter {
                 .and_then(extract_string)
                 .unwrap_or_default();
             let subgraph_error_config = errors_config.subgraph.get_error_config(&subgraph_name);
-            if let Some(trace) = extract_ftv1_trace_with_error_count(ftv1, &subgraph_error_config) {
-                if let Ok((trace_result, error_count)) = trace {
-                    if error_count > 0 {
-                        status = Status::error("ftv1")
-                    }
-                    let encoded = encode_ftv1_trace(&*trace_result);
-                    new_attrs.insert(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
+            if let Some(Ok((trace_result, error_count))) =
+                extract_ftv1_trace_with_error_count(ftv1, subgraph_error_config)
+            {
+                if error_count > 0 {
+                    status = Status::error("ftv1")
                 }
+                let encoded = encode_ftv1_trace(&trace_result);
+                new_attrs.insert(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
             }
         }
 

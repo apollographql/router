@@ -897,7 +897,7 @@ fn preprocess_errors(
     t.child
         .iter_mut()
         .for_each(|n| error_count += preprocess_errors(n, error_config));
-    return error_count;
+    error_count
 }
 
 pub(crate) fn decode_ftv1_trace(string: &str) -> Option<proto::reports::Trace> {
