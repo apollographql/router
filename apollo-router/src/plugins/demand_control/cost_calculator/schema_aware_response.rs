@@ -186,6 +186,9 @@ mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
     use bytes::Bytes;
+    use insta::assert_yaml_snapshot;
+    use serde::ser::SerializeMap;
+    use serde::{Serialize, Serializer};
 
     use super::*;
     use crate::graphql::Response;
@@ -214,8 +217,7 @@ mod tests {
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
         let zipped = SchemaAwareResponse::new(&request, &response);
-
-        assert!(zipped.is_ok())
+        assert_yaml_snapshot!(zipped.expect("expected zipped response"))
     }
 
     #[test]
@@ -228,8 +230,7 @@ mod tests {
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
         let zipped = SchemaAwareResponse::new(&request, &response);
-
-        assert!(zipped.is_ok())
+        assert_yaml_snapshot!(zipped.expect("expected zipped response"))
     }
 
     #[test]
@@ -242,7 +243,62 @@ mod tests {
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
         let zipped = SchemaAwareResponse::new(&request, &response);
+        assert_yaml_snapshot!(zipped.expect("expected zipped response"))
+    }
 
-        assert!(zipped.is_ok())
+    impl Serialize for SchemaAwareResponse<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            self.value.serialize(serializer)
+        }
+    }
+
+    impl Serialize for TypedValue<'_> {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            match self {
+                TypedValue::Null => serializer.serialize_none(),
+                TypedValue::Bool(ty, field, b) => {
+                    let mut map = serializer.serialize_map(None)?;
+                    map.serialize_entry("type", ty.as_str())?;
+                    map.serialize_entry("field", &field.name)?;
+                    map.serialize_entry("value", b)?;
+                    map.end()
+                }
+                TypedValue::Number(ty, field, n) => {
+                    let mut map = serializer.serialize_map(None)?;
+                    map.serialize_entry("type", ty.as_str())?;
+                    map.serialize_entry("field", &field.name)?;
+                    map.serialize_entry("value", n)?;
+                    map.end()
+                }
+                TypedValue::String(ty, field, s) => {
+                    let mut map = serializer.serialize_map(None)?;
+                    map.serialize_entry("type", ty.as_str())?;
+                    map.serialize_entry("field", &field.name)?;
+                    map.serialize_entry("value", s)?;
+                    map.end()
+                }
+                TypedValue::List(ty, field, items) => {
+                    let mut map = serializer.serialize_map(None)?;
+                    map.serialize_entry("type", ty.as_str())?;
+                    map.serialize_entry("field", &field.name)?;
+                    map.serialize_entry("items", items)?;
+                    map.end()
+                }
+                TypedValue::Object(ty, field, children) => {
+                    let mut map = serializer.serialize_map(None)?;
+                    map.serialize_entry("type", ty.as_str())?;
+                    map.serialize_entry("field", &field.name)?;
+                    map.serialize_entry("children", children)?;
+                    map.end()
+                }
+                TypedValue::Root(children) => children.serialize(serializer),
+            }
+        }
     }
 }

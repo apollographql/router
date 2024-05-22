@@ -1,0 +1,30 @@
+---
+source: apollo-router/src/plugins/demand_control/cost_calculator/schema_aware_response.rs
+expression: "zipped.expect(\"expected zipped response\")"
+---
+users:
+  type: Query
+  field: users
+  items:
+    - type: Query
+      field: users
+      children:
+        name:
+          type: User
+          field: name
+          value: Kate Chopin
+        licenseNumber:
+          type: User
+          field: licenseNumber
+          value: 1
+    - type: Query
+      field: users
+      children:
+        licenseNumber:
+          type: User
+          field: licenseNumber
+          value: 2
+        name:
+          type: User
+          field: name
+          value: Paul Auster
