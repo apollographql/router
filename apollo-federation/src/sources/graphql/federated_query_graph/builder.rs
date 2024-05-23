@@ -133,7 +133,7 @@ fn process_type(
             .filter(|field| is_field_ignored(field.clone().into(), subgraph_schema))
             .try_for_each(|subgraph_field| {
                 subgraph_schema
-                    .get_type(subgraph_field.field_name.clone())
+                    .get_type(subgraph_field.type_name.clone())
                     .and_then(OutputTypeDefinitionPosition::try_from)
                     .and_then(|ty| process_type(ty, subgraph_schema, builder, existing_types))
                     .and_then(|next_index| {
