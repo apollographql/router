@@ -164,7 +164,7 @@ impl IntraSourceQueryGraphBuilderApi for IntraSourceQueryGraphBuilder {
         &mut self,
         source: SourceId,
     ) -> Result<impl IntraSourceQueryGraphSubBuilderApi, FederationError> {
-        if Some(source.kind()) == self.source_kind {
+        if Some(source.kind()) != self.source_kind {
             return Err(FederationError::internal(format!(
                 r#"Source "{source}" did not match kind "{}"."#,
                 source.kind(),
