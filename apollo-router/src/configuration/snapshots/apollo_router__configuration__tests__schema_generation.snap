@@ -2868,6 +2868,19 @@ expression: "&schema"
             "type_name"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "static": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
+            }
+          },
+          "required": [
+            "static"
+          ],
+          "type": "object"
         }
       ]
     },
