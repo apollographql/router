@@ -691,6 +691,10 @@ where
         self.attributes.on_response_event(response, ctx);
     }
 
+    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+        self.attributes.on_response_field(typed_value, ctx);
+    }
+
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         self.attributes.on_error(error, ctx);
     }
