@@ -1855,6 +1855,25 @@ mod tests {
                                 }
                             }
                         },
+                        "acme.request.on_graphql_error_histo": {
+                            "value": "event_unit",
+                            "type": "histogram",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "NOPE",
+                                    {
+                                        "response_errors": "$.[0].extensions.code"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
                         "acme.request.on_graphql_data": {
                             "value": {
                                 "response_data": "$.price"
@@ -1940,6 +1959,11 @@ mod tests {
                 1.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
             assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
@@ -1984,6 +2008,11 @@ mod tests {
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
             assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
@@ -2015,6 +2044,11 @@ mod tests {
             assert_counter!("acme.request.on_error", 2.0);
             assert_counter!(
                 "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );

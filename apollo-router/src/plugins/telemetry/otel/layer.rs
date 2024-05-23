@@ -992,6 +992,7 @@ mod tests {
                 builder,
                 parent_cx: parent_cx.clone(),
                 event_attributes: None,
+                forced_status: None,
             });
             noop::NoopSpan::new()
         }
