@@ -198,6 +198,14 @@ impl From<opentelemetry::Value> for AttributeValue {
 
 #[cfg(test)]
 mod test {
+    use std::sync::OnceLock;
+
+    use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::ast::Type;
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::Node;
+    use apollo_compiler::NodeStr;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
@@ -214,6 +222,28 @@ mod test {
     use crate::plugins::telemetry::config_new::DatadogId;
     use crate::plugins::telemetry::config_new::ToOtelValue;
     use crate::plugins::telemetry::otel;
+
+    pub(crate) fn field() -> &'static Field {
+        static FIELD: OnceLock<Field> = OnceLock::new();
+        FIELD.get_or_init(|| {
+            Field::new(
+                NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                Node::new(FieldDefinition {
+                    description: None,
+                    name: NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                    arguments: vec![],
+                    ty: Type::Named(NamedType::new_unchecked(NodeStr::from_static(
+                        &"field_type",
+                    ))),
+                    directives: Default::default(),
+                }),
+            )
+        })
+    }
+    pub(crate) fn ty() -> &'static NamedType {
+        static TYPE: NamedType = NamedType::new_unchecked(NodeStr::from_static(&"type_name"));
+        &TYPE
+    }
 
     #[test]
     fn dd_convert() {

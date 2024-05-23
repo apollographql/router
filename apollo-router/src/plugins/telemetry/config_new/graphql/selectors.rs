@@ -144,8 +144,8 @@ mod tests {
     use opentelemetry::Value;
 
     use super::*;
-    use crate::plugins::telemetry::config_new::graphql::test::field;
-    use crate::plugins::telemetry::config_new::graphql::test::ty;
+    use crate::plugins::telemetry::config_new::test::field;
+    use crate::plugins::telemetry::config_new::test::ty;
 
     #[test]
     fn array_length() {

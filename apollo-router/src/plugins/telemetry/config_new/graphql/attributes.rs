@@ -112,8 +112,8 @@ impl Selectors for GraphQLAttributes {
 #[cfg(test)]
 mod test {
     use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-    use crate::plugins::telemetry::config_new::graphql::test::field;
-    use crate::plugins::telemetry::config_new::graphql::test::ty;
+    use crate::plugins::telemetry::config_new::test::field;
+    use crate::plugins::telemetry::config_new::test::ty;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
 

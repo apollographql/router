@@ -229,15 +229,7 @@ impl<'a> Visitor for GraphQLInstrumentsVisitor<'a> {
 }
 
 #[cfg(test)]
-mod test {
-    use std::sync::OnceLock;
-
-    use apollo_compiler::executable::Field;
-    use apollo_compiler::schema::FieldDefinition;
-    use apollo_compiler::schema::NamedType;
-    use apollo_compiler::schema::Type;
-    use apollo_compiler::Node;
-    use apollo_compiler::NodeStr;
+pub(crate) mod test {
 
     use super::*;
     use crate::metrics::FutureMetricsExt;
@@ -441,27 +433,5 @@ mod test {
         context.extensions().lock().insert(query);
 
         context
-    }
-
-    pub(crate) fn field() -> &'static Field {
-        static FIELD: OnceLock<Field> = OnceLock::new();
-        FIELD.get_or_init(|| {
-            Field::new(
-                NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
-                Node::new(FieldDefinition {
-                    description: None,
-                    name: NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
-                    arguments: vec![],
-                    ty: Type::Named(NamedType::new_unchecked(NodeStr::from_static(
-                        &"field_type",
-                    ))),
-                    directives: Default::default(),
-                }),
-            )
-        })
-    }
-    pub(crate) fn ty() -> &'static NamedType {
-        static TYPE: NamedType = NamedType::new_unchecked(NodeStr::from_static(&"type_name"));
-        &TYPE
     }
 }

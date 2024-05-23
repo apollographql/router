@@ -188,7 +188,8 @@ mod tests {
     use bytes::Bytes;
     use insta::assert_yaml_snapshot;
     use serde::ser::SerializeMap;
-    use serde::{Serialize, Serializer};
+    use serde::Serialize;
+    use serde::Serializer;
 
     use super::*;
     use crate::graphql::Response;
