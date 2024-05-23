@@ -209,7 +209,7 @@ pub(crate) fn build_operation_with_aliasing(
     subgraph_schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<Valid<ExecutableDocument>, ContextBatchingError> {
     let ContextualArguments { arguments, count } = contextual_arguments;
-    let parsed_document = subgraph_operation.as_parsed(subgraph_schema);
+    let parsed_document = subgraph_operation.as_parsed();
 
     let mut ed = ExecutableDocument::new();
 
