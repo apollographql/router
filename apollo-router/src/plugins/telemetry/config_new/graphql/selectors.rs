@@ -66,9 +66,6 @@ pub(crate) enum GraphQLSelector {
         type_name: TypeName,
     },
 
-    /// A static string value
-    Static(AttributeValue),
-
     StaticField {
         /// A static string value
         r#static: AttributeValue,
@@ -144,7 +141,6 @@ impl Selector for GraphQLSelector {
                 | TypedValue::Object(ty, _, _) => Some(ty.to_string().into()),
                 TypedValue::Root(_) => None,
             },
-            GraphQLSelector::Static(v) => Some(v.clone().into()),
             GraphQLSelector::StaticField { r#static } => Some(r#static.clone().into()),
         }
     }
@@ -253,14 +249,6 @@ mod tests {
         let typed_value = TypedValue::Bool(ty(), field(), &true);
         let result = selector.on_response_field(&typed_value, &Context::default());
         assert_eq!(result, Some(Value::String("type_name".into())));
-    }
-
-    #[test]
-    fn static_value() {
-        let selector = GraphQLSelector::Static("static_value".into());
-        let typed_value = TypedValue::Bool(ty(), field(), &true);
-        let result = selector.on_response_field(&typed_value, &Context::default());
-        assert_eq!(result, Some(Value::String("static_value".into())));
     }
 
     #[test]
