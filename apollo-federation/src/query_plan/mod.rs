@@ -14,6 +14,7 @@ pub(crate) mod fetch_dependency_graph;
 pub(crate) mod fetch_dependency_graph_processor;
 pub mod generate;
 pub(crate) mod operation;
+mod optimize;
 pub mod query_planner;
 pub(crate) mod query_planning_traversal;
 
