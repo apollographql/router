@@ -134,7 +134,6 @@ const REPORTS_INCLUDE_ATTRS: [Key; 17] = [
 const OTLP_EXT_INCLUDE_ATTRS: [Key; 6] = [
     // TBD(tim): operation subtype is not yet implemented but we'll need it for parity with the reports protocol
     OPERATION_SUBTYPE,
-    // TBD(tim): attributes below will take us beyond parity but these seem useful:
     EXT_TRACE_ID,
     opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD,
     opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
@@ -352,8 +351,7 @@ impl Exporter {
             use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
             include_span_names: INCLUDE_SPANS.into(),
             include_attr_names: match apollo_tracing_protocol {
-                // TBD(tim): consider filtering the current implementation for memory purposes to HashSet::from(REPORTS_INCLUDE_ATTRS)
-                ApolloTracingProtocol::Apollo => None,
+                ApolloTracingProtocol::Apollo => Some(HashSet::from(REPORTS_INCLUDE_ATTRS)),
                 ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => {
                     Some(HashSet::from_iter(
                         [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
