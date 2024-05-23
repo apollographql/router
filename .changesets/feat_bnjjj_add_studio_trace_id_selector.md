@@ -1,8 +1,8 @@
 ### Add support for studio trace id in selectors and document context entry ([Issue #3803](https://github.com/apollographql/router/issues/3803)), ([Issue #5172](https://github.com/apollographql/router/issues/5172))
 
-Add support for a new trace id selector kind, the apollo trace id which represents the trace id on [Apollo Studio](https://studio.apollographql.com/). 
+Add support for a new trace ID selector kind, the `apollo` trace ID, which represents the trace ID on [Apollo GraphOS Studio](https://studio.apollographql.com/). 
 
-Example:
+An example configuration using `trace_id: apollo`:
 
 ```yaml
 telemetry:
@@ -13,6 +13,6 @@ telemetry:
             trace_id:: apollo
 ```
 
-Add documentation for available rhai constants.
+Also, router documentation has been updated with constants that are available in Rhai.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5189
