@@ -99,6 +99,7 @@ impl FetchNode {
         let Variables {
             variables,
             inverted_paths: paths,
+            .. // TODO: context
         } = match Variables::new(
             &self.requires,
             &self.variable_usages,
@@ -108,6 +109,7 @@ impl FetchNode {
             parameters.supergraph_request,
             parameters.schema,
             &self.input_rewrites,
+            &self.context_rewrites,
         ) {
             Some(variables) => variables,
             None => {
@@ -394,6 +396,7 @@ mod soure_node_tests {
             source_node: Some(Arc::new(source::query_plan::FetchNode::Connect(
                 fake_source_node(),
             ))),
+            context_rewrites: Default::default(),
         };
         let root_node = PlanNode::Fetch(fetch_node);
 
@@ -429,6 +432,7 @@ mod soure_node_tests {
             subscription_handle: &subscription_handle,
             subscription_config: &subscription_config,
             connectors: &Arc::new(connectors),
+            subgraph_schemas: &Default::default(),
         };
         let source_node = fake_source_node();
         let data = Default::default();

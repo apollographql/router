@@ -259,8 +259,8 @@ impl StaticCostCalculator {
         })?;
 
         let operation = operation
-            .as_parsed(schema)
-            .map_err(DemandControlError::InvalidSubgraphQuery)?;
+            .as_parsed()
+            .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
         self.estimated(operation, schema)
     }
 

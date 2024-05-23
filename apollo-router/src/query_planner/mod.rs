@@ -22,6 +22,7 @@ mod labeler;
 mod plan;
 pub(crate) mod rewrites;
 mod selection;
+mod subgraph_context;
 pub(crate) mod subscription;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";

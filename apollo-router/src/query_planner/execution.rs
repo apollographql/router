@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
 use apollo_federation::sources::connect::Connectors;
 use futures::future::join_all;
@@ -51,6 +52,7 @@ impl QueryPlan {
         service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
+        subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
@@ -76,6 +78,7 @@ impl QueryPlan {
                     subscription_handle: &subscription_handle,
                     subscription_config,
                     connectors,
+                    subgraph_schemas,
                 },
                 &root,
                 &initial_value.unwrap_or_default(),
@@ -103,6 +106,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
+    pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
     pub(crate) deferred_fetches: &'a HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
@@ -341,6 +345,7 @@ impl PlanNode {
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
                                         connectors: parameters.connectors,
+                                        subgraph_schemas: parameters.subgraph_schemas,
                                     },
                                     current_dir,
                                     &value,
@@ -483,6 +488,7 @@ impl DeferredNode {
         let label = self.label.as_ref().map(|l| l.to_string());
         let tx = sender;
         let sc = parameters.schema.clone();
+        let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
         let connectors = parameters.connectors.clone();
@@ -532,6 +538,7 @@ impl DeferredNode {
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
                             connectors: &connectors,
+                            subgraph_schemas: &subgraph_schemas,
                         },
                         &Path::default(),
                         &value,
