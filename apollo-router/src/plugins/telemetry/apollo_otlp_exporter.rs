@@ -159,14 +159,13 @@ impl ApolloOtlpExporter {
 
     fn prepare_subgraph_span(
         &self,
-        span: LightSpanData,
+        mut span: LightSpanData,
         errors_config: &ErrorsConfiguration,
     ) -> SpanData {
-        let mut new_attrs = span.attributes.clone();
         let mut status = Status::Unset;
 
         // If there is an FTV1 attribute, process it for error redaction and replace it
-        if let Some(ftv1) = new_attrs.get(&APOLLO_PRIVATE_FTV1) {
+        if let Some(ftv1) = span.attributes.get(&APOLLO_PRIVATE_FTV1) {
             let subgraph_name = span
                 .attributes
                 .get(&SUBGRAPH_NAME)
@@ -180,7 +179,8 @@ impl ApolloOtlpExporter {
                     status = Status::error("ftv1")
                 }
                 let encoded = encode_ftv1_trace(&trace_result);
-                new_attrs.insert(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
+                span.attributes
+                    .insert(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
             }
         }
 
@@ -197,7 +197,7 @@ impl ApolloOtlpExporter {
             name: span.name.clone(),
             start_time: span.start_time,
             end_time: span.end_time,
-            attributes: span.attributes.clone(),
+            attributes: span.attributes,
             events: EvictedQueue::new(0),
             links: EvictedQueue::new(0),
             status,
