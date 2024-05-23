@@ -204,8 +204,7 @@ mod tests {
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
         let zipped = SchemaAwareResponse::new(&request, &response);
-
-        assert!(zipped.is_ok())
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(zipped.expect("expected zipped response")) })
     }
 
     #[test]
@@ -218,7 +217,7 @@ mod tests {
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
         let zipped = SchemaAwareResponse::new(&request, &response);
-        assert_yaml_snapshot!(zipped.expect("expected zipped response"))
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(zipped.expect("expected zipped response")) })
     }
 
     #[test]
@@ -231,7 +230,7 @@ mod tests {
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
         let zipped = SchemaAwareResponse::new(&request, &response);
-        assert_yaml_snapshot!(zipped.expect("expected zipped response"))
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(zipped.expect("expected zipped response")) })
     }
 
     #[test]
@@ -244,7 +243,7 @@ mod tests {
         let request = ExecutableDocument::parse(&schema, query_str, "").unwrap();
         let response = Response::from_bytes("test", Bytes::from_static(response_bytes)).unwrap();
         let zipped = SchemaAwareResponse::new(&request, &response);
-        assert_yaml_snapshot!(zipped.expect("expected zipped response"))
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(zipped.expect("expected zipped response")) })
     }
 
     impl Serialize for SchemaAwareResponse<'_> {

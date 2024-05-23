@@ -3,62 +3,62 @@ source: apollo-router/src/plugins/demand_control/cost_calculator/schema_aware_re
 expression: "zipped.expect(\"expected zipped response\")"
 ---
 ships:
-  type: Query
   field: ships
   items:
-    - type: Query
-      field: ships
-      children:
+    - children:
         owner:
-          type: Ship
-          field: owner
           children:
             licenseNumber:
-              type: User
               field: licenseNumber
+              type: User
               value: 1
             name:
-              type: User
               field: name
+              type: User
               value: Kate Chopin
-    - type: Query
-      field: ships
-      children:
-        owner:
-          type: Ship
           field: owner
+          type: Ship
+      field: ships
+      type: Query
+    - children:
+        owner:
           children:
             licenseNumber:
-              type: User
               field: licenseNumber
+              type: User
               value: 2
             name:
-              type: User
               field: name
+              type: User
               value: Paul Auster
-users:
+          field: owner
+          type: Ship
+      field: ships
+      type: Query
   type: Query
+users:
   field: users
   items:
-    - type: Query
-      field: users
-      children:
-        name:
-          type: User
-          field: name
-          value: Kate Chopin
+    - children:
         licenseNumber:
-          type: User
           field: licenseNumber
+          type: User
           value: 1
-    - type: Query
-      field: users
-      children:
         name:
-          type: User
           field: name
-          value: Paul Auster
-        licenseNumber:
           type: User
+          value: Kate Chopin
+      field: users
+      type: Query
+    - children:
+        licenseNumber:
           field: licenseNumber
+          type: User
           value: 2
+        name:
+          field: name
+          type: User
+          value: Paul Auster
+      field: users
+      type: Query
+  type: Query
