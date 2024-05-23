@@ -8,6 +8,7 @@ use indexmap::IndexSet;
 use petgraph::prelude::EdgeIndex;
 
 use crate::error::FederationError;
+use crate::query_plan::fetch_dependency_graph_processor::FETCH_COST;
 use crate::source_aware::federated_query_graph;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
 use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
@@ -330,7 +331,9 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
         _source_id: SourceId,
         _source_data: &source::fetch_dependency_graph::Node,
     ) -> Result<QueryPlanCost, FederationError> {
-        todo!()
+        // REST doesn't let you (normally) select only a subset of the response,
+        // so the cost is constant regardless of what was selected.
+        Ok(FETCH_COST)
     }
 
     fn to_plan_node(
