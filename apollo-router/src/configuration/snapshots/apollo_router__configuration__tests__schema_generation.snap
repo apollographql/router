@@ -6047,6 +6047,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "on_graphql_error": {
+              "description": "Boolean set to true if the response body contains graphql error",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "on_graphql_error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "error": {
               "$ref": "#/definitions/ErrorRepr",
               "description": "#/definitions/ErrorRepr"
