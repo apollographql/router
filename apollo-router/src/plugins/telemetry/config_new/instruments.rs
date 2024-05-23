@@ -1851,89 +1851,7 @@ mod tests {
     #[tokio::test]
     async fn test_router_instruments() {
         async {
-            let config: InstrumentsConfig = serde_json::from_str(
-                json!({
-                    "router": {
-                        "http.server.request.body.size": true,
-                        "http.server.response.body.size": {
-                            "attributes": {
-                                "http.response.status_code": false,
-                                "acme.my_attribute": {
-                                    "response_header": "x-my-header",
-                                    "default": "unknown"
-                                }
-                            }
-                        },
-                        "acme.request.on_error": {
-                            "value": "unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "not": {
-                                    "eq": [
-                                        200,
-                                        {
-                                            "response_status": "code"
-                                        }
-                                    ]
-                                }
-                            },
-                            "attributes": {
-                                "http.response.status_code": true
-                            }
-                        },
-                        "acme.request.on_critical_error": {
-                            "value": "unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "eq": [
-                                    "request time out",
-                                    {
-                                        "error": "reason"
-                                    }
-                                ]
-                            },
-                            "attributes": {
-                                "http.response.status_code": true
-                            }
-                        },
-                        "acme.request.on_error_histo": {
-                            "value": "unit",
-                            "type": "histogram",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "not": {
-                                    "eq": [
-                                        200,
-                                        {
-                                            "response_status": "code"
-                                        }
-                                    ]
-                                }
-                            },
-                            "attributes": {
-                                "http.response.status_code": true
-                            }
-                        },
-                        "acme.request.header_value": {
-                            "value": {
-                                "request_header": "x-my-header-count"
-                            },
-                            "type": "counter",
-                            "description": "my description",
-                            "unit": "nb"
-                        }
-                    }
-                })
-                .to_string()
-                .as_str(),
-            )
-            .unwrap();
-
+            let config = load_config(include_str!("fixtures/router_instruments.router.yaml"));
             let router_instruments = config.new_router_instruments();
             let router_req = RouterRequest::fake_builder()
                 .header("conditional-custom", "X")
@@ -2063,83 +1981,7 @@ mod tests {
     #[tokio::test]
     async fn test_supergraph_instruments() {
         async {
-            let config: InstrumentsConfig = serde_json::from_str(
-                json!({
-                    "supergraph": {
-                        "acme.request.on_error": {
-                            "value": "unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "not": {
-                                    "eq": [
-                                        200,
-                                        {
-                                            "response_status": "code"
-                                        }
-                                    ]
-                                }
-                            }
-                        },
-                        "acme.request.on_graphql_error": {
-                            "value": "event_unit",
-                            "type": "counter",
-                            "unit": "error",
-                            "description": "my description",
-                            "condition": {
-                                "eq": [
-                                    "NOPE",
-                                    {
-                                        "response_errors": "$.[0].extensions.code"
-                                    }
-                                ]
-                            },
-                            "attributes": {
-                                "response_errors": {
-                                    "response_errors": "$.*"
-                                }
-                            }
-                        },
-                        "acme.request.on_graphql_data": {
-                            "value": {
-                                "response_data": "$.price"
-                            },
-                            "type": "counter",
-                            "unit": "$",
-                            "description": "my description",
-                            "attributes": {
-                                "response.data": {
-                                    "response_data": "$.*"
-                                }
-                            }
-                        },
-                        "acme.query": {
-                            "value": "unit",
-                            "type": "counter",
-                            "description": "nb of queries",
-                            "condition": {
-                                "eq": [
-                                    "query",
-                                    {
-                                        "operation_kind": "string"
-                                    }
-                                ]
-                            },
-                            "unit": "query",
-                            "attributes": {
-                                "query": {
-                                    "query": "string"
-                                }
-                            }
-                        }
-                    }
-                })
-                .to_string()
-                .as_str(),
-            )
-            .unwrap();
-
+            let config = load_config(include_str!("fixtures/supergraph_instruments.router.yaml"));
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let context = crate::context::Context::new();
             let _ = context.insert(OPERATION_KIND, "query".to_string());
@@ -2268,5 +2110,23 @@ mod tests {
         }
         .with_metrics()
         .await;
+    }
+
+    fn load_config(config: &str) -> InstrumentsConfig {
+        let val: serde_json::Value = serde_yaml::from_str(config).unwrap();
+        let instruments = val
+            .as_object()
+            .unwrap()
+            .get("telemetry")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("instrumentation")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("instruments")
+            .unwrap();
+        serde_json::from_value(instruments.clone()).unwrap()
     }
 }
