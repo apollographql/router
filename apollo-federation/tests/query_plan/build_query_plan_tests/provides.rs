@@ -302,49 +302,58 @@ fn it_works_on_unions() {
         // This is our sanity check: we first query _without_ the provides
         // to make sure we _do_ need to go the the second subgraph.
         @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "Subgraph1") {
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            noProvides {
+              ... on T1 {
+                __typename
+                id
+              }
+              ... on T2 {
+                __typename
+                id
+                a
+              }
+            }
+          }
+        },
+        Parallel {
+          Flatten(path: "noProvides") {
+            Fetch(service: "Subgraph2") {
               {
-                noProvides {
+                ... on T2 {
                   __typename
-                  ... on T1 {
-                    __typename
-                    id
-                  }
-                  ... on T2 {
-                    __typename
-                    id
-                    a
-                  }
+                  id
+                }
+              } =>
+              {
+                ... on T2 {
+                  b
                 }
               }
             },
-            Flatten(path: "noProvides") {
-              Fetch(service: "Subgraph2") {
-                {
-                  ... on T1 {
-                    __typename
-                    id
-                  }
-                  ... on T2 {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on T1 {
-                    a
-                  }
-                  ... on T2 {
-                    b
-                  }
+          },
+          Flatten(path: "noProvides") {
+            Fetch(service: "Subgraph2") {
+              {
+                ... on T1 {
+                  __typename
+                  id
                 }
-              },
+              } =>
+              {
+                ... on T1 {
+                  a
+                }
+              }
             },
           },
-        }
-        "###
+        },
+      },
+    }
+    "###
     );
 
     // Ensuring that querying only `a` can be done with subgraph1 only when provided.
@@ -363,22 +372,21 @@ fn it_works_on_unions() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Fetch(service: "Subgraph1") {
-            {
-              withProvidesForT1 {
-                __typename
-                ... on T1 {
-                  a
-                }
-                ... on T2 {
-                  a
-                }
-              }
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          withProvidesForT1 {
+            ... on T1 {
+              a
             }
-          },
+            ... on T2 {
+              a
+            }
+          }
         }
-        "###
+      },
+    }
+    "###
     );
 
     // But ensure that querying `b` still goes to subgraph2 if only a is provided.
@@ -398,41 +406,40 @@ fn it_works_on_unions() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "Subgraph1") {
-              {
-                withProvidesForT1 {
-                  __typename
-                  ... on T1 {
-                    a
-                  }
-                  ... on T2 {
-                    __typename
-                    id
-                    a
-                  }
-                }
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            withProvidesForT1 {
+              ... on T1 {
+                a
               }
-            },
-            Flatten(path: "withProvidesForT1") {
-              Fetch(service: "Subgraph2") {
-                {
-                  ... on T2 {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on T2 {
-                    b
-                  }
-                }
-              },
-            },
+              ... on T2 {
+                __typename
+                id
+                a
+              }
+            }
+          }
+        },
+        Flatten(path: "withProvidesForT1") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T2 {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T2 {
+                b
+              }
+            }
           },
-        }
-        "###
+        },
+      },
+    }
+    "###
     );
 
     // Lastly, if both are provided, ensures we only hit subgraph1.
