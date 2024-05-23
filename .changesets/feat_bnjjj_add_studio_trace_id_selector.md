@@ -13,6 +13,6 @@ telemetry:
             trace_id:: apollo
 ```
 
-Add documentation for available rhai constants.
+Also, router documentation has been updated with constants that are available in Rhai.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5189
