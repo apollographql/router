@@ -541,7 +541,10 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl)?;
+            .init_parsed_operations_and_hash_subqueries(
+                &self.subgraph_schemas,
+                &self.schema.raw_sdl,
+            )?;
         plan_success
             .data
             .query_plan
@@ -969,13 +972,16 @@ pub(super) struct QueryPlan {
 }
 
 impl QueryPlan {
-    fn hash_subqueries(
+    fn init_parsed_operations_and_hash_subqueries(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
+            node.init_parsed_operations_and_hash_subqueries(
+                subgraph_schemas,
+                supergraph_schema_hash,
+            )?;
         }
         Ok(())
     }
