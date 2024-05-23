@@ -50,10 +50,7 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
         // If we have distinct merge positions, or if the entering edge is different from the supplied node,
         // then there is nothing in common and thus nothing reusable.
         if source_entering_edge != source_data.source_entering_edge
-            || merge_at
-                .iter()
-                .zip(source_data.merge_at.iter())
-                .any(|(lhs, rhs)| lhs != rhs)
+            || *merge_at != *source_data.merge_at
         {
             return Ok(Vec::new());
         }
@@ -83,13 +80,12 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
 
             // If the arguments differ, then we can't reuse the edge
             if op_data.arguments.len() != source_data.field_arguments.len()
-                || op_data
-                    .arguments
-                    .iter()
-                    .zip(source_data.field_arguments.iter())
-                    .any(|(op_arg, (source_arg_name, source_arg_value))| {
-                        op_arg.name != *source_arg_name || op_arg.value != *source_arg_value
-                    })
+                || op_data.arguments.iter().any(|arg| {
+                    !matches!(
+                        source_data.field_arguments.get(&arg.name),
+                        Some(source_arg) if *source_arg == arg.value
+                    )
+                })
             {
                 continue;
             }
@@ -1444,6 +1440,7 @@ mod tests {
                     )),
                 },
             )]);
+
             let field_response_name = name!("_matching_name");
             let last_edge_index = *source_entry_edges.last().unwrap();
             let merge_at = [];
@@ -1479,7 +1476,14 @@ mod tests {
                         arguments: if index != 2 {
                             args.clone()
                         } else {
-                            Arc::new(Vec::new())
+                            Arc::new(vec![apollo_compiler::Node::new(
+                                apollo_compiler::ast::Argument {
+                                    name: name!("single_arg_modified"),
+                                    value: apollo_compiler::Node::new(
+                                        apollo_compiler::ast::Value::String("arg_value".into()),
+                                    ),
+                                },
+                            )])
                         },
                         directives: Arc::new(executable::DirectiveList::new()),
                         sibling_typename: None,
