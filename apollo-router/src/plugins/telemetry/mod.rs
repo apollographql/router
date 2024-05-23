@@ -953,6 +953,12 @@ impl Telemetry {
                 let (parts, stream) = response.response.into_parts();
                 let config_cloned = config.clone();
                 let stream = stream.inspect(move |resp| {
+                    let has_errors = !resp.errors.is_empty();
+                    // Useful for selector in spans/instruments/events
+                    ctx.insert_json_value(
+                        CONTAINS_GRAPHQL_ERROR,
+                        serde_json_bytes::Value::Bool(has_errors),
+                    );
                     let span = Span::current();
                     span.set_span_dyn_attributes(
                         config_cloned
@@ -1279,11 +1285,6 @@ impl Telemetry {
                         .enumerate()
                         .map(move |(idx, response)| {
                             let has_errors = !response.errors.is_empty();
-                            // Useful for selector in spans/instruments/events
-                            ctx.insert_json_value(
-                                CONTAINS_GRAPHQL_ERROR,
-                                serde_json_bytes::Value::Bool(has_errors),
-                            );
 
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {

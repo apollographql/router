@@ -156,7 +156,8 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<String>,
     },
-    Static(AttributeValue),
+    /// Deprecated, should not be used anymore, use static field instead
+    Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
@@ -306,10 +307,15 @@ pub(crate) enum SupergraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
-    Static(AttributeValue),
+    /// Deprecated, should not be used anymore, use static field instead
+    Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
+    },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        on_graphql_error: bool,
     },
     Error {
         #[allow(dead_code)]
@@ -518,7 +524,8 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
-    Static(AttributeValue),
+    /// Deprecated, should not be used anymore, use static field instead
+    Static(String),
     StaticField {
         /// A static value
         r#static: AttributeValue,
@@ -817,6 +824,15 @@ impl Selector for SupergraphSelector {
                         CostValue::Delta => cost_result.delta().into(),
                         CostValue::Result => cost_result.result.into(),
                     })
+            }
+            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
             }
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
@@ -1122,7 +1138,7 @@ mod test {
 
     #[test]
     fn router_static() {
-        let selector = RouterSelector::Static("test_static".to_string().into());
+        let selector = RouterSelector::Static("test_static".to_string());
         assert_eq!(
             selector
                 .on_request(
@@ -1261,7 +1277,9 @@ mod test {
 
     #[test]
     fn supergraph_static() {
-        let selector = SupergraphSelector::Static("test_static".to_string().into());
+        let selector = SupergraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
         assert_eq!(
             selector
                 .on_request(
@@ -1317,7 +1335,7 @@ mod test {
 
     #[test]
     fn subgraph_static() {
-        let selector = SubgraphSelector::Static("test_static".to_string().into());
+        let selector = SubgraphSelector::Static("test_static".to_string());
         assert_eq!(
             selector
                 .on_request(
