@@ -20,6 +20,8 @@ use tower::BoxError;
 use tower::ServiceExt;
 use tracing::Instrument;
 
+use super::http_json_transport::http_json_transport;
+use super::http_json_transport::HttpJsonTransportError;
 use crate::error::Error;
 use crate::error::FetchError;
 use crate::graphql::Request;
@@ -36,9 +38,6 @@ use crate::query_planner::ExecutionParameters;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::SubgraphRequest;
 
-use super::http_json_transport::http_json_transport;
-use super::http_json_transport::HttpJsonTransportError;
-
 impl From<FetchNode> for source::query_plan::FetchNode {
     fn from(value: FetchNode) -> source::query_plan::FetchNode {
         let subgraph_name = match value.protocol.as_ref() {
@@ -48,7 +47,7 @@ impl From<FetchNode> for source::query_plan::FetchNode {
         source::query_plan::FetchNode::Connect(connect::query_plan::FetchNode {
             source_id: ConnectId {
                 label: value.service_name.to_string(),
-                subgraph_name: subgraph_name,
+                subgraph_name,
                 directive: ObjectOrInterfaceFieldDirectivePosition {
                     field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                         ObjectFieldDefinitionPosition {
@@ -244,7 +243,7 @@ async fn process_source_node<'a>(
     source_node: &'a ConnectFetchNode,
     execution_parameters: &'a ExecutionParameters<'a>,
     data: Object,
-    paths: Vec<Vec<Path>>,
+    _paths: Vec<Vec<Path>>,
 ) -> (Value, Vec<Error>) {
     let connector = execution_parameters
         .connectors

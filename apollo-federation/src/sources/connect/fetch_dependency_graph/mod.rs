@@ -16,9 +16,13 @@ use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::federated_query_graph::SelfConditionIndex;
 use crate::source_aware::query_plan::FetchDataPathElement;
 use crate::source_aware::query_plan::QueryPlanCost;
+use crate::sources::connect;
+use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::Key;
+use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::PathSelection;
+use crate::sources::connect::json_selection::StarSelection;
 use crate::sources::connect::json_selection::SubSelection;
 use crate::sources::source;
 use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
@@ -92,10 +96,232 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
     fn add_path(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _source_path: source::fetch_dependency_graph::Path,
-        _source_data: &mut source::fetch_dependency_graph::Node,
+        source_path: source::fetch_dependency_graph::Path,
+        source_data: &mut source::fetch_dependency_graph::Node,
     ) -> Result<(), FederationError> {
-        todo!()
+        // Since we are handling connect code, we should make sure that we actually have connect data
+        let source::fetch_dependency_graph::Path::Connect(source_path) = source_path else {
+            return Err(FederationError::internal("expected connect path"));
+        };
+        let source::fetch_dependency_graph::Node::Connect(source_data) = source_data else {
+            return Err(FederationError::internal("expected connect path"));
+        };
+
+        // We should be at the same merge level
+        // Note: This should be a fast comparison (pointer-level)
+        if source_path.merge_at != source_data.merge_at {
+            return Err(FederationError::internal(
+                "expected to have matching merge elements",
+            ));
+        }
+
+        // The given edge should be one that connects to both the source_path and source_data
+        // Note: Comparison of two numbers is fast
+        if source_path.source_entering_edge != source_data.source_entering_edge {
+            return Err(FederationError::internal(
+                "expected to have matching entering edges",
+            ));
+        }
+
+        // If we don't have any field selections in the source_path, then there is nothing to do.
+        let Some(source_path_field) = source_path.field else {
+            return Ok(());
+        };
+
+        // Enforce that the field contains properties shared with the source data
+        if source_path_field.response_name != source_data.field_response_name {
+            return Err(FederationError::internal(
+                "expected path and source data to have the same field name",
+            ));
+        }
+        if source_path_field.arguments != source_data.field_arguments {
+            return Err(FederationError::internal(
+                "expected path and source data to have the same field arguments",
+            ));
+        }
+
+        // Ensure that we have a selection, inserting an initial value if not.
+        let selection =
+            source_data
+                .selection
+                .get_or_insert_with(|| match &source_path_field.selections {
+                    // Construct a new selection from the supplied path properties
+                    PathSelections::Selections {
+                        head_property_path,
+                        tail_selection,
+                        ..
+                    } => {
+                        if head_property_path.is_empty() {
+                            JSONSelection::Named(SubSelection::default())
+                        } else if let Some((_name, _tail)) = tail_selection {
+                            JSONSelection::Path(PathSelection::from_slice(
+                                head_property_path,
+                                Some(SubSelection::default()),
+                            ))
+                        } else {
+                            JSONSelection::Path(PathSelection::from_slice(head_property_path, None))
+                        }
+                    }
+
+                    // Pass through the supplied selection
+                    PathSelections::CustomScalarRoot { selection } => selection.clone(),
+                });
+
+        // TODO: Matching twice seems sad, but how can we separate the selection logic from the traversal?
+        // If figured out, remove clone above
+        if let PathSelections::Selections {
+            named_selections,
+            tail_selection,
+            ..
+        } = source_path_field.selections
+        {
+            // We can short out if there's nothing to select
+            let Some((tail_name, tail_subselection)) = tail_selection else {
+                return Ok(());
+            };
+
+            // If we are adding a path and have a tail selection, then the selection _must_ have a subselection to account
+            // for the extra tail.
+            let subselection =
+                selection
+                    .next_mut_subselection()
+                    .ok_or(FederationError::internal(
+                        "expecting a subselection in our selection",
+                    ))?;
+
+            // Helper method for finding existing references of names within a vec of keys
+            fn name_matches(seen_selection: &NamedSelection, name: &Name) -> bool {
+                match seen_selection {
+                    NamedSelection::Field(Some(Alias { name: ident }), _, _)
+                    | NamedSelection::Field(None, ident, _)
+                    | NamedSelection::Quoted(Alias { name: ident }, _, _)
+                    | NamedSelection::Path(Alias { name: ident }, _)
+                    | NamedSelection::Group(Alias { name: ident }, _) => ident == name.as_str(),
+                }
+            }
+
+            // Now we need to traverse the hierarchy behind the supplied node, updating its JSONSelections
+            // along the way as we find missing members needed by the new source path.
+            let mut subselection_ref = subselection;
+            for (name, keys) in named_selections {
+                // If we have a selection already, we'll need to make sure that it includes the new field,
+                // then we process the next subselection in the path chain.
+                // TODO: This is probably not very performant, but we only have a Vec to work with...
+                subselection_ref = if let Some(matching_selection_position) = subselection_ref
+                    .selections
+                    .iter()
+                    .position(|s| name_matches(s, &name))
+                {
+                    let matching_selection = subselection_ref.selections.get_mut(matching_selection_position).ok_or(FederationError::internal("matched position does not actually exist in selections. This should not happen"))?;
+                    matching_selection
+                        .next_mut_subselection()
+                        .ok_or(FederationError::internal(
+                            "expected existing selection to have a subselection",
+                        ))?
+                } else if keys.is_empty() {
+                    subselection_ref.selections.push(NamedSelection::Group(
+                        Alias {
+                            name: name.to_string(),
+                        },
+                        SubSelection::default(),
+                    ));
+
+                    subselection_ref
+                        .selections
+                        .last_mut()
+                        .ok_or(FederationError::internal(
+                            "recently added group named selection disappeared. This should not happen",
+                        ))?
+                        .next_mut_subselection()
+                        .ok_or(FederationError::internal(
+                            "recently added group named selection's subselection disappeared. This should not happen",
+                        ))?
+                } else {
+                    // TODO: You could technically detect whether a shorthand enum variant of NamedSelection
+                    // is usable based on the Name and Keys to make the overall JSONSelection appear cleaner,
+                    // though this isn't necessary.
+                    subselection_ref.selections.push(NamedSelection::Path(
+                        Alias {
+                            name: name.to_string(),
+                        },
+                        PathSelection::from_slice(&keys, Some(SubSelection::default())),
+                    ));
+
+                    subselection_ref
+                        .selections
+                        .last_mut()
+                        .ok_or(FederationError::internal(
+                            "recently added path named selection disappeared. This should not happen",
+                        ))?
+                        .next_mut_subselection()
+                        .ok_or(FederationError::internal(
+                            "recently added path named selection's subselection disappeared. This should not happen",
+                        ))?
+                };
+            }
+
+            // Now that we've merged in the JSON selection into the node, add in the final tail subselection
+            // Note: The subselection_ref here is now the furthest down in the chain, which is where we need
+            // it to be.
+            match tail_subselection {
+                // TODO: This is probably not very performant, but we only have a Vec to work with...
+                PathTailSelection::Selection { property_path } => {
+                    if !subselection_ref
+                        .selections
+                        .iter()
+                        .any(|s| name_matches(s, &tail_name))
+                    {
+                        subselection_ref.selections.push(NamedSelection::Path(
+                            Alias {
+                                name: tail_name.to_string(),
+                            },
+                            PathSelection::from_slice(&property_path, None),
+                        ));
+                    }
+                }
+                PathTailSelection::CustomScalarPathSelection { path_selection } => {
+                    if !subselection_ref
+                        .selections
+                        .iter()
+                        .any(|s| name_matches(s, &tail_name))
+                    {
+                        subselection_ref.selections.push(NamedSelection::Path(
+                            Alias {
+                                name: tail_name.to_string(),
+                            },
+                            path_selection,
+                        ));
+                    }
+                }
+
+                PathTailSelection::CustomScalarStarSelection {
+                    star_subselection,
+                    excluded_properties,
+                } => {
+                    if subselection_ref.star.is_none() {
+                        // Initialize the star
+                        subselection_ref.star = Some(StarSelection(
+                            Some(Alias {
+                                name: tail_name.to_string(),
+                            }),
+                            star_subselection.map(Box::new),
+                        ));
+
+                        // Keep track of which props we've excluded
+                        for (index, key) in excluded_properties.into_iter().enumerate() {
+                            let alias = format!("____excluded_star_key__{index}");
+                            subselection_ref.selections.push(NamedSelection::Quoted(
+                                Alias { name: alias },
+                                key.as_string(),
+                                None,
+                            ));
+                        }
+                    }
+                }
+            };
+        }
+
+        Ok(())
     }
 
     fn to_cost(
@@ -123,11 +349,15 @@ pub(crate) struct Node {
     merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
     field_response_name: Name,
-    field_arguments: IndexMap<Name, Value>,
-    selection: JSONSelection,
+    field_arguments: IndexMap<Name, NodeElement<Value>>,
+    selection: Option<JSONSelection>,
 }
 
-#[derive(Debug)]
+/// Connect-specific path tracking information.
+///
+/// A [Path] describes tracking information useful when doing introspection
+/// of a connect-specific query.
+#[derive(Debug, Clone)]
 pub(crate) struct Path {
     merge_at: Arc<[FetchDataPathElement]>,
     source_entering_edge: EdgeIndex,
@@ -135,216 +365,486 @@ pub(crate) struct Path {
     field: Option<PathField>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct PathField {
     response_name: Name,
     arguments: IndexMap<Name, NodeElement<Value>>,
     selections: PathSelections,
 }
 
-#[derive(Debug)]
+/// A path to a specific selection
+///
+/// This enum encompasses a set of directions for reaching a target property
+/// within a JSON selection.
+#[derive(Debug, Clone)]
 pub(crate) enum PathSelections {
+    /// Set of selections assuming a starting point of the root.
     Selections {
+        /// Property path from the head
+        ///
+        /// This is a list of properties to traverse starting from the root (or head)
+        /// of the corresponding selection. These should be simple paths that can be
+        /// chained together.
         head_property_path: Vec<Key>,
+
+        /// Named selections from the root reachable through [head_property_path]
+        ///
+        /// Each member in this list is of the form ([Name], [Keys](Vec<Key>)) and is
+        /// a chain of named selections to apply iteratively to reach the leaf of our selection.
+        ///
+        /// Note: [Name] here can refer to aliased fields as well.
         named_selections: Vec<(Name, Vec<Key>)>,
+
+        /// The (optional) final selection for this chain.
+        ///
+        /// This selection is assumed to be from the context of the node accessable from
+        /// the chain of [head_property_path] followed by the chain of [named_selections].
+        ///
+        /// A value of `None` here means to stop traversal at the current selection, while any
+        /// other value signals that there might be further sections to traverse.
         tail_selection: Option<(Name, PathTailSelection)>,
     },
+
+    /// The full selection from a (potentially) different root
     CustomScalarRoot {
+        /// The full selection
         selection: JSONSelection,
     },
 }
 
-#[derive(Debug)]
+/// A path to a specific selection, not from the root.
+///
+/// This enum describes different ways to perform a final selection of a path
+/// from the context of any selection in the tree.
+#[derive(Debug, Clone)]
 pub(crate) enum PathTailSelection {
+    /// Simple selection using a chain of keys.
     Selection {
+        /// The chain of [Key]s to traverse
         property_path: Vec<Key>,
     },
-    CustomScalarPathSelection {
-        path_selection: PathSelection,
-    },
+
+    /// Custom selection using a [PathSelection]
+    ///
+    /// Note: This is useful when a simple [PathTailSelection::Selection] is not
+    /// complex enough to describe the traversal path, such as when using variables
+    /// or custom [SubSelection]s.
+    CustomScalarPathSelection { path_selection: PathSelection },
+
+    /// Custom selection using a star (*) subselection.
+    ///
+    /// Note: This is useful when needing to collect all other possible values
+    /// in a selection into a singular property.
     CustomScalarStarSelection {
+        /// The subselection including the star
         star_subselection: Option<SubSelection>,
+
+        /// All other known properties that _shouldn't_ be collected into the
+        /// star selection.
         excluded_properties: IndexSet<Key>,
     },
 }
 
 impl PathApi for Path {
     fn source_id(&self) -> &SourceId {
-        todo!()
+        &self.source_id
     }
 
     fn add_operation_element(
         &self,
-        _query_graph: Arc<FederatedQueryGraph>,
-        _operation_element: Arc<OperationPathElement>,
-        _edge: Option<EdgeIndex>,
+        query_graph: Arc<FederatedQueryGraph>,
+        operation_element: Arc<OperationPathElement>,
+        edge: Option<EdgeIndex>,
         _self_condition_resolutions: IndexMap<SelfConditionIndex, ConditionResolutionId>,
     ) -> Result<source::fetch_dependency_graph::Path, FederationError> {
-        todo!()
+        // For this milestone, we only allow `NormalizedField`s for operation elements
+        let OperationPathElement::Field(operation_field) = operation_element.as_ref() else {
+            return Err(FederationError::internal(
+                "operation elements must be called on a field",
+            ));
+        };
+
+        // For milestone 1, we don't consider cases where the edge is not present
+        let Some(edge) = edge else {
+            return Err(FederationError::internal("edge cannot be None"));
+        };
+
+        // Extract the edge information for this operation
+        let federated_query_graph::Edge::ConcreteField { source_data, .. } =
+            query_graph.edge_weight(edge)?
+        else {
+            return Err(FederationError::internal(
+                "operation elements should only be called for concrete fields",
+            ));
+        };
+
+        let source::federated_query_graph::ConcreteFieldEdge::Connect(concrete_field_edge) =
+            source_data
+        else {
+            return Err(FederationError::internal(
+                "operation element's source data must be a connect concrete field",
+            ));
+        };
+
+        // We need to figure out now what path to take based on what needs updating in the original connect path
+        let connect_field = self
+            .field
+            .to_owned()
+            .map(|field| {
+                // Deconstruct the original selection
+                let PathSelections::Selections {
+                    head_property_path,
+                    named_selections,
+                    tail_selection: None,
+                } = field.selections
+                else {
+                    return Err(FederationError::internal(
+                        "expected the existing field to have selections with no tail",
+                    ));
+                };
+
+                // Recreate it with additional info
+                let selections = match concrete_field_edge {
+                    connect::federated_query_graph::ConcreteFieldEdge::Selection {
+                        property_path,
+                        ..
+                    } => {
+                        let (_, operation_target_index) = query_graph.edge_endpoints(edge)?;
+                        let operation_target_node =
+                            query_graph.node_weight(operation_target_index)?;
+
+                        match operation_target_node {
+                            federated_query_graph::Node::Concrete { .. } => {
+                                let concrete_selection = (
+                                    operation_field.data().response_name(),
+                                    property_path.clone(),
+                                );
+
+                                let mut named_selections = named_selections;
+                                named_selections.push(concrete_selection);
+                                PathSelections::Selections {
+                                    head_property_path,
+                                    named_selections,
+                                    tail_selection: None,
+                                }
+                            }
+
+                            federated_query_graph::Node::Enum { .. }
+                            | federated_query_graph::Node::Scalar { .. } => {
+                                let new_tail = PathTailSelection::Selection {
+                                    property_path: property_path.clone(),
+                                };
+
+                                PathSelections::Selections {
+                                    head_property_path,
+                                    named_selections,
+                                    tail_selection: Some((operation_field.data().response_name(), new_tail)),
+                                }
+                            }
+
+                            other => return Err(FederationError::internal(format!("expected the tail edge to contain a concrete, enum, or scalar node, found: {other:?}"))),
+                        }
+                    }
+
+                    connect::federated_query_graph::ConcreteFieldEdge::CustomScalarPathSelection {
+                        path_selection,
+                        ..
+                    } => {
+                        let new_tail = PathTailSelection::CustomScalarPathSelection {
+                            path_selection: path_selection.clone(),
+                        };
+
+                        PathSelections::Selections {
+                            head_property_path,
+                            named_selections,
+                            tail_selection: Some((operation_field.data().response_name(), new_tail)),
+                        }
+                    }
+
+                    connect::federated_query_graph::ConcreteFieldEdge::CustomScalarStarSelection {
+                        star_subselection,
+                        excluded_properties,
+                        ..
+                    } => {
+                        let new_tail = PathTailSelection::CustomScalarStarSelection {
+                            star_subselection: star_subselection.clone(),
+                            excluded_properties: excluded_properties.clone(),
+                        };
+
+                        PathSelections::Selections {
+                            head_property_path,
+                            named_selections,
+                            tail_selection: Some((operation_field.data().response_name(), new_tail)),
+                        }
+                    }
+
+                    _ => {
+                        return Err(FederationError::internal(
+                            "expected the concrete edge to be a selection",
+                        ))
+                    }
+                };
+
+                Ok(PathField { response_name: field.response_name, arguments: field.arguments, selections })
+            })
+            .unwrap_or_else(|| {
+                let connect::federated_query_graph::ConcreteFieldEdge::Connect {
+                    subgraph_field: _subgraph_field,
+                } = concrete_field_edge
+                else {
+                    return Err(FederationError::internal(
+                        "expected the field edge to be connect",
+                    ));
+                };
+
+                let (_, operation_target_index) = query_graph.edge_endpoints(edge)?;
+                let operation_target_node = query_graph.node_weight(operation_target_index)?;
+                let selections = match operation_target_node {
+                    federated_query_graph::Node::Concrete {
+                        source_data:
+                            source::federated_query_graph::ConcreteNode::Connect(
+                                connect::federated_query_graph::ConcreteNode::SelectionRoot {
+                                    property_path,
+                                    ..
+                                },
+                            ),
+                        ..
+                    }
+                    | federated_query_graph::Node::Enum {
+                        source_data:
+                            source::federated_query_graph::EnumNode::Connect(
+                                connect::federated_query_graph::EnumNode::SelectionRoot {
+                                    property_path,
+                                    ..
+                                },
+                            ),
+                        ..
+                    }
+                    | federated_query_graph::Node::Scalar {
+                        source_data:
+                            source::federated_query_graph::ScalarNode::Connect(
+                                connect::federated_query_graph::ScalarNode::SelectionRoot {
+                                    property_path,
+                                    ..
+                                },
+                            ),
+                        ..
+                    } => PathSelections::Selections {
+                        head_property_path: property_path.clone(),
+                        named_selections: Vec::new(),
+                        tail_selection: None,
+                    },
+
+                    federated_query_graph::Node::Scalar {
+                        source_data:
+                            source::federated_query_graph::ScalarNode::Connect(
+                                connect::federated_query_graph::ScalarNode::CustomScalarSelectionRoot {
+                                    selection,
+                                    ..
+                                },
+                            ),
+                        ..
+                    } => PathSelections::CustomScalarRoot {
+                        selection: selection.clone(),
+                    },
+
+                    _ => {
+                        return Err(FederationError::internal(
+                            "expected a concrete type, enum, or scalar",
+                        ))
+                    }
+                };
+
+                Ok(PathField {
+                    response_name: operation_field.data().response_name(),
+                    arguments: operation_field
+                        .data()
+                        .arguments
+                        .iter()
+                        .map(|arg| (arg.name.clone(), arg.value.clone()))
+                        .collect(),
+                    selections,
+                })
+            })?;
+
+        Ok(source::fetch_dependency_graph::Path::Connect(Path {
+            merge_at: self.merge_at.clone(),
+            source_entering_edge: self.source_entering_edge,
+            source_id: self.source_id.clone(),
+            field: Some(connect_field),
+        }))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    mod fetch {
+        use std::sync::Arc;
 
-    use apollo_compiler::ast::Name;
-    use apollo_compiler::name;
-    use indexmap::IndexMap;
-    use insta::assert_debug_snapshot;
-    use petgraph::graph::DiGraph;
-    use petgraph::prelude::EdgeIndex;
+        use apollo_compiler::ast::Name;
+        use apollo_compiler::name;
+        use indexmap::IndexMap;
+        use insta::assert_debug_snapshot;
+        use insta::assert_snapshot;
+        use petgraph::graph::DiGraph;
+        use petgraph::prelude::EdgeIndex;
 
-    use super::FetchDependencyGraph;
-    use crate::schema::position::ObjectFieldDefinitionPosition;
-    use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
-    use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-    use crate::schema::position::ObjectTypeDefinitionPosition;
-    use crate::source_aware::federated_query_graph;
-    use crate::source_aware::federated_query_graph::FederatedQueryGraph;
-    use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
-    use crate::sources::connect::federated_query_graph::ConcreteNode;
-    use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
-    use crate::sources::connect::json_selection::Key;
-    use crate::sources::connect::ConnectId;
-    use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
-    use crate::sources::source::SourceId;
+        use crate::schema::position::ObjectFieldDefinitionPosition;
+        use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+        use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+        use crate::schema::position::ObjectTypeDefinitionPosition;
+        use crate::source_aware::federated_query_graph;
+        use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+        use crate::sources::connect;
+        use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
+        use crate::sources::connect::federated_query_graph::ConcreteNode;
+        use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
+        use crate::sources::connect::fetch_dependency_graph::FetchDependencyGraph;
+        use crate::sources::connect::json_selection::Alias;
+        use crate::sources::connect::json_selection::Key;
+        use crate::sources::connect::json_selection::NamedSelection;
+        use crate::sources::connect::ConnectId;
+        use crate::sources::connect::JSONSelection;
+        use crate::sources::source;
+        use crate::sources::source::fetch_dependency_graph::FetchDependencyGraphApi;
+        use crate::sources::source::SourceId;
 
-    struct SetupInfo {
-        fetch_graph: FetchDependencyGraph,
-        query_graph: Arc<FederatedQueryGraph>,
-        source_id: SourceId,
-        source_entry_edges: Vec<EdgeIndex>,
-        non_source_entry_edges: Vec<EdgeIndex>,
-    }
-    fn setup() -> SetupInfo {
-        let mut graph = DiGraph::new();
+        struct SetupInfo {
+            fetch_graph: FetchDependencyGraph,
+            query_graph: Arc<FederatedQueryGraph>,
+            source_id: SourceId,
+            source_entry_edges: Vec<EdgeIndex>,
+            non_source_entry_edges: Vec<EdgeIndex>,
+        }
+        fn setup() -> SetupInfo {
+            let mut graph = DiGraph::new();
 
-        // Fill in some dummy data
-        // Root
-        // |- Post (entry edge)
-        // |- User (entry edge)
-        // |- View
-        let source_id = SourceId::Connect(ConnectId {
-            label: "test connect".to_string(),
-            subgraph_name: "CONNECT".into(),
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: ObjectOrInterfaceFieldDefinitionPosition::Object(
-                    ObjectFieldDefinitionPosition {
-                        type_name: name!("TestObject"),
-                        field_name: name!("testField"),
-                    },
-                ),
-                directive_name: name!("connect"),
-                directive_index: 0,
-            },
-        });
+            // Fill in some dummy data
+            // Root
+            // |- Post (entry edge)
+            // |- User (entry edge)
+            // |- View
+            let source_id = SourceId::Connect(ConnectId {
+                label: "test connect".to_string(),
+                subgraph_name: "CONNECT".into(),
+                directive: ObjectOrInterfaceFieldDirectivePosition {
+                    field: ObjectOrInterfaceFieldDefinitionPosition::Object(
+                        ObjectFieldDefinitionPosition {
+                            type_name: name!("TestObject"),
+                            field_name: name!("testField"),
+                        },
+                    ),
+                    directive_name: name!("connect"),
+                    directive_index: 0,
+                },
+            });
 
-        // Create a root
-        let query = graph.add_node(federated_query_graph::Node::Concrete {
-            supergraph_type: ObjectTypeDefinitionPosition {
-                type_name: name!("Query"),
-            },
-            field_edges: IndexMap::new(),
-            source_exiting_edge: None,
-            source_id: source_id.clone(),
-            source_data: ConcreteNode::SelectionRoot {
-                subgraph_type: ObjectTypeDefinitionPosition {
+            // Create a root
+            let query = graph.add_node(federated_query_graph::Node::Concrete {
+                supergraph_type: ObjectTypeDefinitionPosition {
                     type_name: name!("Query"),
                 },
-                property_path: Vec::new(),
-            }
-            .into(),
-        });
-
-        // Make the nodes with entrypoints
-        let mut edges = Vec::new();
-        let entrypoints = 2;
-        for (index, type_name) in ["Post", "User", "View"].into_iter().enumerate() {
-            let node_type = ObjectTypeDefinitionPosition {
-                type_name: Name::new(type_name).unwrap(),
-            };
-
-            let node = graph.add_node(federated_query_graph::Node::Concrete {
-                supergraph_type: node_type.clone(),
                 field_edges: IndexMap::new(),
                 source_exiting_edge: None,
                 source_id: source_id.clone(),
                 source_data: ConcreteNode::SelectionRoot {
-                    subgraph_type: node_type.clone(),
-                    property_path: vec![Key::Field(type_name.to_lowercase().to_string())],
+                    subgraph_type: ObjectTypeDefinitionPosition {
+                        type_name: name!("Query"),
+                    },
+                    property_path: Vec::new(),
                 }
                 .into(),
             });
 
-            let field = ObjectFieldDefinitionPosition {
-                type_name: Name::new(type_name).unwrap(),
-                field_name: Name::new(type_name.to_lowercase()).unwrap(),
-            };
-            edges.push(
-                graph.add_edge(
-                    query,
-                    node,
-                    federated_query_graph::Edge::ConcreteField {
-                        supergraph_field: field.clone(),
-                        self_conditions: None,
-                        source_id: source_id.clone(),
-                        source_data: ConcreteFieldEdge::Connect {
-                            subgraph_field: field.clone(),
-                        }
-                        .into(),
-                    },
-                ),
-            );
+            // Make the nodes with entrypoints
+            let mut edges = Vec::new();
+            let entrypoints = 2;
+            for (index, type_name) in ["Post", "User", "View"].into_iter().enumerate() {
+                let node_type = ObjectTypeDefinitionPosition {
+                    type_name: Name::new(type_name).unwrap(),
+                };
 
-            // Optionally add the entrypoint
-            if index < entrypoints {
+                let node = graph.add_node(federated_query_graph::Node::Concrete {
+                    supergraph_type: node_type.clone(),
+                    field_edges: IndexMap::new(),
+                    source_exiting_edge: None,
+                    source_id: source_id.clone(),
+                    source_data: ConcreteNode::SelectionRoot {
+                        subgraph_type: node_type.clone(),
+                        property_path: vec![Key::Field(type_name.to_lowercase().to_string())],
+                    }
+                    .into(),
+                });
+
+                let field = ObjectFieldDefinitionPosition {
+                    type_name: Name::new(type_name).unwrap(),
+                    field_name: Name::new(type_name.to_lowercase()).unwrap(),
+                };
                 edges.push(
                     graph.add_edge(
                         query,
                         node,
-                        federated_query_graph::Edge::SourceEntering {
-                            supergraph_type: node_type.clone(),
-                            self_conditions: None,
-                            tail_source_id: source_id.clone(),
-                            source_data: SourceEnteringEdge::ConnectParent {
-                                subgraph_type: node_type,
+                        federated_query_graph::Edge::ConcreteField {
+                            supergraph_field: field.clone(),
+                            self_conditions: Default::default(),
+                            source_id: source_id.clone(),
+                            source_data: ConcreteFieldEdge::Connect {
+                                subgraph_field: field.clone(),
                             }
                             .into(),
                         },
                     ),
                 );
+
+                // Optionally add the entrypoint
+                if index < entrypoints {
+                    edges.push(
+                        graph.add_edge(
+                            query,
+                            node,
+                            federated_query_graph::Edge::SourceEntering {
+                                supergraph_type: node_type.clone(),
+                                self_conditions: Default::default(),
+                                tail_source_id: source_id.clone(),
+                                source_data: SourceEnteringEdge::ConnectParent {
+                                    subgraph_type: node_type,
+                                }
+                                .into(),
+                            },
+                        ),
+                    );
+                }
+            }
+
+            let (entry, non_entry) = edges.into_iter().partition(|&edge_index| {
+                matches!(
+                    graph.edge_weight(edge_index),
+                    Some(federated_query_graph::Edge::SourceEntering { .. })
+                )
+            });
+            SetupInfo {
+                fetch_graph: FetchDependencyGraph,
+                query_graph: Arc::new(FederatedQueryGraph::with_graph(graph)),
+                source_id,
+                source_entry_edges: entry,
+                non_source_entry_edges: non_entry,
             }
         }
 
-        let (entry, non_entry) = edges.into_iter().partition(|&edge_index| {
-            matches!(
-                graph.edge_weight(edge_index),
-                Some(federated_query_graph::Edge::SourceEntering { .. })
-            )
-        });
-        SetupInfo {
-            fetch_graph: FetchDependencyGraph,
-            query_graph: Arc::new(FederatedQueryGraph::with_graph(graph)),
-            source_id,
-            source_entry_edges: entry,
-            non_source_entry_edges: non_entry,
-        }
-    }
+        #[test]
+        fn it_handles_a_new_path() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                ..
+            } = setup();
 
-    #[test]
-    fn it_handles_a_new_path() {
-        let SetupInfo {
-            fetch_graph,
-            query_graph,
-            source_entry_edges,
-            ..
-        } = setup();
-
-        // Make sure that the first edge is what we expect
-        let last_edge_index = *source_entry_edges.last().unwrap();
-        let (query_root_index, post_index) = query_graph.edge_endpoints(last_edge_index).unwrap();
-        assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
+            // Make sure that the first edge is what we expect
+            let last_edge_index = *source_entry_edges.last().unwrap();
+            let (query_root_index, post_index) =
+                query_graph.edge_endpoints(last_edge_index).unwrap();
+            assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
         Concrete {
             supergraph_type: Object(Query),
             field_edges: {},
@@ -368,7 +868,7 @@ mod tests {
             ),
         }
         "###);
-        assert_debug_snapshot!(query_graph.node_weight(post_index).unwrap(), @r###"
+            assert_debug_snapshot!(query_graph.node_weight(post_index).unwrap(), @r###"
         Concrete {
             supergraph_type: Object(User),
             field_edges: {},
@@ -397,13 +897,13 @@ mod tests {
         }
         "###);
 
-        let path = fetch_graph
-            .new_path(query_graph, Arc::new([]), last_edge_index, None)
-            .unwrap();
+            let path = fetch_graph
+                .new_path(query_graph, Arc::new([]), last_edge_index, None)
+                .unwrap();
 
-        assert_debug_snapshot!(
-            path,
-            @r###"
+            assert_debug_snapshot!(
+                path,
+                @r###"
         Connect(
             Path {
                 merge_at: [],
@@ -423,22 +923,23 @@ mod tests {
             },
         )
         "###
-        );
-    }
+            );
+        }
 
-    #[test]
-    fn it_fails_with_invalid_entrypoint() {
-        let SetupInfo {
-            fetch_graph,
-            query_graph,
-            non_source_entry_edges,
-            ..
-        } = setup();
+        #[test]
+        fn it_fails_with_invalid_entrypoint() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                non_source_entry_edges,
+                ..
+            } = setup();
 
-        // Make sure that the first edge is what we expect
-        let last_edge_index = *non_source_entry_edges.last().unwrap();
-        let (query_root_index, view_index) = query_graph.edge_endpoints(last_edge_index).unwrap();
-        assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
+            // Make sure that the first edge is what we expect
+            let last_edge_index = *non_source_entry_edges.last().unwrap();
+            let (query_root_index, view_index) =
+                query_graph.edge_endpoints(last_edge_index).unwrap();
+            assert_debug_snapshot!(query_graph.node_weight(query_root_index).unwrap(), @r###"
         Concrete {
             supergraph_type: Object(Query),
             field_edges: {},
@@ -462,7 +963,7 @@ mod tests {
             ),
         }
         "###);
-        assert_debug_snapshot!(query_graph.node_weight(view_index).unwrap(), @r###"
+            assert_debug_snapshot!(query_graph.node_weight(view_index).unwrap(), @r###"
         Concrete {
             supergraph_type: Object(View),
             field_edges: {},
@@ -491,48 +992,893 @@ mod tests {
         }
         "###);
 
-        // Make sure that we fail since we do not have an entering edge
-        let path = fetch_graph.new_path(query_graph, Arc::new([]), last_edge_index, None);
+            // Make sure that we fail since we do not have an entering edge
+            let path = fetch_graph.new_path(query_graph, Arc::new([]), last_edge_index, None);
 
-        assert_debug_snapshot!(
-            path,
-            @r###"
-        Err(
-            SingleFederationError(
-                Internal {
-                    message: "a path should start from an entering edge",
+            let Err(path) = path else {
+                panic!("Unexpectedly succeeded with non-source-entering edge.")
+            };
+            assert_snapshot!(
+                path,
+                @r###"
+            An internal error has occurred, please report this bug to Apollo.
+
+            Details: a path should start from an entering edge
+            "###
+            );
+        }
+
+        #[test]
+        fn it_fails_with_invalid_edge() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                ..
+            } = setup();
+
+            // Make sure that the first edge is what we expect
+            let invalid_index = EdgeIndex::end();
+
+            // Make sure that we fail since we pass in an invalid edge
+            let path = fetch_graph.new_path(query_graph, Arc::new([]), invalid_index, None);
+
+            let Err(path) = path else {
+                panic!("Unexpectedly succeeded with invalid edge.")
+            };
+            assert_snapshot!(
+                path,
+                @r###"
+            An internal error has occurred, please report this bug to Apollo.
+
+            Details: Edge unexpectedly missing
+            "###
+            );
+        }
+
+        /// Tests adding in a new path.
+        ///
+        /// This test ensures that nodes which have no existing JSONSelection will correctly
+        /// have the new additions merged in from a separate path.
+        ///
+        /// - Node's selection: _
+        /// - Path's selection: { a b c }
+        #[test]
+        fn it_adds_a_simple_path() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                source_id,
+                ..
+            } = setup();
+
+            let arguments = IndexMap::from([]);
+            let merge_at = Arc::new([]);
+            let source_entering_edge = *source_entry_edges.last().unwrap();
+            let response_name = name!("_simple_path_test");
+
+            let (unmatched, selection) = JSONSelection::parse("a b c").unwrap();
+            assert!(unmatched.is_empty());
+
+            let mut node = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: merge_at.clone(),
+                    source_entering_edge,
+                    field_response_name: response_name.clone(),
+                    field_arguments: arguments.clone(),
+                    selection: Some(selection),
                 },
-            ),
-        )
-        "###
-        );
+            );
+
+            fetch_graph
+                .add_path(
+                    query_graph,
+                    source::fetch_dependency_graph::Path::Connect(
+                        connect::fetch_dependency_graph::Path {
+                            merge_at,
+                            source_entering_edge,
+                            source_id,
+                            field: Some(connect::fetch_dependency_graph::PathField {
+                                response_name,
+                                arguments,
+                                selections:
+                                    connect::fetch_dependency_graph::PathSelections::Selections {
+                                        head_property_path: Vec::new(),
+                                        named_selections: Vec::new(),
+                                        tail_selection: None,
+                                    },
+                            }),
+                        },
+                    ),
+                    &mut node,
+                )
+                .unwrap();
+
+            let source::fetch_dependency_graph::Node::Connect(result) = node else {
+                unreachable!()
+            };
+            assert_eq!(*result.merge_at, []);
+            assert_eq!(result.source_entering_edge, source_entering_edge);
+            assert_eq!(result.field_response_name.as_str(), "_simple_path_test");
+            assert_eq!(result.field_arguments, IndexMap::new());
+            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            {
+              a
+              b
+              c
+            }
+            "###);
+        }
+
+        /// Tests adding in a new nested path.
+        ///
+        /// This test ensures that nodes which have no existing JSONSelection will correctly
+        /// have the new additions merged in from a separate path, including nesting.
+        ///
+        /// - Node's selection: _
+        /// - Path's selection:
+        /// {
+        ///   a
+        ///   b {
+        ///     x
+        ///     y
+        ///     z {
+        ///       one
+        ///       two
+        ///       three
+        ///     }
+        ///   }
+        ///   c: last
+        /// }
+        #[test]
+        fn it_adds_a_nested_path() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                source_id,
+                ..
+            } = setup();
+
+            let arguments = IndexMap::from([]);
+            let merge_at = Arc::new([]);
+            let source_entering_edge = *source_entry_edges.last().unwrap();
+            let response_name = name!("_nested_path_test");
+
+            let (unmatched, selection) =
+                JSONSelection::parse("a b { x y z { one two three } } c: last").unwrap();
+            assert!(unmatched.is_empty());
+
+            let mut node = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: merge_at.clone(),
+                    source_entering_edge,
+                    field_response_name: response_name.clone(),
+                    field_arguments: arguments.clone(),
+                    selection: Some(selection),
+                },
+            );
+
+            fetch_graph
+                .add_path(
+                    query_graph,
+                    source::fetch_dependency_graph::Path::Connect(
+                        connect::fetch_dependency_graph::Path {
+                            merge_at,
+                            source_entering_edge,
+                            source_id,
+                            field: Some(connect::fetch_dependency_graph::PathField {
+                                response_name,
+                                arguments,
+                                selections:
+                                    connect::fetch_dependency_graph::PathSelections::Selections {
+                                        head_property_path: Vec::new(),
+                                        named_selections: Vec::new(),
+                                        tail_selection: None,
+                                    },
+                            }),
+                        },
+                    ),
+                    &mut node,
+                )
+                .unwrap();
+
+            let source::fetch_dependency_graph::Node::Connect(result) = node else {
+                unreachable!()
+            };
+            assert_eq!(*result.merge_at, []);
+            assert_eq!(result.source_entering_edge, source_entering_edge);
+            assert_eq!(result.field_response_name.as_str(), "_nested_path_test");
+            assert_eq!(result.field_arguments, IndexMap::new());
+            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            {
+              a
+              b {
+                x
+                y
+                z {
+                  one
+                  two
+                  three
+                }
+              }
+              c: last
+            }
+            "###);
+        }
+
+        /// Tests merging in of a new path.
+        ///
+        /// This test ensures that nodes which already contain a portion of the new path
+        /// will correctly have the new additions merged in from a separate path, including
+        /// nesting.
+        ///
+        /// - Node's selection:
+        /// .foo.bar {
+        ///   qux: .qaax
+        ///   qax: .qaax {
+        ///     baz
+        ///   }
+        /// }
+        ///
+        /// - Path's selection:
+        /// .foo.bar {
+        ///   qax: .qaax {
+        ///     baaz: .baz.buzz {
+        ///       biz: .blah {
+        ///         x
+        ///         y
+        ///       }
+        ///     }
+        ///   }
+        /// }
+        #[test]
+        fn it_merges_a_nested_path() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                source_id,
+                ..
+            } = setup();
+
+            let arguments = IndexMap::from([]);
+            let merge_at = Arc::new([]);
+            let source_entering_edge = *source_entry_edges.last().unwrap();
+            let response_name = name!("_merge_nested_path_test");
+
+            let (unmatched, selection) = JSONSelection::parse(
+                ".foo.bar {
+                    qux: .qaax
+                    qax: .qaax {
+                      baz
+                    }
+                }",
+            )
+            .unwrap();
+            assert!(unmatched.is_empty());
+
+            let mut node = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: merge_at.clone(),
+                    source_entering_edge,
+                    field_response_name: response_name.clone(),
+                    field_arguments: arguments.clone(),
+                    selection: Some(selection),
+                },
+            );
+
+            fetch_graph
+                .add_path(
+                    query_graph,
+                    source::fetch_dependency_graph::Path::Connect(
+                        connect::fetch_dependency_graph::Path {
+                            merge_at,
+                            source_entering_edge,
+                            source_id,
+                            field: Some(connect::fetch_dependency_graph::PathField {
+                                response_name,
+                                arguments,
+                                selections:
+                                    connect::fetch_dependency_graph::PathSelections::Selections {
+                                        head_property_path: vec![
+                                            Key::Field("foo".to_string()),
+                                            Key::Field("bar".to_string()),
+                                        ],
+                                        named_selections: vec![
+                                            (name!("qax"), vec![Key::Field("qaax".to_string())]),
+                                            (
+                                                name!("baaz"),
+                                                vec![
+                                                    Key::Field("baz".to_string()),
+                                                    Key::Field("buzz".to_string()),
+                                                ],
+                                            ),
+                                        ],
+                                        tail_selection: Some((
+                                            name!("biz"),
+                                            connect::fetch_dependency_graph::PathTailSelection::CustomScalarPathSelection {
+                                                path_selection: connect::fetch_dependency_graph::PathSelection::Selection(connect::SubSelection {
+                                                    selections: vec![
+                                                        NamedSelection::Group(
+                                                            Alias { name: "blah".to_string() },
+                                                            connect::SubSelection {
+                                                                selections: vec![
+                                                                    NamedSelection::Field(None, "x".to_string(), None),
+                                                                    NamedSelection::Field(None, "y".to_string(), None)
+                                                                ],
+                                                                star: None
+                                                            })
+                                                    ],
+                                                    star: None
+                                                })
+                                            },
+                                        )),
+                                    },
+                            }),
+                        },
+                    ),
+                    &mut node,
+                )
+                .unwrap();
+
+            let source::fetch_dependency_graph::Node::Connect(result) = node else {
+                unreachable!()
+            };
+
+            assert_eq!(*result.merge_at, []);
+            assert_eq!(result.source_entering_edge, source_entering_edge);
+            assert_eq!(
+                result.field_response_name.as_str(),
+                "_merge_nested_path_test"
+            );
+            assert_eq!(result.field_arguments, IndexMap::new());
+            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            .foo.bar {
+              qux: .qaax
+              qax: .qaax {
+                baz
+                baaz: .baz.buzz {
+                  biz: {
+                    blah: {
+                      x
+                      y
+                    }
+                  }
+                }
+              }
+            }
+            "###);
+        }
     }
 
-    #[test]
-    fn it_fails_with_invalid_edge() {
-        let SetupInfo {
-            fetch_graph,
-            query_graph,
-            ..
-        } = setup();
+    mod path {
+        use std::sync::Arc;
 
-        // Make sure that the first edge is what we expect
-        let invalid_index = EdgeIndex::end();
+        use apollo_compiler::ast::DirectiveList;
+        use apollo_compiler::name;
+        use apollo_compiler::Schema;
+        use indexmap::IndexMap;
+        use insta::assert_debug_snapshot;
+        use petgraph::graph::DiGraph;
+        use petgraph::prelude::EdgeIndex;
+        use petgraph::prelude::NodeIndex;
 
-        // Make sure that we fail since we pass in an invalid edge
-        let path = fetch_graph.new_path(query_graph, Arc::new([]), invalid_index, None);
+        use crate::query_plan::operation::Field;
+        use crate::query_plan::operation::FieldData;
+        use crate::schema::position::EnumTypeDefinitionPosition;
+        use crate::schema::position::FieldDefinitionPosition;
+        use crate::schema::position::ObjectFieldDefinitionPosition;
+        use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
+        use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+        use crate::schema::position::ObjectTypeDefinitionPosition;
+        use crate::schema::position::ScalarTypeDefinitionPosition;
+        use crate::schema::ValidFederationSchema;
+        use crate::source_aware::federated_query_graph;
+        use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
+        use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+        use crate::sources::connect;
+        use crate::sources::connect::json_selection::Key;
+        use crate::sources::connect::ConnectId;
+        use crate::sources::connect::JSONSelection;
+        use crate::sources::source;
+        use crate::sources::source::fetch_dependency_graph::PathApi;
+        use crate::sources::source::SourceId;
 
-        assert_debug_snapshot!(
-            path,
-            @r###"
-        Err(
-            SingleFederationError(
-                Internal {
-                    message: "Edge unexpectedly missing",
+        struct SetupInfo {
+            graph: DiGraph<federated_query_graph::Node, federated_query_graph::Edge>,
+            schema: ValidFederationSchema,
+            source_id: SourceId,
+        }
+        fn setup() -> SetupInfo {
+            let mut graph = DiGraph::new();
+            let source_id = SourceId::Connect(ConnectId {
+                label: "test connect".to_string(),
+                subgraph_name: "CONNECT".into(),
+                directive: ObjectOrInterfaceFieldDirectivePosition {
+                    field: ObjectOrInterfaceFieldDefinitionPosition::Object(
+                        ObjectFieldDefinitionPosition {
+                            type_name: name!("_testObject"),
+                            field_name: name!("testField"),
+                        },
+                    ),
+                    directive_name: name!("connect"),
+                    directive_index: 0,
                 },
-            ),
-        )
-        "###
-        );
+            });
+
+            // Create a dummy schema for tests
+            let schema =
+                Schema::parse(include_str!("../tests/schemas/simple.graphql"), "").unwrap();
+            let schema = schema.validate().unwrap();
+            let schema = ValidFederationSchema::new(schema).unwrap();
+
+            // Fill in some dummy data
+            graph.add_node(federated_query_graph::Node::Concrete {
+                supergraph_type: ObjectTypeDefinitionPosition {
+                    type_name: name!("_query"),
+                },
+                field_edges: IndexMap::new(),
+                source_exiting_edge: None,
+                source_id: source_id.clone(),
+                source_data: source::federated_query_graph::ConcreteNode::Connect(
+                    connect::federated_query_graph::ConcreteNode::SelectionRoot {
+                        subgraph_type: ObjectTypeDefinitionPosition {
+                            type_name: name!("_query"),
+                        },
+                        property_path: Vec::new(),
+                    },
+                ),
+            });
+
+            SetupInfo {
+                graph,
+                schema,
+                source_id,
+            }
+        }
+
+        #[test]
+        fn it_adds_operation_element_with_no_field_with_concrete() {
+            let SetupInfo {
+                schema,
+                source_id,
+                mut graph,
+                ..
+            } = setup();
+
+            let node_type = ObjectTypeDefinitionPosition {
+                type_name: name!("_noFieldConcreteNode"),
+            };
+            let field_pos = ObjectFieldDefinitionPosition {
+                type_name: name!("_noFieldTypeName"),
+                field_name: name!("_noFieldFieldName"),
+            };
+            let node = graph.add_node(federated_query_graph::Node::Concrete {
+                supergraph_type: node_type.clone(),
+                field_edges: IndexMap::new(),
+                source_exiting_edge: None,
+                source_id: source_id.clone(),
+                source_data: source::federated_query_graph::ConcreteNode::Connect(
+                    connect::federated_query_graph::ConcreteNode::SelectionRoot {
+                        subgraph_type: node_type.clone(),
+                        property_path: vec![Key::Field("no_field_concrete".to_string())],
+                    },
+                ),
+            });
+
+            let edge = graph.add_edge(
+                NodeIndex::new(0),
+                node,
+                federated_query_graph::Edge::ConcreteField {
+                    supergraph_field: field_pos.clone(),
+                    self_conditions: Default::default(),
+                    source_id: source_id.clone(),
+                    source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
+                        connect::federated_query_graph::ConcreteFieldEdge::Connect {
+                            subgraph_field: field_pos.clone(),
+                        },
+                    ),
+                },
+            );
+            let path = connect::fetch_dependency_graph::Path {
+                merge_at: Arc::new([]),
+                source_entering_edge: EdgeIndex::end(),
+                source_id,
+                field: None,
+            };
+            let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
+                schema,
+                field_position: FieldDefinitionPosition::Object(field_pos),
+                alias: Some(name!("_noFieldTestAlias")),
+                arguments: Arc::new(Vec::new()),
+                directives: Arc::new(DirectiveList::new()),
+                sibling_typename: None,
+            })));
+
+            let result = path
+                .add_operation_element(
+                    Arc::new(FederatedQueryGraph::with_graph(graph)),
+                    operation_element,
+                    Some(edge),
+                    IndexMap::new(),
+                )
+                .unwrap();
+
+            assert_debug_snapshot!(result, @r###"
+            Connect(
+                Path {
+                    merge_at: [],
+                    source_entering_edge: EdgeIndex(4294967295),
+                    source_id: Connect(
+                        ConnectId {
+                            label: "test connect",
+                            subgraph_name: "CONNECT",
+                            directive: ObjectOrInterfaceFieldDirectivePosition {
+                                field: Object(_testObject.testField),
+                                directive_name: "connect",
+                                directive_index: 0,
+                            },
+                        },
+                    ),
+                    field: Some(
+                        PathField {
+                            response_name: "_noFieldTestAlias",
+                            arguments: {},
+                            selections: Selections {
+                                head_property_path: [
+                                    Field(
+                                        "no_field_concrete",
+                                    ),
+                                ],
+                                named_selections: [],
+                                tail_selection: None,
+                            },
+                        },
+                    ),
+                },
+            )
+            "###);
+        }
+
+        #[test]
+        fn it_adds_operation_element_with_no_field_with_enum() {
+            let SetupInfo {
+                schema,
+                source_id,
+                mut graph,
+                ..
+            } = setup();
+
+            let node_type = EnumTypeDefinitionPosition {
+                type_name: name!("_noFieldEnumNode"),
+            };
+            let field_pos = ObjectFieldDefinitionPosition {
+                type_name: name!("_noFieldTypeName"),
+                field_name: name!("_noFieldFieldName"),
+            };
+            let node = graph.add_node(federated_query_graph::Node::Enum {
+                supergraph_type: node_type.clone(),
+                source_id: source_id.clone(),
+                source_data: source::federated_query_graph::EnumNode::Connect(
+                    connect::federated_query_graph::EnumNode::SelectionRoot {
+                        subgraph_type: node_type.clone(),
+                        property_path: vec![Key::Field("no_field_enum".to_string())],
+                    },
+                ),
+            });
+
+            let edge = graph.add_edge(
+                NodeIndex::new(0),
+                node,
+                federated_query_graph::Edge::ConcreteField {
+                    supergraph_field: field_pos.clone(),
+                    self_conditions: Default::default(),
+                    source_id: source_id.clone(),
+                    source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
+                        connect::federated_query_graph::ConcreteFieldEdge::Connect {
+                            subgraph_field: field_pos.clone(),
+                        },
+                    ),
+                },
+            );
+            let path = connect::fetch_dependency_graph::Path {
+                merge_at: Arc::new([]),
+                source_entering_edge: EdgeIndex::end(),
+                source_id,
+                field: None,
+            };
+            let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
+                schema,
+                field_position: FieldDefinitionPosition::Object(field_pos),
+                alias: Some(name!("_noFieldTestAlias")),
+                arguments: Arc::new(Vec::new()),
+                directives: Arc::new(DirectiveList::new()),
+                sibling_typename: None,
+            })));
+
+            let result = path
+                .add_operation_element(
+                    Arc::new(FederatedQueryGraph::with_graph(graph)),
+                    operation_element,
+                    Some(edge),
+                    IndexMap::new(),
+                )
+                .unwrap();
+
+            assert_debug_snapshot!(result, @r###"
+            Connect(
+                Path {
+                    merge_at: [],
+                    source_entering_edge: EdgeIndex(4294967295),
+                    source_id: Connect(
+                        ConnectId {
+                            label: "test connect",
+                            subgraph_name: "CONNECT",
+                            directive: ObjectOrInterfaceFieldDirectivePosition {
+                                field: Object(_testObject.testField),
+                                directive_name: "connect",
+                                directive_index: 0,
+                            },
+                        },
+                    ),
+                    field: Some(
+                        PathField {
+                            response_name: "_noFieldTestAlias",
+                            arguments: {},
+                            selections: Selections {
+                                head_property_path: [
+                                    Field(
+                                        "no_field_enum",
+                                    ),
+                                ],
+                                named_selections: [],
+                                tail_selection: None,
+                            },
+                        },
+                    ),
+                },
+            )
+            "###);
+        }
+
+        #[test]
+        fn it_adds_operation_element_with_no_field_with_custom_scalar() {
+            let SetupInfo {
+                schema,
+                source_id,
+                mut graph,
+                ..
+            } = setup();
+
+            let (_, selection) = JSONSelection::parse(".one.two.three").unwrap();
+            let node_type = ScalarTypeDefinitionPosition {
+                type_name: name!("_noFieldCustomScalarNode"),
+            };
+            let field_pos = ObjectFieldDefinitionPosition {
+                type_name: name!("_noFieldTypeName"),
+                field_name: name!("_noFieldFieldName"),
+            };
+            let node = graph.add_node(federated_query_graph::Node::Scalar {
+                supergraph_type: node_type.clone(),
+                source_id: source_id.clone(),
+                source_data: source::federated_query_graph::ScalarNode::Connect(
+                    connect::federated_query_graph::ScalarNode::CustomScalarSelectionRoot {
+                        subgraph_type: node_type.clone(),
+                        selection,
+                    },
+                ),
+            });
+
+            let edge = graph.add_edge(
+                NodeIndex::new(0),
+                node,
+                federated_query_graph::Edge::ConcreteField {
+                    supergraph_field: field_pos.clone(),
+                    self_conditions: Default::default(),
+                    source_id: source_id.clone(),
+                    source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
+                        connect::federated_query_graph::ConcreteFieldEdge::Connect {
+                            subgraph_field: field_pos.clone(),
+                        },
+                    ),
+                },
+            );
+            let path = connect::fetch_dependency_graph::Path {
+                merge_at: Arc::new([]),
+                source_entering_edge: EdgeIndex::end(),
+                source_id,
+                field: None,
+            };
+            let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
+                schema,
+                field_position: FieldDefinitionPosition::Object(field_pos),
+                alias: Some(name!("_noFieldTestAlias")),
+                arguments: Arc::new(Vec::new()),
+                directives: Arc::new(DirectiveList::new()),
+                sibling_typename: None,
+            })));
+
+            let result = path
+                .add_operation_element(
+                    Arc::new(FederatedQueryGraph::with_graph(graph)),
+                    operation_element,
+                    Some(edge),
+                    IndexMap::new(),
+                )
+                .unwrap();
+
+            assert_debug_snapshot!(result, @r###"
+            Connect(
+                Path {
+                    merge_at: [],
+                    source_entering_edge: EdgeIndex(4294967295),
+                    source_id: Connect(
+                        ConnectId {
+                            label: "test connect",
+                            subgraph_name: "CONNECT",
+                            directive: ObjectOrInterfaceFieldDirectivePosition {
+                                field: Object(_testObject.testField),
+                                directive_name: "connect",
+                                directive_index: 0,
+                            },
+                        },
+                    ),
+                    field: Some(
+                        PathField {
+                            response_name: "_noFieldTestAlias",
+                            arguments: {},
+                            selections: CustomScalarRoot {
+                                selection: Path(
+                                    Key(
+                                        Field(
+                                            "one",
+                                        ),
+                                        Key(
+                                            Field(
+                                                "two",
+                                            ),
+                                            Key(
+                                                Field(
+                                                    "three",
+                                                ),
+                                                Empty,
+                                            ),
+                                        ),
+                                    ),
+                                ),
+                            },
+                        },
+                    ),
+                },
+            )
+            "###);
+        }
+
+        #[test]
+        fn it_adds_operation_element_with_existing_field_with_selection() {
+            let SetupInfo {
+                schema,
+                source_id,
+                mut graph,
+                ..
+            } = setup();
+
+            let node_type = EnumTypeDefinitionPosition {
+                type_name: name!("_fieldEnumNode"),
+            };
+            let field_pos = ObjectFieldDefinitionPosition {
+                type_name: name!("_fieldTypeName"),
+                field_name: name!("_fieldFieldName"),
+            };
+            let node = graph.add_node(federated_query_graph::Node::Enum {
+                supergraph_type: node_type.clone(),
+                source_id: source_id.clone(),
+                source_data: source::federated_query_graph::EnumNode::Connect(
+                    connect::federated_query_graph::EnumNode::SelectionRoot {
+                        subgraph_type: node_type.clone(),
+                        property_path: vec![Key::Field("field_enum".to_string())],
+                    },
+                ),
+            });
+
+            let edge = graph.add_edge(
+                NodeIndex::new(0),
+                node,
+                federated_query_graph::Edge::ConcreteField {
+                    supergraph_field: field_pos.clone(),
+                    self_conditions: Default::default(),
+                    source_id: source_id.clone(),
+                    source_data: source::federated_query_graph::ConcreteFieldEdge::Connect(
+                        connect::federated_query_graph::ConcreteFieldEdge::Selection {
+                            subgraph_field: field_pos.clone(),
+                            property_path: vec!["one", "two", "three"]
+                                .into_iter()
+                                .map(|prop| Key::Field(prop.to_string()))
+                                .collect(),
+                        },
+                    ),
+                },
+            );
+            let path = connect::fetch_dependency_graph::Path {
+                merge_at: Arc::new([]),
+                source_entering_edge: EdgeIndex::end(),
+                source_id,
+                field: Some(connect::fetch_dependency_graph::PathField {
+                    response_name: name!("_connectPathResponseName"),
+                    arguments: IndexMap::new(),
+                    selections: connect::fetch_dependency_graph::PathSelections::Selections {
+                        head_property_path: Vec::new(),
+                        named_selections: Vec::new(),
+                        tail_selection: None,
+                    },
+                }),
+            };
+            let operation_element = Arc::new(OperationPathElement::Field(Field::new(FieldData {
+                schema,
+                field_position: FieldDefinitionPosition::Object(field_pos),
+                alias: Some(name!("_fieldTestAlias")),
+                arguments: Arc::new(Vec::new()),
+                directives: Arc::new(DirectiveList::new()),
+                sibling_typename: None,
+            })));
+
+            let result = path
+                .add_operation_element(
+                    Arc::new(FederatedQueryGraph::with_graph(graph)),
+                    operation_element,
+                    Some(edge),
+                    IndexMap::new(),
+                )
+                .unwrap();
+
+            assert_debug_snapshot!(result, @r###"
+            Connect(
+                Path {
+                    merge_at: [],
+                    source_entering_edge: EdgeIndex(4294967295),
+                    source_id: Connect(
+                        ConnectId {
+                            label: "test connect",
+                            subgraph_name: "CONNECT",
+                            directive: ObjectOrInterfaceFieldDirectivePosition {
+                                field: Object(_testObject.testField),
+                                directive_name: "connect",
+                                directive_index: 0,
+                            },
+                        },
+                    ),
+                    field: Some(
+                        PathField {
+                            response_name: "_connectPathResponseName",
+                            arguments: {},
+                            selections: Selections {
+                                head_property_path: [],
+                                named_selections: [],
+                                tail_selection: Some(
+                                    (
+                                        "_fieldTestAlias",
+                                        Selection {
+                                            property_path: [
+                                                Field(
+                                                    "one",
+                                                ),
+                                                Field(
+                                                    "two",
+                                                ),
+                                                Field(
+                                                    "three",
+                                                ),
+                                            ],
+                                        },
+                                    ),
+                                ),
+                            },
+                        },
+                    ),
+                },
+            )
+            "###);
+        }
     }
 }

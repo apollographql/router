@@ -25,7 +25,7 @@ pub(crate) mod path_tree;
 
 #[derive(Debug)]
 pub struct FederatedQueryGraph {
-    pub(crate) graph: DiGraph<Node, Edge>,
+    graph: DiGraph<Node, Edge>,
     supergraph_types_to_root_nodes: IndexMap<ObjectTypeDefinitionPosition, NodeIndex>,
     supergraph_root_kinds_to_types:
         IndexMap<SchemaRootDefinitionKind, ObjectTypeDefinitionPosition>,
@@ -179,7 +179,7 @@ pub(crate) enum Edge {
     },
     ConcreteField {
         supergraph_field: ObjectFieldDefinitionPosition,
-        self_conditions: Option<SelfConditionIndex>,
+        self_conditions: IndexSet<SelfConditionIndex>,
         source_id: SourceId,
         source_data: source::federated_query_graph::ConcreteFieldEdge,
     },
@@ -190,7 +190,7 @@ pub(crate) enum Edge {
     },
     SourceEntering {
         supergraph_type: ObjectTypeDefinitionPosition,
-        self_conditions: Option<SelfConditionIndex>,
+        self_conditions: IndexSet<SelfConditionIndex>,
         tail_source_id: SourceId,
         source_data: source::federated_query_graph::SourceEnteringEdge,
     },

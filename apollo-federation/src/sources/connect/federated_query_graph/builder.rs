@@ -9,6 +9,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphSubBuilderApi;
 use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
 use crate::sources::connect::federated_query_graph::ConcreteNode;
 use crate::sources::connect::federated_query_graph::EnumNode;
@@ -30,6 +31,7 @@ use crate::ValidFederationSubgraph;
 /// directives.
 ///
 /// Refer to [SourceSpecDefinition] and [ConnectSpecDefinition] for more info.
+#[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
 
 impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
@@ -43,13 +45,13 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
 
         for (id, connect) in connectors {
             // Inform the builder that every node / edge from here out are part of the current connect directive
-            builder.add_and_set_current_source(SourceId::Connect(id.clone()))?;
+            let mut sub_builder = builder.add_source(SourceId::Connect(id.clone()))?;
 
             // Save the connector to the backing query graph for use later in execution
             {
                 let source::federated_query_graph::FederatedQueryGraph::Connect(
                     connect_query_graph,
-                ) = builder.source_query_graph()?
+                ) = sub_builder.source_query_graph()?
                 else {
                     return Err(FederationError::internal(
                         "connect builder called with non-connect query graph",
@@ -69,7 +71,7 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
             };
 
             // Make a node for the entrypoint of this field
-            let parent_node = builder.add_concrete_node(
+            let parent_node = sub_builder.add_concrete_node(
                 field_def_pos.type_name.clone(),
                 ConcreteNode::ConnectParent {
                     subgraph_type: field_def_pos.parent().clone(),
@@ -78,9 +80,9 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
             )?;
 
             // Mark this entrypoint as being externally accessible to other resolvers
-            builder.add_source_entering_edge(
+            sub_builder.add_source_entering_edge(
                 parent_node,
-                None,
+                Default::default(),
                 SourceEnteringEdge::ConnectParent {
                     subgraph_type: field_def_pos.parent().clone(),
                 }
@@ -97,11 +99,11 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
                 connect.selection,
                 field_output_type_pos,
                 &subgraph.schema,
-                builder,
+                &mut sub_builder,
             )?;
 
             // Make an edge from the parent into our new subgraph
-            builder.add_concrete_field_edge(
+            sub_builder.add_concrete_field_edge(
                 parent_node,
                 field_node,
                 field_def_pos.field_name.clone(),
@@ -125,7 +127,7 @@ fn process_selection(
     selection: JSONSelection,
     field_output_type_pos: TypeDefinitionPosition,
     subgraph_schema: &ValidFederationSchema,
-    builder: &mut impl IntraSourceQueryGraphBuilderApi,
+    sub_builder: &mut impl IntraSourceQueryGraphSubBuilderApi,
 ) -> Result<NodeIndex<u32>, FederationError> {
     // Keep a cache to reuse nodes
     let mut node_cache: IndexMap<Name, NodeIndex<u32>> = IndexMap::new();
@@ -141,7 +143,7 @@ fn process_selection(
             return Err(FederationError::internal("scalar wasn't really a scalar"));
         };
 
-        return builder.add_scalar_node(
+        return sub_builder.add_scalar_node(
             field_ty.name().clone(),
             ScalarNode::CustomScalarSelectionRoot {
                 subgraph_type: scalar_field_ty,
@@ -156,7 +158,7 @@ fn process_selection(
         JSONSelection::Path(path) => match field_output_type_pos {
             TypeDefinitionPosition::Enum(enum_type) => {
                 // Create the node for this enum
-                builder.add_enum_node(
+                sub_builder.add_enum_node(
                     field_ty.name().clone(),
                     EnumNode::SelectionRoot {
                         subgraph_type: enum_type,
@@ -167,7 +169,7 @@ fn process_selection(
             }
             TypeDefinitionPosition::Scalar(scalar_type) => {
                 // Create the node for this enum
-                builder.add_scalar_node(
+                sub_builder.add_scalar_node(
                     field_ty.name().clone(),
                     ScalarNode::SelectionRoot {
                         subgraph_type: scalar_type,
@@ -189,7 +191,7 @@ fn process_selection(
                     sub,
                     field_output_type_pos,
                     subgraph_schema,
-                    builder,
+                    sub_builder,
                     &mut node_cache,
                     Some(path.collect_paths()),
                 )
@@ -208,7 +210,7 @@ fn process_selection(
                 &sub,
                 field_output_type_pos,
                 subgraph_schema,
-                builder,
+                sub_builder,
                 &mut node_cache,
                 Some(Vec::new()),
             )
@@ -220,7 +222,7 @@ fn process_subselection(
     sub: &SubSelection,
     field_output_type_pos: TypeDefinitionPosition,
     subgraph_schema: &ValidFederationSchema,
-    builder: &mut impl IntraSourceQueryGraphBuilderApi,
+    sub_builder: &mut impl IntraSourceQueryGraphSubBuilderApi,
     node_cache: &mut IndexMap<Name, NodeIndex<u32>>,
     properties_path: Option<Vec<Key>>,
 ) -> Result<NodeIndex<u32>, FederationError> {
@@ -237,7 +239,7 @@ fn process_subselection(
     let field_type_pos = object_pos.field(field_ty.name().clone());
 
     // Create the root node for this object
-    let object_node = builder.add_concrete_node(
+    let object_node = sub_builder.add_concrete_node(
         field_ty.name().clone(),
         properties_path
             .map(|props| ConcreteNode::SelectionRoot {
@@ -282,7 +284,7 @@ fn process_subselection(
                 let enum_node = match node_cache.entry(r#enum.type_name.clone()) {
                     Entry::Occupied(e) => e.into_mut(),
                     Entry::Vacant(e) => {
-                        let node = builder.add_enum_node(
+                        let node = sub_builder.add_enum_node(
                             r#enum.type_name.clone(),
                             EnumNode::SelectionChild {
                                 subgraph_type: r#enum.clone(),
@@ -295,7 +297,7 @@ fn process_subselection(
                 };
 
                 // Link the field to the object node
-                builder.add_concrete_field_edge(
+                sub_builder.add_concrete_field_edge(
                     object_node,
                     *enum_node,
                     selection_field.name.clone(),
@@ -326,7 +328,7 @@ fn process_subselection(
                 let scalar_node = match node_cache.entry(scalar.type_name.clone()) {
                     Entry::Occupied(e) => e.into_mut(),
                     Entry::Vacant(e) => {
-                        let node = builder.add_scalar_node(
+                        let node = sub_builder.add_scalar_node(
                             scalar.type_name.clone(),
                             ScalarNode::SelectionChild {
                                 subgraph_type: scalar.clone(),
@@ -339,7 +341,7 @@ fn process_subselection(
                 };
 
                 // Link the field to the object node
-                builder.add_concrete_field_edge(
+                sub_builder.add_concrete_field_edge(
                     object_node,
                     *scalar_node,
                     selection_field.name.clone(),
@@ -365,13 +367,13 @@ fn process_subselection(
                     subselection,
                     other,
                     subgraph_schema,
-                    builder,
+                    sub_builder,
                     node_cache,
                     None,
                 )?;
 
                 // Link the field to the object node
-                builder.add_concrete_field_edge(
+                sub_builder.add_concrete_field_edge(
                     object_node,
                     subselection_node,
                     selection_field.name.clone(),
@@ -718,6 +720,7 @@ mod tests {
         use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
         use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
         use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
+        use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphSubBuilderApi;
         use crate::source_aware::federated_query_graph::SelfConditionIndex;
         use crate::sources::connect;
         use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
@@ -783,9 +786,7 @@ mod tests {
         /// Mock implementation of [IntraSourceQueryGraphBuilder]
         pub struct MockSourceQueryGraphBuilder {
             graph: Graph<MockNode, MockEdge>,
-            current_source: Option<SourceId>,
             entering_node: NodeIndex<u32>,
-
             query_graph: source::federated_query_graph::FederatedQueryGraph,
         }
         impl MockSourceQueryGraphBuilder {
@@ -821,7 +822,6 @@ mod tests {
 
                 Self {
                     graph,
-                    current_source: None,
                     entering_node,
                     query_graph,
                 }
@@ -946,13 +946,40 @@ mod tests {
         }
 
         impl IntraSourceQueryGraphBuilderApi for MockSourceQueryGraphBuilder {
-            fn add_and_set_current_source(
+            fn source_query_graph(
+                &mut self,
+            ) -> Result<&mut source::federated_query_graph::FederatedQueryGraph, FederationError>
+            {
+                Ok(&mut self.query_graph)
+            }
+
+            fn is_for_query_planning(&self) -> bool {
+                todo!()
+            }
+
+            fn add_source(
                 &mut self,
                 source: SourceId,
-            ) -> Result<(), FederationError> {
-                self.current_source = Some(source);
+            ) -> Result<MockSourceQueryGraphSubBuilder, FederationError> {
+                Ok(MockSourceQueryGraphSubBuilder {
+                    source_id: source,
+                    builder: self,
+                })
+            }
+        }
 
-                Ok(())
+        /// Mock implementation of [IntraSourceQueryGraphSubBuilder]
+        pub struct MockSourceQueryGraphSubBuilder<'builder> {
+            source_id: SourceId,
+            builder: &'builder mut MockSourceQueryGraphBuilder,
+        }
+
+        impl<'builder> IntraSourceQueryGraphSubBuilderApi for MockSourceQueryGraphSubBuilder<'builder> {
+            fn source_query_graph(
+                &mut self,
+            ) -> Result<&mut source::federated_query_graph::FederatedQueryGraph, FederationError>
+            {
+                Ok(&mut self.builder.query_graph)
             }
 
             // We only support concrete types for now
@@ -966,10 +993,10 @@ mod tests {
                     unreachable!()
                 };
 
-                Ok(self.graph.add_node(MockNode {
+                Ok(self.builder.graph.add_node(MockNode {
                     prefix: "Node".to_string(),
                     type_name: supergraph_type_name,
-                    source_id: self.current_source.as_ref().unwrap().clone(),
+                    source_id: self.source_id.clone(),
                 }))
             }
 
@@ -990,7 +1017,7 @@ mod tests {
                     ConcreteFieldEdge::Selection { property_path, .. } => property_path,
                     _ => Vec::new(),
                 };
-                Ok(self.graph.add_edge(
+                Ok(self.builder.graph.add_edge(
                     head,
                     tail,
                     MockEdge {
@@ -1005,17 +1032,17 @@ mod tests {
                 supergraph_type_name: NamedType,
                 _source_data: source::federated_query_graph::ScalarNode,
             ) -> Result<NodeIndex, FederationError> {
-                Ok(self.graph.add_node(MockNode {
+                Ok(self.builder.graph.add_node(MockNode {
                     prefix: "Scalar".to_string(),
                     type_name: supergraph_type_name,
-                    source_id: self.current_source.as_ref().unwrap().clone(),
+                    source_id: self.source_id.clone(),
                 }))
             }
 
             fn add_source_entering_edge(
                 &mut self,
                 tail: NodeIndex,
-                _self_conditions: Option<SelfConditionIndex>,
+                _self_conditions: IndexSet<SelfConditionIndex>,
                 source_data: source::federated_query_graph::SourceEnteringEdge,
             ) -> Result<EdgeIndex, FederationError> {
                 let source::federated_query_graph::SourceEnteringEdge::Connect(
@@ -1025,8 +1052,8 @@ mod tests {
                     unreachable!()
                 };
 
-                Ok(self.graph.add_edge(
-                    self.entering_node,
+                Ok(self.builder.graph.add_edge(
+                    self.builder.entering_node,
                     tail,
                     MockEdge {
                         field_name: subgraph_type.type_name,
@@ -1035,18 +1062,11 @@ mod tests {
                 ))
             }
 
-            fn source_query_graph(
-                &mut self,
-            ) -> Result<&mut source::federated_query_graph::FederatedQueryGraph, FederationError>
-            {
-                Ok(&mut self.query_graph)
-            }
-
             // ---------------------------------
             // -- Everything below is todo!() --
             // ---------------------------------
 
-            fn get_current_source(&self) -> Result<SourceId, FederationError> {
+            fn get_source(&self) -> SourceId {
                 todo!()
             }
 
@@ -1054,7 +1074,7 @@ mod tests {
                 &mut self,
                 _supergraph_type_name: NamedType,
                 _field_set: &str,
-            ) -> Result<SelfConditionIndex, FederationError> {
+            ) -> Result<Option<SelfConditionIndex>, FederationError> {
                 todo!()
             }
 
@@ -1079,7 +1099,6 @@ mod tests {
                 _head: NodeIndex,
                 _tail: NodeIndex,
                 _supergraph_field_name: Name,
-                _self_conditions: IndexSet<SelfConditionIndex>,
                 _source_data: source::federated_query_graph::AbstractFieldEdge,
             ) -> Result<EdgeIndex, FederationError> {
                 todo!()

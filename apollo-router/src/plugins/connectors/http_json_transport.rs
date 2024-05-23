@@ -61,15 +61,16 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
     HeaderName::from_static("keep-alive"),
 ];
 
+// temporary while we're refactoring the modules
+#[allow(clippy::module_inception)]
 pub(super) mod http_json_transport {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use url::Url;
 
-    use crate::error::ConnectorDirectiveError;
-
     use super::flatten_keys;
     use super::HttpJsonTransportError;
     use super::Value;
+    use crate::error::ConnectorDirectiveError;
 
     pub(crate) fn make_request(
         transport: &HttpJsonTransport,
@@ -81,9 +82,11 @@ pub(super) mod http_json_transport {
         let method = transport.method.to_string().to_uppercase();
         let request = http::Request::builder()
             .method(method.as_bytes())
-            .uri(make_uri(transport, &inputs)
-                .map_err(HttpJsonTransportError::ConnectorDirectiveError)?
-                .as_str())
+            .uri(
+                make_uri(transport, &inputs)
+                    .map_err(HttpJsonTransportError::ConnectorDirectiveError)?
+                    .as_str(),
+            )
             .header("content-type", "application/json")
             .body(body)
             .map_err(HttpJsonTransportError::InvalidNewRequest)?;
@@ -100,7 +103,7 @@ pub(super) mod http_json_transport {
             .path_template
             .generate_path(&Value::Object(flat_inputs))
             .map_err(ConnectorDirectiveError::PathGenerationError)?;
-        append_path(Url::parse(&transport.base_url.to_string()).unwrap(), &path)
+        append_path(Url::parse(transport.base_url.as_ref()).unwrap(), &path)
     }
 
     /// Append a path and query to a URI. Uses the path from base URI (but will discard the query).

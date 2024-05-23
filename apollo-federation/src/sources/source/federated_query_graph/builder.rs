@@ -1,13 +1,14 @@
-use apollo_compiler::NodeStr;
 use enum_dispatch::enum_dispatch;
 use indexmap::IndexMap;
 
 use crate::error::FederationError;
+use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilder;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
 use crate::sources::connect;
 use crate::sources::graphql;
 use crate::sources::source::SourceKind;
 use crate::ValidFederationSubgraph;
+use crate::ValidFederationSubgraphs;
 
 #[enum_dispatch(FederatedQueryGraphBuilderApi)]
 pub(crate) enum FederatedQueryGraphBuilder {
@@ -29,15 +30,28 @@ pub(crate) struct FederatedQueryGraphBuilders {
 }
 
 impl FederatedQueryGraphBuilders {
-    fn new() -> Self {
-        todo!()
-    }
-
-    fn process_subgraph_schemas(
+    pub(crate) fn process_subgraph_schemas(
         &self,
-        _subgraphs_by_name: IndexMap<NodeStr, ValidFederationSubgraph>,
-        _builder: &mut impl IntraSourceQueryGraphBuilderApi,
+        _subgraphs: ValidFederationSubgraphs,
+        _builder: &mut IntraSourceQueryGraphBuilder,
     ) -> Result<(), FederationError> {
         todo!()
+    }
+}
+
+impl Default for FederatedQueryGraphBuilders {
+    fn default() -> Self {
+        Self {
+            builders: IndexMap::from([
+                (
+                    SourceKind::Graphql,
+                    FederatedQueryGraphBuilder::Graphql(Default::default()),
+                ),
+                (
+                    SourceKind::Connect,
+                    FederatedQueryGraphBuilder::Connect(Default::default()),
+                ),
+            ]),
+        }
     }
 }
