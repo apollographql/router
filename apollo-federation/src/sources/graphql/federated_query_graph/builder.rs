@@ -4,6 +4,7 @@ use apollo_compiler::name;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use itertools::Either;
+use itertools::Itertools;
 use petgraph::prelude::NodeIndex;
 use strum::IntoEnumIterator;
 
@@ -17,7 +18,6 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphSubBuilderApi;
-use crate::sources::graphql::federated_query_graph::ConcreteFieldEdge;
 use crate::sources::graphql::federated_query_graph::TypeConditionEdge;
 use crate::sources::graphql::GraphqlId;
 use crate::sources::source;
@@ -25,6 +25,8 @@ use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphB
 use crate::sources::source::federated_query_graph::EnumNode;
 use crate::sources::source::federated_query_graph::ScalarNode;
 use crate::ValidFederationSubgraph;
+
+use super::ConcreteFieldEdge;
 
 #[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
@@ -37,13 +39,14 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
     ) -> Result<(), FederationError> {
         let src_id = GraphqlId::from(NodeStr::new(&subgraph.name));
         let schema = &subgraph.schema;
-        if let source::federated_query_graph::FederatedQueryGraph::Graphql(graph) =
+        let source::federated_query_graph::FederatedQueryGraph::Graphql(graph) =
             builder.source_query_graph()?
-        {
-            graph
-                .subgraphs_by_source
-                .insert(src_id.clone(), subgraph.clone());
-        }
+        else {
+            return Err(FederationError::internal("While processing GraphQL subgraph schema, received a non-GraphQL source query graph."));
+        };
+        graph
+            .subgraphs_by_source
+            .insert(src_id.clone(), subgraph.clone());
         let mut existing_types: HashMap<OutputTypeDefinitionPosition, NodeIndex> = HashMap::new();
         let mut sub_builder = builder.add_source(src_id.into())?;
         for root_kind in SchemaRootDefinitionKind::iter() {
@@ -53,27 +56,31 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
             };
             let ty: OutputTypeDefinitionPosition =
                 schema.get_type(position.name.clone())?.try_into()?;
-            if is_source_entering_type_ignored(&ty, schema) {
+            if is_source_entering_type_ignored(&ty, schema)? {
                 continue;
             }
             process_type(ty, schema, &mut sub_builder, &mut existing_types)?;
         }
-        if let Some(metadata) = schema.subgraph_metadata() {
-            let key_name = metadata
-                .federation_spec_definition()
-                .key_directive_definition(schema)?;
-            schema
-                .referencers()
-                .get_directive(&key_name.name)?
-                .object_types
-                .iter()
-                .map(|ty| OutputTypeDefinitionPosition::from(ty.clone()))
-                .filter(|ty| is_source_entering_type_ignored(ty, schema))
-                .try_for_each(|ty| {
-                    process_type(ty, schema, &mut sub_builder, &mut existing_types).map(drop)
-                })?;
-        }
-        Ok(())
+        let Some(metadata) = schema.subgraph_metadata() else {
+            return Err(FederationError::internal(
+                "Expected subgraph metadata while processing GraphQL subgraph but found none.",
+            ));
+        };
+        let key_name = metadata
+            .federation_spec_definition()
+            .key_directive_definition(schema)?;
+        schema
+            .referencers()
+            .get_directive(&key_name.name)?
+            .object_types
+            .iter()
+            .map(|ty| OutputTypeDefinitionPosition::from(ty.clone()))
+            .try_for_each(|ty| {
+                if is_source_entering_type_ignored(&ty, schema)? {
+                    return Ok(());
+                }
+                process_type(ty, schema, &mut sub_builder, &mut existing_types).map(drop)
+            })
     }
 }
 
@@ -86,10 +93,7 @@ fn process_type(
     if let Some(index) = existing_types.get(&output_type_definition_position) {
         return Ok(*index);
     }
-    let type_name = output_type_definition_position
-        .get(subgraph_schema.schema())?
-        .name()
-        .clone();
+    let type_name = output_type_definition_position.type_name().clone();
     let (ty, index) = match output_type_definition_position.clone() {
         OutputTypeDefinitionPosition::Scalar(ty) => (
             None,
@@ -130,28 +134,31 @@ fn process_type(
     match ty {
         Some(Either::Left(concrete_ty)) => concrete_ty
             .field_positions(subgraph_schema.schema())?
-            .filter(|field| is_field_ignored(field.clone().into(), subgraph_schema))
             .try_for_each(|subgraph_field| {
-                subgraph_schema
-                    .get_type(subgraph_field.type_name.clone())
-                    .and_then(OutputTypeDefinitionPosition::try_from)
-                    .and_then(|ty| process_type(ty, subgraph_schema, builder, existing_types))
-                    .and_then(|next_index| {
-                        builder
-                            .add_concrete_field_edge(
-                                index,
-                                next_index,
-                                subgraph_field.field_name.clone(),
-                                IndexSet::new(),
-                                ConcreteFieldEdge {
-                                    subgraph_field,
-                                    requires_condition: None,
-                                }
-                                .into(),
-                            )
-                            .map(drop)
-                    })
-            })?,
+            if !is_field_ignored(subgraph_field.clone().into(), subgraph_schema)? {
+                return Ok(());
+            }
+            subgraph_field
+                .get(subgraph_schema.schema())
+                .and_then(|field| subgraph_schema.get_type(field.ty.inner_named_type().clone()))
+                .and_then(OutputTypeDefinitionPosition::try_from)
+                .and_then(|ty| process_type(ty, subgraph_schema, builder, existing_types))
+                .and_then(|next_index| {
+                    builder
+                        .add_concrete_field_edge(
+                            index,
+                            next_index,
+                            subgraph_field.field_name.clone(),
+                            IndexSet::new(),
+                            ConcreteFieldEdge {
+                                subgraph_field,
+                                requires_condition: None,
+                            }
+                            .into(),
+                        )
+                        .map(drop)
+                })
+        })?,
         Some(Either::Right(abstract_ty)) => subgraph_schema
             .possible_runtime_types(abstract_ty.into())?
             .into_iter()
@@ -176,9 +183,9 @@ fn process_type(
 fn is_field_ignored(
     field_definition_position: FieldDefinitionPosition,
     subgraph_schema: &ValidFederationSchema,
-) -> bool {
+) -> Result<bool, FederationError> {
     if field_definition_position.field_name().starts_with("__") {
-        return true;
+        return Ok(true);
     }
 
     if let FieldDefinitionPosition::Object(position) = &field_definition_position {
@@ -188,27 +195,28 @@ fn is_field_ignored(
         let entities = query_def.field(name!("_entities"));
         let service = query_def.field(name!("_service"));
         if [entities, service].contains(position) {
-            return true;
+            return Ok(true);
         }
     }
 
     subgraph_schema
         .subgraph_metadata()
-        .unwrap()
-        .external_metadata()
-        .is_external(&field_definition_position)
-        .unwrap_or_default()
+        .ok_or_else(|| FederationError::internal("Expected subgraph metadata while processing GraphQL subgraph schema but found none."))
+        .and_then(|metadata| {
+            metadata
+                .external_metadata()
+                .is_external(&field_definition_position)
+        })
 }
 
 fn is_source_entering_type_ignored(
     output_type_definition_position: &OutputTypeDefinitionPosition,
     subgraph_schema: &ValidFederationSchema,
-) -> bool {
+) -> Result<bool, FederationError> {
     let OutputTypeDefinitionPosition::Object(ty) = output_type_definition_position else {
-        return false;
+        return Ok(false);
     };
-    let Ok(mut fields) = ty.field_positions(subgraph_schema.schema()) else {
-        return false;
-    };
-    fields.all(|field| is_field_ignored(field.into(), subgraph_schema))
+    ty.field_positions(subgraph_schema.schema())?
+        .map(|field| is_field_ignored(field.into(), subgraph_schema))
+        .process_results(|mut results| results.all(|b| b))
 }
