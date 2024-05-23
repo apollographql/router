@@ -12,6 +12,7 @@ expression: query_plan
   "id": null,
   "inputRewrites": null,
   "outputRewrites": null,
+  "contextRewrites": null,
   "schemaAwareHash": "121b9859eba2d8fa6dde0a54b6e3781274cf69f7ffb0af912e92c01c6bfff6ca",
   "authorization": {
     "is_authenticated": false,
