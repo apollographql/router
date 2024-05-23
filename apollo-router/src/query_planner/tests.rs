@@ -116,6 +116,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -177,6 +178,7 @@ async fn fetch_includes_operation_name() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -235,6 +237,7 @@ async fn fetch_makes_post_requests() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -266,6 +269,7 @@ async fn defer() {
                         id: Some("fetch1".into()),
                         input_rewrites: None,
                         output_rewrites: None,
+                        context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
                     }))),
@@ -311,6 +315,7 @@ async fn defer() {
                             id: Some("fetch2".into()),
                             input_rewrites: None,
                             output_rewrites: None,
+                            context_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
                         })),
@@ -385,6 +390,7 @@ async fn defer() {
             &sf,
             &Default::default(),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -493,6 +499,7 @@ async fn defer_if_condition() {
                     .unwrap(),
             ),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -515,6 +522,7 @@ async fn defer_if_condition() {
             &service_factory,
             &Default::default(),
             &schema,
+            &Default::default(),
             default_sender,
             None,
             &None,
@@ -546,6 +554,7 @@ async fn defer_if_condition() {
                     .unwrap(),
             ),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -667,6 +676,7 @@ async fn dependent_mutations() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -1799,6 +1809,7 @@ fn broken_plan_does_not_panic() {
             id: Some("fetch1".into()),
             input_rewrites: None,
             output_rewrites: None,
+            context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
         }),
@@ -1813,7 +1824,9 @@ fn broken_plan_does_not_panic() {
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::new();
     subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
-    let result = plan.root.hash_subqueries(&subgraph_schemas, "");
+    let result = plan
+        .root
+        .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#

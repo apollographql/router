@@ -247,20 +247,16 @@ impl PlannerMode {
                 })
                 .unwrap_or_else(|panic| {
                     USING_CATCH_UNWIND.set(false);
-                    Err(
-                        apollo_federation::error::FederationError::SingleFederationError(
-                            apollo_federation::error::SingleFederationError::Internal {
-                                message: format!(
-                                    "query planner panicked: {}",
-                                    panic
-                                        .downcast_ref::<String>()
-                                        .map(|s| s.as_str())
-                                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                                        .unwrap_or_default()
-                                ),
-                            },
+                    Err(apollo_federation::error::FederationError::internal(
+                        format!(
+                            "query planner panicked: {}",
+                            panic
+                                .downcast_ref::<String>()
+                                .map(|s| s.as_str())
+                                .or_else(|| panic.downcast_ref::<&str>().copied())
+                                .unwrap_or_default()
                         ),
-                    )
+                    ))
                 });
 
                 let js_result = js
@@ -545,7 +541,10 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl)?;
+            .init_parsed_operations_and_hash_subqueries(
+                &self.subgraph_schemas,
+                &self.schema.raw_sdl,
+            )?;
         plan_success
             .data
             .query_plan
@@ -973,13 +972,16 @@ pub(super) struct QueryPlan {
 }
 
 impl QueryPlan {
-    fn hash_subqueries(
+    fn init_parsed_operations_and_hash_subqueries(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
+            node.init_parsed_operations_and_hash_subqueries(
+                subgraph_schemas,
+                supergraph_schema_hash,
+            )?;
         }
         Ok(())
     }
