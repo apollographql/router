@@ -6,7 +6,9 @@ telemetry:
           description: test
           type: histogram
           unit: count
-          value: field_unit
+          value:
+            field_custom:
+              list_length: value
           condition:
             eq:
               - field_name: string
