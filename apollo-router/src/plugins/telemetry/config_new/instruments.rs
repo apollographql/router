@@ -1411,16 +1411,21 @@ where
             }
             if let Some(counter) = inner.counter.take() {
                 let incr: f64 = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
+                    Increment::Unit | Increment::EventUnit => 1f64,
                     Increment::Duration(instant) | Increment::EventDuration(instant) => {
                         instant.elapsed().as_secs_f64()
                     }
-                    Increment::Custom(val)
-                    | Increment::EventCustom(val)
-                    | Increment::FieldCustom(val) => match val {
+                    Increment::Custom(val) | Increment::EventCustom(val) => match val {
                         Some(incr) => *incr as f64,
                         None => 0f64,
                     },
+                    Increment::FieldUnit | Increment::FieldCustom(_) => {
+                        // Dropping a metric on a field will never increment.
+                        // We can't increment graphql metrics unless we actually process the result.
+                        // It's not like we're counting the number of requests, where we want to increment
+                        // with the data that we know so far if the request stops.
+                        return;
+                    }
                 };
                 counter.add(incr, &inner.attributes);
             }
@@ -1803,13 +1808,20 @@ where
             }
             if let Some(histogram) = inner.histogram.take() {
                 let increment = match &inner.increment {
-                    Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
+                    Increment::Unit | Increment::EventUnit => Some(1f64),
                     Increment::Duration(instant) | Increment::EventDuration(instant) => {
                         Some(instant.elapsed().as_secs_f64())
                     }
-                    Increment::Custom(val)
-                    | Increment::EventCustom(val)
-                    | Increment::FieldCustom(val) => val.map(|incr| incr as f64),
+                    Increment::Custom(val) | Increment::EventCustom(val) => {
+                        val.map(|incr| incr as f64)
+                    }
+                    Increment::FieldUnit | Increment::FieldCustom(_) => {
+                        // Dropping a metric on a field will never increment.
+                        // We can't increment graphql metrics unless we actually process the result.
+                        // It's not like we're counting the number of requests, where we want to increment
+                        // with the data that we know so far if the request stops.
+                        return;
+                    }
                 };
 
                 if let Some(increment) = increment {
