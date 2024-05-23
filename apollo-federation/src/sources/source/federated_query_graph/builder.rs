@@ -1,5 +1,4 @@
 use enum_dispatch::enum_dispatch;
-use indexmap::IndexMap;
 
 use crate::error::FederationError;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilder;
@@ -27,7 +26,8 @@ pub(crate) trait FederatedQueryGraphBuilderApi {
 }
 
 pub(crate) struct FederatedQueryGraphBuilders {
-    builders: IndexMap<SourceKind, FederatedQueryGraphBuilder>,
+    graphql: FederatedQueryGraphBuilder, // Always the GraphQL variant
+    connect: FederatedQueryGraphBuilder, // Always the Connect variant
 }
 
 impl FederatedQueryGraphBuilders {
@@ -45,7 +45,10 @@ impl FederatedQueryGraphBuilders {
     }
 
     fn get_builder(&self, src_kind: SourceKind) -> &FederatedQueryGraphBuilder {
-        self.builders.get(&src_kind).unwrap()
+        match src_kind {
+            SourceKind::Graphql => &self.graphql,
+            SourceKind::Connect => &self.connect,
+        }
     }
 }
 
@@ -65,16 +68,28 @@ fn extract_source_kind(graph: &ValidFederationSubgraph) -> SourceKind {
 impl Default for FederatedQueryGraphBuilders {
     fn default() -> Self {
         Self {
-            builders: IndexMap::from([
-                (
-                    SourceKind::Graphql,
-                    FederatedQueryGraphBuilder::Graphql(Default::default()),
-                ),
-                (
-                    SourceKind::Connect,
-                    FederatedQueryGraphBuilder::Connect(Default::default()),
-                ),
-            ]),
+            graphql: FederatedQueryGraphBuilder::Graphql(Default::default()),
+            connect: FederatedQueryGraphBuilder::Connect(Default::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilder;
+    use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphBuilders;
+    use crate::sources::source::SourceKind;
+
+    #[test]
+    fn federated_query_graph_builder_field_invariant() {
+        let builder = FederatedQueryGraphBuilders::default();
+        assert!(matches!(
+            builder.get_builder(SourceKind::Graphql),
+            FederatedQueryGraphBuilder::Graphql(_)
+        ));
+        assert!(matches!(
+            builder.get_builder(SourceKind::Connect),
+            FederatedQueryGraphBuilder::Connect(_)
+        ));
     }
 }
