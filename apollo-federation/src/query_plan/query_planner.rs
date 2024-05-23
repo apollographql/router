@@ -1137,7 +1137,7 @@ type User
             "#,
             "operation.graphql",
         )
-        .unwrap();
+            .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
