@@ -3287,7 +3287,7 @@ impl IntoIterator for SelectionSet {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct SelectionSetAtPath {
     path: Vec<FetchDataPathElement>,
     selections: Option<SelectionSet>,

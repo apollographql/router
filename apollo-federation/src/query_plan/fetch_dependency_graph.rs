@@ -735,7 +735,7 @@ impl FetchDependencyGraph {
         other_id: NodeIndex,
     ) -> Result<(), FederationError> {
         let (fetch_node, other_node) = self.graph.index_twice_mut(node_id, other_id);
-        Arc::make_mut(fetch_node).copy_inputs(&self.supergraph_schema, other_node)
+        Arc::make_mut(fetch_node).copy_inputs(other_node)
     }
 
     /// Returns true if `needle` is either part of `haystack`, or is one of their ancestors
@@ -1447,7 +1447,7 @@ impl FetchDependencyGraph {
         let (node, sibling) = self.graph.index_twice_mut(node_id, sibling_id);
         let mutable_node = Arc::make_mut(node);
 
-        mutable_node.copy_inputs(&self.supergraph_schema, sibling)?;
+        mutable_node.copy_inputs(sibling)?;
         self.merge_in_internal(node_id, sibling_id, &OpPath::default(), false)?;
 
         Ok(())
@@ -1679,13 +1679,12 @@ impl FetchDependencyGraphNode {
 
     fn add_inputs(
         &mut self,
-        supergraph_schema: &ValidFederationSchema,
         selection: &SelectionSet,
         rewrites: impl IntoIterator<Item = Arc<FetchDataRewrite>>,
     ) -> Result<(), FederationError> {
         let inputs = self
             .inputs
-            .get_or_insert_with(|| Arc::new(FetchInputs::empty(supergraph_schema.clone())));
+            .get_or_insert_with(|| Arc::new(FetchInputs::empty(selection.schema.clone())));
         Arc::make_mut(inputs).add(selection)?;
         self.on_inputs_updated();
         Arc::make_mut(&mut self.input_rewrites).extend(rewrites);
@@ -1694,13 +1693,12 @@ impl FetchDependencyGraphNode {
 
     fn copy_inputs(
         &mut self,
-        supergraph_schema: &ValidFederationSchema,
         other: &FetchDependencyGraphNode,
     ) -> Result<(), FederationError> {
         if let Some(other_inputs) = other.inputs.clone() {
             let inputs = self
                 .inputs
-                .get_or_insert_with(|| Arc::new(FetchInputs::empty(supergraph_schema.clone())));
+                .get_or_insert_with(|| Arc::new(FetchInputs::empty(other_inputs.supergraph_schema.clone())));
             Arc::make_mut(inputs).add_all(&other_inputs)?;
             self.on_inputs_updated();
 
@@ -2557,7 +2555,6 @@ fn compute_nodes_for_key_resolution<'a>(
 
     let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
-        &dependency_graph.supergraph_schema,
         &wrap_input_selections(
             &dependency_graph.supergraph_schema,
             &input_type,
@@ -3114,15 +3111,15 @@ fn handle_requires(
 
         // We start by computing the nodes for the conditions. We do this using a copy of the current
         // node (with only the inputs) as that allows to modify this copy without modifying `node`.
-        let fetch_node_ = dependency_graph.node_weight(fetch_node_id)?;
-        let subgraph_name = fetch_node_.subgraph_name.clone();
-        let Some(merge_at) = fetch_node_.merge_at.clone() else {
+        let fetch_node = dependency_graph.node_weight(fetch_node_id)?;
+        let subgraph_name = fetch_node.subgraph_name.clone();
+        let Some(merge_at) = fetch_node.merge_at.clone() else {
             return Err(FederationError::internal(format!(
                 "Fetch node {} merge_at_path is required but was missing",
                 fetch_node_id.index()
             )));
         };
-        let defer_ref = fetch_node_.defer_ref.clone();
+        let defer_ref = fetch_node.defer_ref.clone();
         let new_node_id =
             dependency_graph.new_key_node(&subgraph_name, merge_at, defer_ref.clone())?;
         dependency_graph.add_parent(new_node_id, parent.clone());
@@ -3280,7 +3277,6 @@ fn handle_requires(
             let fetch_node =
                 FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, fetch_node_id)?;
             fetch_node.add_inputs(
-                &dependency_graph.supergraph_schema,
                 &selection,
                 iter::empty(),
             )?;
@@ -3596,7 +3592,6 @@ fn add_post_require_inputs(
     let post_require_node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, post_require_node_id)?;
     post_require_node.add_inputs(
-        &dependency_graph.supergraph_schema,
         &inputs,
         input_rewrites.into_iter().flatten(),
     )?;

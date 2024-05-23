@@ -1113,7 +1113,6 @@ type User
         "###);
     }
 
-<<<<<<< HEAD
     #[test]
     fn test_optimize_basic() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
@@ -1196,136 +1195,15 @@ type User
             "#,
             "operation.graphql",
         )
-        .unwrap();
+            .unwrap();
 
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
         insta::assert_snapshot!(plan, @r###"
-=======
-    mod requires {
-        use apollo_compiler::ExecutableDocument;
-        use crate::query_plan::query_planner::QueryPlanner;
-        use crate::Supergraph;
-
-        #[test]
-        fn handles_multiple_requires_within_the_same_entity_fetch() {
-            let supergraph_schema = r#"
-                schema
-                  @link(url: "https://specs.apollo.dev/link/v1.0")
-                  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-                {
-                  query: Query
-                }
-
-                directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-
-                directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-
-                directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-
-                directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-
-                directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-
-                directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-
-                directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-
-                directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-
-                enum link__Purpose {
-                  """
-                  `SECURITY` features provide metadata necessary to securely resolve fields.
-                  """
-                  SECURITY
-
-                  """
-                  `EXECUTION` features provide metadata necessary for operation execution.
-                  """
-                  EXECUTION
-                }
-
-                scalar link__Import
-
-                enum join__Graph {
-                  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "")
-                  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "")
-                }
-
-                scalar join__FieldSet
-
-                scalar join__DirectiveArguments
-
-                type Query
-                  @join__type(graph: SUBGRAPH1)
-                  @join__type(graph: SUBGRAPH2)
-                {
-                  is: [I!]! @join__field(graph: SUBGRAPH1)
-                }
-
-                interface I
-                  @join__type(graph: SUBGRAPH1)
-                {
-                  id: ID!
-                  f: Int
-                  g: Int
-                }
-
-                type T1 implements I
-                  @join__implements(graph: SUBGRAPH1, interface: "I")
-                  @join__type(graph: SUBGRAPH1)
-                {
-                  id: ID!
-                  f: Int
-                  g: Int
-                }
-
-                type T2 implements I
-                  @join__implements(graph: SUBGRAPH1, interface: "I")
-                  @join__type(graph: SUBGRAPH1, key: "id")
-                  @join__type(graph: SUBGRAPH2, key: "id")
-                {
-                  id: ID!
-                  f: Int! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
-                  g: Int @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2, requires: "f")
-                }
-
-                type T3 implements I
-                  @join__implements(graph: SUBGRAPH1, interface: "I")
-                  @join__type(graph: SUBGRAPH1, key: "id")
-                  @join__type(graph: SUBGRAPH2, key: "id")
-                {
-                  id: ID!
-                  f: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
-                  g: Int @join__field(graph: SUBGRAPH1, external: true) @join__field(graph: SUBGRAPH2, requires: "f")
-                }
-            "#;
-            let supergraph = Supergraph::new(supergraph_schema).unwrap();
-            let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
-
-            let document = ExecutableDocument::parse_and_validate(
-                planner.api_schema().schema(),
-                r#"
-            {
-                is {
-                    g
-                }
-            }
-            "#,
-                "operation.graphql",
-            )
-                .unwrap();
-            let plan = planner.build_query_plan(&document, None).unwrap();
-            // The main goal of this test is to show that the 2 @requires for `f` gets handled seamlessly
-            // into the same fetch node. But note that because the type for `f` differs, the 2nd instance
-            // gets aliased (or the fetch would be invalid graphQL).
-            insta::assert_snapshot!(plan, @r###"
->>>>>>> d06481780 (add missing method and bug fixes)
         QueryPlan {
           Fetch(service: "accounts") {
             {
               userById(id: 1) {
-<<<<<<< HEAD
                 ...userFields
                 id
               }      partial_optimize: userById(id: 2) {
