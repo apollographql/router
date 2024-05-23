@@ -23,6 +23,7 @@ use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
+use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceError;
 use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
@@ -106,7 +107,7 @@ const LABEL: Key = Key::from_static_str("graphql.label");
 const CONDITION: Key = Key::from_static_str("graphql.condition");
 const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
-const OPERATION_SUBTYPE: Key = Key::from_static_str("graphql.operation.subtype");
+pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("graphql.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
@@ -190,6 +191,7 @@ pub(crate) struct LightSpanData {
     pub(crate) start_time: SystemTime,
     pub(crate) end_time: SystemTime,
     pub(crate) attributes: EvictedHashMap,
+    pub(crate) status: Status,
 }
 
 impl LightSpanData {
@@ -224,6 +226,7 @@ impl LightSpanData {
             start_time: value.start_time,
             end_time: value.end_time,
             attributes: filtered_attributes,
+            status: value.status,
         }
     }
 }
