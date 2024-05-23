@@ -83,6 +83,7 @@ impl FetchNode {
             operation_kind: _,
             input_rewrites: _,
             output_rewrites: _,
+            context_rewrites: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
