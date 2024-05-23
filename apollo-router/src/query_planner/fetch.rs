@@ -762,6 +762,7 @@ impl FetchNode {
             subscription_handle: parameters.subscription_handle,
             subscription_config: parameters.subscription_config,
             supergraph_request: &Arc::new(supergraph_request),
+            connectors: parameters.connectors,
         };
 
         let path = Path::default();

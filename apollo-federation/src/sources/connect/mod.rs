@@ -1,11 +1,13 @@
 use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
+use std::sync::Arc;
 
 use apollo_compiler::NodeStr;
+use indexmap::IndexMap;
 
+use super::source::SourceId;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-
 pub(crate) mod federated_query_graph;
 pub(crate) mod fetch_dependency_graph;
 mod json_selection;
@@ -24,6 +26,13 @@ pub use models::validate;
 pub use models::ValidationError;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
+
+pub use self::models::Connector;
+pub use self::models::HTTPMethod;
+pub use self::models::HttpJsonTransport;
+pub use self::models::Transport;
+
+pub type Connectors = Arc<IndexMap<SourceId, Connector>>;
 
 #[derive(Debug, Clone)]
 pub struct ConnectId {

@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use apollo_federation::sources::connect::Connectors;
 use async_trait::async_trait;
 use derivative::Derivative;
 use serde::Deserialize;
@@ -78,8 +79,14 @@ pub(crate) struct Response {
 /// Query, QueryPlan and Introspection data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) enum QueryPlannerContent {
-    Plan { plan: Arc<QueryPlan> },
-    Response { response: Box<graphql::Response> },
+    Plan {
+        plan: Arc<QueryPlan>,
+        #[serde(default, skip)]
+        connectors: Connectors,
+    },
+    Response {
+        response: Box<graphql::Response>,
+    },
     IntrospectionDisabled,
 }
 

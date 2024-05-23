@@ -480,7 +480,6 @@ fn entity_union(schema: &Schema) -> ExtendedType {
                         // && d.arguments.iter().any(|arg| arg.name == name!("key"))
                     })
                     .flat_map(|d| {
-                        dbg!(&key, &d.name, &d.node);
                         let Component { origin, mut node } = d;
                         let directive = node.make_mut();
                         let Directive { arguments, .. } = directive.clone();
