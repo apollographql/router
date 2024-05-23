@@ -106,7 +106,7 @@ resourceSpans:
             droppedLinksCount: 0
             status:
               message: ""
-              code: 0
+              code: 1
         schemaUrl: ""
     schemaUrl: ""
   - resource:
