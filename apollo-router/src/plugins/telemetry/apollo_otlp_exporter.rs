@@ -16,6 +16,7 @@ use opentelemetry::InstrumentationLibrary;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
 use parking_lot::Mutex;
 use sys_info::hostname;
 use tonic::metadata::MetadataMap;
@@ -25,6 +26,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::apollo::ErrorsConfiguration;
+use super::apollo::OperationSubType;
 use super::config_new::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
@@ -32,11 +34,15 @@ use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
 use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
-use super::SUBGRAPH_SPAN_NAME;
+use super::tracing::apollo_telemetry::OPERATION_SUBTYPE;
 use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
+use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
+use crate::services::OperationKind;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
 #[derive(Clone, Derivative)]
@@ -134,29 +140,75 @@ impl ApolloOtlpExporter {
     ) -> SpanData {
         match span.name.as_ref() {
             SUBGRAPH_SPAN_NAME => self.prepare_subgraph_span(span, errors_config),
-            _ => SpanData {
-                span_context: SpanContext::new(
-                    span.trace_id,
-                    span.span_id,
-                    TraceFlags::default().with_sampled(true),
-                    true,
-                    TraceState::default(),
-                ),
-                parent_span_id: span.parent_span_id,
-                span_kind: span.span_kind.clone(),
-                name: span.name.clone(),
-                start_time: span.start_time,
-                end_time: span.end_time,
-                attributes: span.attributes.clone(),
-                events: EvictedQueue::new(0),
-                links: EvictedQueue::new(0),
-                status: Status::Unset,
-                resource: Cow::Owned(self.resource_template.to_owned()),
-                instrumentation_lib: self.intrumentation_library.clone(),
-            },
+            EXECUTION_SPAN_NAME => self.prepare_execution_span(span),
+            SUBSCRIPTION_EVENT_SPAN_NAME => self.prepare_subscription_event_span(span),
+            _ => self.base_prepare_span(span),
         }
     }
 
+    fn base_prepare_span(&self, span: LightSpanData) -> SpanData {
+        SpanData {
+            span_context: SpanContext::new(
+                span.trace_id,
+                span.span_id,
+                TraceFlags::default().with_sampled(true),
+                true,
+                TraceState::default(),
+            ),
+            parent_span_id: span.parent_span_id,
+            span_kind: span.span_kind.clone(),
+            name: span.name.clone(),
+            start_time: span.start_time,
+            end_time: span.end_time,
+            attributes: span.attributes,
+            events: EvictedQueue::new(0),
+            links: EvictedQueue::new(0),
+            status: span.status,
+            // TBD(tim): if the underlying exporter supported it, we could
+            // group by resource attributes here and significantly reduce the
+            // duplicate resource / scope data that will get sent on every span.
+            resource: Cow::Owned(self.resource_template.to_owned()),
+            instrumentation_lib: self.intrumentation_library.clone(),
+        }
+    }
+
+    /// Adds the "graphql.operation.subtype" attribute for subscription requests.
+    /// TBD(tim): we could do this for all OTLP?
+    /// or not do this at all and let the backend interpret?
+    fn prepare_execution_span(&self, mut span: LightSpanData) -> SpanData {
+        let op_type = span
+            .attributes
+            .get(&GRAPHQL_OPERATION_TYPE)
+            .and_then(extract_string)
+            .unwrap_or_default();
+        if op_type == OperationKind::Subscription.as_apollo_operation_type() {
+            // Currently, all "subscription" operations are of the "request" variety.
+            span.attributes.insert(KeyValue::new(
+                OPERATION_SUBTYPE,
+                OperationSubType::SubscriptionRequest.as_str(),
+            ));
+        }
+        self.base_prepare_span(span)
+    }
+
+    /// Adds the "graphql.operation.type" and "graphql.operation.subtype" attribute.
+    /// TBD(tim): we could do this for all OTLP?
+    /// or not do this at all and let the backend interpret?
+    fn prepare_subscription_event_span(&self, mut span: LightSpanData) -> SpanData {
+        span.attributes.insert(KeyValue::new(
+            OPERATION_SUBTYPE,
+            OperationSubType::SubscriptionEvent.as_str(),
+        ));
+        // Currently, all "subscription" operations are of the "request" variety.
+        span.attributes.insert(KeyValue::new(
+            OPERATION_SUBTYPE,
+            OperationSubType::SubscriptionEvent.as_str(),
+        ));
+        self.base_prepare_span(span)
+    }
+
+    /// Parses and redacts errors from ftv1 traces.
+    /// Sets the span status to error if there are any errors.
     fn prepare_subgraph_span(
         &self,
         mut span: LightSpanData,
