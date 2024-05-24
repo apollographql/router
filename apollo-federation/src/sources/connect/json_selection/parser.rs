@@ -411,7 +411,7 @@ pub struct SubSelection {
 }
 
 impl SubSelection {
-    fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             spaces_or_comments,
             char('{'),

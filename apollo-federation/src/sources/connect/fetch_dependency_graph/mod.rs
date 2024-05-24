@@ -765,9 +765,7 @@ mod tests {
         use crate::sources::connect::federated_query_graph::ConcreteNode;
         use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
         use crate::sources::connect::fetch_dependency_graph::FetchDependencyGraph;
-        use crate::sources::connect::json_selection::Alias;
         use crate::sources::connect::json_selection::Key;
-        use crate::sources::connect::json_selection::NamedSelection;
         use crate::sources::connect::ConnectId;
         use crate::sources::connect::JSONSelection;
         use crate::sources::source;
@@ -1372,19 +1370,11 @@ mod tests {
                                         tail_selection: Some((
                                             name!("biz"),
                                             connect::fetch_dependency_graph::PathTailSelection::CustomScalarPathSelection {
-                                                path_selection: connect::fetch_dependency_graph::PathSelection::Selection(connect::SubSelection {
-                                                    selections: vec![
-                                                        NamedSelection::Group(
-                                                            Alias { name: "blah".to_string() },
-                                                            connect::SubSelection {
-                                                                selections: vec![
-                                                                    NamedSelection::Field(None, "x".to_string(), None),
-                                                                    NamedSelection::Field(None, "y".to_string(), None)
-                                                                ],
-                                                                star: None
-                                                            })
-                                                    ],
-                                                    star: None
+                                                path_selection: connect::fetch_dependency_graph::PathSelection::Selection({
+                                                    let (unmatched, sub) = connect::SubSelection::parse("{ blah: { x y } }").unwrap();
+                                                    assert!(unmatched.is_empty());
+
+                                                    sub
                                                 })
                                             },
                                         )),
