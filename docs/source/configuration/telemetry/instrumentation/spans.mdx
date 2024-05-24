@@ -152,6 +152,34 @@ The `mode` option will be defaulted to `spec_compliant` in a future release, and
 
 </Note>
 
+## Span status
+
+By default spans are marked in error only if the http status code is different than 200. If you want to mark a span in error for other reason you can override the `otel.status_code` attribute which is responsible to mark a span in error or not.
+If it's in error then `otel.status_code` = `error`, if not it will be `ok`.
+
+Here is an example if you want to mark the `router` and `supergraph` span in error if you have a graphql error in the payload.
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        attributes:
+          otel.status_code:
+            static: error
+            condition:
+              eq:
+              - true
+              - on_graphql_error: true
+      supergraph:
+        attributes:
+          otel.status_code:
+            static: error
+            condition:
+              exists:
+                response_errors: $[0].extensions.code # Here is an example to get the first error code, `on_graphql_error` is also available for supergraph
+```
+
 ## Span configuration example
 
 An example configuration of `telemetry.spans` in `router.yaml` sets both standard and custom attributes for the router service:
@@ -191,7 +219,8 @@ telemetry:
             default: "unknown"
           "acme.custom_3":
             env: "ENV_VAR"
-          "static_attribute": "my_static_value"
+          "static_attribute":
+            static: "my_static_value"
             # ...
           
       supergraph:

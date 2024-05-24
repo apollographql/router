@@ -247,20 +247,16 @@ impl PlannerMode {
                 })
                 .unwrap_or_else(|panic| {
                     USING_CATCH_UNWIND.set(false);
-                    Err(
-                        apollo_federation::error::FederationError::SingleFederationError(
-                            apollo_federation::error::SingleFederationError::Internal {
-                                message: format!(
-                                    "query planner panicked: {}",
-                                    panic
-                                        .downcast_ref::<String>()
-                                        .map(|s| s.as_str())
-                                        .or_else(|| panic.downcast_ref::<&str>().copied())
-                                        .unwrap_or_default()
-                                ),
-                            },
+                    Err(apollo_federation::error::FederationError::internal(
+                        format!(
+                            "query planner panicked: {}",
+                            panic
+                                .downcast_ref::<String>()
+                                .map(|s| s.as_str())
+                                .or_else(|| panic.downcast_ref::<&str>().copied())
+                                .unwrap_or_default()
                         ),
-                    )
+                    ))
                 });
 
                 let js_result = js
@@ -545,7 +541,10 @@ impl BridgeQueryPlanner {
         plan_success
             .data
             .query_plan
-            .hash_subqueries(&self.subgraph_schemas, &self.schema.raw_sdl)?;
+            .init_parsed_operations_and_hash_subqueries(
+                &self.subgraph_schemas,
+                &self.schema.raw_sdl,
+            )?;
         plan_success
             .data
             .query_plan
@@ -973,13 +972,16 @@ pub(super) struct QueryPlan {
 }
 
 impl QueryPlan {
-    fn hash_subqueries(
+    fn init_parsed_operations_and_hash_subqueries(
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
         if let Some(node) = self.node.as_mut() {
-            node.hash_subqueries(subgraph_schemas, supergraph_schema_hash)?;
+            node.init_parsed_operations_and_hash_subqueries(
+                subgraph_schemas,
+                supergraph_schema_hash,
+            )?;
         }
         Ok(())
     }
@@ -1336,9 +1338,18 @@ mod tests {
 
     #[test(tokio::test)]
     async fn test_subselections() {
+        let mut configuration: Configuration = Default::default();
+        configuration.supergraph.introspection = true;
+        let configuration = Arc::new(configuration);
+
+        let planner =
+            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), configuration.clone(), None)
+                .await
+                .unwrap();
+
         macro_rules! s {
             ($query: expr) => {
-                insta::assert_snapshot!(subselections_keys($query).await);
+                insta::assert_snapshot!(subselections_keys($query, &planner).await);
             };
         }
         s!("query Q { me { username name { first last }}}");
@@ -1476,7 +1487,7 @@ mod tests {
         }}"#);
     }
 
-    async fn subselections_keys(query: &str) -> String {
+    async fn subselections_keys(query: &str, planner: &BridgeQueryPlanner) -> String {
         fn check_query_plan_coverage(
             node: &PlanNode,
             parent_label: Option<&str>,
@@ -1589,9 +1600,26 @@ mod tests {
             }
         }
 
-        let result = plan(EXAMPLE_SCHEMA, query, query, None, PlanOptions::default())
+        let mut configuration: Configuration = Default::default();
+        configuration.supergraph.introspection = true;
+        let configuration = Arc::new(configuration);
+
+        let doc = Query::parse_document(query, None, &planner.schema(), &configuration).unwrap();
+
+        let result = planner
+            .get(
+                QueryKey {
+                    original_query: query.to_string(),
+                    filtered_query: query.to_string(),
+                    operation_name: None,
+                    metadata: CacheKeyMetadata::default(),
+                    plan_options: PlanOptions::default(),
+                },
+                doc,
+            )
             .await
             .unwrap();
+
         if let QueryPlannerContent::Plan { plan, .. } = result {
             check_query_plan_coverage(&plan.root, None, &plan.query.subselections);
 
