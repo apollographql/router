@@ -35,6 +35,7 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use url::Url;
 
+use crate::plugins::rhai::RHAI_SPAN_NAME;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::ApolloTracingProtocol;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
@@ -83,6 +84,7 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::QUERY_PLANNING_SPAN_NAME;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -110,6 +112,9 @@ const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("graphql.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
+pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query"; // TBD(tim): this should be an import
+pub(crate) const HTTP_REQUEST_SPAN_NAME: &str = "http_request"; // TBD(tim): this should be an import
+pub(crate) const SUBGRAPH_REQUEST_SPAN_NAME: &str = "subgraph_request"; // TBD(tim): this should be an import
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
 const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
@@ -143,7 +148,7 @@ const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
 ];
 
-const INCLUDE_SPANS: [&str; 16] = [
+const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     PARALLEL_SPAN_NAME,
     SEQUENCE_SPAN_NAME,
     FETCH_SPAN_NAME,
@@ -160,6 +165,14 @@ const INCLUDE_SPANS: [&str; 16] = [
     EXECUTION_SPAN_NAME,
     SUBSCRIBE_SPAN_NAME,
     SUBSCRIPTION_EVENT_SPAN_NAME,
+];
+
+const OTLP_EXT_INCLUDE_SPANS: [&str; 5] = [
+    QUERY_PARSING_SPAN_NAME,
+    QUERY_PLANNING_SPAN_NAME,
+    HTTP_REQUEST_SPAN_NAME,
+    SUBGRAPH_REQUEST_SPAN_NAME,
+    RHAI_SPAN_NAME,
 ];
 
 #[derive(Error, Debug)]
@@ -342,7 +355,9 @@ impl Exporter {
                         apollo_graph_ref,
                         schema_id,
                         errors_configuration,
-                        INCLUDE_SPANS.into(),
+                        HashSet::from_iter(
+                            [&REPORTS_INCLUDE_SPANS[..], &OTLP_EXT_INCLUDE_SPANS[..]].concat(),
+                        ),
                     )?))
                 }
             },
@@ -355,7 +370,7 @@ impl Exporter {
             },
             errors_configuration: errors_configuration.clone(),
             use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
-            include_span_names: INCLUDE_SPANS.into(),
+            include_span_names: REPORTS_INCLUDE_SPANS.into(),
             include_attr_names: match apollo_tracing_protocol {
                 ApolloTracingProtocol::Apollo => Some(HashSet::from(REPORTS_INCLUDE_ATTRS)),
                 ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => {

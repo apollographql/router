@@ -71,6 +71,7 @@ pub(crate) struct ApolloOtlpExporter {
 }
 
 impl ApolloOtlpExporter {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         endpoint: &Url,
         protocol: &Protocol,
