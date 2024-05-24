@@ -12,7 +12,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 
 use super::directives::IncludeDirective;
-use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::schema_aware_response::SchemaAwareResponse;
 use super::schema_aware_response::TypedValue;
@@ -59,7 +58,7 @@ impl StaticCostCalculator {
     fn score_field(
         &self,
         field: &Field,
-        parent_type: &NamedType,
+        _parent_type: &NamedType,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
@@ -96,25 +95,12 @@ impl StaticCostCalculator {
             executable,
         )?;
 
-        // If the field is marked with `@requires`, the required selection may not be included
-        // in the query's selection. Adding that requirement's cost to the field ensures it's
-        // accounted for.
-        let requirements =
-            RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
-        let requirements_cost = match requirements {
-            Some(selection_set) => {
-                self.score_selection_set(&selection_set, parent_type, schema, executable)?
-            }
-            None => 0.0,
-        };
-
-        let cost = instance_count * type_cost + requirements_cost;
+        let cost = instance_count * type_cost;
         tracing::debug!(
-            "Field {} cost breakdown: (count) {} * (type cost) {} + (requirements) {} = {}",
+            "Field {} cost breakdown: (count) {} * (type cost) {} = {}",
             field.name,
             instance_count,
             type_cost,
-            requirements_cost,
             cost
         );
 
@@ -545,7 +531,7 @@ mod tests {
         let query = include_str!("./fixtures/federated_ships_required_query.graphql");
         let response = include_bytes!("./fixtures/federated_ships_required_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(estimated_cost(schema, query), 100.0);
         assert_eq!(planned_cost(schema, query).await, 10400.0);
         assert_eq!(actual_cost(schema, query, response), 2.0);
     }
@@ -578,7 +564,7 @@ mod tests {
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
         let response = include_bytes!("./fixtures/federated_ships_deferred_response.json");
 
-        assert_eq!(estimated_cost(schema, query), 10200.0);
+        assert_eq!(estimated_cost(schema, query), 100.0);
         assert_eq!(planned_cost(schema, query).await, 10400.0);
         assert_eq!(actual_cost(schema, query, response), 2.0);
     }
@@ -596,7 +582,7 @@ mod tests {
             .estimated(&query.executable, schema.supergraph_schema())
             .unwrap();
 
-        assert_eq!(conservative_estimate, 10200.0);
-        assert_eq!(narrow_estimate, 35.0);
+        assert_eq!(conservative_estimate, 100.0);
+        assert_eq!(narrow_estimate, 5.0);
     }
 }
