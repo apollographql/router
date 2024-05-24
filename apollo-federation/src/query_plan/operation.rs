@@ -2872,10 +2872,22 @@ impl SelectionSet {
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection.
                 let element = OpPathElement::clone(ele);
+                // println!("add_at_path[empty sub path]->current selection->{}", self);
+                // println!("add_at_path[empty sub path]->parent->{}", self.type_position);
+                // println!("add_at_path[empty sub path]->element->{}", element.clone());
                 let selection = Selection::from_element(
                     element,
                     selection_set.map(|set| SelectionSet::clone(set)),
                 )?;
+                // println!("add_at_path[empty sub path]->selection->{}", selection);
+                // if let Some(rebased_selection) = selection.rebase_on(
+                //     &self.type_position,
+                //     &NamedFragments::default(),
+                //     &self.schema,
+                //     RebaseErrorHandlingOption::ThrowError
+                // )? {
+                //     self.add_selection(&ele.parent_type_position(), ele.schema(), rebased_selection)?
+                // }
                 self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
             }
             // If we don't have any path, we merge in the given subselections at the root.
@@ -2886,7 +2898,19 @@ impl SelectionSet {
                     sel.selections
                         .values()
                         .cloned()
-                        .try_for_each(|sel| self.add_selection(parent_type, &schema, sel))?;
+                        .try_for_each(|s| {
+                            // if let Some(rebased) = s.rebase_on(
+                            //     &self.type_position,
+                            //     &NamedFragments::default(),
+                            //     &self.schema,
+                            //     RebaseErrorHandlingOption::ThrowError
+                            // )? {
+                            //     self.add_selection(parent_type, &schema, rebased)
+                            // } else {
+                            //     Ok(())
+                            // }
+                            self.add_selection(parent_type, &schema, s)
+                        })?;
                 }
             }
         }

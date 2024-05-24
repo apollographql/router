@@ -1391,6 +1391,7 @@ impl FetchDependencyGraph {
                 node_id.index()
             )));
         };
+        println!("merge_child_in->child path->{}", child_path_in_this);
         self.merge_in_internal(node_id, child_id, &child_path_in_this, false)
     }
 
@@ -1485,14 +1486,15 @@ impl FetchDependencyGraph {
                 .add_selections(&merged.selection_set.selection_set)?;
         } else {
             println!("MERGE INTERNAL PATH IS NOT EMPTY");
+            println!("merge_in_internal->!path.is_empty->original->{}", merged.selection_set.selection_set);
+            println!("merge_in_internal->path->{}", path);
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
             // we clean things up a bit.
             let merged_selection_set = remove_unneeded_top_level_fragment_directives(
                 &merged.selection_set.selection_set,
                 &path.conditional_directives(),
             )?;
-            println!("TRYING TO MERGE CURRENT {}", mutable_node.selection_set.selection_set);
-            println!("TRYING TO MERGE IN {}", merged_selection_set);
+            println!("merge_in_internal->!path.is_empty->merged->{}", merged_selection_set);
             mutable_node
                 .selection_set
                 .add_at_path(path, Some(&Arc::new(merged_selection_set)))?;
@@ -1514,6 +1516,8 @@ impl FetchDependencyGraph {
         merged_id: NodeIndex,
         path_in_this: &OpPath,
     ) {
+        println!("relocate_children_on_merged_in->{}", path_in_this.clone());
+        log_node(self, merged_id);
         let mut new_parent_relations = HashMap::new();
         for child_id in self.children_of(merged_id) {
             // This could already be a child of `this`. Typically, we can have case where we have:
@@ -1527,10 +1531,8 @@ impl FetchDependencyGraph {
                 continue;
             }
 
-            let path_in_merged = self
-                .parents_relations_of(merged_id)
-                .next()
-                .and_then(|p| p.path_in_parent);
+            let path_in_merged = self.parent_relation(child_id, merged_id)
+                .and_then(|r| r.path_in_parent);
             let concatenated_paths =
                 concat_paths_in_parents(&Some(Arc::new(path_in_this.clone())), &path_in_merged);
             new_parent_relations.insert(
@@ -1542,6 +1544,7 @@ impl FetchDependencyGraph {
             );
         }
         for (child_id, new_parent) in new_parent_relations {
+            println!("ADDING PARENT for child_id {} and relation parent {} path {}", child_id.index(), new_parent.parent_node_id.index(), new_parent.path_in_parent.clone().unwrap());
             self.add_parent(child_id, new_parent);
         }
     }
@@ -1564,13 +1567,14 @@ impl FetchDependencyGraph {
             new_parent_relations.push(parent.clone());
         }
         for new_parent in new_parent_relations {
+            println!("relocate_parents_on_merged_in->new_parent->{}", new_parent.clone().path_in_parent.unwrap());
             self.add_parent(node_id, new_parent);
         }
     }
 
     fn remove_inputs_from_selection(&mut self, node_id: NodeIndex) -> Result<(), FederationError> {
         let node = FetchDependencyGraph::node_weight_mut(&mut self.graph, node_id)?;
-        node.remove_inputs_from_selection();
+        node.remove_inputs_from_selection()?;
         Ok(())
     }
 
@@ -1720,11 +1724,15 @@ impl FetchDependencyGraphNode {
         Ok(())
     }
 
-    fn remove_inputs_from_selection(&mut self) {
+    fn remove_inputs_from_selection(&mut self) -> Result<(), FederationError> {
+        let fetch_selection_set = &mut self.selection_set;
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
-            Arc::make_mut(inputs).selection_sets_per_parent_type.clear();
+            for (_, selection) in &inputs.selection_sets_per_parent_type {
+                fetch_selection_set.selection_set = Arc::new(fetch_selection_set.selection_set.minus(selection)?);
+            }
         }
+        Ok(())
     }
 
     fn is_top_level(&self) -> bool {
@@ -3087,8 +3095,8 @@ fn handle_requires(
     created_nodes: &mut IndexSet<NodeIndex>,
 ) -> Result<(NodeIndex, FetchDependencyGraphNodePath), FederationError> {
     println!("HANDLING REQUIRES");
-    println!("original node");
-    log_node(dependency_graph, fetch_node_id);
+    // println!("original node");
+    // log_node(dependency_graph, fetch_node_id);
     // @requires should be on an entity type, and we only support object types right now
     let head = dependency_graph
         .federated_query_graph
@@ -3128,7 +3136,7 @@ fn handle_requires(
     if parents.len() == 1 && paths_has_only_fragments(&fetch_node_path.path_in_node) {
         println!("SINGLE PARENT");
         let parent = &parents[0];
-        log_node(dependency_graph, parent.parent_node_id);
+        // log_node(dependency_graph, parent.parent_node_id);
 
         // We start by computing the nodes for the conditions. We do this using a copy of the current
         // node (with only the inputs) as that allows to modify this copy without modifying `node`.
@@ -3187,13 +3195,16 @@ fn handle_requires(
         let new_node_is_unneeded = dependency_graph.is_node_unneeded(new_node_id, parent)?;
         let mut unmerged_node_ids: Vec<NodeIndex> = Vec::new();
         if new_node_is_unneeded {
-            println!("NEW GROUP IS UNNEDED");
+            println!("NEW GROUP IS UNNEDED\nnew_node");
+            log_node(dependency_graph, new_node_id);
+            println!("parent");
+            log_node(dependency_graph, parent.parent_node_id);
             // Up to this point, `new_node` had no parent, so let's first merge `new_node` to the parent, thus "rooting"
             // its children to it. Note that we just checked that `new_node` selection was just its inputs, so
             // we know that merging it to the parent is mostly a no-op from that POV, except maybe for requesting
             // a few additional `__typename` we didn't before (due to the exclusion of `__typename` in the `new_node_is_unneeded` check)
             dependency_graph.merge_child_in(parent.parent_node_id, new_node_id)?;
-            println!("MERGING CHILD TO PARENT");
+            println!("MERGED CHILD TO PARENT");
             log_node(dependency_graph, parent.parent_node_id);
 
             // Now, all created groups are going to be descendant of `parentGroup`. But some of them may actually be

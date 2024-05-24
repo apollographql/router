@@ -279,7 +279,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     if needed_directives.len() == fragment.directives.len() {
                         // We need all the directives that the fragment has. Return it unchanged.
                         let final_selection =
-                            inline_fragment.with_updated_selection_set(Some(updated_selections));
+                            inline_fragment.with_updated_selection_set(updated_selections);
                         selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                     }
 

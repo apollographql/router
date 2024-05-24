@@ -3663,7 +3663,7 @@ fn is_useless_followup_element(
                 .schema()
                 .schema()
                 .is_subtype(type_of_first.type_name(), type_of_second.type_name());
-            return Ok(are_useless_directives && (is_same_type || is_subtype));
+            Ok(are_useless_directives && (is_same_type || is_subtype))
         }
     };
 }
