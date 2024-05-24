@@ -5,5 +5,3 @@ telemetry:
         http.server.active_requests: false
         http.server.request.duration: false
         http.server.response.body.size: true
-      subgraph:
-        http.client.request.duration: false

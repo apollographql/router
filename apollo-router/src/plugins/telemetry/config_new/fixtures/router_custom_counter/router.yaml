@@ -9,6 +9,3 @@ telemetry:
           type: counter
           unit: "unit"
           value: unit
-
-      subgraph:
-        http.client.request.duration: false

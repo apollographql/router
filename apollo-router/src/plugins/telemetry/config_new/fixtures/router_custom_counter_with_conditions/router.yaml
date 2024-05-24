@@ -17,6 +17,3 @@ telemetry:
             eq:
               - request_method: true
               - GET
-
-      subgraph:
-        http.client.request.duration: false

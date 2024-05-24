@@ -1929,9 +1929,9 @@ mod tests {
                     for request in test_definition.events {
                         // each array of actions is a separate request
                         let router_instruments = config.new_router_instruments();
-                        let supergraph_instruments = config.new_supergraph_instruments();
-                        let subgraph_instruments = config.new_subgraph_instruments();
-                        let graphql_instruments: GraphQLInstruments = (&config).into();
+                        let mut supergraph_instruments = None;
+                        let mut subgraph_instruments = None;
+                        let mut graphql_instruments: Option<GraphQLInstruments> = None;
                         let context = Context::new();
                         for event in request {
                             match event {
@@ -1965,10 +1965,20 @@ mod tests {
                                         .unwrap();
                                     router_instruments.on_response(&router_resp);
                                 }
-                                Event::SupergraphRequest { .. } => {}
-                                Event::SupergraphResponse { .. } => {}
-                                Event::SubgraphRequest { .. } => {}
-                                Event::SubgraphResponse { .. } => {}
+                                Event::SupergraphRequest { .. } => {
+                                    supergraph_instruments =
+                                        Some(config.new_supergraph_instruments());
+                                    graphql_instruments = Some((&config).into())
+                                }
+                                Event::SupergraphResponse { .. } => {
+                                    supergraph_instruments = None;
+                                }
+                                Event::SubgraphRequest { .. } => {
+                                    subgraph_instruments = Some(config.new_subgraph_instruments());
+                                }
+                                Event::SubgraphResponse { .. } => {
+                                    subgraph_instruments = None;
+                                }
                                 Event::GraphqlResponse { .. } => {}
                                 Event::ResponseField { .. } => {}
                             }
