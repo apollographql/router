@@ -58,7 +58,7 @@ impl StaticCostCalculator {
     fn score_field(
         &self,
         field: &Field,
-        parent_type: &NamedType,
+        _parent_type: &NamedType,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
     ) -> Result<f64, DemandControlError> {
