@@ -253,7 +253,7 @@ fn process_subselection(
     )?;
 
     // Handle all named selections
-    for selection in sub.selections.iter() {
+    for selection in sub.selections_iter() {
         // Make sure that we have a field on the object type that matches the alias (or the name itself)
         let alias = selection.name();
         let Some(selection_field) = object_type.fields.get(alias) else {
@@ -389,7 +389,7 @@ fn process_subselection(
     }
 
     // Handle the optional star selection
-    if let Some(_star) = sub.star.as_ref() {
+    if sub.has_star() {
         return Err(FederationError::internal(
             "star selection is not yet supported",
         ));

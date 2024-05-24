@@ -242,46 +242,29 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
                         "expecting a subselection in our selection",
                     ))?;
 
-            // Helper method for finding existing references of names within a vec of keys
-            fn name_matches(seen_selection: &NamedSelection, name: &Name) -> bool {
-                match seen_selection {
-                    NamedSelection::Field(Some(Alias { name: ident }), _, _)
-                    | NamedSelection::Field(None, ident, _)
-                    | NamedSelection::Quoted(Alias { name: ident }, _, _)
-                    | NamedSelection::Path(Alias { name: ident }, _)
-                    | NamedSelection::Group(Alias { name: ident }, _) => ident == name.as_str(),
-                }
-            }
-
             // Now we need to traverse the hierarchy behind the supplied node, updating its JSONSelections
             // along the way as we find missing members needed by the new source path.
             let mut subselection_ref = subselection;
             for (name, keys) in named_selections {
                 // If we have a selection already, we'll need to make sure that it includes the new field,
                 // then we process the next subselection in the path chain.
-                // TODO: This is probably not very performant, but we only have a Vec to work with...
-                subselection_ref = if let Some(matching_selection_position) = subselection_ref
-                    .selections
-                    .iter()
-                    .position(|s| name_matches(s, &name))
+                subselection_ref = if let Some(index) =
+                    subselection_ref.index_of_named_selection(&name)
                 {
-                    let matching_selection = subselection_ref.selections.get_mut(matching_selection_position).ok_or(FederationError::internal("matched position does not actually exist in selections. This should not happen"))?;
-                    matching_selection
+                    subselection_ref
+                        .get_at_index_mut(&index)
                         .next_mut_subselection()
                         .ok_or(FederationError::internal(
                             "expected existing selection to have a subselection",
                         ))?
                 } else if keys.is_empty() {
-                    subselection_ref.selections.push(NamedSelection::Group(
-                        Alias {
-                            name: name.to_string(),
-                        },
+                    subselection_ref.append_selection(NamedSelection::Group(
+                        Alias::new(name.to_string().as_str()),
                         SubSelection::default(),
                     ));
 
                     subselection_ref
-                        .selections
-                        .last_mut()
+                        .last_selection_mut()
                         .ok_or(FederationError::internal(
                             "recently added group named selection disappeared. This should not happen",
                         ))?
@@ -293,16 +276,13 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
                     // TODO: You could technically detect whether a shorthand enum variant of NamedSelection
                     // is usable based on the Name and Keys to make the overall JSONSelection appear cleaner,
                     // though this isn't necessary.
-                    subselection_ref.selections.push(NamedSelection::Path(
-                        Alias {
-                            name: name.to_string(),
-                        },
+                    subselection_ref.append_selection(NamedSelection::Path(
+                        Alias::new(name.to_string().as_str()),
                         PathSelection::from_slice(&keys, Some(SubSelection::default())),
                     ));
 
                     subselection_ref
-                        .selections
-                        .last_mut()
+                        .last_selection_mut()
                         .ok_or(FederationError::internal(
                             "recently added path named selection disappeared. This should not happen",
                         ))?
@@ -317,31 +297,24 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
             // Note: The subselection_ref here is now the furthest down in the chain, which is where we need
             // it to be.
             match tail_subselection {
-                // TODO: This is probably not very performant, but we only have a Vec to work with...
                 PathTailSelection::Selection { property_path } => {
-                    if !subselection_ref
-                        .selections
-                        .iter()
-                        .any(|s| name_matches(s, &tail_name))
+                    if subselection_ref
+                        .index_of_named_selection(&tail_name)
+                        .is_none()
                     {
-                        subselection_ref.selections.push(NamedSelection::Path(
-                            Alias {
-                                name: tail_name.to_string(),
-                            },
+                        subselection_ref.append_selection(NamedSelection::Path(
+                            Alias::new(tail_name.to_string().as_str()),
                             PathSelection::from_slice(&property_path, None),
                         ));
                     }
                 }
                 PathTailSelection::CustomScalarPathSelection { path_selection } => {
-                    if !subselection_ref
-                        .selections
-                        .iter()
-                        .any(|s| name_matches(s, &tail_name))
+                    if subselection_ref
+                        .index_of_named_selection(&tail_name)
+                        .is_none()
                     {
-                        subselection_ref.selections.push(NamedSelection::Path(
-                            Alias {
-                                name: tail_name.to_string(),
-                            },
+                        subselection_ref.append_selection(NamedSelection::Path(
+                            Alias::new(tail_name.to_string().as_str()),
                             path_selection,
                         ));
                     }
@@ -351,20 +324,18 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
                     star_subselection,
                     excluded_properties,
                 } => {
-                    if subselection_ref.star.is_none() {
+                    if !subselection_ref.has_star() {
                         // Initialize the star
-                        subselection_ref.star = Some(StarSelection(
-                            Some(Alias {
-                                name: tail_name.to_string(),
-                            }),
-                            star_subselection.map(Box::new),
-                        ));
+                        subselection_ref.set_star(Some(StarSelection::new(
+                            Some(Alias::new(tail_name.to_string().as_str())),
+                            star_subselection,
+                        )));
 
                         // Keep track of which props we've excluded
                         for (index, key) in excluded_properties.into_iter().enumerate() {
                             let alias = format!("____excluded_star_key__{index}");
-                            subselection_ref.selections.push(NamedSelection::Quoted(
-                                Alias { name: alias },
+                            subselection_ref.append_selection(NamedSelection::Quoted(
+                                Alias::new(alias.as_str()),
                                 key.as_string(),
                                 None,
                             ));
@@ -765,9 +736,7 @@ mod tests {
         use crate::sources::connect::federated_query_graph::ConcreteNode;
         use crate::sources::connect::federated_query_graph::SourceEnteringEdge;
         use crate::sources::connect::fetch_dependency_graph::FetchDependencyGraph;
-        use crate::sources::connect::json_selection::Alias;
         use crate::sources::connect::json_selection::Key;
-        use crate::sources::connect::json_selection::NamedSelection;
         use crate::sources::connect::json_selection::PrettyPrintable;
         use crate::sources::connect::ConnectId;
         use crate::sources::connect::JSONSelection;
@@ -1373,20 +1342,9 @@ mod tests {
                                         tail_selection: Some((
                                             name!("biz"),
                                             connect::fetch_dependency_graph::PathTailSelection::CustomScalarPathSelection {
-                                                path_selection: connect::fetch_dependency_graph::PathSelection::Selection(connect::SubSelection {
-                                                    selections: vec![
-                                                        NamedSelection::Group(
-                                                            Alias { name: "blah".to_string() },
-                                                            connect::SubSelection {
-                                                                selections: vec![
-                                                                    NamedSelection::Field(None, "x".to_string(), None),
-                                                                    NamedSelection::Field(None, "y".to_string(), None)
-                                                                ],
-                                                                star: None
-                                                            })
-                                                    ],
-                                                    star: None
-                                                })
+                                                path_selection: connect::PathSelection::parse(
+                                                    ".blah { x y }",
+                                                ).unwrap().1,
                                             },
                                         )),
                                     },
@@ -1414,11 +1372,9 @@ mod tests {
               qax: .qaax {
                 baz
                 baaz: .baz.buzz {
-                  biz: {
-                    blah: {
-                      x
-                      y
-                    }
+                  biz: .blah {
+                    x
+                    y
                   }
                 }
               }
