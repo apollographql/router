@@ -326,7 +326,7 @@ pub(crate) mod test {
                 2.0,
                 "graphql.field.name" = "ships",
                 "graphql.field.type" = "Ship",
-                "graphql.type.name" = "Query" // TODO: I think this is wrong
+                "graphql.type.name" = "Query"
             );
             assert_histogram_sum!(
                 "graphql.field.list.length",
