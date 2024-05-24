@@ -1474,8 +1474,9 @@ where
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &inner.attributes);
+            inner.updated = true;
         }
     }
 
@@ -1529,9 +1530,9 @@ where
                 return;
             }
         };
-        inner.updated = true;
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &attrs);
+            inner.updated = true;
         }
     }
 
@@ -1595,6 +1596,7 @@ mod tests {
     use serde_json::json;
 
     use super::*;
+    use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
     use crate::graphql;
     use crate::metrics::FutureMetricsExt;
@@ -1854,6 +1856,44 @@ mod tests {
                                 }
                             }
                         },
+                        "acme.request.on_graphql_error_selector": {
+                            "value": "event_unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    true,
+                                    {
+                                        "on_graphql_error": true
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error_histo": {
+                            "value": "event_unit",
+                            "type": "histogram",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "NOPE",
+                                    {
+                                        "response_errors": "$.[0].extensions.code"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
                         "acme.request.on_graphql_data": {
                             "value": {
                                 "response_data": "$.price"
@@ -1895,7 +1935,14 @@ mod tests {
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let context = crate::context::Context::new();
-            let _ = context.insert(OPERATION_KIND, "query".to_string());
+            let _ = context.insert(OPERATION_KIND, "query".to_string()).unwrap();
+            let context_with_error = crate::context::Context::new();
+            let _ = context_with_error
+                .insert(OPERATION_KIND, "query".to_string())
+                .unwrap();
+            let _ = context_with_error
+                .insert(CONTAINS_GRAPHQL_ERROR, true)
+                .unwrap();
             let supergraph_req = supergraph::Request::fake_builder()
                 .header("conditional-custom", "X")
                 .header("x-my-header-count", "55")
@@ -1929,13 +1976,23 @@ mod tests {
                         .extension_code("NOPE")
                         .build()])
                     .build(),
-                &supergraph_req.context.clone(),
+                &context_with_error,
             );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 1.0);
             assert_counter!(
                 "acme.request.on_graphql_error",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
                 1.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
@@ -1973,13 +2030,23 @@ mod tests {
                         .extension_code("NOPE")
                         .build()])
                     .build(),
-                &supergraph_req.context.clone(),
+                &context_with_error,
             );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
             assert_counter!(
                 "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
@@ -2007,13 +2074,23 @@ mod tests {
                 &graphql::Response::builder()
                     .data(serde_json_bytes::json!({"foo": "bar"}))
                     .build(),
-                &supergraph_req.context.clone(),
+                &supergraph_req.context,
             );
 
             assert_counter!("acme.query", 2.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
             assert_counter!(
                 "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );

@@ -59,6 +59,7 @@ The supergraph service is executed after query parsing but before query executio
 | `response_errors`  | Yes         |                                     | Json Path into the supergraph response body errors (it might impact performances) |
 | `request_context`  | Yes         |                                     | The name of a request context key    |
 | `response_context` | Yes         |                                     | The name of a response context key   |
+| `on_graphql_error` | No          | `true`|`false`                      | Boolean set to true if the response payload contains a graphql error  |
 | `baggage`          | Yes         |                                     | The name of a baggage item           |
 | `env`              | Yes         |                                     | The name of an environment variable  |
 | `static`           | No          |                                     | A static string value                |

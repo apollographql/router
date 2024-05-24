@@ -205,7 +205,6 @@ where
     ) -> Option<opentelemetry::Value> {
         // We may have got the value from the request.
         let value = mem::take(&mut *self.value.lock());
-
         match (value, &self.condition) {
             (State::Value(value), Some(condition)) => {
                 // We have a value already, let's see if the condition was evaluated to true.
