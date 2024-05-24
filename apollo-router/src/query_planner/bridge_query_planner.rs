@@ -1404,10 +1404,9 @@ mod tests {
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
 
-        let planner =
-            BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), configuration.clone(), None)
-                .await
-                .unwrap();
+        let planner = BridgeQueryPlanner::new(EXAMPLE_SCHEMA.to_string(), configuration.clone())
+            .await
+            .unwrap();
 
         macro_rules! s {
             ($query: expr) => {
