@@ -3,7 +3,6 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
-use std::sync::Mutex;
 
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
@@ -11,6 +10,7 @@ use apollo_compiler::ExecutableDocument;
 use http::StatusCode;
 use lru::LruCache;
 use router_bridge::planner::UsageReporting;
+use tokio::sync::Mutex;
 use tokio::task;
 use tracing::Instrument;
 
@@ -107,16 +107,15 @@ impl QueryAnalysisLayer {
             .query
             .clone()
             .expect("query presence was already checked");
-
-        let entry = {
-            let mut cache = self.cache.lock().unwrap();
-            cache
-                .get(&QueryAnalysisKey {
-                    query: query.clone(),
-                    operation_name: op_name.clone(),
-                })
-                .cloned()
-        };
+        let entry = self
+            .cache
+            .lock()
+            .await
+            .get(&QueryAnalysisKey {
+                query: query.clone(),
+                operation_name: op_name.clone(),
+            })
+            .cloned();
 
         let res = match entry {
             None => {
@@ -136,17 +135,13 @@ impl QueryAnalysisLayer {
 
                 match result {
                     Err(errors) => {
-                        {
-                            let mut cache = self.cache.lock().unwrap();
-                            cache.put(
-                                QueryAnalysisKey {
-                                    query,
-                                    operation_name: op_name,
-                                },
-                                Err(errors.clone()),
-                            );
-                        }
-
+                        (*self.cache.lock().await).put(
+                            QueryAnalysisKey {
+                                query,
+                                operation_name: op_name,
+                            },
+                            Err(errors.clone()),
+                        );
                         let errors = match errors.into_graphql_errors() {
                             Ok(v) => v,
                             Err(errors) => vec![Error::builder()
@@ -188,16 +183,13 @@ impl QueryAnalysisLayer {
                             .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
                             .expect("cannot insert operation kind in the context; this is a bug");
 
-                        {
-                            let mut cache = self.cache.lock().unwrap();
-                            cache.put(
-                                QueryAnalysisKey {
-                                    query,
-                                    operation_name: op_name,
-                                },
-                                Ok((context.clone(), doc.clone())),
-                            );
-                        }
+                        (*self.cache.lock().await).put(
+                            QueryAnalysisKey {
+                                query,
+                                operation_name: op_name,
+                            },
+                            Ok((context.clone(), doc.clone())),
+                        );
 
                         Ok((context, doc))
                     }
