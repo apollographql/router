@@ -3,6 +3,7 @@ use std::fmt::Debug;
 
 use bytes::Bytes;
 use futures::Stream;
+use http_body::SizeHint;
 use hyper::body::HttpBody;
 
 pub struct RouterBody(pub(crate) super::Body);
@@ -73,5 +74,13 @@ impl HttpBody for RouterBody {
     ) -> std::task::Poll<Result<Option<http::HeaderMap>, Self::Error>> {
         let mut pinned = unsafe { self.map_unchecked_mut(|s| &mut s.0) };
         pinned.as_mut().poll_trailers(cx)
+    }
+
+    fn is_end_stream(&self) -> bool {
+        self.0.is_end_stream()
+    }
+
+    fn size_hint(&self) -> SizeHint {
+        HttpBody::size_hint(&self.0)
     }
 }
