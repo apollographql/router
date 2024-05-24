@@ -67,7 +67,7 @@ pub(crate) enum GraphQLSelector {
     },
 
     StaticField {
-        /// A static string value
+        /// A static value
         r#static: AttributeValue,
     },
 }
