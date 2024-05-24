@@ -111,7 +111,7 @@ pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("graphql.operatio
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
-const REPORTS_INCLUDE_ATTRS: [Key; 17] = [
+const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
     APOLLO_PRIVATE_REQUEST,
     APOLLO_PRIVATE_DURATION_NS_KEY,
     APOLLO_PRIVATE_SENT_TIME_OFFSET,
@@ -129,14 +129,14 @@ const REPORTS_INCLUDE_ATTRS: [Key; 17] = [
     CONDITION,
     OPERATION_NAME,
     OPERATION_TYPE,
+    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD,
 ];
 
 /// Additional attributes to include when sending to the OTLP protocol.
-const OTLP_EXT_INCLUDE_ATTRS: [Key; 6] = [
+const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
     // TBD(tim): operation subtype is not yet implemented but we'll need it for parity with the reports protocol
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD,
     opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
