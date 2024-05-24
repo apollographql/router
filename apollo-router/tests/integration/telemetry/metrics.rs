@@ -40,31 +40,52 @@ async fn test_metrics_reloading() {
         router.assert_reloaded().await;
     }
 
-    router.assert_metrics_contains(r#"apollo_router_cache_hit_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#, None).await;
-    router.assert_metrics_contains(r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#, None).await;
-    router.assert_metrics_contains(r#"apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="100"}"#, None).await;
-    router
-        .assert_metrics_contains(r#"apollo_router_cache_hit_time"#, None)
-        .await;
-    router
-        .assert_metrics_contains(r#"apollo_router_cache_miss_time"#, None)
-        .await;
-    router
-        .assert_metrics_contains(r#"apollo_router_session_count_total"#, None)
-        .await;
-    router
-        .assert_metrics_contains(r#"custom_header="test_custom""#, None)
-        .await;
+    let metrics = router
+        .get_metrics_response()
+        .await
+        .expect("failed to fetch metrics")
+        .text()
+        .await
+        .unwrap();
+
+    check_metrics_contains(
+        &metrics,
+        r#"apollo_router_cache_hit_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 4"#,
+    );
+    check_metrics_contains(
+        &metrics,
+        r#"apollo_router_cache_miss_count_total{kind="query planner",storage="memory",otel_scope_name="apollo/router"} 2"#,
+    );
+    check_metrics_contains(
+        &metrics,
+        r#"apollo_router_http_request_duration_seconds_bucket{status="200",otel_scope_name="apollo/router",le="100"}"#,
+    );
+    check_metrics_contains(&metrics, r#"apollo_router_cache_hit_time"#);
+    check_metrics_contains(&metrics, r#"apollo_router_cache_miss_time"#);
+    check_metrics_contains(&metrics, r#"apollo_router_session_count_total"#);
+    check_metrics_contains(&metrics, r#"custom_header="test_custom""#);
+
     router
         .assert_metrics_does_not_contain(r#"_total_total{"#)
         .await;
 
     if std::env::var("TEST_APOLLO_KEY").is_ok() && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok() {
-        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
-        router.assert_metrics_contains(r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#, Some(Duration::from_secs(10))).await;
-        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(120))).await;
-        router.assert_metrics_contains(r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#, Some(Duration::from_secs(1))).await;
+        router.assert_metrics_contains_multiple(vec![
+                r#"apollo_router_telemetry_studio_reports_total{report_type="metrics",otel_scope_name="apollo/router"} 2"#,
+                r#"apollo_router_telemetry_studio_reports_total{report_type="traces",otel_scope_name="apollo/router"} 2"#,
+                r#"apollo_router_uplink_fetch_duration_seconds_count{kind="unchanged",query="License",url="https://uplink.api.apollographql.com/",otel_scope_name="apollo/router"}"#,
+                r#"apollo_router_uplink_fetch_count_total{query="License",status="success",otel_scope_name="apollo/router"}"#
+            ], Some(Duration::from_secs(10)))
+            .await;
     }
+}
+
+#[track_caller]
+fn check_metrics_contains(metrics: &str, text: &str) {
+    assert!(
+        metrics.contains(text),
+        "'{text}' not detected in metrics\n{metrics}"
+    );
 }
 
 #[tokio::test(flavor = "multi_thread")]
