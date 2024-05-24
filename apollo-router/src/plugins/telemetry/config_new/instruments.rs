@@ -1839,320 +1839,178 @@ where
 
 #[cfg(test)]
 mod tests {
-    use http::StatusCode;
-    use serde_json::json;
+    use http::{HeaderMap, HeaderName, Method, StatusCode, Uri};
+    use multimap::MultiMap;
+    use rust_embed::RustEmbed;
+    use schemars::gen::SchemaGenerator;
+    use serde::Deserialize;
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::str::FromStr;
 
     use super::*;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
     use crate::graphql;
+    use crate::http_ext::{TryIntoHeaderName, TryIntoHeaderValue};
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
+    use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+    use crate::plugins::telemetry::config_new::instruments::{Instrumented, InstrumentsConfig};
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::Context;
 
-    #[tokio::test]
-    async fn test_router_instruments() {
-        async {
-            let config = load_config(include_str!("fixtures/router_instruments.router.yaml"));
-            let router_instruments = config.new_router_instruments();
-            let router_req = RouterRequest::fake_builder()
-                .header("conditional-custom", "X")
-                .header("x-my-header-count", "55")
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            let router_response = RouterResponse::fake_builder()
-                .context(router_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("x-my-header", "TEST")
-                .header("content-length", "35")
-                .data(json!({"errors": [{"message": "nope"}]}))
-                .build()
-                .unwrap();
-            router_instruments.on_response(&router_response);
+    #[derive(RustEmbed)]
+    #[folder = "src/plugins/telemetry/config_new/fixtures"]
+    struct Asset;
 
-            assert_counter!("acme.request.header_value", 55.0);
-            assert_counter!(
-                "acme.request.on_error",
-                1.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!(
-                "acme.request.on_error_histo",
-                1.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!("http.server.request.body.size", 35.0);
-            assert_histogram_sum!(
-                "http.server.response.body.size",
-                35.0,
-                "acme.my_attribute" = "TEST"
-            );
+    #[derive(Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    enum Event {
+        RouterRequest {
+            method: String,
+            uri: String,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: String,
+        },
+        RouterResponse {
+            status: u16,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: String,
+        },
+        SupergraphRequest {},
+        SupergraphResponse {},
+        SubgraphRequest {},
+        SubgraphResponse {
+            body: serde_json::Value,
+        },
+        GraphqlResponse {
+            body: serde_json::Value,
+        },
+        ResponseField {},
+    }
 
-            let router_instruments = config.new_router_instruments();
-            let router_req = RouterRequest::fake_builder()
-                .header("content-length", "35")
-                .header("x-my-header-count", "5")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            let router_response = RouterResponse::fake_builder()
-                .context(router_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .data(json!({"errors": [{"message": "nope"}]}))
-                .build()
-                .unwrap();
-            router_instruments.on_response(&router_response);
-
-            assert_counter!("acme.request.header_value", 60.0);
-            assert_counter!(
-                "acme.request.on_error",
-                2.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!(
-                "acme.request.on_error_histo",
-                2.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!("http.server.request.body.size", 70.0);
-            assert_histogram_sum!(
-                "http.server.response.body.size",
-                35.0,
-                "acme.my_attribute" = "TEST"
-            );
-            assert_histogram_sum!(
-                "http.server.response.body.size",
-                35.0,
-                "acme.my_attribute" = "unknown"
-            );
-
-            let router_instruments = config.new_router_instruments();
-            let router_req = RouterRequest::fake_builder()
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            let router_response = RouterResponse::fake_builder()
-                .context(router_req.context.clone())
-                .status_code(StatusCode::OK)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .data(json!({"errors": [{"message": "nope"}]}))
-                .build()
-                .unwrap();
-            router_instruments.on_response(&router_response);
-
-            assert_counter!("acme.request.header_value", 60.0);
-            assert_counter!(
-                "acme.request.on_error",
-                2.0,
-                "http.response.status_code" = 400
-            );
-            assert_histogram_sum!(
-                "acme.request.on_error_histo",
-                2.0,
-                "http.response.status_code" = 400
-            );
-
-            let router_instruments = config.new_router_instruments();
-            let router_req = RouterRequest::fake_builder()
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .build()
-                .unwrap();
-            router_instruments.on_request(&router_req);
-            router_instruments.on_error(&BoxError::from("request time out"), &Context::new());
-            assert_counter!(
-                "acme.request.on_critical_error",
-                1.0,
-                "http.response.status_code" = 500
-            );
-        }
-        .with_metrics()
-        .await;
+    #[derive(Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields, rename_all = "snake_case")]
+    struct TestDefinition {
+        description: String,
+        events: Vec<Vec<Event>>,
     }
 
     #[tokio::test]
-    async fn test_supergraph_instruments() {
-        async {
-            let config = load_config(include_str!("fixtures/supergraph_instruments.router.yaml"));
-            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
-            let context = crate::context::Context::new();
-            let _ = context.insert(OPERATION_KIND, "query".to_string()).unwrap();
-            let context_with_error = crate::context::Context::new();
-            let _ = context_with_error
-                .insert(OPERATION_KIND, "query".to_string())
-                .unwrap();
-            let _ = context_with_error
-                .insert(CONTAINS_GRAPHQL_ERROR, true)
-                .unwrap();
-            let supergraph_req = supergraph::Request::fake_builder()
-                .header("conditional-custom", "X")
-                .header("x-my-header-count", "55")
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .query("{me{name}}")
-                .context(context.clone())
-                .build()
-                .unwrap();
-            custom_instruments.on_request(&supergraph_req);
-            let supergraph_response = supergraph::Response::fake_builder()
-                .context(supergraph_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("x-my-header", "TEST")
-                .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
-                .build()
-                .unwrap();
-            custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_response_event(
-                &graphql::Response::builder()
-                    .data(json!({
-                        "price": 500
-                    }))
-                    .errors(vec![graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build()])
-                    .build(),
-                &context_with_error,
-            );
+    async fn test_instruments() {
+        for fixture in Asset::iter() {
+            // There's no async in this test, but introducing an async block allows us to separate metrics for each fixture.
+            async move {
+                if fixture.ends_with("test.yaml") {
+                    println!("Running test for fixture: {}", fixture);
+                    let path = PathBuf::from_str(&fixture).unwrap();
+                    let fixture_name = path
+                        .parent()
+                        .expect("fixture path")
+                        .file_name()
+                        .expect("fixture name");
+                    let test_definition_file = Asset::get(&fixture).expect("failed to get fixture");
+                    let test_definition: TestDefinition =
+                        serde_yaml::from_slice(&test_definition_file.data)
+                            .expect("failed to parse fixture");
 
-            assert_counter!("acme.query", 1.0, query = "{me{name}}");
-            assert_counter!("acme.request.on_error", 1.0);
-            assert_counter!(
-                "acme.request.on_graphql_error",
-                1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!(
-                "acme.request.on_graphql_error_selector",
-                1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_histogram_sum!(
-                "acme.request.on_graphql_error_histo",
-                1.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
+                    let router_config_file =
+                        Asset::get(&fixture.replace("test.yaml", "router.yaml"))
+                            .expect("failed to get fixture router config");
 
-            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
-            let supergraph_req = supergraph::Request::fake_builder()
-                .header("content-length", "35")
-                .header("x-my-header-count", "5")
-                .header("content-type", "application/graphql")
-                .context(context.clone())
-                .query("Subscription {me{name}}")
-                .build()
-                .unwrap();
-            custom_instruments.on_request(&supergraph_req);
-            let supergraph_response = supergraph::Response::fake_builder()
-                .context(supergraph_req.context.clone())
-                .status_code(StatusCode::BAD_REQUEST)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .errors(vec![graphql::Error::builder()
-                    .message("nope")
-                    .extension_code("NOPE")
-                    .build()])
-                .build()
-                .unwrap();
-            custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_response_event(
-                &graphql::Response::builder()
-                    .data(json!({
-                        "price": 500
-                    }))
-                    .errors(vec![graphql::Error::builder()
-                        .message("nope")
-                        .extension_code("NOPE")
-                        .build()])
-                    .build(),
-                &context_with_error,
-            );
+                    let mut config = load_config(&router_config_file.data);
+                    config.update_defaults();
 
-            assert_counter!("acme.query", 1.0, query = "{me{name}}");
-            assert_counter!("acme.request.on_error", 2.0);
-            assert_counter!(
-                "acme.request.on_graphql_error",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!(
-                "acme.request.on_graphql_error_selector",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_histogram_sum!(
-                "acme.request.on_graphql_error_histo",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+                    for request in test_definition.events {
+                        // each array of actions is a separate request
+                        let router_instruments = config.new_router_instruments();
+                        let supergraph_instruments = config.new_supergraph_instruments();
+                        let subgraph_instruments = config.new_subgraph_instruments();
+                        let graphql_instruments: GraphQLInstruments = (&config).into();
+                        let context = Context::new();
+                        for event in request {
+                            match event {
+                                Event::RouterRequest {
+                                    method,
+                                    uri,
+                                    headers,
+                                    body,
+                                } => {
+                                    let router_req = RouterRequest::fake_builder()
+                                        .context(context.clone())
+                                        .method(Method::from_str(&method).expect("method"))
+                                        .uri(Uri::from_str(&uri).expect("uri"))
+                                        .headers(convert_headers(headers))
+                                        .body(body)
+                                        .build()
+                                        .unwrap();
+                                    router_instruments.on_request(&router_req);
+                                }
+                                Event::RouterResponse {
+                                    status,
+                                    headers,
+                                    body,
+                                } => {
+                                    let router_resp = RouterResponse::fake_builder()
+                                        .context(context.clone())
+                                        .status_code(StatusCode::from_u16(status).expect("status"))
+                                        .headers(convert_headers(headers))
+                                        .data(body)
+                                        .build()
+                                        .unwrap();
+                                    router_instruments.on_response(&router_resp);
+                                }
+                                Event::SupergraphRequest { .. } => {}
+                                Event::SupergraphResponse { .. } => {}
+                                Event::SubgraphRequest { .. } => {}
+                                Event::SubgraphResponse { .. } => {}
+                                Event::GraphqlResponse { .. } => {}
+                                Event::ResponseField { .. } => {}
+                            }
+                        }
+                    }
 
-            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
-            let supergraph_req = supergraph::Request::fake_builder()
-                .header("content-length", "35")
-                .header("content-type", "application/graphql")
-                .context(context.clone())
-                .query("{me{name}}")
-                .build()
-                .unwrap();
-            custom_instruments.on_request(&supergraph_req);
-            let supergraph_response = supergraph::Response::fake_builder()
-                .context(supergraph_req.context.clone())
-                .status_code(StatusCode::OK)
-                .header("content-type", "application/json")
-                .header("content-length", "35")
-                .data(serde_json_bytes::json!({"foo": "bar"}))
-                .build()
-                .unwrap();
-            custom_instruments.on_response(&supergraph_response);
-            custom_instruments.on_response_event(
-                &graphql::Response::builder()
-                    .data(serde_json_bytes::json!({"foo": "bar"}))
-                    .build(),
-                &supergraph_req.context,
-            );
+                    let snapshot_path = format!("fixtures/{}", fixture_name.to_string_lossy());
+                    let description = test_definition.description;
+                    let info: serde_yaml::Value = serde_yaml::from_slice(&router_config_file.data)
+                        .expect("failed to parse fixture");
 
-            assert_counter!("acme.query", 2.0, query = "{me{name}}");
-            assert_counter!("acme.request.on_error", 2.0);
-            assert_counter!(
-                "acme.request.on_graphql_error",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!(
-                "acme.request.on_graphql_error_selector",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_histogram_sum!(
-                "acme.request.on_graphql_error_histo",
-                2.0,
-                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
-            );
-            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+                    insta::with_settings!({sort_maps => true,
+                        snapshot_path=>snapshot_path,
+                        input_file=>fixture_name,
+                        prepend_module_to_snapshot=>false,
+                        description=>description,
+                        info=>&info
+
+                    }, {
+                        let metrics = crate::metrics::collect_metrics();
+                        insta::assert_yaml_snapshot!("metrics", &metrics.all());
+                    });
+                }
+            }
+            .with_metrics()
+            .await;
         }
-        .with_metrics()
-        .await;
     }
 
-    fn load_config(config: &str) -> InstrumentsConfig {
-        let val: serde_json::Value = serde_yaml::from_str(config).unwrap();
+    fn convert_headers(
+        headers: HashMap<String, String>,
+    ) -> MultiMap<TryIntoHeaderName, TryIntoHeaderValue> {
+        let mut converted_headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> =
+            MultiMap::new();
+        for (name, value) in headers {
+            converted_headers.insert(name.clone().into(), value.into());
+        }
+        converted_headers
+    }
+
+    fn load_config(config: &[u8]) -> InstrumentsConfig {
+        let val: serde_json::Value = serde_yaml::from_slice(config).unwrap();
         let instruments = val
             .as_object()
             .unwrap()
@@ -2167,5 +2025,22 @@ mod tests {
             .get("instruments")
             .unwrap();
         serde_json::from_value(instruments.clone()).unwrap()
+    }
+
+    #[test]
+    fn write_schema() {
+        let mut schema_gen = SchemaGenerator::default();
+        let schema = schema_gen.root_schema_for::<TestDefinition>();
+        let schema = serde_json::to_string_pretty(&schema);
+        let mut path = PathBuf::from_str(env!("CARGO_MANIFEST_DIR")).expect("manifest dir");
+        path.push("src");
+        path.push("plugins");
+        path.push("telemetry");
+        path.push("config_new");
+        path.push("fixtures");
+        path.push("schema.json");
+        let mut file = File::create(path).unwrap();
+        file.write_all(schema.unwrap().as_bytes())
+            .expect("write schema");
     }
 }

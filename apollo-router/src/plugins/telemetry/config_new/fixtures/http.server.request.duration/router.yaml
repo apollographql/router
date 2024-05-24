@@ -1,0 +1,8 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: false
+        http.server.request.duration: true
+      subgraph:
+        http.client.request.duration: false

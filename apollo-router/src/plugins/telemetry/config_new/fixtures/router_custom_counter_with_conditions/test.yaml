@@ -1,0 +1,25 @@
+description: Custom instruments with conditions
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: custom_value
+        body: |
+          hello
+    - router_response:
+        body: |
+          hello
+        status: 200
+
+  - - router_request:
+        uri: "/hello"
+        method: POST
+        headers:
+          custom_header: custom_value
+        body: |
+          hello
+    - router_response:
+        body: |
+          hello
+        status: 200

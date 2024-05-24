@@ -1,0 +1,190 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TestDefinition",
+  "type": "object",
+  "required": [
+    "description",
+    "events"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/Event"
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "router_request"
+          ],
+          "properties": {
+            "router_request": {
+              "type": "object",
+              "required": [
+                "body",
+                "method",
+                "uri"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "method": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "router_response"
+          ],
+          "properties": {
+            "router_response": {
+              "type": "object",
+              "required": [
+                "body",
+                "status"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "integer",
+                  "format": "uint16",
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "supergraph_request"
+          ],
+          "properties": {
+            "supergraph_request": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "supergraph_response"
+          ],
+          "properties": {
+            "supergraph_response": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "subgraph_request"
+          ],
+          "properties": {
+            "subgraph_request": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "subgraph_response"
+          ],
+          "properties": {
+            "subgraph_response": {
+              "type": "object",
+              "required": [
+                "body"
+              ],
+              "properties": {
+                "body": true
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "graphql_response"
+          ],
+          "properties": {
+            "graphql_response": {
+              "type": "object",
+              "required": [
+                "body"
+              ],
+              "properties": {
+                "body": true
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "response_field"
+          ],
+          "properties": {
+            "response_field": {
+              "type": "object",
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

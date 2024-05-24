@@ -26,6 +26,7 @@ pub(crate) mod test_utils {
     use std::sync::Weak;
 
     use itertools::Itertools;
+    use mockall::Any;
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
     use opentelemetry::sdk::metrics::data::DataPoint;
@@ -374,12 +375,27 @@ pub(crate) mod test_utils {
 
     impl From<Metric> for SerdeMetric {
         fn from(value: Metric) -> Self {
-            SerdeMetric {
+            let mut serde_metric = SerdeMetric {
                 name: value.name.into_owned(),
                 description: value.description.into_owned(),
                 unit: value.unit.as_str().to_string(),
                 data: value.data.into(),
+            };
+            // Redact duration metrics;
+            if serde_metric.name.ends_with(".duration") {
+                serde_metric
+                    .data
+                    .datapoints
+                    .iter_mut()
+                    .for_each(|datapoint| {
+                        if let Some(sum) = &datapoint.sum {
+                            if sum.as_f64().unwrap_or_default() > 0.0 {
+                                datapoint.sum = Some(0.1.into());
+                            }
+                        }
+                    });
             }
+            serde_metric
         }
     }
 
