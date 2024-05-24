@@ -6243,7 +6243,7 @@ expression: "&schema"
           "type": "string"
         },
         {
-          "description": "Apollo Studio trace ID",
+          "description": "Apollo Studio trace id",
           "enum": [
             "apollo"
           ],
