@@ -31,6 +31,13 @@ pub enum JSONSelection {
 }
 
 impl JSONSelection {
+    pub fn empty() -> Self {
+        JSONSelection::Named(SubSelection {
+            selections: vec![],
+            star: None,
+        })
+    }
+
     pub fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             all_consuming(map(
@@ -325,8 +332,8 @@ impl PathSelection {
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct SubSelection {
-    pub selections: Vec<NamedSelection>,
-    pub star: Option<StarSelection>,
+    pub(super) selections: Vec<NamedSelection>,
+    pub(super) star: Option<StarSelection>,
 }
 
 impl SubSelection {
@@ -346,14 +353,71 @@ impl SubSelection {
         ))(input)
         .map(|(input, (_, _, selections, star, _, _, _))| (input, Self { selections, star }))
     }
+
+    pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
+        self.selections.iter()
+    }
+
+    pub fn has_star(&self) -> bool {
+        self.star.is_some()
+    }
+
+    pub fn set_star(&mut self, star: Option<StarSelection>) {
+        self.star = star;
+    }
+
+    pub fn append_selection(&mut self, selection: NamedSelection) {
+        self.selections.push(selection);
+    }
+
+    pub fn last_selection_mut(&mut self) -> Option<&mut NamedSelection> {
+        self.selections.last_mut()
+    }
+
+    // Since we enforce that new selections may only be appended to
+    // self.selections, we can provide an index-based search method that returns
+    // an unforgeable NamedSelectionIndex, which can later be used to access the
+    // selection using either get_at_index or get_at_index_mut.
+    // TODO In the future, this method could make use of an internal lookup
+    // table to avoid linear search.
+    pub fn index_of_named_selection(&self, name: &str) -> Option<NamedSelectionIndex> {
+        self.selections
+            .iter()
+            .position(|selection| selection.name() == name)
+            .map(|pos| NamedSelectionIndex { pos })
+    }
+
+    pub fn get_at_index(&self, index: &NamedSelectionIndex) -> &NamedSelection {
+        self.selections
+            .get(index.pos)
+            .expect("NamedSelectionIndex out of bounds")
+    }
+
+    pub fn get_at_index_mut(&mut self, index: &NamedSelectionIndex) -> &mut NamedSelection {
+        self.selections
+            .get_mut(index.pos)
+            .expect("NamedSelectionIndex out of bounds")
+    }
+}
+
+pub struct NamedSelectionIndex {
+    // Intentionally private so NamedSelectionIndex cannot be forged.
+    pos: usize,
 }
 
 // StarSelection ::= Alias? "*" SubSelection?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub struct StarSelection(pub Option<Alias>, pub Option<Box<SubSelection>>);
+pub struct StarSelection(
+    pub(super) Option<Alias>,
+    pub(super) Option<Box<SubSelection>>,
+);
 
 impl StarSelection {
+    pub(crate) fn new(alias: Option<Alias>, sub: Option<SubSelection>) -> Self {
+        Self(alias, sub.map(Box::new))
+    }
+
     pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             // The spaces_or_comments separators are necessary here because
@@ -375,10 +439,16 @@ impl StarSelection {
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
 pub struct Alias {
-    pub(crate) name: String,
+    pub(super) name: String,
 }
 
 impl Alias {
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+        }
+    }
+
     fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             spaces_or_comments,
@@ -388,6 +458,10 @@ impl Alias {
             spaces_or_comments,
         ))(input)
         .map(|(input, (_, name, _, _, _))| (input, Self { name }))
+    }
+
+    pub fn name(&self) -> &str {
+        self.name.as_str()
     }
 }
 
