@@ -1839,11 +1839,15 @@ where
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::execution::JsonMap;
     use http::{HeaderMap, HeaderName, Method, StatusCode, Uri};
+    use mockall::Any;
     use multimap::MultiMap;
     use rust_embed::RustEmbed;
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
+    use serde_json_bytes::{ByteString, Value};
     use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
@@ -1852,14 +1856,16 @@ mod tests {
     use super::*;
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
+    use crate::error::Error;
     use crate::graphql;
     use crate::http_ext::{TryIntoHeaderName, TryIntoHeaderValue};
+    use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::{Instrumented, InstrumentsConfig};
-    use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::services::{OperationKind, RouterRequest};
     use crate::Context;
 
     #[derive(RustEmbed)]
@@ -1882,16 +1888,109 @@ mod tests {
             headers: HashMap<String, String>,
             body: String,
         },
-        SupergraphRequest {},
-        SupergraphResponse {},
-        SubgraphRequest {},
+        SupergraphRequest {
+            query: String,
+            method: String,
+            uri: String,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+        },
+        SupergraphResponse {
+            status: u16,
+            status_code: Option<String>,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            label: Option<String>,
+            #[schemars(with = "Option<serde_json::Value>")]
+            data: Option<Value>,
+            #[schemars(with = "Option<String>")]
+            path: Option<Path>,
+            #[serde(default)]
+            #[schemars(with = "Vec<serde_json::Value>")]
+            errors: Vec<Error>,
+            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
+        },
+        SubgraphRequest {
+            subgraph_name: String,
+            #[schemars(with = "Option<String>")]
+            operation_kind: Option<OperationKind>,
+            query: String,
+            operation_name: Option<String>,
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            variables: JsonMap,
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
+        },
         SubgraphResponse {
-            body: serde_json::Value,
+            status: u16,
+            data: Option<serde_json::Value>,
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
+            #[serde(default)]
+            #[schemars(with = "Vec<serde_json::Value>")]
+            errors: Vec<Error>,
         },
+        /// Note that this MUST not be used without first using supergraph request event
         GraphqlResponse {
-            body: serde_json::Value,
+            #[schemars(with = "Option<serde_json::Value>")]
+            data: Option<Value>,
+            #[schemars(with = "Option<String>")]
+            path: Option<Path>,
+            #[serde(default)]
+            #[schemars(with = "Vec<serde_json::Value>")]
+            errors: Vec<Error>,
+            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
         },
-        ResponseField {},
+        /// Note that this MUST not be used without first using supergraph request event
+        ResponseField { typed_value: TypedValueMirror },
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    enum TypedValueMirror {
+        Null,
+        Bool {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            value: bool,
+        },
+        Number {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            value: serde_json::Number,
+        },
+        String {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            value: String,
+        },
+        List {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            values: Vec<TypedValueMirror>,
+        },
+        Object {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            values: HashMap<String, TypedValueMirror>,
+        },
+        Root {
+            values: HashMap<String, TypedValueMirror>,
+        },
     }
 
     #[derive(Deserialize, JsonSchema)]
@@ -1903,6 +2002,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_instruments() {
+        // This test is data driven.
+        // It reads a list of fixtures from the fixtures directory and runs a test for each fixture.
+        // Each fixture is a yaml file that contains a list of events and a router config for the instruments.
+
         for fixture in Asset::iter() {
             // There's no async in this test, but introducing an async block allows us to separate metrics for each fixture.
             async move {
@@ -1931,7 +2034,7 @@ mod tests {
                         let router_instruments = config.new_router_instruments();
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
-                        let mut graphql_instruments: Option<GraphQLInstruments> = None;
+                        let mut graphql_instruments: GraphQLInstruments = (&config).into();
                         let context = Context::new();
                         for event in request {
                             match event {
@@ -1965,22 +2068,119 @@ mod tests {
                                         .unwrap();
                                     router_instruments.on_response(&router_resp);
                                 }
-                                Event::SupergraphRequest { .. } => {
+                                Event::SupergraphRequest {
+                                    query,
+                                    method,
+                                    uri,
+                                    headers,
+                                } => {
                                     supergraph_instruments =
                                         Some(config.new_supergraph_instruments());
-                                    graphql_instruments = Some((&config).into())
+
+                                    let request = supergraph::Request::fake_builder()
+                                        .context(context.clone())
+                                        .method(Method::from_str(&method).expect("method"))
+                                        .headers(convert_headers(headers))
+                                        .query(query)
+                                        .build()
+                                        .unwrap();
+
+                                    supergraph_instruments
+                                        .as_mut()
+                                        .unwrap()
+                                        .on_request(&request);
                                 }
-                                Event::SupergraphResponse { .. } => {
+                                Event::SupergraphResponse {
+                                    status,
+                                    label,
+                                    data,
+                                    path,
+                                    errors,
+                                    extensions,
+                                    status_code,
+                                    headers,
+                                } => {
+                                    let response = supergraph::Response::fake_builder()
+                                        .context(context.clone())
+                                        .status_code(StatusCode::from_u16(status).expect("status"))
+                                        .and_label(label)
+                                        .and_path(path)
+                                        .errors(errors)
+                                        .extensions(extensions)
+                                        .and_data(data)
+                                        .headers(convert_headers(headers))
+                                        .build()
+                                        .unwrap();
+
+                                    supergraph_instruments.unwrap().on_response(&response);
                                     supergraph_instruments = None;
                                 }
-                                Event::SubgraphRequest { .. } => {
+                                Event::SubgraphRequest {
+                                    subgraph_name,
+                                    operation_kind,
+                                    query,
+                                    operation_name,
+                                    variables,
+                                    extensions,
+                                } => {
                                     subgraph_instruments = Some(config.new_subgraph_instruments());
+                                    let graphql_request = graphql::Request::fake_builder()
+                                        .query(query)
+                                        .and_operation_name(operation_name)
+                                        .variables(variables)
+                                        .extensions(extensions)
+                                        .build();
+                                    let http_request = http::Request::new(graphql_request);
+
+                                    let request = subgraph::Request::fake_builder()
+                                        .context(context.clone())
+                                        .subgraph_name(subgraph_name)
+                                        .and_operation_kind(operation_kind)
+                                        .subgraph_request(http_request)
+                                        .build();
+
+                                    subgraph_instruments.as_mut().unwrap().on_request(&request);
                                 }
-                                Event::SubgraphResponse { .. } => {
+                                Event::SubgraphResponse {
+                                    status,
+                                    data,
+                                    extensions,
+                                    errors,
+                                } => {
+                                    let response = subgraph::Response::fake2_builder()
+                                        .context(context.clone())
+                                        .status_code(StatusCode::from_u16(status).expect("status"))
+                                        .and_data(data)
+                                        .errors(errors)
+                                        .extensions(extensions)
+                                        .build()
+                                        .unwrap();
                                     subgraph_instruments = None;
                                 }
-                                Event::GraphqlResponse { .. } => {}
-                                Event::ResponseField { .. } => {}
+                                Event::GraphqlResponse {
+                                    data,
+                                    path,
+                                    errors,
+                                    extensions,
+                                } => {
+                                    let response = graphql::Response::builder()
+                                        .and_data(data)
+                                        .and_path(path)
+                                        .errors(errors)
+                                        .extensions(extensions)
+                                        .build();
+                                    supergraph_instruments
+                                        .as_mut()
+                                        .expect(
+                                            "supergraph request event should have happened first",
+                                        )
+                                        .on_response_event(&response, &context);
+                                }
+                                Event::ResponseField { typed_value } => {
+                                    //TODO Convert typed value mirror to TypedValue @Taylor maybe you can have a go?
+                                    graphql_instruments
+                                        .on_response_field(&TypedValue::Null, &context);
+                                }
                             }
                         }
                     }
@@ -2039,6 +2239,7 @@ mod tests {
 
     #[test]
     fn write_schema() {
+        // Write a json schema for the above test
         let mut schema_gen = SchemaGenerator::default();
         let schema = schema_gen.root_schema_for::<TestDefinition>();
         let schema = serde_json::to_string_pretty(&schema);

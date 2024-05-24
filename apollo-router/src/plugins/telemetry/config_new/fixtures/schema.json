@@ -102,6 +102,29 @@
           "properties": {
             "supergraph_request": {
               "type": "object",
+              "required": [
+                "method",
+                "query",
+                "uri"
+              ],
+              "properties": {
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "method": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string"
+                }
+              },
               "additionalProperties": false
             }
           },
@@ -115,6 +138,55 @@
           "properties": {
             "supergraph_response": {
               "type": "object",
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "data": true,
+                "errors": {
+                  "default": [],
+                  "type": "array",
+                  "items": true
+                },
+                "extensions": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "integer",
+                  "format": "uint16",
+                  "minimum": 0.0
+                },
+                "status_code": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
               "additionalProperties": false
             }
           },
@@ -128,6 +200,46 @@
           "properties": {
             "subgraph_request": {
               "type": "object",
+              "required": [
+                "query",
+                "subgraph_name"
+              ],
+              "properties": {
+                "extensions": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "operation_kind": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "operation_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "query": {
+                  "type": "string"
+                },
+                "subgraph_name": {
+                  "type": "string"
+                },
+                "variables": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                }
+              },
               "additionalProperties": false
             }
           },
@@ -142,10 +254,28 @@
             "subgraph_response": {
               "type": "object",
               "required": [
-                "body"
+                "status"
               ],
               "properties": {
-                "body": true
+                "data": true,
+                "errors": {
+                  "default": [],
+                  "type": "array",
+                  "items": true
+                },
+                "extensions": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "status": {
+                  "type": "integer",
+                  "format": "uint16",
+                  "minimum": 0.0
+                }
               },
               "additionalProperties": false
             }
