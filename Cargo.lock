@@ -1399,9 +1399,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.11.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4ca5674d1f48a1788aae6124e87949474ab1560efb1a02a0f63a0ce9e845f0a"
+checksum = "ad9211604c79bf86afd55f798b3c105607f87bd08a9edbf71b22785b0d53f851"
 dependencies = [
  "anyhow",
  "auth-git2",
