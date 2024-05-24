@@ -1598,7 +1598,6 @@ mod tests {
             }
         }
 
-
         let mut configuration: Configuration = Default::default();
         configuration.supergraph.introspection = true;
         let configuration = Arc::new(configuration);
