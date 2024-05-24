@@ -4492,14 +4492,15 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
@@ -5453,14 +5454,15 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
@@ -6026,18 +6028,32 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
             "static"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "on_graphql_error": {
+              "description": "Boolean set to true if the response body contains graphql error",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "on_graphql_error"
           ],
           "type": "object"
         },
