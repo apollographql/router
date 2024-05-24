@@ -830,6 +830,40 @@ impl IntegrationTest {
     }
 
     #[allow(dead_code)]
+    pub async fn assert_metrics_contains_multiple(
+        &self,
+        mut texts: Vec<&str>,
+        duration: Option<Duration>,
+    ) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                let mut v = vec![];
+                for text in &texts {
+                    if !metrics.contains(text) {
+                        v.push(*text);
+                    }
+                }
+                if v.len() == texts.len() {
+                    return;
+                } else {
+                    texts = v;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{texts:?}' not detected in metrics\n{last_metrics}");
+    }
+
+    #[allow(dead_code)]
     pub async fn assert_metrics_does_not_contain(&self, text: &str) {
         if let Ok(metrics) = self
             .get_metrics_response()
