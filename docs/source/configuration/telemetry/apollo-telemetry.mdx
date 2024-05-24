@@ -331,3 +331,10 @@ telemetry:
           account: # Override the default behavior for the "account" subgraph
             send: false
 ```
+
+
+<Note>
+
+If you're writing a plugin, you can get the Studio Trace ID by reading the value of `apollo_operation_id` from the context.
+
+</Note>
