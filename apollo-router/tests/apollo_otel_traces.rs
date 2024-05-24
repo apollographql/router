@@ -64,7 +64,7 @@ async fn config(
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
 
-    let listener = std::net::TcpListener::bind("127.0.0.1:4318").unwrap();
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
     let addr = listener.local_addr().unwrap();
     let app = axum::Router::new()
         .route("/", post(traces_handler))
