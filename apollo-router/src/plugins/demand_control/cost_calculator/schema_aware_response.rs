@@ -21,7 +21,8 @@ impl<'a> SchemaAwareResponse<'a> {
         response: &'a Response,
     ) -> Result<Self, DemandControlError> {
         if let Some(Value::Object(children)) = &response.data {
-            let mut typed_children: HashMap<String, TypedValue<'a>> = HashMap::new();
+            let mut typed_children: HashMap<&'a str, TypedValue<'a>> =
+                HashMap::with_capacity(children.len());
 
             if let Some(operation) = &request.anonymous_operation {
                 typed_children.extend(TypedValue::zip_selections(
@@ -56,8 +57,8 @@ pub(crate) enum TypedValue<'a> {
     Number(&'a Field, &'a serde_json::Number),
     String(&'a Field, &'a str),
     Array(&'a Field, Vec<TypedValue<'a>>),
-    Object(&'a Field, HashMap<String, TypedValue<'a>>),
-    Root(HashMap<String, TypedValue<'a>>),
+    Object(&'a Field, HashMap<&'a str, TypedValue<'a>>),
+    Root(HashMap<&'a str, TypedValue<'a>>),
 }
 
 impl<'a> TypedValue<'a> {
@@ -72,7 +73,7 @@ impl<'a> TypedValue<'a> {
             Value::Number(n) => Ok(TypedValue::Number(field, n)),
             Value::String(s) => Ok(TypedValue::String(field, s.as_str())),
             Value::Array(items) => {
-                let mut typed_items = Vec::new();
+                let mut typed_items = Vec::with_capacity(items.len());
                 for item in items {
                     typed_items.push(TypedValue::zip_field(request, field, item)?);
                 }
@@ -89,14 +90,14 @@ impl<'a> TypedValue<'a> {
         request: &'a ExecutableDocument,
         selection_set: &'a SelectionSet,
         fields: &'a Map<ByteString, Value>,
-    ) -> Result<HashMap<String, TypedValue<'a>>, DemandControlError> {
-        let mut typed_children: HashMap<String, TypedValue> = HashMap::new();
+    ) -> Result<HashMap<&'a str, TypedValue<'a>>, DemandControlError> {
+        let mut typed_children: HashMap<&'a str, TypedValue> = HashMap::with_capacity(fields.len());
         for selection in &selection_set.selections {
             match selection {
                 Selection::Field(inner_field) => {
                     if let Some(value) = fields.get(inner_field.name.as_str()) {
                         typed_children.insert(
-                            inner_field.name.to_string(),
+                            inner_field.name.as_str(),
                             TypedValue::zip_field(request, inner_field.as_ref(), value)?,
                         );
                     } else {
