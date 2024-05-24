@@ -8,7 +8,10 @@ info:
       instruments:
         router:
           http.server.active_requests: false
-          http.server.request.duration: true
+          http.server.request.duration:
+            attributes:
+              my_attribute:
+                request_method: true
 ---
 - name: http.server.request.duration
   data:
@@ -17,3 +20,4 @@ info:
         attributes:
           http.request.method: GET
           http.response.status_code: 200
+          my_attribute: GET

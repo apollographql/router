@@ -1,4 +1,4 @@
-description: Custom counter
+description: Custom histogram unit
 events:
   - - router_request:
         uri: "/hello"

@@ -1,4 +1,4 @@
-description: Custom counter
+description: Server duration metrics
 events:
   - - router_request:
         uri: "/hello"

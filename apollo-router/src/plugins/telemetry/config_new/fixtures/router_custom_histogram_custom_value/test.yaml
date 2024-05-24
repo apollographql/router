@@ -1,8 +1,10 @@
-description: Custom counter
+description: Custom histogram with value from custom header
 events:
   - - router_request:
         uri: "/hello"
         method: GET
+        headers:
+          count_header: "10"
         body: |
           hello
     - router_response:
