@@ -1,3 +1,18 @@
+//! ## Usage
+//!
+//! This crate is internal to [Apollo Router](https://www.apollographql.com/docs/router/)
+//! and not intended to be used directly.
+//!
+//! ## Crate versioning
+//!
+//! The  `apollo-federation` crate does **not** adhere to [Semantic Versioning](https://semver.org/).
+//! Any version may have breaking API changes, as this API is expected to only be used by `apollo-router`.
+//! Instead, the version number matches exactly that of the `apollo-router` crate version using it.
+//!
+//! This version number is **not** that of the Apollo Federation specification being implemented.
+//! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
+//! for which Federation versions are supported by which Router versions.
+
 #![allow(dead_code)] // TODO: This is fine while we're iterating, but should be removed later.
 
 mod api_schema;

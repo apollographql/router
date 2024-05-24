@@ -83,6 +83,7 @@ impl FetchNode {
             operation_kind: _,
             input_rewrites: _,
             output_rewrites: _,
+            context_rewrites: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
@@ -354,11 +355,12 @@ fn write_selections(
     state.write("}")
 }
 
+/// PORT_NOTE: Corresponds to `GroupPath.updatedResponsePath` in `buildPlan.ts`
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Key(name) => f.write_str(name),
-            Self::AnyIndex => f.write_str("*"),
+            Self::AnyIndex => f.write_str("@"),
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
         }
     }

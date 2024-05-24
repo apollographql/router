@@ -333,6 +333,15 @@ impl OpPathElement {
         }
     }
 
+    pub(crate) fn sub_selection_type_position(
+        &self,
+    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
+        match self {
+            OpPathElement::Field(field) => Ok(field.data().output_base_type()?.try_into().ok()),
+            OpPathElement::InlineFragment(inline) => Ok(Some(inline.data().casted_type())),
+        }
+    }
+
     pub(crate) fn extract_operation_conditionals(
         &self,
     ) -> Result<Vec<OperationConditional>, FederationError> {
