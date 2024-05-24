@@ -6257,6 +6257,13 @@ expression: "&schema"
             "datadog"
           ],
           "type": "string"
+        },
+        {
+          "description": "Apollo Studio trace id",
+          "enum": [
+            "apollo"
+          ],
+          "type": "string"
         }
       ]
     },
