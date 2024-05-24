@@ -20,6 +20,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::ToOtelValue;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -33,6 +34,8 @@ pub(crate) enum TraceIdFormat {
     OpenTelemetry,
     /// Datadog trace ID, a u64.
     Datadog,
+    /// Apollo Studio trace id
+    Apollo,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -156,10 +159,11 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
     },
     OnGraphQLError {
         /// Boolean set to true if the response body contains graphql error
@@ -306,10 +310,15 @@ pub(crate) enum SupergraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
+    },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        on_graphql_error: bool,
     },
     Error {
         #[allow(dead_code)]
@@ -518,10 +527,11 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
     },
     Error {
         #[allow(dead_code)]
@@ -556,13 +566,20 @@ impl Selector for RouterSelector {
                 .map(opentelemetry::Value::from),
             RouterSelector::TraceId {
                 trace_id: trace_id_format,
-            } => trace_id().map(|id| {
-                match trace_id_format {
-                    TraceIdFormat::OpenTelemetry => id.to_string(),
-                    TraceIdFormat::Datadog => id.to_datadog(),
+            } => {
+                if let TraceIdFormat::Apollo = &trace_id_format {
+                    return None;
                 }
-                .into()
-            }),
+                trace_id().map(|id| {
+                    match trace_id_format {
+                        TraceIdFormat::OpenTelemetry => id.to_string(),
+                        TraceIdFormat::Datadog => id.to_datadog(),
+                        // It happens in the response
+                        TraceIdFormat::Apollo => String::new(),
+                    }
+                    .into()
+                })
+            }
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
@@ -617,7 +634,22 @@ impl Selector for RouterSelector {
                     None
                 }
             }
+            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::TraceId {
+                trace_id: trace_id_format,
+            } => {
+                if let TraceIdFormat::Apollo = &trace_id_format {
+                    response
+                        .context
+                        .get::<_, String>(APOLLO_OPERATION_ID)
+                        .ok()
+                        .flatten()
+                        .map(opentelemetry::Value::from)
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
@@ -625,6 +657,8 @@ impl Selector for RouterSelector {
     fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
+            RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -750,6 +784,7 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
@@ -814,6 +849,17 @@ impl Selector for SupergraphSelector {
                         CostValue::Result => cost_result.result.into(),
                     })
             }
+            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
+            }
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -821,6 +867,8 @@ impl Selector for SupergraphSelector {
     fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::Error { .. } => Some(error.to_string().into()),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -1058,6 +1106,7 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
@@ -1067,6 +1116,8 @@ impl Selector for SubgraphSelector {
     fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -1108,6 +1159,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
+    use crate::query_planner::APOLLO_OPERATION_ID;
 
     #[test]
     fn router_static() {
@@ -1250,7 +1302,9 @@ mod test {
 
     #[test]
     fn supergraph_static() {
-        let selector = SupergraphSelector::Static("test_static".to_string());
+        let selector = SupergraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
         assert_eq!(
             selector
                 .on_request(
@@ -1817,6 +1871,27 @@ mod test {
                 opentelemetry::Value::String("42".into())
             );
         });
+    }
+
+    #[test]
+    fn test_router_studio_trace_id() {
+        let selector = RouterSelector::TraceId {
+            trace_id: TraceIdFormat::Apollo,
+        };
+        let ctx = crate::Context::new();
+        let _ = ctx.insert(APOLLO_OPERATION_ID, "42".to_string()).unwrap();
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .context(ctx)
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap(),
+            opentelemetry::Value::String("42".into())
+        );
     }
 
     #[test]

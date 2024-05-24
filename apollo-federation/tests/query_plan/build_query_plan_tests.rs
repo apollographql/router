@@ -153,8 +153,6 @@ fn pick_keys_that_minimize_fetches() {
 /// (more precisely, this force the query planner to _consider_ type explosion; the generated
 /// query plan still ends up not type-exploding in practice since as it's not necessary).
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn field_covariance_and_type_explosion() {
     let planner = planner!(
         Subgraph1: r#"
@@ -195,23 +193,22 @@ fn field_covariance_and_type_explosion() {
         }
         "#,
         @r###"
-          QueryPlan {
-            Fetch(service: "Subgraph1") {
-              {
-                dummy {
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          dummy {
+            field {
+              __typename
+              ... on Object {
+                field {
                   __typename
-                  field {
-                    __typename
-                    ... on Object {
-                      field {
-                        __typename
-                      }
-                    }
-                  }
                 }
               }
-            },
+            }
           }
-        "###
+        }
+      },
+    }
+    "###
     );
 }

@@ -68,6 +68,7 @@ expression: "serde_json::to_value(response).unwrap()"
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
+              "contextRewrites": null,
               "schemaAwareHash": "7245d488e97c3b2ac9f5fa4dd4660940b94ad81af070013305b2c0f76337b2f9",
               "authorization": {
                 "is_authenticated": false,
@@ -107,6 +108,7 @@ expression: "serde_json::to_value(response).unwrap()"
                 "id": null,
                 "inputRewrites": null,
                 "outputRewrites": null,
+                "contextRewrites": null,
                 "schemaAwareHash": "6e0b4156706ea0cf924500cfdc99dd44b9f0ed07e2d3f888d4aff156e6a33238",
                 "authorization": {
                   "is_authenticated": false,
@@ -153,6 +155,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
+                    "contextRewrites": null,
                     "schemaAwareHash": "ff649f3d70241d5a8cd5f5d03ff4c41ecff72b0e4129a480207b05ac92318042",
                     "authorization": {
                       "is_authenticated": false,
@@ -196,6 +199,7 @@ expression: "serde_json::to_value(response).unwrap()"
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
+                    "contextRewrites": null,
                     "schemaAwareHash": "bf9f3beda78a7a565e47c862157bad4ec871d724d752218da1168455dddca074",
                     "authorization": {
                       "is_authenticated": false,
