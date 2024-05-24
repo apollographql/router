@@ -1206,25 +1206,14 @@ impl SelectionSet {
 }
 
 impl Operation {
+    // PORT_NOTE: The JS version of `optimize` takes an optional `minUsagesToOptimize` argument.
+    //            However, it's only used in tests. So, it's removed in the Rust version.
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
-    pub(crate) fn optimize(
-        &mut self,
-        fragments: Option<&NamedFragments>,
-        min_usages_to_optimize: Option<u32>,
-    ) -> Result<(), FederationError> {
-        let min_usages_to_optimize =
-            min_usages_to_optimize.unwrap_or(Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE);
-        let Some(fragments) = fragments else {
-            return Ok(());
-        };
+    pub(crate) fn optimize(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
         if fragments.is_empty() {
             return Ok(());
         }
-        assert!(
-            min_usages_to_optimize >= 1,
-            "Expected 'min_usages_to_optimize' to be at least 1, but got {min_usages_to_optimize}"
-        );
 
         // Optimize the operation's selection set by re-using existing fragments.
         let optimized_selection = self.selection_set.optimize_at_root(fragments)?;
@@ -1234,8 +1223,8 @@ impl Operation {
 
         // Optimize the named fragment definitions by dropping low-usage ones.
         let mut final_fragments = fragments.clone();
-        let final_selection_set =
-            final_fragments.reduce_named_fragments(&optimized_selection, min_usages_to_optimize)?;
+        let final_selection_set = final_fragments
+            .reduce_named_fragments(&optimized_selection, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)?;
 
         self.selection_set = final_selection_set;
         self.named_fragments = final_fragments;
