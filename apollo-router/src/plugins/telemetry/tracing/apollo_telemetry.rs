@@ -86,7 +86,8 @@ use crate::query_planner::SUBSCRIBE_SPAN_NAME;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
-const APOLLO_PRIVATE_DURATION_NS_KEY: Key = Key::from_static_str(APOLLO_PRIVATE_DURATION_NS);
+pub(crate) const APOLLO_PRIVATE_DURATION_NS_KEY: Key =
+    Key::from_static_str(APOLLO_PRIVATE_DURATION_NS);
 const APOLLO_PRIVATE_SENT_TIME_OFFSET: Key =
     Key::from_static_str("apollo_private.sent_time_offset");
 const APOLLO_PRIVATE_GRAPHQL_VARIABLES: Key =
@@ -340,6 +341,8 @@ impl Exporter {
                         apollo_key,
                         apollo_graph_ref,
                         schema_id,
+                        errors_configuration,
+                        INCLUDE_SPANS.into(),
                     )?))
                 }
             },
@@ -454,18 +457,9 @@ impl Exporter {
         Ok(results)
     }
 
-    fn init_spans_for_tree(&self, root_span: LightSpanData) -> Vec<SpanData> {
-        let exporter = self
-            .otlp_exporter
-            .as_ref()
-            .expect("expected an otlp exporter");
-        let root_span_data = exporter.prepare_for_export(root_span, &self.errors_configuration);
-        vec![root_span_data]
-    }
-
     /// Collects the subtree for a trace by calling pop() on the LRU cache for
     /// all spans in the tree.
-    fn pop_spans_for_tree(&mut self, root_span: LightSpanData) -> Vec<SpanData> {
+    fn pop_spans_for_tree(&mut self, root_span: LightSpanData) -> Vec<LightSpanData> {
         let root_span_id = root_span.span_id;
         let mut child_spans = match self.spans_by_parent_id.pop(&root_span_id) {
             Some(spans) => spans
@@ -474,7 +468,7 @@ impl Exporter {
                 .collect(),
             None => Vec::new(),
         };
-        let mut spans_for_tree = self.init_spans_for_tree(root_span);
+        let mut spans_for_tree = vec![root_span];
         spans_for_tree.append(&mut child_spans);
         spans_for_tree
     }
@@ -483,7 +477,7 @@ impl Exporter {
     /// Iterates over all children and recursively collect the entire subtree.
     /// TBD(tim): For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
     /// groups based on trace ID instead of connecting recursively by parent ID.
-    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<SpanData> {
+    fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
         self.pop_spans_for_tree(span)
     }
 
@@ -837,7 +831,7 @@ fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
         .unwrap_or_default()
 }
 
-fn extract_i64(v: &Value) -> Option<i64> {
+pub(crate) fn extract_i64(v: &Value) -> Option<i64> {
     if let Value::I64(v) = v {
         Some(*v)
     } else {
@@ -978,7 +972,12 @@ impl SpanExporter for Exporter {
                 if send_otlp {
                     let grouped_trace_spans = self.group_by_trace(root_span);
                     // TBD(tim): do we need to filter out traces w/o signatures?  What scenario(s) would cause that to happen?
-                    otlp_trace_spans.push(grouped_trace_spans);
+                    otlp_trace_spans.push(
+                        self.otlp_exporter
+                            .as_ref()
+                            .expect("otlp exporter required")
+                            .prepare_for_export(grouped_trace_spans),
+                    );
                 } else if send_reports {
                     match self.extract_traces(root_span) {
                         Ok(extracted_traces) => {
@@ -1022,6 +1021,7 @@ impl SpanExporter for Exporter {
             }
         }
         tracing::info!(value.apollo_router_span_lru_size = self.spans_by_parent_id.len() as u64,);
+
         #[allow(clippy::manual_map)] // https://github.com/rust-lang/rust-clippy/issues/8346
         let report_exporter = match self.report_exporter.as_ref() {
             Some(exporter) => Some(exporter.clone()),
