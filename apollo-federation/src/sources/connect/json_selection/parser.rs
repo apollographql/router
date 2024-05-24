@@ -385,7 +385,7 @@ impl PathSelection {
         match self {
             PathSelection::Var(var, path) => {
                 let rest = path.pretty_print(indentation)?;
-                write!(result, "${var}{rest}")?;
+                write!(result, "{var}{rest}")?;
             }
             PathSelection::Key(key, path) => {
                 let rest = path.pretty_print(indentation)?;
