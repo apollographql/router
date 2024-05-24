@@ -52,6 +52,7 @@ use crate::Context;
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
+pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
 pub(crate) enum ConfigMode {
@@ -384,7 +385,7 @@ where
                     urp.cloned()
                 } {
                     let _ = response.context.insert(
-                        "apollo_operation_id",
+                        APOLLO_OPERATION_ID,
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
                     let _ = response.context.insert(

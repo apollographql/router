@@ -44,6 +44,8 @@ telemetry:
               eq:
                 - request_header: "head"
                 - "test"
+          studio.trace.id:
+            trace_id: apollo
       supergraph:
         attributes:
           graphql.operation.name: true
