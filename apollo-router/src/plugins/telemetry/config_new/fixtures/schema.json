@@ -27,6 +27,19 @@
         {
           "type": "object",
           "required": [
+            "context"
+          ],
+          "properties": {
+            "context": {
+              "type": "object",
+              "additionalProperties": true
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
             "router_request"
           ],
           "properties": {
