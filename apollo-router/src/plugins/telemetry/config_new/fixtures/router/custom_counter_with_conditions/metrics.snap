@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Test server request body size metrics
+description: Custom counter with conditions
 expression: "&metrics.all()"
 info:
   telemetry:
@@ -18,6 +18,10 @@ info:
               http.request.method: true
               custom_attribute:
                 request_header: custom_header
+            condition:
+              eq:
+                - request_header: custom_header
+                - allowed
 ---
 - name: custom_counter
   description: count of requests
@@ -26,5 +30,5 @@ info:
     datapoints:
       - value: 1
         attributes:
-          custom_attribute: custom_value
+          custom_attribute: allowed
           http.request.method: GET

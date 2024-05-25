@@ -4,7 +4,7 @@ events:
         uri: "/hello"
         method: GET
         headers:
-          custom_header: custom_value
+          custom_header: allowed
         body: |
           hello
     - router_response:
@@ -14,9 +14,9 @@ events:
 
   - - router_request:
         uri: "/hello"
-        method: POST
+        method: GET
         headers:
-          custom_header: custom_value
+          custom_header: not_allowed
         body: |
           hello
     - router_response:

@@ -15,5 +15,5 @@ telemetry:
               request_header: "custom_header"
           condition:
             eq:
-              - request_method: true
-              - GET
+              - request_header: "custom_header"
+              - "allowed"

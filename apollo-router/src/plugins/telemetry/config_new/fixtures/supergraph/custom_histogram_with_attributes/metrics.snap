@@ -6,16 +6,15 @@ info:
   telemetry:
     instrumentation:
       instruments:
-        router:
-          http.server.active_requests: false
-          http.server.request.duration: false
+        default_requirement_level: none
+        supergraph:
           custom_histogram:
             description: histogram of requests
             type: histogram
             unit: unit
             value: unit
             attributes:
-              http.request.method: true
+              graphql.document: true
               custom_attribute:
                 request_header: custom_header
 ---
@@ -27,4 +26,4 @@ info:
       - sum: 1
         attributes:
           custom_attribute: custom_value
-          http.request.method: GET
+          graphql.document: "query { hello }"
