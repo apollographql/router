@@ -1839,30 +1839,39 @@ where
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::ast::{Name, NamedType};
-    use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::execution::JsonMap;
-    use http::{HeaderMap, HeaderName, Method, StatusCode, Uri};
-    use multimap::MultiMap;
-    use rust_embed::RustEmbed;
-    use schemars::gen::SchemaGenerator;
-    use serde::Deserialize;
-    use serde_json_bytes::Value;
     use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
     use std::str::FromStr;
 
+    use apollo_compiler::ast::Name;
+    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::execution::JsonMap;
+    use http::HeaderMap;
+    use http::HeaderName;
+    use http::Method;
+    use http::StatusCode;
+    use http::Uri;
+    use multimap::MultiMap;
+    use rust_embed::RustEmbed;
+    use schemars::gen::SchemaGenerator;
+    use serde::Deserialize;
+    use serde_json_bytes::Value;
+
     use super::*;
     use crate::error::Error;
     use crate::graphql;
-    use crate::http_ext::{TryIntoHeaderName, TryIntoHeaderValue};
+    use crate::http_ext::TryIntoHeaderName;
+    use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
-    use crate::plugins::telemetry::config_new::instruments::{Instrumented, InstrumentsConfig};
+    use crate::plugins::telemetry::config_new::instruments::Instrumented;
+    use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::services::OperationKind;
+    use crate::services::RouterRequest;
     use crate::services::RouterResponse;
-    use crate::services::{OperationKind, RouterRequest};
     use crate::Context;
 
     #[derive(RustEmbed)]

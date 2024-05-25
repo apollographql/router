@@ -7,7 +7,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
-use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::ServiceExt;
@@ -42,7 +41,7 @@ use crate::spec::Schema;
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
-#[cfg_attr(test, derive(JsonSchema))]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub enum OperationKind {
     #[default]
     Query,
