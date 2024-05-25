@@ -350,6 +350,21 @@ pub(crate) mod test_utils {
         pub(crate) attributes: BTreeMap<String, serde_json::Value>,
     }
 
+    impl Ord for SerdeMetricDataPoint {
+        fn cmp(&self, other: &Self) -> Ordering {
+            //Horribly inefficient, but it's just for testing
+            let self_string = serde_json::to_string(&self.attributes).expect("serde failed");
+            let other_string = serde_json::to_string(&other.attributes).expect("serde failed");
+            self_string.cmp(&other_string)
+        }
+    }
+
+    impl PartialOrd for SerdeMetricDataPoint {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
     impl SerdeMetricData {
         fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
             metric_data: &mut SerdeMetricData,
@@ -381,6 +396,9 @@ pub(crate) mod test_utils {
                 unit: value.unit.as_str().to_string(),
                 data: value.data.into(),
             };
+            // Sort the datapoints so that we can compare them
+            serde_metric.data.datapoints.sort();
+
             // Redact duration metrics;
             if serde_metric.name.ends_with(".duration") {
                 serde_metric

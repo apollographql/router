@@ -2034,7 +2034,7 @@ mod tests {
 
                     for request in test_definition.events {
                         // each array of actions is a separate request
-                        let router_instruments = config.new_router_instruments();
+                        let mut router_instruments = None;
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
                         let graphql_instruments: GraphQLInstruments = (&config).into();
@@ -2055,7 +2055,11 @@ mod tests {
                                         .body(body)
                                         .build()
                                         .unwrap();
-                                    router_instruments.on_request(&router_req);
+                                    router_instruments = Some(config.new_router_instruments());
+                                    router_instruments
+                                        .as_mut()
+                                        .expect("router instruments")
+                                        .on_request(&router_req);
                                 }
                                 Event::RouterResponse {
                                     status,
@@ -2069,7 +2073,10 @@ mod tests {
                                         .data(body)
                                         .build()
                                         .unwrap();
-                                    router_instruments.on_response(&router_resp);
+                                    router_instruments
+                                        .take()
+                                        .expect("router instruments")
+                                        .on_response(&router_resp);
                                 }
                                 Event::SupergraphRequest {
                                     query,
@@ -2217,7 +2224,6 @@ mod tests {
                         prepend_module_to_snapshot=>false,
                         description=>description,
                         info=>&info
-
                     }, {
                         let metrics = crate::metrics::collect_metrics();
                         insta::assert_yaml_snapshot!("metrics", &metrics.all());
