@@ -1839,29 +1839,26 @@ where
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::ast::{Name, NamedType};
+    use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::execution::JsonMap;
-    use http::{HeaderMap, HeaderName, Method, StatusCode, Uri};
-    use mockall::Any;
+    use http::{Method, StatusCode, Uri};
     use multimap::MultiMap;
     use rust_embed::RustEmbed;
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
-    use serde_json_bytes::{ByteString, Value};
+    use serde_json_bytes::Value;
     use std::fs::File;
     use std::io::Write;
     use std::path::PathBuf;
     use std::str::FromStr;
 
     use super::*;
-    use crate::context::CONTAINS_GRAPHQL_ERROR;
-    use crate::context::OPERATION_KIND;
     use crate::error::Error;
     use crate::graphql;
     use crate::http_ext::{TryIntoHeaderName, TryIntoHeaderValue};
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
-    use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::{Instrumented, InstrumentsConfig};
     use crate::services::RouterResponse;
@@ -1897,7 +1894,6 @@ mod tests {
         },
         SupergraphResponse {
             status: u16,
-            status_code: Option<String>,
             #[serde(default)]
             headers: HashMap<String, String>,
             label: Option<String>,
@@ -2034,7 +2030,7 @@ mod tests {
                         let router_instruments = config.new_router_instruments();
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
-                        let mut graphql_instruments: GraphQLInstruments = (&config).into();
+                        let graphql_instruments: GraphQLInstruments = (&config).into();
                         let context = Context::new();
                         for event in request {
                             match event {
@@ -2077,13 +2073,15 @@ mod tests {
                                     supergraph_instruments =
                                         Some(config.new_supergraph_instruments());
 
-                                    let request = supergraph::Request::fake_builder()
+                                    let mut request = supergraph::Request::fake_builder()
                                         .context(context.clone())
                                         .method(Method::from_str(&method).expect("method"))
                                         .headers(convert_headers(headers))
                                         .query(query)
                                         .build()
                                         .unwrap();
+                                    *request.supergraph_request.uri_mut() =
+                                        Uri::from_str(&uri).expect("uri");
 
                                     supergraph_instruments
                                         .as_mut()
@@ -2097,7 +2095,6 @@ mod tests {
                                     path,
                                     errors,
                                     extensions,
-                                    status_code,
                                     headers,
                                 } => {
                                     let response = supergraph::Response::fake_builder()
@@ -2112,8 +2109,10 @@ mod tests {
                                         .build()
                                         .unwrap();
 
-                                    supergraph_instruments.unwrap().on_response(&response);
-                                    supergraph_instruments = None;
+                                    supergraph_instruments
+                                        .take()
+                                        .unwrap()
+                                        .on_response(&response);
                                 }
                                 Event::SubgraphRequest {
                                     subgraph_name,
@@ -2155,7 +2154,10 @@ mod tests {
                                         .extensions(extensions)
                                         .build()
                                         .unwrap();
-                                    subgraph_instruments = None;
+                                    subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
                                 }
                                 Event::GraphqlResponse {
                                     data,
@@ -2177,9 +2179,9 @@ mod tests {
                                         .on_response_event(&response, &context);
                                 }
                                 Event::ResponseField { typed_value } => {
-                                    //TODO Convert typed value mirror to TypedValue @Taylor maybe you can have a go?
-                                    graphql_instruments
-                                        .on_response_field(&TypedValue::Null, &context);
+                                    let typed_value_data: TypedValueData = typed_value.into();
+                                    let typed_value = TypedValue::from(&typed_value_data);
+                                    graphql_instruments.on_response_field(&typed_value, &context);
                                 }
                             }
                         }
@@ -2253,5 +2255,170 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(schema.unwrap().as_bytes())
             .expect("write schema");
+    }
+
+    enum TypedValueData {
+        Null,
+        Bool {
+            type_name: NamedType,
+            field_definition: apollo_compiler::executable::Field,
+            value: bool,
+        },
+        Number {
+            type_name: NamedType,
+            field_definition: apollo_compiler::executable::Field,
+            value: serde_json::Number,
+        },
+        String {
+            type_name: NamedType,
+            field_definition: apollo_compiler::executable::Field,
+            value: String,
+        },
+        List {
+            type_name: NamedType,
+            field_definition: apollo_compiler::executable::Field,
+            values: Vec<TypedValueData>,
+        },
+        Object {
+            type_name: NamedType,
+            field_definition: apollo_compiler::executable::Field,
+            values: HashMap<String, TypedValueData>,
+        },
+        Root {
+            values: HashMap<String, TypedValueData>,
+        },
+    }
+
+    impl From<TypedValueMirror> for TypedValueData {
+        fn from(value: TypedValueMirror) -> Self {
+            match value {
+                TypedValueMirror::Null => TypedValueData::Null,
+                TypedValueMirror::Bool {
+                    type_name,
+                    field_type,
+                    field_name,
+                    value,
+                } => TypedValueData::Bool {
+                    type_name: Self::type_name(type_name),
+                    field_definition: Self::field(field_type, field_name),
+                    value,
+                },
+                TypedValueMirror::Number {
+                    type_name,
+                    field_type,
+                    field_name,
+                    value,
+                } => TypedValueData::Number {
+                    type_name: Self::type_name(type_name),
+                    field_definition: Self::field(field_type, field_name),
+                    value,
+                },
+                TypedValueMirror::String {
+                    type_name,
+                    field_type,
+                    field_name,
+                    value,
+                } => TypedValueData::String {
+                    type_name: Self::type_name(type_name),
+                    field_definition: Self::field(field_type, field_name),
+                    value,
+                },
+                TypedValueMirror::List {
+                    type_name,
+                    field_type,
+                    field_name,
+                    values,
+                } => TypedValueData::List {
+                    type_name: Self::type_name(type_name),
+                    field_definition: Self::field(field_type, field_name),
+                    values: values.into_iter().map(|v| v.into()).collect(),
+                },
+                TypedValueMirror::Object {
+                    type_name,
+                    field_type,
+                    field_name,
+                    values,
+                } => TypedValueData::Object {
+                    type_name: Self::type_name(type_name),
+                    field_definition: Self::field(field_type, field_name),
+                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
+                },
+                TypedValueMirror::Root { values } => TypedValueData::Root {
+                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
+                },
+            }
+        }
+    }
+
+    impl TypedValueData {
+        fn field(field_type: String, field_name: String) -> apollo_compiler::executable::Field {
+            apollo_compiler::executable::Field {
+                definition: apollo_compiler::schema::FieldDefinition {
+                    description: None,
+                    name: NamedType::new(field_name.clone()).expect("valid field name"),
+                    arguments: vec![],
+                    ty: apollo_compiler::schema::Type::Named(
+                        NamedType::new(field_type.clone()).expect("valid type name"),
+                    ),
+                    directives: Default::default(),
+                }
+                .into(),
+                alias: None,
+                name: NamedType::new(field_name.clone()).expect("valid field name"),
+                arguments: vec![],
+                directives: Default::default(),
+                selection_set: SelectionSet::new(
+                    NamedType::new(field_name).expect("valid field name"),
+                ),
+            }
+        }
+
+        fn type_name(type_name: String) -> Name {
+            NamedType::new(type_name).expect("valid type name")
+        }
+    }
+
+    impl<'a> From<&'a TypedValueData> for TypedValue<'a> {
+        fn from(value: &'a TypedValueData) -> Self {
+            match value {
+                TypedValueData::Null => TypedValue::Null,
+                TypedValueData::Bool {
+                    type_name,
+                    field_definition,
+                    value,
+                } => TypedValue::Bool(type_name, field_definition, value),
+                TypedValueData::Number {
+                    type_name,
+                    field_definition,
+                    value,
+                } => TypedValue::Number(type_name, field_definition, value),
+                TypedValueData::String {
+                    type_name,
+                    field_definition,
+                    value,
+                } => TypedValue::String(type_name, field_definition, value),
+                TypedValueData::List {
+                    type_name,
+                    field_definition,
+                    values,
+                } => TypedValue::List(
+                    type_name,
+                    field_definition,
+                    values.iter().map(|v| v.into()).collect(),
+                ),
+                TypedValueData::Object {
+                    type_name,
+                    field_definition,
+                    values,
+                } => TypedValue::Object(
+                    type_name,
+                    field_definition,
+                    values.iter().map(|(k, v)| (k.clone(), v.into())).collect(),
+                ),
+                TypedValueData::Root { values } => {
+                    TypedValue::Root(values.iter().map(|(k, v)| (k.clone(), v.into())).collect())
+                }
+            }
+        }
     }
 }
