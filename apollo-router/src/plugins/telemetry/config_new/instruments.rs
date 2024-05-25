@@ -1842,7 +1842,7 @@ mod tests {
     use apollo_compiler::ast::{Name, NamedType};
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::execution::JsonMap;
-    use http::{Method, StatusCode, Uri};
+    use http::{HeaderMap, HeaderName, Method, StatusCode, Uri};
     use multimap::MultiMap;
     use rust_embed::RustEmbed;
     use schemars::gen::SchemaGenerator;
@@ -1915,7 +1915,6 @@ mod tests {
         },
         SubgraphRequest {
             subgraph_name: String,
-            #[schemars(with = "Option<String>")]
             operation_kind: Option<OperationKind>,
             query: String,
             operation_name: Option<String>,
@@ -1925,6 +1924,8 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
             extensions: JsonMap,
+            #[serde(default)]
+            headers: HashMap<String, String>,
         },
         SubgraphResponse {
             status: u16,
@@ -1935,6 +1936,8 @@ mod tests {
             #[serde(default)]
             #[schemars(with = "Vec<serde_json::Value>")]
             errors: Vec<Error>,
+            #[serde(default)]
+            headers: HashMap<String, String>,
         },
         /// Note that this MUST not be used without first using supergraph request event
         GraphqlResponse {
@@ -2125,6 +2128,7 @@ mod tests {
                                     operation_name,
                                     variables,
                                     extensions,
+                                    headers,
                                 } => {
                                     subgraph_instruments = Some(config.new_subgraph_instruments());
                                     let graphql_request = graphql::Request::fake_builder()
@@ -2133,7 +2137,8 @@ mod tests {
                                         .variables(variables)
                                         .extensions(extensions)
                                         .build();
-                                    let http_request = http::Request::new(graphql_request);
+                                    let mut http_request = http::Request::new(graphql_request);
+                                    *http_request.headers_mut() = convert_http_headers(headers);
 
                                     let request = subgraph::Request::fake_builder()
                                         .context(context.clone())
@@ -2149,6 +2154,7 @@ mod tests {
                                     data,
                                     extensions,
                                     errors,
+                                    headers,
                                 } => {
                                     let response = subgraph::Response::fake2_builder()
                                         .context(context.clone())
@@ -2156,6 +2162,7 @@ mod tests {
                                         .and_data(data)
                                         .errors(errors)
                                         .extensions(extensions)
+                                        .headers(convert_headers(headers))
                                         .build()
                                         .unwrap();
                                     subgraph_instruments
@@ -2222,13 +2229,24 @@ mod tests {
         }
     }
 
+    fn convert_http_headers(headers: HashMap<String, String>) -> HeaderMap {
+        let mut converted_headers = HeaderMap::new();
+        for (name, value) in headers {
+            converted_headers.insert::<HeaderName>(
+                name.try_into().expect("expected header name"),
+                value.try_into().expect("expected header value"),
+            );
+        }
+        converted_headers
+    }
+
     fn convert_headers(
         headers: HashMap<String, String>,
     ) -> MultiMap<TryIntoHeaderName, TryIntoHeaderValue> {
         let mut converted_headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> =
             MultiMap::new();
         for (name, value) in headers {
-            converted_headers.insert(name.clone().into(), value.into());
+            converted_headers.insert(name.into(), value.into());
         }
         converted_headers
     }

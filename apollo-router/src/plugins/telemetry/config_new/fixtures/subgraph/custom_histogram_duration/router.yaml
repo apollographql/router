@@ -1,9 +1,8 @@
 telemetry:
   instrumentation:
     instruments:
-      router:
-        http.server.active_requests: false
-        http.server.request.duration: false
+      default_requirement_level: none
+      subgraph:
         "custom_histogram.duration":
           description: "histogram of requests"
           type: histogram

@@ -6,18 +6,17 @@ info:
   telemetry:
     instrumentation:
       instruments:
-        router:
-          http.server.active_requests: false
-          http.server.request.duration: false
+        default_requirement_level: none
+        subgraph:
           custom_histogram:
             description: histogram of requests
             type: histogram
             unit: unit
             value: unit
             attributes:
-              http.request.method: true
+              subgraph.graphql.document: true
               custom_attribute:
-                request_header: custom_header
+                subgraph_request_header: custom_header
 ---
 - name: custom_histogram
   description: histogram of requests
@@ -27,4 +26,4 @@ info:
       - sum: 1
         attributes:
           custom_attribute: custom_value
-          http.request.method: GET
+          subgraph.graphql.document: "query { hello }"

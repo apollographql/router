@@ -1,19 +1,18 @@
 telemetry:
   instrumentation:
     instruments:
-      router:
-        http.server.active_requests: false
-        http.server.request.duration: false
+      default_requirement_level: none
+      subgraph:
         "custom_counter":
           description: "count of requests"
           type: counter
           unit: "unit"
           value: unit
           attributes:
-            http.request.method: true
+            subgraph.graphql.document: true
             "custom_attribute":
-              request_header: "custom_header"
+              subgraph_request_header: "custom_header"
           condition:
             eq:
-              - request_method: true
-              - GET
+              - subgraph_request_header: "custom_header"
+              - "allowed"

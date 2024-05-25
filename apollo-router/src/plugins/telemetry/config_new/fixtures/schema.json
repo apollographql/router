@@ -220,10 +220,21 @@
                   ],
                   "additionalProperties": true
                 },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
                 "operation_kind": {
-                  "type": [
-                    "string",
-                    "null"
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/OperationKind"
+                    },
+                    {
+                      "type": "null"
+                    }
                   ]
                 },
                 "operation_name": {
@@ -277,6 +288,13 @@
                     "null"
                   ],
                   "additionalProperties": true
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
                 },
                 "status": {
                   "type": "integer",
@@ -347,6 +365,15 @@
           },
           "additionalProperties": false
         }
+      ]
+    },
+    "OperationKind": {
+      "description": "GraphQL operation type.",
+      "type": "string",
+      "enum": [
+        "query",
+        "mutation",
+        "subscription"
       ]
     },
     "TypedValueMirror": {

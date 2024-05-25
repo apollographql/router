@@ -3,10 +3,27 @@ events:
   - - router_request:
         uri: "/hello"
         method: GET
-        headers:
-          custom_header: custom_value
         body: |
           hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        query: "query { hello }"
+    - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+        headers:
+          custom_header: allowed
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
     - router_response:
         body: |
           hello
@@ -14,11 +31,28 @@ events:
 
   - - router_request:
         uri: "/hello"
-        method: POST
-        headers:
-          custom_header: custom_value
+        method: GET
         body: |
           hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        query: "query { hello }"
+    - subgraph_request:
+        query: "query { hello }"
+        operation_name: "Products"
+        operation_kind: query
+        subgraph_name: "products"
+        headers:
+          custom_header: "not_allowed"
+    - subgraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
     - router_response:
         body: |
           hello

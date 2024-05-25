@@ -1,23 +1,26 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Test server request body size metrics
+description: Custom counter with conditions
 expression: "&metrics.all()"
 info:
   telemetry:
     instrumentation:
       instruments:
-        router:
-          http.server.active_requests: false
-          http.server.request.duration: false
+        default_requirement_level: none
+        subgraph:
           custom_counter:
             description: count of requests
             type: counter
             unit: unit
             value: unit
             attributes:
-              http.request.method: true
+              subgraph.graphql.document: true
               custom_attribute:
-                request_header: custom_header
+                subgraph_request_header: custom_header
+            condition:
+              eq:
+                - subgraph_request_header: custom_header
+                - allowed
 ---
 - name: custom_counter
   description: count of requests
@@ -26,5 +29,5 @@ info:
     datapoints:
       - value: 1
         attributes:
-          custom_attribute: custom_value
-          http.request.method: GET
+          custom_attribute: allowed
+          subgraph.graphql.document: "query { hello }"
