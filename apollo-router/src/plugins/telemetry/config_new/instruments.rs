@@ -2196,7 +2196,10 @@ mod tests {
                         }
                     }
 
-                    let snapshot_path = format!("fixtures/{}", fixture_name.to_string_lossy());
+                    let mut snapshot_path = PathBuf::new();
+                    snapshot_path.push("fixtures");
+                    path.iter().for_each(|p| snapshot_path.push(p));
+                    snapshot_path.pop();
                     let description = test_definition.description;
                     let info: serde_yaml::Value = serde_yaml::from_slice(&router_config_file.data)
                         .expect("failed to parse fixture");
