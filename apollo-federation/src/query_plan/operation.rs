@@ -1290,7 +1290,7 @@ mod normalized_field_selection {
             self.alias.clone().unwrap_or_else(|| self.name().clone())
         }
 
-        pub(crate) fn output_ast_type(&self) -> Result<&ast::Type, FederationError> {
+        fn output_ast_type(&self) -> Result<&ast::Type, FederationError> {
             Ok(&self.field_position.get(self.schema.schema())?.ty)
         }
 
@@ -4759,10 +4759,10 @@ impl NamedFragments {
                 &fragment.schema,
                 NormalizeSelectionOption::NormalizeRecursively,
             )?;
-            let mapped_selection_set = mapper(&expanded_selection_set)?;
-            let optimized_selection_set = mapped_selection_set.optimize_at_root(&result)?;
+            let mut mapped_selection_set = mapper(&expanded_selection_set)?;
+            mapped_selection_set.optimize_at_root(&result)?;
             let updated = Fragment {
-                selection_set: optimized_selection_set,
+                selection_set: mapped_selection_set,
                 schema: fragment.schema.clone(),
                 name: fragment.name.clone(),
                 type_condition_position: fragment.type_condition_position.clone(),

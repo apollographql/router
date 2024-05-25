@@ -931,7 +931,7 @@ impl NamedFragments {
     /// Compute the reduced set of NamedFragments that are used in the selection set at least
     /// `min_usage_to_optimize` times. Also, computes the new selection set that uses only the
     /// reduced set of fragments by expanding the other ones.
-    fn reduce_named_fragments(
+    fn reduce(
         &mut self,
         selection_set: &SelectionSet,
         min_usage_to_optimize: u32,
@@ -1147,11 +1147,11 @@ impl SelectionSet {
     /// Specialized version of `optimize` for top-level sub-selections under Operation
     /// or Fragment.
     pub(crate) fn optimize_at_root(
-        &self,
+        &mut self,
         fragments: &NamedFragments,
-    ) -> Result<SelectionSet, FederationError> {
+    ) -> Result<(), FederationError> {
         if fragments.is_empty() {
-            return Ok(self.clone());
+            return Ok(());
         }
 
         // Calling optimize() will not match a fragment that would have expanded at
@@ -1184,24 +1184,24 @@ impl SelectionSet {
         // the named fragment, and in that case we return a singleton selection with just that.
         // Otherwise, it's our wrapping inline fragment with the sub-selections optimized, and we
         // just return that subselection.
-
         match optimized {
-            Selection::FragmentSpread(fragment) => Ok(SelectionSet::make_selection_set(
-                &self.schema,
-                &self.type_position, // parent type
-                std::iter::once(fragment.selection_set.selections.values()),
-                fragments,
-            )?),
+            Selection::FragmentSpread(_) => {
+                let self_selections = Arc::make_mut(&mut self.selections);
+                self_selections.clear();
+                self_selections.insert(optimized);
+            }
 
-            _ => optimized
-                .selection_set()?
-                .ok_or_else(|| {
-                    FederationError::internal(
-                        "Unexpected: missing sub-selection set after optimization",
-                    )
-                })
-                .cloned(),
+            Selection::InlineFragment(inline_fragment) => {
+                // Note: `inline_fragment.selection_set` can't be moved (since it's inside Arc).
+                // So, it's cloned.
+                *self = inline_fragment.selection_set.clone();
+            }
+
+            Selection::Field(_field_selection) => {
+                unreachable!("Inline fragment should not be optimized to a field selection");
+            }
         }
+        Ok(())
     }
 }
 
@@ -1216,15 +1216,16 @@ impl Operation {
         }
 
         // Optimize the operation's selection set by re-using existing fragments.
-        let optimized_selection = self.selection_set.optimize_at_root(fragments)?;
-        if optimized_selection == self.selection_set {
+        let before_optimization = self.selection_set.clone();
+        self.selection_set.optimize_at_root(fragments)?;
+        if before_optimization == self.selection_set {
             return Ok(());
         }
 
         // Optimize the named fragment definitions by dropping low-usage ones.
         let mut final_fragments = fragments.clone();
-        let final_selection_set = final_fragments
-            .reduce_named_fragments(&optimized_selection, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)?;
+        let final_selection_set =
+            final_fragments.reduce(&self.selection_set, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)?;
 
         self.selection_set = final_selection_set;
         self.named_fragments = final_fragments;
