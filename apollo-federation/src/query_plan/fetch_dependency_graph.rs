@@ -3443,22 +3443,6 @@ fn handle_requires(
     }
 }
 
-fn log_node(dependency_graph: &FetchDependencyGraph, node_id: NodeIndex) {
-    let node = dependency_graph.node_weight(node_id).unwrap();
-    println!("\tsubgraph name: {}", node.subgraph_name);
-    println!("\tentity fetch: {}", node.is_entity_fetch);
-    println!("\tparent: {}", node.parent_type);
-    if node.inputs.is_some() {
-        println!("\tinputs per parent");
-        for (parent, selection) in &node.inputs.clone().unwrap().selection_sets_per_parent_type {
-            println!("\t\tinputs for {}: {}", parent, selection);
-        }
-    }
-    println!("\tinput rewrites: {:?}", node.input_rewrites);
-    println!("\tfetch -> selections: {}", node.selection_set.selection_set);
-    println!("\tfetch -> conditions: {:?}", node.selection_set.conditions);
-}
-
 fn paths_has_only_fragments(path: &Arc<OpPath>) -> bool {
     // JS PORT NOTE: this was checking for FragmentElement which was used for both inline fragments and spreads
     path.0
@@ -3544,7 +3528,7 @@ fn inputs_for_require(
             };
 
             // Note: we are rebasing on another schema below, but we also know that we're working on a full expanded
-            // selection set (no spread), so passing undefined is actually correct.
+            // selection set (no spread), so passing empty fragments is actually correct.
             let target_subgraph_name = fetch_dependency_graph
                 .federated_query_graph
                 .edge_head_weight(query_graph_edge_id)?

@@ -2882,18 +2882,38 @@ impl SelectionSet {
                     element,
                     selection_set.map(|set| SelectionSet::clone(set)),
                 )?;
-                self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
+                let schema = self.schema.clone();
+                let parent_type_position = self.type_position.clone();
+                if let Some(rebased_selection) = selection.rebase_on(
+                    &parent_type_position,
+                    &NamedFragments::default(),
+                    &schema,
+                    RebaseErrorHandlingOption::ThrowError
+                )? {
+                    self.add_selection(&ele.parent_type_position(), &schema, rebased_selection)?
+                }
+                // self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
             }
             // If we don't have any path, we merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
-                    let parent_type = &sel.type_position;
-                    let schema = sel.schema.clone();
+                    let schema = self.schema.clone();
+                    let parent_type = self.type_position.clone();
+                    let selection_type = &sel.type_position;
                     sel.selections
                         .values()
                         .cloned()
                         .try_for_each(|s| {
-                            self.add_selection(parent_type, &schema, s)
+                            if let Some(rebased) = s.rebase_on(
+                                &parent_type,
+                                &NamedFragments::default(),
+                                &schema,
+                                RebaseErrorHandlingOption::ThrowError
+                            )? {
+                                self.add_selection(selection_type, &schema, rebased)
+                            } else {
+                                Ok(())
+                            }
                         })?;
                 }
             }

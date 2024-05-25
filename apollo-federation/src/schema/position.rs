@@ -3107,6 +3107,7 @@ impl InterfaceTypeDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Node<InterfaceType>, FederationError> {
+        // println!("SCHEMA {}", schema);
         schema
             .types
             .get(&self.type_name)

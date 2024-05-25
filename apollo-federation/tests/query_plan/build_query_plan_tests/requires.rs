@@ -1,7 +1,76 @@
+use apollo_compiler::ExecutableDocument;
+use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::Supergraph;
+
 mod include_skip;
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
+fn handles_simple_requires() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+            a: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            a: Int @external
+            b: Int @requires(fields: "a")
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              b
+            }
+          }
+        "#,
+
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph1") {
+              {
+                t {
+                  __typename
+                  id
+                  a
+                }
+              }
+            },
+            Flatten(path: "t") {
+              Fetch(service: "Subgraph2") {
+                {
+                  ... on T {
+                    __typename
+                    id
+                    a
+                  }
+                } =>
+                {
+                  ... on T {
+                    b
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
+    );
+}
+
+#[test]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn it_handles_multiple_requires_within_the_same_entity_fetch() {
     let planner = planner!(
@@ -116,7 +185,7 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
@@ -230,7 +299,7 @@ fn handles_multiple_requires_involving_different_nestedness() {
 
 /// require that depends on another require
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")]
 // TODO: investigate this failure
 fn it_handles_simple_require_chain() {
     let planner = planner!(
@@ -384,7 +453,7 @@ fn it_handles_simple_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")]
 // TODO: investigate this failure
 fn it_handles_require_chain_not_ending_in_original_group() {
     // This is somewhat simiar to the 'simple require chain' case, but the chain does not
@@ -571,7 +640,7 @@ fn it_handles_require_chain_not_ending_in_original_group() {
 
 /// a chain of 10 requires
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")]
 // TODO: investigate this failure
 fn it_handles_longer_require_chain() {
     let planner = planner!(
@@ -822,7 +891,7 @@ fn it_handles_longer_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")]
 // TODO: investigate this failure
 fn it_handles_complex_require_chain() {
     // Another "require chain" test but with more complexity as we have a require on multiple fields, some of which being
@@ -1106,7 +1175,7 @@ fn it_handles_complex_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")]
 // TODO: investigate this failure
 fn it_handes_diamond_shape_depedencies() {
     // The idea of this test is that to be able to fulfill the @require in subgraph D, we need
@@ -1237,8 +1306,6 @@ fn it_handes_diamond_shape_depedencies() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
 fn it_can_require_at_inaccessible_fields() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1310,7 +1377,7 @@ fn it_can_require_at_inaccessible_fields() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")]
 // TODO: investigate this failure
 fn it_require_of_multiple_field_when_one_is_also_a_key_to_reach_another() {
     // The specificity of this example is that we `T.v` requires 2 fields `req1`
