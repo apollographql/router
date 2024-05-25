@@ -26,7 +26,6 @@ pub(crate) mod test_utils {
     use std::sync::Weak;
 
     use itertools::Itertools;
-    use mockall::Any;
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
     use opentelemetry::sdk::metrics::data::DataPoint;
