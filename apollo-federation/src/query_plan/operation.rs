@@ -694,16 +694,20 @@ pub(crate) enum Selection {
 
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
-        Self::Field(Arc::new(field.with_subselection(sub_selections)))
+        let selections_without_unnecessary_fragments = sub_selections
+            .map(|s| s.without_unnecessary_fragments());
+        Self::Field(Arc::new(field.with_subselection(selections_without_unnecessary_fragments)))
     }
 
     pub(crate) fn from_inline_fragment(
         inline_fragment: InlineFragment,
         sub_selections: SelectionSet,
     ) -> Self {
+        let selections_without_unnecessary_fragments = sub_selections
+            .without_unnecessary_fragments();
         let inline_fragment_selection = InlineFragmentSelection {
             inline_fragment,
-            selection_set: sub_selections,
+            selection_set: selections_without_unnecessary_fragments,
         };
         Self::InlineFragment(Arc::new(inline_fragment_selection))
     }
@@ -1218,6 +1222,8 @@ mod normalized_field_selection {
             self,
             selection_set: Option<SelectionSet>,
         ) -> FieldSelection {
+            // self.parent_type_position()
+
             FieldSelection {
                 field: self,
                 selection_set,
@@ -2872,22 +2878,10 @@ impl SelectionSet {
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection.
                 let element = OpPathElement::clone(ele);
-                // println!("add_at_path[empty sub path]->current selection->{}", self);
-                // println!("add_at_path[empty sub path]->parent->{}", self.type_position);
-                // println!("add_at_path[empty sub path]->element->{}", element.clone());
                 let selection = Selection::from_element(
                     element,
                     selection_set.map(|set| SelectionSet::clone(set)),
                 )?;
-                // println!("add_at_path[empty sub path]->selection->{}", selection);
-                // if let Some(rebased_selection) = selection.rebase_on(
-                //     &self.type_position,
-                //     &NamedFragments::default(),
-                //     &self.schema,
-                //     RebaseErrorHandlingOption::ThrowError
-                // )? {
-                //     self.add_selection(&ele.parent_type_position(), ele.schema(), rebased_selection)?
-                // }
                 self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
             }
             // If we don't have any path, we merge in the given subselections at the root.
@@ -2899,16 +2893,6 @@ impl SelectionSet {
                         .values()
                         .cloned()
                         .try_for_each(|s| {
-                            // if let Some(rebased) = s.rebase_on(
-                            //     &self.type_position,
-                            //     &NamedFragments::default(),
-                            //     &self.schema,
-                            //     RebaseErrorHandlingOption::ThrowError
-                            // )? {
-                            //     self.add_selection(parent_type, &schema, rebased)
-                            // } else {
-                            //     Ok(())
-                            // }
                             self.add_selection(parent_type, &schema, s)
                         })?;
                 }
@@ -3299,6 +3283,41 @@ impl SelectionSet {
     /// Returns true if this selection is a superset of the other selection.
     pub(crate) fn contains(&self, other: &Self) -> bool {
         self.containment(other, Default::default()).is_contained()
+    }
+
+    /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
+    /// JS code was pooling the updates and only apply those when building the final selection set.
+    /// See `makeSelectionSet` method for details.
+    ///
+    /// Manipulating selection sets may result in some inefficiencies. As a result we may end up with
+    /// some unnecessary top level inline fragment selections, i.e. fragments without any directives
+    /// and with the type condition same as the parent type that should be inlined.
+    ///
+    /// This method inlines those unnecessary top level fragments only. While the JS code was applying
+    /// this logic recursively, since we are manipulating selections sets in-place we only need to
+    /// apply this normalization at the top level.
+    fn without_unnecessary_fragments(&self) -> SelectionSet {
+        let parent_type = &self.type_position;
+        let mut final_selections = SelectionMap::new();
+        for selection in self.selections.values() {
+            match selection {
+                Selection::InlineFragment(inline_fragment) => {
+                    if inline_fragment.is_unnecessary(parent_type) {
+                        final_selections.extend_ref(&inline_fragment.selection_set.selections);
+                    } else {
+                        final_selections.insert(selection.clone());
+                    }
+                },
+                _ => {
+                    final_selections.insert(selection.clone());
+                },
+            }
+        }
+        SelectionSet {
+            schema: self.schema.clone(),
+            type_position: parent_type.clone(),
+            selections: Arc::new(final_selections),
+        }
     }
 }
 
@@ -4429,6 +4448,11 @@ impl InlineFragmentSelection {
     /// Returns true if this selection is a superset of the other selection.
     pub(crate) fn contains(&self, other: &Selection) -> bool {
         self.containment(other, Default::default()).is_contained()
+    }
+
+    fn is_unnecessary(&self, maybe_parent: &CompositeTypeDefinitionPosition) -> bool {
+        self.inline_fragment.data().directives.is_empty()
+            && self.inline_fragment.data().type_condition_position.clone().is_some_and(|t| t == *maybe_parent)
     }
 }
 

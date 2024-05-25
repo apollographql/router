@@ -1295,12 +1295,6 @@ impl FetchDependencyGraph {
         let node = self.node_weight(node_id)?;
         let child = self.node_weight(child_id)?;
         let parent_relation = self.parent_relation(child_id, node_id);
-        let child_relation = self.parent_relation(node_id, child_id);
-        println!("can_merge_child_in");
-        println!("\tsubgraph name: {} {}", node.subgraph_name, child.subgraph_name);
-        println!("\tdefer: {:?} {:?}", node.defer_ref, child.defer_ref);
-        println!("\tparent relation: {:?}", parent_relation);
-        println!("\tchild relation: {:?}", child_relation);
 
         Ok(node.subgraph_name == child.subgraph_name
             && node.defer_ref == child.defer_ref
@@ -1391,7 +1385,6 @@ impl FetchDependencyGraph {
                 node_id.index()
             )));
         };
-        println!("merge_child_in->child path->{}", child_path_in_this);
         self.merge_in_internal(node_id, child_id, &child_path_in_this, false)
     }
 
@@ -1480,21 +1473,16 @@ impl FetchDependencyGraph {
         }
 
         if path.is_empty() {
-            println!("MERGE INTERNAL PATH IS EMPTY");
             mutable_node
                 .selection_set
                 .add_selections(&merged.selection_set.selection_set)?;
         } else {
-            println!("MERGE INTERNAL PATH IS NOT EMPTY");
-            println!("merge_in_internal->!path.is_empty->original->{}", merged.selection_set.selection_set);
-            println!("merge_in_internal->path->{}", path);
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
             // we clean things up a bit.
             let merged_selection_set = remove_unneeded_top_level_fragment_directives(
                 &merged.selection_set.selection_set,
                 &path.conditional_directives(),
             )?;
-            println!("merge_in_internal->!path.is_empty->merged->{}", merged_selection_set);
             mutable_node
                 .selection_set
                 .add_at_path(path, Some(&Arc::new(merged_selection_set)))?;
@@ -1516,8 +1504,6 @@ impl FetchDependencyGraph {
         merged_id: NodeIndex,
         path_in_this: &OpPath,
     ) {
-        println!("relocate_children_on_merged_in->{}", path_in_this.clone());
-        log_node(self, merged_id);
         let mut new_parent_relations = HashMap::new();
         for child_id in self.children_of(merged_id) {
             // This could already be a child of `this`. Typically, we can have case where we have:
@@ -1544,7 +1530,6 @@ impl FetchDependencyGraph {
             );
         }
         for (child_id, new_parent) in new_parent_relations {
-            println!("ADDING PARENT for child_id {} and relation parent {} path {}", child_id.index(), new_parent.parent_node_id.index(), new_parent.path_in_parent.clone().unwrap());
             self.add_parent(child_id, new_parent);
         }
     }
@@ -1567,7 +1552,6 @@ impl FetchDependencyGraph {
             new_parent_relations.push(parent.clone());
         }
         for new_parent in new_parent_relations {
-            println!("relocate_parents_on_merged_in->new_parent->{}", new_parent.clone().path_in_parent.unwrap());
             self.add_parent(node_id, new_parent);
         }
     }
@@ -3094,9 +3078,6 @@ fn handle_requires(
     defer_context: &DeferContext,
     created_nodes: &mut IndexSet<NodeIndex>,
 ) -> Result<(NodeIndex, FetchDependencyGraphNodePath), FederationError> {
-    println!("HANDLING REQUIRES");
-    // println!("original node");
-    // log_node(dependency_graph, fetch_node_id);
     // @requires should be on an entity type, and we only support object types right now
     let head = dependency_graph
         .federated_query_graph
@@ -3134,9 +3115,7 @@ fn handle_requires(
     // effectively means that the parent node will collect the provides before taking the edge
     // to our current node).
     if parents.len() == 1 && paths_has_only_fragments(&fetch_node_path.path_in_node) {
-        println!("SINGLE PARENT");
         let parent = &parents[0];
-        // log_node(dependency_graph, parent.parent_node_id);
 
         // We start by computing the nodes for the conditions. We do this using a copy of the current
         // node (with only the inputs) as that allows to modify this copy without modifying `node`.
@@ -3163,7 +3142,6 @@ fn handle_requires(
             &OpGraphPathContext::default(),
         )?;
         if newly_created_node_ids.is_empty() {
-            println!("ALL CONDITIONS WERE LOCAL");
             // All conditions were local. Just merge the newly created node back into the current node (we didn't need it)
             // and continue.
             if !dependency_graph.can_merge_sibling_in(fetch_node_id, new_node_id)? {
@@ -3177,7 +3155,6 @@ fn handle_requires(
             return Ok((fetch_node_id, fetch_node_path.clone()));
         }
 
-        println!("REQUIRES NEEDS CREATED GROUPS");
         // We know the @requires needs `newly_created_node_ids`. We do want to know however if any of the conditions was
         // fetched from our `new_node`. If not, then this means that the `newly_created_node_ids` don't really depend on
         // the current `node` and can be dependencies of the parent (or even merged into this parent).
@@ -3195,17 +3172,11 @@ fn handle_requires(
         let new_node_is_unneeded = dependency_graph.is_node_unneeded(new_node_id, parent)?;
         let mut unmerged_node_ids: Vec<NodeIndex> = Vec::new();
         if new_node_is_unneeded {
-            println!("NEW GROUP IS UNNEDED\nnew_node");
-            log_node(dependency_graph, new_node_id);
-            println!("parent");
-            log_node(dependency_graph, parent.parent_node_id);
             // Up to this point, `new_node` had no parent, so let's first merge `new_node` to the parent, thus "rooting"
             // its children to it. Note that we just checked that `new_node` selection was just its inputs, so
             // we know that merging it to the parent is mostly a no-op from that POV, except maybe for requesting
             // a few additional `__typename` we didn't before (due to the exclusion of `__typename` in the `new_node_is_unneeded` check)
             dependency_graph.merge_child_in(parent.parent_node_id, new_node_id)?;
-            println!("MERGED CHILD TO PARENT");
-            log_node(dependency_graph, parent.parent_node_id);
 
             // Now, all created groups are going to be descendant of `parentGroup`. But some of them may actually be
             // mergeable into it.
@@ -3213,10 +3184,8 @@ fn handle_requires(
                 // Note that `created_node_id` may not be a direct child of `parent_node_id`, but `can_merge_child_in` just return `false` in
                 // that case, yielding the behaviour we want (not trying to merge it in).
                 if dependency_graph.can_merge_child_in(parent.parent_node_id, created_node_id)? {
-                    println!("MERGING CHILD IN");
                     dependency_graph.merge_child_in(parent.parent_node_id, created_node_id)?;
                 } else {
-                    println!("UNMERGED GROUPS");
                     unmerged_node_ids.push(created_node_id);
 
                     // `created_node_id` cannot be merged into `parent_node_id`, which may typically be because they are not to the same
@@ -3266,7 +3235,6 @@ fn handle_requires(
                 }
             }
         } else {
-            println!("CANNOT MERGE NEW GROUP TO THE PARENT");
             // We cannot merge `new_node_id` to the parent, either because there it fetches some things necessary to the
             // @requires, or because we had more than one parent and don't know how to handle this (unsure if the later
             // can actually happen at this point tbh (?)). But there is no reason not to merge `new_node_id` back to `fetch_node_id`
@@ -3304,7 +3272,6 @@ fn handle_requires(
         // If we've merged all the created nodes, then all the "requires" are handled _before_ we get to the
         // current node, so we can "continue" with the current node.
         if unmerged_node_ids.is_empty() {
-            println!("MERGED ALL CREATED GROUPS");
             // We still need to add the stuffs we require though (but `node` already has a key in its inputs,
             // we don't need one).
             let selection = inputs_for_require(
@@ -3315,22 +3282,15 @@ fn handle_requires(
                 false,
             )?
             .0;
-            println!("REQUIRE INPUT SELECTION {}", selection);
-            log_node(dependency_graph, fetch_node_id);
             let fetch_node =
                 FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, fetch_node_id)?;
             fetch_node.add_inputs(
                 &selection,
                 iter::empty(),
             )?;
-            println!("PARENT");
-            log_node(dependency_graph, parent.parent_node_id);
-            println!("ADDED INPUTS");
-            log_node(dependency_graph, fetch_node_id);
             return Ok((fetch_node_id, fetch_node_path.clone()));
         }
 
-        println!("REQUIRES NEEDS INFORMATION FROM UNMERGED GROUPS");
         // If we get here, it means that @require needs the information from `unmerged_nodes` (plus whatever has
         // been merged before) _and_ those rely on some information from the current `fetch_node` (if they hadn't, we
         // would have been able to merge `new_node` to `fetch_node`'s parent). So the group we should return, which
@@ -3364,8 +3324,6 @@ fn handle_requires(
                 },
             )
         }
-        println!("last-good node");
-        log_node(dependency_graph, fetch_node_id);
 
         // Note(Sylvain): I'm not 100% sure about this assert in the sense that while I cannot think of a case where `parent.path_in_parent` wouldn't
         // exist, the code paths are complex enough that I'm not able to prove this easily and could easily be missing something. That said,
@@ -3394,8 +3352,6 @@ fn handle_requires(
             fetch_node_id,
             post_require_node_id,
         )?;
-        println!("after post_require_inputs node");
-        log_node(dependency_graph, fetch_node_id);
         created_nodes.extend(unmerged_node_ids);
         created_nodes.insert(post_require_node_id);
         let initial_fetch_path = create_fetch_initial_path(
@@ -3404,8 +3360,6 @@ fn handle_requires(
             context,
         )?;
         let new_path = fetch_node_path.for_new_key_fetch(initial_fetch_path);
-        println!("final node");
-        log_node(dependency_graph, fetch_node_id);
         Ok((post_require_node_id, new_path))
     } else {
         // We're in the somewhat simpler case where a @require happens somewhere in the middle of a subgraph query (so, not
@@ -3678,10 +3632,6 @@ fn add_post_require_inputs(
             &mut dependency_graph.graph,
             pre_require_node_id,
         )?;
-        println!("adding key inputs {}", key_inputs);
-        println!("full path: {}", &require_node_path.full_path);
-        println!("path in node: {}", &require_node_path.path_in_node);
-        println!("response path: {:?}", &require_node_path.response_path);
         pre_require_node
             .selection_set
             .add_at_path(&require_node_path.path_in_node, Some(&Arc::new(key_inputs)))?;
