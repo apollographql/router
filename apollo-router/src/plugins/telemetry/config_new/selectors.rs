@@ -2,6 +2,7 @@ use access_json::JSONQuery;
 use derivative::Derivative;
 use jsonpath_rust::JsonPathFinder;
 use jsonpath_rust::JsonPathInst;
+use opentelemetry_api::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::ByteString;
@@ -661,6 +662,14 @@ impl Selector for RouterSelector {
             _ => None,
         }
     }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            _ => None,
+        }
+    }
 }
 
 impl Selector for SupergraphSelector {
@@ -875,6 +884,14 @@ impl Selector for SupergraphSelector {
     fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::Error { .. } => Some(error.to_string().into()),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            _ => None,
+        }
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
@@ -1129,6 +1146,14 @@ impl Selector for SubgraphSelector {
             _ => None,
         }
     }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            _ => None,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1182,6 +1207,25 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn router_static_field() {
+        let selector = RouterSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1310,6 +1354,22 @@ mod test {
 
     #[test]
     fn supergraph_static() {
+        let selector = SupergraphSelector::Static("test_static".to_string());
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn supergraph_static_field() {
         let selector = SupergraphSelector::StaticField {
             r#static: "test_static".to_string().into(),
         };
@@ -1323,6 +1383,7 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1383,6 +1444,29 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn subgraph_static_field() {
+        let selector = SubgraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .supergraph_request(Arc::new(
+                            http::Request::builder()
+                                .body(crate::request::Request::builder().build())
+                                .unwrap()
+                        ))
+                        .build()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]

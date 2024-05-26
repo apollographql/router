@@ -2,6 +2,7 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
+use opentelemetry_api::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
@@ -64,6 +65,10 @@ pub(crate) trait Selector {
         _typed_value: &TypedValue,
         _ctx: &Context,
     ) -> Option<opentelemetry::Value> {
+        None
+    }
+
+    fn on_drop(&self) -> Option<Value> {
         None
     }
 }

@@ -308,14 +308,88 @@ where
     }
     pub(crate) fn evaluate_drop(&self) -> Option<bool> {
         match self {
-            Condition::Eq(_) | Condition::Gt(_) | Condition::Lt(_) | Condition::Exists(_) => None,
+            Condition::Eq(eq) => match (eq[0].on_drop(), eq[1].on_drop()) {
+                (Some(left), Some(right)) => {
+                    if left == right {
+                        Some(true)
+                    } else {
+                        Some(false)
+                    }
+                }
+                _ => None,
+            },
+            Condition::Gt(gt) => {
+                let left_att = gt[0].on_drop().map(AttributeValue::from);
+                let right_att = gt[1].on_drop().map(AttributeValue::from);
+                match (left_att, right_att) {
+                    (Some(l), Some(r)) => {
+                        if l > r {
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            Condition::Lt(lt) => {
+                let left_att = lt[0].on_drop().map(AttributeValue::from);
+                let right_att = lt[1].on_drop().map(AttributeValue::from);
+                match (left_att, right_att) {
+                    (Some(l), Some(r)) => {
+                        if l < r {
+                            Some(true)
+                        } else {
+                            Some(false)
+                        }
+                    }
+                    _ => None,
+                }
+            }
+            Condition::Exists(exist) => {
+                if exist.on_drop().is_some() {
+                    Some(true)
+                } else {
+                    None
+                }
+            }
             Condition::All(all) => {
-                Some(all.iter().all(|c| matches!(c.evaluate_drop(), Some(true))))
+                if all.is_empty() {
+                    return Some(true);
+                }
+                let mut response = Some(true);
+                for cond in all {
+                    match cond.evaluate_drop() {
+                        Some(resp) => {
+                            response = response.map(|r| resp && r);
+                        }
+                        None => {
+                            response = None;
+                        }
+                    }
+                }
+
+                response
             }
             Condition::Any(any) => {
-                Some(any.iter().any(|c| matches!(c.evaluate_drop(), Some(true))))
+                if any.is_empty() {
+                    return Some(true);
+                }
+                let mut response: Option<bool> = Some(false);
+                for cond in any {
+                    match cond.evaluate_drop() {
+                        Some(resp) => {
+                            response = response.map(|r| resp || r);
+                        }
+                        None => {
+                            response = None;
+                        }
+                    }
+                }
+
+                response
             }
-            Condition::Not(not) => Some(matches!(not.evaluate_drop(), Some(false))),
+            Condition::Not(not) => not.evaluate_drop().map(|r| !r),
             Condition::True => Some(true),
             Condition::False => Some(false),
         }
@@ -364,6 +438,13 @@ where
             SelectorOrValue::Selector(selector) => selector.on_response_field(typed_value, ctx),
         }
     }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            SelectorOrValue::Value(value) => Some(value.clone().into()),
+            SelectorOrValue::Selector(selector) => selector.on_drop(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -372,6 +453,7 @@ mod test {
     use tower::BoxError;
     use TestSelector::Req;
     use TestSelector::Resp;
+    use TestSelector::Static;
 
     use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
     use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -384,6 +466,7 @@ mod test {
     enum TestSelector {
         Req,
         Resp,
+        Static(i64),
     }
 
     impl Selector for TestSelector {
@@ -395,6 +478,7 @@ mod test {
             match self {
                 Req => request.map(Value::I64),
                 Resp => None,
+                Static(v) => Some((*v).into()),
             }
         }
 
@@ -406,6 +490,7 @@ mod test {
             match self {
                 Req => None,
                 Resp => response.map(Value::I64),
+                Static(v) => Some((*v).into()),
             }
         }
 
@@ -413,6 +498,7 @@ mod test {
             match self {
                 Req => None,
                 Resp => response.map(Value::I64),
+                Static(v) => Some((*v).into()),
             }
         }
 
@@ -429,6 +515,13 @@ mod test {
                 Some(Value::I64(val.as_i64().expect("mut be i64")))
             } else {
                 None
+            }
+        }
+
+        fn on_drop(&self) -> Option<Value> {
+            match self {
+                Static(v) => Some((*v).into()),
+                _ => None,
             }
         }
     }
@@ -617,6 +710,30 @@ mod test {
         assert!(eq(Resp, 1).resp_event(Some(1i64)));
         assert!(eq(Resp, 1).field(Some(1i64)));
         assert!(eq(Resp, "error").error(Some("error")));
+    }
+
+    #[test]
+    fn test_evaluate_drop() {
+        assert!(eq(Req, 1).evaluate_drop().is_none());
+        assert!(eq(1, Req).evaluate_drop().is_none());
+        assert_eq!(eq(1, 1).evaluate_drop(), Some(true));
+        assert_eq!(eq(1, 2).evaluate_drop(), Some(false));
+        assert_eq!(eq(Static(1), 1).evaluate_drop(), Some(true));
+        assert_eq!(eq(1, Static(2)).evaluate_drop(), Some(false));
+        assert_eq!(lt(1, 2).evaluate_drop(), Some(true));
+        assert_eq!(lt(2, 1).evaluate_drop(), Some(false));
+        assert_eq!(lt(Static(1), 2).evaluate_drop(), Some(true));
+        assert_eq!(lt(2, Static(1)).evaluate_drop(), Some(false));
+        assert_eq!(gt(2, 1).evaluate_drop(), Some(true));
+        assert_eq!(gt(1, 2).evaluate_drop(), Some(false));
+        assert_eq!(gt(Static(2), 1).evaluate_drop(), Some(true));
+        assert_eq!(gt(1, Static(2)).evaluate_drop(), Some(false));
+        assert_eq!(not(eq(1, 2)).evaluate_drop(), Some(true));
+        assert_eq!(not(eq(1, 1)).evaluate_drop(), Some(false));
+        assert_eq!(all(eq(1, 1), eq(2, 2)).evaluate_drop(), Some(true));
+        assert_eq!(all(eq(1, 1), eq(2, 1)).evaluate_drop(), Some(false));
+        assert_eq!(any(eq(1, 1), eq(1, 2)).evaluate_drop(), Some(true));
+        assert_eq!(any(eq(1, 2), eq(1, 2)).evaluate_drop(), Some(false));
     }
 
     fn exists(selector: TestSelector) -> Condition<TestSelector> {
