@@ -1898,6 +1898,9 @@ mod tests {
             headers: HashMap<String, String>,
             body: String,
         },
+        RouterError {
+            error: String,
+        },
         SupergraphRequest {
             query: String,
             method: String,
@@ -1936,6 +1939,9 @@ mod tests {
             #[serde(default)]
             headers: HashMap<String, String>,
         },
+        SupergraphError {
+            error: String,
+        },
         SubgraphResponse {
             status: u16,
             data: Option<serde_json::Value>,
@@ -1963,7 +1969,9 @@ mod tests {
             extensions: JsonMap,
         },
         /// Note that this MUST not be used without first using supergraph request event
-        ResponseField { typed_value: TypedValueMirror },
+        ResponseField {
+            typed_value: TypedValueMirror,
+        },
     }
 
     #[derive(Deserialize, JsonSchema)]
@@ -2087,6 +2095,12 @@ mod tests {
                                         .expect("router instruments")
                                         .on_response(&router_resp);
                                 }
+                                Event::RouterError { error } => {
+                                    router_instruments
+                                        .take()
+                                        .expect("router request must have been made first")
+                                        .on_error(&BoxError::from(error), &context);
+                                }
                                 Event::SupergraphRequest {
                                     query,
                                     method,
@@ -2185,6 +2199,12 @@ mod tests {
                                         .take()
                                         .expect("subgraph request must have been made first")
                                         .on_response(&response);
+                                }
+                                Event::SupergraphError { error } => {
+                                    subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_error(&BoxError::from(error), &context);
                                 }
                                 Event::GraphqlResponse {
                                     data,
