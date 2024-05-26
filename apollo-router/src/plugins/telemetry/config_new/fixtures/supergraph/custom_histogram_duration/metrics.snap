@@ -9,13 +9,13 @@ info:
         router:
           http.server.active_requests: false
           http.server.request.duration: false
-          custom_histogram.duration:
+          custom.histogram.duration:
             description: histogram of requests
             type: histogram
             unit: unit
             value: duration
 ---
-- name: custom_histogram.duration
+- name: custom.histogram.duration
   description: histogram of requests
   unit: unit
   data:

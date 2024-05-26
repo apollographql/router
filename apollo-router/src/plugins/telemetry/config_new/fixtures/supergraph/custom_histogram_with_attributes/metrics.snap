@@ -8,7 +8,7 @@ info:
       instruments:
         default_requirement_level: none
         supergraph:
-          custom_histogram:
+          custom.histogram:
             description: histogram of requests
             type: histogram
             unit: unit
@@ -18,7 +18,7 @@ info:
               custom_attribute:
                 request_header: custom_header
 ---
-- name: custom_histogram
+- name: custom.histogram
   description: histogram of requests
   unit: unit
   data:

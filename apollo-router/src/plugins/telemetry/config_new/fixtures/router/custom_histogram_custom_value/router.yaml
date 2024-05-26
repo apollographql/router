@@ -4,7 +4,7 @@ telemetry:
       router:
         http.server.active_requests: false
         http.server.request.duration: false
-        "custom_histogram":
+        "custom.histogram":
           description: "histogram of requests"
           type: histogram
           unit: "unit"

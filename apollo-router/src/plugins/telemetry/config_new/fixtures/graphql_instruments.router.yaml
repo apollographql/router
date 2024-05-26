@@ -24,7 +24,7 @@ telemetry:
             eq:
               - field_name: string
               - "name"
-        "custom_histogram":
+        "custom.histogram":
           description: "histogram of review length"
           type: histogram
           unit: "unit"
