@@ -1858,6 +1858,7 @@ mod tests {
     use rust_embed::RustEmbed;
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
+    use serde_json::json;
     use serde_json_bytes::Value;
 
     use super::*;
@@ -1874,6 +1875,9 @@ mod tests {
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::Context;
+
+    use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::context::OPERATION_KIND;
 
     #[derive(RustEmbed)]
     #[folder = "src/plugins/telemetry/config_new/fixtures"]
@@ -2485,5 +2489,506 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[tokio::test]
+    async fn test_router_instruments() {
+        // Please don't add further logic to this test, it's already testing multiple things.
+        // Instead, add a data driven test via test_instruments test.
+        async {
+            let config: InstrumentsConfig = serde_json::from_str(
+                json!({
+                    "router": {
+                        "http.server.request.body.size": true,
+                        "http.server.response.body.size": {
+                            "attributes": {
+                                "http.response.status_code": false,
+                                "acme.my_attribute": {
+                                    "response_header": "x-my-header",
+                                    "default": "unknown"
+                                }
+                            }
+                        },
+                        "acme.request.on_error": {
+                            "value": "unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "not": {
+                                    "eq": [
+                                        200,
+                                        {
+                                            "response_status": "code"
+                                        }
+                                    ]
+                                }
+                            },
+                            "attributes": {
+                                "http.response.status_code": true
+                            }
+                        },
+                        "acme.request.on_critical_error": {
+                            "value": "unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "request time out",
+                                    {
+                                        "error": "reason"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "http.response.status_code": true
+                            }
+                        },
+                        "acme.request.on_error_histo": {
+                            "value": "unit",
+                            "type": "histogram",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "not": {
+                                    "eq": [
+                                        200,
+                                        {
+                                            "response_status": "code"
+                                        }
+                                    ]
+                                }
+                            },
+                            "attributes": {
+                                "http.response.status_code": true
+                            }
+                        },
+                        "acme.request.header_value": {
+                            "value": {
+                                "request_header": "x-my-header-count"
+                            },
+                            "type": "counter",
+                            "description": "my description",
+                            "unit": "nb"
+                        }
+                    }
+                })
+                .to_string()
+                .as_str(),
+            )
+            .unwrap();
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("conditional-custom", "X")
+                .header("x-my-header-count", "55")
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            let router_response = RouterResponse::fake_builder()
+                .context(router_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("x-my-header", "TEST")
+                .header("content-length", "35")
+                .data(json!({"errors": [{"message": "nope"}]}))
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            assert_counter!("acme.request.header_value", 55.0);
+            assert_counter!(
+                "acme.request.on_error",
+                1.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!(
+                "acme.request.on_error_histo",
+                1.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!("http.server.request.body.size", 35.0);
+            assert_histogram_sum!(
+                "http.server.response.body.size",
+                35.0,
+                "acme.my_attribute" = "TEST"
+            );
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("content-length", "35")
+                .header("x-my-header-count", "5")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            let router_response = RouterResponse::fake_builder()
+                .context(router_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .data(json!({"errors": [{"message": "nope"}]}))
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            assert_counter!("acme.request.header_value", 60.0);
+            assert_counter!(
+                "acme.request.on_error",
+                2.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!(
+                "acme.request.on_error_histo",
+                2.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!("http.server.request.body.size", 70.0);
+            assert_histogram_sum!(
+                "http.server.response.body.size",
+                35.0,
+                "acme.my_attribute" = "TEST"
+            );
+            assert_histogram_sum!(
+                "http.server.response.body.size",
+                35.0,
+                "acme.my_attribute" = "unknown"
+            );
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            let router_response = RouterResponse::fake_builder()
+                .context(router_req.context.clone())
+                .status_code(StatusCode::OK)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .data(json!({"errors": [{"message": "nope"}]}))
+                .build()
+                .unwrap();
+            router_instruments.on_response(&router_response);
+
+            assert_counter!("acme.request.header_value", 60.0);
+            assert_counter!(
+                "acme.request.on_error",
+                2.0,
+                "http.response.status_code" = 400
+            );
+            assert_histogram_sum!(
+                "acme.request.on_error_histo",
+                2.0,
+                "http.response.status_code" = 400
+            );
+
+            let router_instruments = config.new_router_instruments();
+            let router_req = RouterRequest::fake_builder()
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .build()
+                .unwrap();
+            router_instruments.on_request(&router_req);
+            router_instruments.on_error(&BoxError::from("request time out"), &Context::new());
+            assert_counter!(
+                "acme.request.on_critical_error",
+                1.0,
+                "http.response.status_code" = 500
+            );
+        }
+        .with_metrics()
+        .await;
+    }
+
+    #[tokio::test]
+    async fn test_supergraph_instruments() {
+        // Please don't add further logic to this test, it's already testing multiple things.
+        // Instead, add a data driven test via test_instruments test.
+        async {
+            let config: InstrumentsConfig = serde_json::from_str(
+                json!({
+                    "supergraph": {
+                        "acme.request.on_error": {
+                            "value": "unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "not": {
+                                    "eq": [
+                                        200,
+                                        {
+                                            "response_status": "code"
+                                        }
+                                    ]
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error": {
+                            "value": "event_unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "NOPE",
+                                    {
+                                        "response_errors": "$.[0].extensions.code"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error_selector": {
+                            "value": "event_unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    true,
+                                    {
+                                        "on_graphql_error": true
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error_histo": {
+                            "value": "event_unit",
+                            "type": "histogram",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "NOPE",
+                                    {
+                                        "response_errors": "$.[0].extensions.code"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_data": {
+                            "value": {
+                                "response_data": "$.price"
+                            },
+                            "type": "counter",
+                            "unit": "$",
+                            "description": "my description",
+                            "attributes": {
+                                "response.data": {
+                                    "response_data": "$.*"
+                                }
+                            }
+                        },
+                        "acme.query": {
+                            "value": "unit",
+                            "type": "counter",
+                            "description": "nb of queries",
+                            "condition": {
+                                "eq": [
+                                    "query",
+                                    {
+                                        "operation_kind": "string"
+                                    }
+                                ]
+                            },
+                            "unit": "query",
+                            "attributes": {
+                                "query": {
+                                    "query": "string"
+                                }
+                            }
+                        }
+                    }
+                })
+                .to_string()
+                .as_str(),
+            )
+            .unwrap();
+
+            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
+            let context = crate::context::Context::new();
+            let _ = context.insert(OPERATION_KIND, "query".to_string()).unwrap();
+            let context_with_error = crate::context::Context::new();
+            let _ = context_with_error
+                .insert(OPERATION_KIND, "query".to_string())
+                .unwrap();
+            let _ = context_with_error
+                .insert(CONTAINS_GRAPHQL_ERROR, true)
+                .unwrap();
+            let supergraph_req = supergraph::Request::fake_builder()
+                .header("conditional-custom", "X")
+                .header("x-my-header-count", "55")
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .query("{me{name}}")
+                .context(context.clone())
+                .build()
+                .unwrap();
+            custom_instruments.on_request(&supergraph_req);
+            let supergraph_response = supergraph::Response::fake_builder()
+                .context(supergraph_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("x-my-header", "TEST")
+                .header("content-length", "35")
+                .errors(vec![graphql::Error::builder()
+                    .message("nope")
+                    .extension_code("NOPE")
+                    .build()])
+                .build()
+                .unwrap();
+            custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_response_event(
+                &graphql::Response::builder()
+                    .data(json!({
+                        "price": 500
+                    }))
+                    .errors(vec![graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build()])
+                    .build(),
+                &context_with_error,
+            );
+
+            assert_counter!("acme.query", 1.0, query = "{me{name}}");
+            assert_counter!("acme.request.on_error", 1.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!("acme.request.on_graphql_data", 500.0, response.data = 500);
+
+            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
+            let supergraph_req = supergraph::Request::fake_builder()
+                .header("content-length", "35")
+                .header("x-my-header-count", "5")
+                .header("content-type", "application/graphql")
+                .context(context.clone())
+                .query("Subscription {me{name}}")
+                .build()
+                .unwrap();
+            custom_instruments.on_request(&supergraph_req);
+            let supergraph_response = supergraph::Response::fake_builder()
+                .context(supergraph_req.context.clone())
+                .status_code(StatusCode::BAD_REQUEST)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .errors(vec![graphql::Error::builder()
+                    .message("nope")
+                    .extension_code("NOPE")
+                    .build()])
+                .build()
+                .unwrap();
+            custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_response_event(
+                &graphql::Response::builder()
+                    .data(json!({
+                        "price": 500
+                    }))
+                    .errors(vec![graphql::Error::builder()
+                        .message("nope")
+                        .extension_code("NOPE")
+                        .build()])
+                    .build(),
+                &context_with_error,
+            );
+
+            assert_counter!("acme.query", 1.0, query = "{me{name}}");
+            assert_counter!("acme.request.on_error", 2.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+
+            let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
+            let supergraph_req = supergraph::Request::fake_builder()
+                .header("content-length", "35")
+                .header("content-type", "application/graphql")
+                .context(context.clone())
+                .query("{me{name}}")
+                .build()
+                .unwrap();
+            custom_instruments.on_request(&supergraph_req);
+            let supergraph_response = supergraph::Response::fake_builder()
+                .context(supergraph_req.context.clone())
+                .status_code(StatusCode::OK)
+                .header("content-type", "application/json")
+                .header("content-length", "35")
+                .data(serde_json_bytes::json!({"foo": "bar"}))
+                .build()
+                .unwrap();
+            custom_instruments.on_response(&supergraph_response);
+            custom_instruments.on_response_event(
+                &graphql::Response::builder()
+                    .data(serde_json_bytes::json!({"foo": "bar"}))
+                    .build(),
+                &supergraph_req.context,
+            );
+
+            assert_counter!("acme.query", 2.0, query = "{me{name}}");
+            assert_counter!("acme.request.on_error", 2.0);
+            assert_counter!(
+                "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!("acme.request.on_graphql_data", 1000.0, response.data = 500);
+        }
+        .with_metrics()
+        .await;
     }
 }
