@@ -32,7 +32,16 @@
           "properties": {
             "context": {
               "type": "object",
-              "additionalProperties": true
+              "required": [
+                "map"
+              ],
+              "properties": {
+                "map": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
             }
           },
           "additionalProperties": false
@@ -100,6 +109,27 @@
                   "type": "integer",
                   "format": "uint16",
                   "minimum": 0.0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "router_error"
+          ],
+          "properties": {
+            "router_error": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
                 }
               },
               "additionalProperties": false
@@ -256,6 +286,27 @@
                     "null"
                   ],
                   "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "supergraph_error"
+          ],
+          "properties": {
+            "supergraph_error": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
                 }
               },
               "additionalProperties": false

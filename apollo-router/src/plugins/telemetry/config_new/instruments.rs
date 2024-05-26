@@ -1882,8 +1882,7 @@ mod tests {
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     enum Event {
         Context {
-            #[serde(flatten)]
-            values: serde_json::Map<String, serde_json::Value>,
+            map: serde_json::Map<String, serde_json::Value>,
         },
         RouterRequest {
             method: String,
@@ -2201,9 +2200,9 @@ mod tests {
                                         .on_response(&response);
                                 }
                                 Event::SupergraphError { error } => {
-                                    subgraph_instruments
+                                    supergraph_instruments
                                         .take()
-                                        .expect("subgraph request must have been made first")
+                                        .expect("supergraph request must have been made first")
                                         .on_error(&BoxError::from(error), &context);
                                 }
                                 Event::GraphqlResponse {
@@ -2230,8 +2229,8 @@ mod tests {
                                     let typed_value = TypedValue::from(&typed_value_data);
                                     graphql_instruments.on_response_field(&typed_value, &context);
                                 }
-                                Event::Context { values } => {
-                                    for (key, value) in values {
+                                Event::Context { map } => {
+                                    for (key, value) in map {
                                         context.insert(key, value).expect("insert context");
                                     }
                                 }
