@@ -1862,6 +1862,8 @@ mod tests {
     use serde_json_bytes::Value;
 
     use super::*;
+    use crate::context::CONTAINS_GRAPHQL_ERROR;
+    use crate::context::OPERATION_KIND;
     use crate::error::Error;
     use crate::graphql;
     use crate::http_ext::TryIntoHeaderName;
@@ -1875,9 +1877,6 @@ mod tests {
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::Context;
-
-    use crate::context::CONTAINS_GRAPHQL_ERROR;
-    use crate::context::OPERATION_KIND;
 
     #[derive(RustEmbed)]
     #[folder = "src/plugins/telemetry/config_new/fixtures"]
