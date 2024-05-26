@@ -306,6 +306,20 @@ where
             Condition::False => false,
         }
     }
+    pub(crate) fn evaluate_drop(&self) -> Option<bool> {
+        match self {
+            Condition::Eq(_) | Condition::Gt(_) | Condition::Lt(_) | Condition::Exists(_) => None,
+            Condition::All(all) => {
+                Some(all.iter().all(|c| matches!(c.evaluate_drop(), Some(true))))
+            }
+            Condition::Any(any) => {
+                Some(any.iter().any(|c| matches!(c.evaluate_drop(), Some(true))))
+            }
+            Condition::Not(not) => Some(matches!(not.evaluate_drop(), Some(false))),
+            Condition::True => Some(true),
+            Condition::False => Some(false),
+        }
+    }
 }
 
 impl<T> Selector for SelectorOrValue<T>

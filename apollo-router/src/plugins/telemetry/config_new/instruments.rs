@@ -1410,7 +1410,8 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
-            if inner.incremented {
+            // If the condition is false or indeterminate then we don't increment the counter
+            if inner.incremented || matches!(inner.condition.evaluate_drop(), Some(false) | None) {
                 return;
             }
             if let Some(counter) = inner.counter.take() {
@@ -1808,7 +1809,7 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
-            if inner.updated {
+            if inner.updated || matches!(inner.condition.evaluate_drop(), Some(false) | None) {
                 return;
             }
             if let Some(histogram) = inner.histogram.take() {
