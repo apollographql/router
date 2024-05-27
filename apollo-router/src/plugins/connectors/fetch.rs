@@ -244,20 +244,22 @@ impl FetchNode {
     }
 }
 
-#[allow(dead_code)]
 async fn process_source_node<'a>(
     source_node: &'a ConnectFetchNode,
     execution_parameters: &'a ExecutionParameters<'a>,
     data: Object,
     _paths: Vec<Vec<Path>>,
 ) -> (Value, Vec<Error>) {
-    let connector = execution_parameters
+    let connector = if let Some(connector) = execution_parameters
         .connectors
-        // TODO: not elegant at all
         .get(&SourceId::Connect(source_node.source_id.clone()))
-        .unwrap();
+    {
+        connector
+    } else {
+        return (Default::default(), Default::default());
+    };
 
-    // TODO: this as well
+    // TODO: remove unwraps
     let requests = create_requests(connector, &data).unwrap();
 
     let responses = make_requests(requests).await.unwrap();
