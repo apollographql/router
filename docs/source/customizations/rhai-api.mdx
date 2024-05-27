@@ -242,6 +242,27 @@ You don't need to import the "base64" module. It is imported in the router.
 
 </Note>
 
+### Base64 alphabets
+
+There are multiple ways to encode base64, and the default one might not correspond to what the Router is receiving. The `encode` and `decode` functions support an additional argument to specify the alphabet, with the following possible values:
+
+* STANDARD (default)
+* STANDARD_NO_PAD
+* URL_SAFE
+* URL_SAFE_NO_PAD
+
+They can be used as follows:
+
+```rhai
+let original = "alice and bob";
+let encoded = base64::encode(original, base64::URL_SAFE);
+// encoded will be "YWxpY2UgYW5kIGJvYgo="
+try {
+    let and_back = base64::decode(encoded, base64::URL_SAFE);
+    // and_back will be "alice and bob"
+}
+```
+
 ## sha256 hash strings
 
 Your Rhai customization can use the function `sha256::digest()` to hash strings using the SHA256 hashing algorithm.
