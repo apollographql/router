@@ -469,7 +469,11 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
 
         println!("will hash fragment: {node:?}");
         node.name.hash(self);
+        println!("type condition: {:?}", node.type_condition());
         self.hash_type_by_name(node.type_condition())?;
+        for directive in &node.directives {
+            self.hash_directive(&directive);
+        }
 
         traverse::fragment(self, node)
     }
@@ -487,6 +491,10 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             .type_condition();
         self.hash_type_by_name(type_condition)?;
 
+        for directive in &node.directives {
+            self.hash_directive(&directive);
+        }
+
         traverse::fragment_spread(self, node)
     }
 
@@ -500,6 +508,10 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         if let Some(type_condition) = &node.type_condition {
             self.hash_type_by_name(type_condition)?;
         }
+        for directive in &node.directives {
+            self.hash_directive(&directive);
+        }
+
         traverse::inline_fragment(self, parent_type, node)
     }
 
