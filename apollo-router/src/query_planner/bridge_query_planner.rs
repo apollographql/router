@@ -525,7 +525,7 @@ impl BridgeQueryPlanner {
             configuration,
             _federation_instrument: federation_instrument,
             subgraph_planners: Arc::new(subgraph_planners),
-            connectors,
+           connectors: dbg!(connectors),
         })
     }
 

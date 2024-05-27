@@ -12,12 +12,16 @@ use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use tokio::sync::broadcast;
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
+use super::rewrites::DataRewrite;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
 use super::subgraph_context::build_operation_with_aliasing;
@@ -41,6 +45,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::connectors::finder_field_for_fetch_node;
 use crate::plugins::connectors::Connector;
+use crate::services::subgraph::BoxService;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Schema;
@@ -319,12 +324,11 @@ impl Variables {
         variable_usages: &[NodeStr],
         data: &Value,
         current_dir: &Path,
-        request: &Arc<http::Request<Request>>,
+        body: &Request,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
@@ -437,7 +441,7 @@ impl FetchNode {
             data,
             current_dir,
             // Needs the original request here
-            parameters.supergraph_request,
+            parameters.supergraph_request.body(),
             parameters.schema,
             &self.input_rewrites,
             &self.context_rewrites,
@@ -524,6 +528,38 @@ impl FetchNode {
             .create(service_name)
             .expect("we already checked that the service exists during planning; qed");
 
+        Self::subgraph_fetch(
+            service,
+            subgraph_request,
+            service_name,
+            current_dir,
+            &self.requires,
+            &self.output_rewrites,
+            parameters.schema,
+            paths,
+            self.id.clone(),
+            parameters.deferred_fetches,
+            aliased_operation,
+            variables,
+        )
+        .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) async fn subgraph_fetch(
+        service: BoxService,
+        subgraph_request: SubgraphRequest,
+        service_name: &str,
+        current_dir: &Path,
+        requires: &[Selection],
+        output_rewrites: &Option<Vec<DataRewrite>>,
+        schema: &Schema,
+        paths: Vec<Vec<Path>>,
+        id: Option<NodeStr>,
+        deferred_fetches: &HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+        operation_str: &str,
+        variables: Map<ByteString, Value>,
+    ) -> (Value, Vec<Error>) {
         let (_parts, response) = match service
             .oneshot(subgraph_request)
             .instrument(tracing::trace_span!("subfetch_stream"))
@@ -556,12 +592,7 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(
-            service_name,
-            operation.as_serialized(),
-            &variables,
-            &response,
-        );
+        super::log::trace_subfetch(service_name, operation_str, &variables, &response);
 
         if !response.is_primary() {
             return (
@@ -573,13 +604,20 @@ impl FetchNode {
             );
         }
 
-        let (value, errors) =
-            self.response_at_path(parameters.schema, current_dir, paths, response);
-        if let Some(id) = &self.id {
-            if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+        let (value, errors) = Self::response_at_path(
+            schema,
+            current_dir,
+            paths,
+            response,
+            requires,
+            output_rewrites,
+            service_name,
+        );
+        if let Some(id) = id {
+            if let Some(sender) = deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
                 if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
-                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, id, e);
                 }
             }
         }
@@ -588,13 +626,15 @@ impl FetchNode {
 
     #[instrument(skip_all, level = "debug", name = "response_insert")]
     pub(crate) fn response_at_path<'a>(
-        &'a self,
         schema: &Schema,
         current_dir: &'a Path,
         inverted_paths: Vec<Vec<Path>>,
         response: graphql::Response,
+        requires: &[Selection],
+        output_rewrites: &Option<Vec<DataRewrite>>,
+        service_name: &str,
     ) -> (Value, Vec<Error>) {
-        if !self.requires.is_empty() {
+        if !requires.is_empty() {
             let entities_path = Path(vec![json_ext::PathElement::Key(
                 "_entities".to_string(),
                 None,
@@ -652,7 +692,7 @@ impl FetchNode {
                         let mut value = Value::default();
 
                         for (index, mut entity) in array.into_iter().enumerate() {
-                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
+                            rewrites::apply_rewrites(schema, &mut entity, output_rewrites);
 
                             if let Some(paths) = inverted_paths.get(index) {
                                 if paths.len() > 1 {
@@ -678,7 +718,7 @@ impl FetchNode {
             if errors.is_empty() {
                 tracing::warn!(
                     "Subgraph response from '{}' was missing key `_entities` and had no errors. This is likely a bug in the subgraph.",
-                    self.service_name
+                    service_name
                 );
             }
 
@@ -708,7 +748,7 @@ impl FetchNode {
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();
-            rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
+            rewrites::apply_rewrites(schema, &mut data, output_rewrites);
             (Value::from_path(current_dir, data), errors)
         }
     }
@@ -790,7 +830,7 @@ impl FetchNode {
             data,
             current_dir,
             // Needs the original request here
-            parameters.supergraph_request,
+            parameters.supergraph_request.body(),
             parameters.schema,
             &self.input_rewrites,
             &self.context_rewrites,
@@ -858,8 +898,15 @@ impl FetchNode {
             .errors(errors)
             .build();
 
-        let (value, errors) =
-            self.response_at_path(parameters.schema, current_dir, paths, response);
+        let (value, errors) = Self::response_at_path(
+            parameters.schema,
+            current_dir,
+            paths,
+            response,
+            &self.requires,
+            &self.output_rewrites,
+            &self.service_name(),
+        );
         if let Some(id) = &self.id {
             if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
