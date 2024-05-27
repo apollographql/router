@@ -1055,8 +1055,7 @@ mod tests {
         let query_two = "{ directLink { test recursiveLink { test(arg: 2) } } }";
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
-        // FIXME:
-        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+        assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
     }
 
     #[test]
@@ -1090,12 +1089,11 @@ mod tests {
         let query_two = "query Bar { test }";
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
-        // FIXME:
-        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+        assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
     }
 
     #[test]
-    fn adding_direction_on_operation_changes_hash() {
+    fn adding_directive_on_operation_changes_hash() {
         let schema: &str = r#"
         directive @test on QUERY
         type Query {
@@ -1107,8 +1105,7 @@ mod tests {
         let query_two = "query @test { test }";
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
-        // FIXME:
-        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+        assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
     }
 
     #[test]
@@ -1138,8 +1135,7 @@ mod tests {
         let query_two = "query ($var: Int!) { test(arg: $var) }";
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
-        // FIXME:
-        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+        assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
     }
 
     #[test]
@@ -1154,8 +1150,7 @@ mod tests {
         let query_two = "query ($var: Int = 2) { test(arg: $var) }";
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
-        // FIXME:
-        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+        assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
     }
 
     #[test]
@@ -1172,8 +1167,7 @@ mod tests {
         let query_two = "query ($var: Int @test) { test(arg: $var) }";
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
-        // FIXME:
-        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+        assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
     }
 
     #[test]
@@ -1219,9 +1213,8 @@ mod tests {
 
         let query = "{ foo }";
 
-        // FIXME: both hashes doesn't catch schema change
-        assert!(hash(schema1, query).from_hash_query == hash(schema2, query).from_hash_query);
-        assert!(hash(schema1, query).from_visitor == hash(schema2, query).from_visitor);
+        assert!(hash(schema1, query).from_hash_query != hash(schema2, query).from_hash_query);
+        assert!(hash(schema1, query).from_visitor != hash(schema2, query).from_visitor);
     }
 
     #[test]
@@ -1240,9 +1233,8 @@ mod tests {
 
         let query = "{ test }";
 
-        // FIXME: both hashes doesn't catch schema change
-        assert!(hash(schema1, query).from_hash_query == hash(schema2, query).from_hash_query);
-        assert!(hash(schema1, query).from_visitor == hash(schema2, query).from_visitor);
+        assert!(hash(schema1, query).from_hash_query != hash(schema2, query).from_hash_query);
+        assert!(hash(schema1, query).from_visitor != hash(schema2, query).from_visitor);
     }
 
     #[test]
@@ -1269,9 +1261,8 @@ mod tests {
 
         let query = "{ foo { value } }";
 
-        // FIXME: both hashes doesn't catch schema change
-        assert!(hash(schema1, query).from_hash_query == hash(schema2, query).from_hash_query);
-        assert!(hash(schema1, query).from_visitor == hash(schema2, query).from_visitor);
+        assert!(hash(schema1, query).from_hash_query != hash(schema2, query).from_hash_query);
+        assert!(hash(schema1, query).from_visitor != hash(schema2, query).from_visitor);
     }
 
     #[test]
@@ -1294,8 +1285,7 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
@@ -1318,8 +1308,7 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
@@ -1352,8 +1341,7 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
@@ -1388,8 +1376,7 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
@@ -1410,8 +1397,7 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
@@ -1456,8 +1442,7 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
@@ -1514,8 +1499,7 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
@@ -1558,7 +1542,6 @@ mod tests {
             hash(schema, query_one).from_hash_query,
             hash(schema, query_two).from_hash_query
         );
-        // FIXME:
         assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
