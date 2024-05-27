@@ -245,7 +245,7 @@ impl<'a> QueryHashVisitor<'a> {
         parent_type: String,
         type_name: String,
         field_def: &FieldDefinition,
-        arguments: &[Node<Argument>],
+        node: &executable::Field,
     ) -> Result<(), BoxError> {
         if self.hashed_fields.insert((parent_type.clone(), type_name)) {
             self.hash_type_by_name(&parent_type)?;
@@ -256,7 +256,7 @@ impl<'a> QueryHashVisitor<'a> {
                 self.hash_input_value_definition(argument)?;
             }
 
-            for argument in arguments {
+            for argument in &node.arguments {
                 self.hash_argument(argument);
             }
 
@@ -267,6 +267,12 @@ impl<'a> QueryHashVisitor<'a> {
             }
 
             self.hash_join_field(&parent_type, &field_def.directives)?;
+
+            for directive in &node.directives {
+                self.hash_directive(directive);
+            }
+
+            node.alias.hash(self);
         }
         Ok(())
     }
@@ -364,6 +370,12 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
         root_type.hash(self);
         self.hash_type_by_name(root_type)?;
+        node.operation_type.hash(self);
+        node.name.hash(self);
+        for variable in &node.variables {}
+        for directive in &node.directives {
+            self.hash_directive(directive);
+        }
 
         traverse::operation(self, root_type, node)
     }
@@ -384,7 +396,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             parent_type.to_string(),
             field_def.name.as_str().to_string(),
             field_def,
-            &node.arguments,
+            node,
         )?;
 
         traverse::field(self, field_def, node)
@@ -1100,7 +1112,7 @@ mod tests {
     }
 
     #[test]
-    fn order_of_varibles_changes_hash() {
+    fn order_of_variables_changes_hash() {
         let schema: &str = r#"
         type Query {
           test1(arg: Int): String
@@ -1179,8 +1191,7 @@ mod tests {
         let query_two = "{ test @bar @foo }";
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
-        // FIXME:
-        assert!(hash(schema, query_one).from_visitor == hash(schema, query_two).from_visitor);
+        assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
     }
 
     #[test]
@@ -1548,7 +1559,7 @@ mod tests {
             hash(schema, query_two).from_hash_query
         );
         // FIXME:
-        assert_eq!(
+        assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
         );
