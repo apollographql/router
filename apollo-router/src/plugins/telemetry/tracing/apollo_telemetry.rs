@@ -11,7 +11,6 @@ use async_trait::async_trait;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
 use derivative::Derivative;
-use futures::future::try_join_all;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -1049,29 +1048,23 @@ impl SpanExporter for Exporter {
         };
 
         let fut = async move {
-            let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();
             if send_otlp && !otlp_trace_spans.is_empty() {
-                exports.push(
-                    otlp_exporter
-                        .as_ref()
-                        .expect("expected an otel exporter")
-                        .export(otlp_trace_spans.into_iter().flatten().collect()),
-                );
+                otlp_exporter
+                    .as_ref()
+                    .expect("expected an otel exporter")
+                    .export(otlp_trace_spans.into_iter().flatten().collect())
+                    .await
             } else if send_reports && !traces.is_empty() {
                 let mut report = telemetry::apollo::Report::default();
                 report += SingleReport::Traces(TracesReport { traces });
-                exports.push(
-                    report_exporter
-                        .as_ref()
-                        .expect("expected an apollo exporter")
-                        .submit_report(report)
-                        .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-                        .boxed(),
-                );
-            }
-            match try_join_all(exports).await {
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
+                report_exporter
+                    .as_ref()
+                    .expect("expected an apollo exporter")
+                    .submit_report(report)
+                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                    .await
+            } else {
+                ExportResult::Ok(())
             }
         };
         fut.boxed()
