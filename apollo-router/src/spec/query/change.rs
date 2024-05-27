@@ -247,7 +247,6 @@ impl<'a> QueryHashVisitor<'a> {
         field_def: &FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
-        if self.hashed_fields.insert((parent_type.clone(), type_name)) {
             self.hash_type_by_name(&parent_type)?;
 
             field_def.name.hash(self);
@@ -273,7 +272,6 @@ impl<'a> QueryHashVisitor<'a> {
             }
 
             node.alias.hash(self);
-        }
         Ok(())
     }
 
