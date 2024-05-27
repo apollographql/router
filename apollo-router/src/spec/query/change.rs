@@ -287,6 +287,8 @@ impl<'a> QueryHashVisitor<'a> {
         }
         if let Some(value) = t.default_value.as_ref() {
             self.hash_value(value);
+        } else {
+            "no default value".hash(self);
         }
         Ok(())
     }
@@ -372,7 +374,20 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         self.hash_type_by_name(root_type)?;
         node.operation_type.hash(self);
         node.name.hash(self);
-        for variable in &node.variables {}
+        for variable in &node.variables {
+            variable.name.hash(self);
+            self.hash_type(&variable.ty)?;
+
+            if let Some(value) = variable.default_value.as_ref() {
+                self.hash_value(&value);
+            } else {
+                "no default value".hash(self);
+            }
+
+            for directive in &variable.directives {
+                self.hash_directive(&directive);
+            }
+        }
         for directive in &node.directives {
             self.hash_directive(directive);
         }
