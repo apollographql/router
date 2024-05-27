@@ -166,7 +166,24 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
 
-const OTLP_EXT_INCLUDE_SPANS: [&str; 5] = [
+const OTLP_INCLUDE_SPANS: [&str; 20] = [
+    PARALLEL_SPAN_NAME,
+    SEQUENCE_SPAN_NAME,
+    FETCH_SPAN_NAME,
+    FLATTEN_SPAN_NAME,
+    SUBGRAPH_SPAN_NAME,
+    SUPERGRAPH_SPAN_NAME,
+    ROUTER_SPAN_NAME,
+    DEFER_SPAN_NAME,
+    DEFER_PRIMARY_SPAN_NAME,
+    DEFER_DEFERRED_SPAN_NAME,
+    CONDITION_SPAN_NAME,
+    CONDITION_IF_SPAN_NAME,
+    CONDITION_ELSE_SPAN_NAME,
+    EXECUTION_SPAN_NAME,
+    SUBSCRIBE_SPAN_NAME,
+    // Dropping these for now since they are not working with protobuf anyway.
+    // SUBSCRIPTION_EVENT_SPAN_NAME,
     QUERY_PARSING_SPAN_NAME,
     QUERY_PLANNING_SPAN_NAME,
     HTTP_REQUEST_SPAN_NAME,
@@ -354,9 +371,7 @@ impl Exporter {
                         apollo_graph_ref,
                         schema_id,
                         errors_configuration,
-                        HashSet::from_iter(
-                            [&REPORTS_INCLUDE_SPANS[..], &OTLP_EXT_INCLUDE_SPANS[..]].concat(),
-                        ),
+                        HashSet::from(OTLP_INCLUDE_SPANS),
                     )?))
                 }
             },
