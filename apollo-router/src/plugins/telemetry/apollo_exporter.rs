@@ -36,7 +36,9 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
-const ROUTER_REPORT_TYPE_TRACES: &str = "traces";
+pub(crate) const ROUTER_REPORT_TYPE_TRACES: &str = "traces";
+const ROUTER_TRACING_PROTOCOL_APOLLO: &str = "apollo";
+pub(crate) const ROUTER_TRACING_PROTOCOL_OTLP: &str = "otlp";
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ApolloExportError {
@@ -301,7 +303,8 @@ impl ApolloExporter {
                             "apollo.router.telemetry.studio.reports",
                             "The number of reports submitted to Studio by the Router",
                             1,
-                            report.type = report_type
+                            report.type = report_type,
+                            report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.

@@ -4,7 +4,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use derivative::Derivative;
+use futures::future;
 use futures::future::BoxFuture;
+use futures::TryFutureExt;
 use opentelemetry::sdk::export::trace::ExportResult;
 use opentelemetry::sdk::export::trace::SpanData;
 use opentelemetry::sdk::export::trace::SpanExporter;
@@ -48,6 +50,8 @@ use super::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
 use super::tracing::apollo_telemetry::OPERATION_SUBTYPE;
 use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
+use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
+use crate::plugins::telemetry::apollo_exporter::ROUTER_TRACING_PROTOCOL_OTLP;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
@@ -346,7 +350,17 @@ impl ApolloOtlpExporter {
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         let mut exporter = self.otlp_exporter.lock();
-        exporter.export(spans)
+        Box::pin(exporter.export(spans).and_then(|_| {
+            // re-use the metric we already have in apollo_exporter but attach the protocol
+            u64_counter!(
+                "apollo.router.telemetry.studio.reports",
+                "The number of reports submitted to Studio by the Router",
+                1,
+                report.type = ROUTER_REPORT_TYPE_TRACES,
+                report.protocol = ROUTER_TRACING_PROTOCOL_OTLP
+            );
+            future::ready(Ok(()))
+        }))
     }
 
     pub(crate) fn shutdown(&self) {

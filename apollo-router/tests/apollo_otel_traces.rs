@@ -178,6 +178,7 @@ macro_rules! assert_report {
                         ".**.attributes[].value" => "[redacted]", // TBD(tim): this is too aggressive and redacts all attr values
                         // ".resourceSpans[].resource.attributes[].value" => "[redacted]", // TBD(tim): ideally this and the line below
                         // ".**.attributes[][\"apollo_private.ftv1\"].value" => "[ftv1]", // TBD(tim): this doesn't work
+                        // TBD(tim): let's explore https://insta.rs/docs/redactions/#dynamic-redactions to only redact certain attributes
                         ".resourceSpans[].scopeSpans[].scope.version" => "[version]",
                         ".**.traceId" => "[trace_id]",
                         ".**.spanId" => "[span_id]",
