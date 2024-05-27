@@ -85,7 +85,8 @@ impl<'a> QueryHashVisitor<'a> {
     ) -> Result<Vec<u8>, BoxError> {
         let mut visitor = QueryHashVisitor::new(schema, schema_str, executable);
         traverse::document(&mut visitor, executable, operation_name)?;
-        executable.to_string().hash(&mut visitor);
+        //FIXME: temporarily deactivate this to trigger test failures. This muist be reactivated before merging
+        //executable.to_string().hash(&mut visitor);
         Ok(visitor.finish())
     }
 
