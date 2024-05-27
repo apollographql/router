@@ -353,6 +353,8 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
         if bytes.len() != 1 || bytes[0] != 0xFF {
             println!("{:?}", std::str::from_utf8(bytes).unwrap());
         }
+        // byte separator between each part that is hashed
+        self.hasher.update(&[0xFF][..]);
         self.hasher.update(bytes);
     }
 }
