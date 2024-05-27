@@ -11,7 +11,6 @@ use async_trait::async_trait;
 use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
 use derivative::Derivative;
-use futures::future::try_join_all;
 use futures::future::BoxFuture;
 use futures::FutureExt;
 use futures::TryFutureExt;
@@ -167,7 +166,24 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
 
-const OTLP_EXT_INCLUDE_SPANS: [&str; 5] = [
+const OTLP_INCLUDE_SPANS: [&str; 20] = [
+    PARALLEL_SPAN_NAME,
+    SEQUENCE_SPAN_NAME,
+    FETCH_SPAN_NAME,
+    FLATTEN_SPAN_NAME,
+    SUBGRAPH_SPAN_NAME,
+    SUPERGRAPH_SPAN_NAME,
+    ROUTER_SPAN_NAME,
+    DEFER_SPAN_NAME,
+    DEFER_PRIMARY_SPAN_NAME,
+    DEFER_DEFERRED_SPAN_NAME,
+    CONDITION_SPAN_NAME,
+    CONDITION_IF_SPAN_NAME,
+    CONDITION_ELSE_SPAN_NAME,
+    EXECUTION_SPAN_NAME,
+    SUBSCRIBE_SPAN_NAME,
+    // Dropping these for now since they are not working with protobuf anyway.
+    // SUBSCRIPTION_EVENT_SPAN_NAME,
     QUERY_PARSING_SPAN_NAME,
     QUERY_PLANNING_SPAN_NAME,
     HTTP_REQUEST_SPAN_NAME,
@@ -355,9 +371,7 @@ impl Exporter {
                         apollo_graph_ref,
                         schema_id,
                         errors_configuration,
-                        HashSet::from_iter(
-                            [&REPORTS_INCLUDE_SPANS[..], &OTLP_EXT_INCLUDE_SPANS[..]].concat(),
-                        ),
+                        HashSet::from(OTLP_INCLUDE_SPANS),
                     )?))
                 }
             },
@@ -1049,29 +1063,23 @@ impl SpanExporter for Exporter {
         };
 
         let fut = async move {
-            let mut exports: Vec<BoxFuture<ExportResult>> = Vec::new();
             if send_otlp && !otlp_trace_spans.is_empty() {
-                exports.push(
-                    otlp_exporter
-                        .as_ref()
-                        .expect("expected an otel exporter")
-                        .export(otlp_trace_spans.into_iter().flatten().collect()),
-                );
+                otlp_exporter
+                    .as_ref()
+                    .expect("expected an otel exporter")
+                    .export(otlp_trace_spans.into_iter().flatten().collect())
+                    .await
             } else if send_reports && !traces.is_empty() {
                 let mut report = telemetry::apollo::Report::default();
                 report += SingleReport::Traces(TracesReport { traces });
-                exports.push(
-                    report_exporter
-                        .as_ref()
-                        .expect("expected an apollo exporter")
-                        .submit_report(report)
-                        .map_err(|e| TraceError::ExportFailed(Box::new(e)))
-                        .boxed(),
-                );
-            }
-            match try_join_all(exports).await {
-                Ok(_) => Ok(()),
-                Err(e) => Err(e),
+                report_exporter
+                    .as_ref()
+                    .expect("expected an apollo exporter")
+                    .submit_report(report)
+                    .map_err(|e| TraceError::ExportFailed(Box::new(e)))
+                    .await
+            } else {
+                ExportResult::Ok(())
             }
         };
         fut.boxed()
