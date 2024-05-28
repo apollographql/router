@@ -205,7 +205,7 @@ impl SubscriptionNode {
             data,
             current_dir,
             // Needs the original request here
-            parameters.supergraph_request,
+            parameters.supergraph_request.body(),
             parameters.schema,
             &self.input_rewrites,
             &None,

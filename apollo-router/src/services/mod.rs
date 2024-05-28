@@ -13,6 +13,8 @@ pub use crate::http_ext::TryIntoHeaderValue;
 pub use crate::query_planner::OperationKind;
 pub(crate) use crate::services::execution::Request as ExecutionRequest;
 pub(crate) use crate::services::execution::Response as ExecutionResponse;
+pub(crate) use crate::services::fetch::Request as FetchRequest;
+pub(crate) use crate::services::fetch::Response as FetchResponse;
 pub(crate) use crate::services::query_planner::Request as QueryPlannerRequest;
 pub(crate) use crate::services::query_planner::Response as QueryPlannerResponse;
 pub(crate) use crate::services::router::Request as RouterRequest;
@@ -25,6 +27,8 @@ pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 
 pub mod execution;
 pub(crate) mod external;
+pub(crate) mod fetch;
+pub(crate) mod fetch_service;
 pub(crate) mod http;
 pub(crate) mod layers;
 pub(crate) mod new_service;

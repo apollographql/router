@@ -23,6 +23,7 @@ mod plan;
 pub(crate) mod rewrites;
 mod selection;
 mod subgraph_context;
+pub(crate) use subgraph_context::build_operation_with_aliasing;
 pub(crate) mod subscription;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
