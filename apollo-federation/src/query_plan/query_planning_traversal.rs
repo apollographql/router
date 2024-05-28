@@ -3,6 +3,7 @@ use std::sync::Arc;
 use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use tracing::instrument;
 
 use crate::error::FederationError;
 use crate::query_graph::condition_resolver::ConditionResolution;
@@ -152,6 +153,7 @@ impl BestQueryPlanInfo {
 }
 
 impl<'a> QueryPlanningTraversal<'a> {
+    #[instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new")]
     pub fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
@@ -245,6 +247,11 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     // PORT_NOTE: In JS, the traversal is still usable after finding the best plan. Here we consume
     // the struct so we do not need to return a reference, which is very unergonomic.
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::find_best_plan"
+    )]
     pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
         self.find_best_plan_inner()?;
         Ok(self.best_plan)
@@ -279,6 +286,11 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     /// Returns whether to terminate planning immediately, and any new open branches to push onto
     /// the stack.
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::handle_open_branch"
+    )]
     fn handle_open_branch(
         &mut self,
         selection: &Selection,
@@ -530,6 +542,11 @@ impl<'a> QueryPlanningTraversal<'a> {
         }
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::compute_best_plan_from_closed_branches"
+    )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
         if self.closed_branches.is_empty() {
             return Ok(());
@@ -814,6 +831,11 @@ impl<'a> QueryPlanningTraversal<'a> {
         }
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::new_dependency_graph"
+    )]
     pub(crate) fn new_dependency_graph(&self) -> FetchDependencyGraph {
         let root_type = if self.is_top_level && self.has_defers {
             self.parameters
@@ -834,6 +856,11 @@ impl<'a> QueryPlanningTraversal<'a> {
         )
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::updated_dependency_graph"
+    )]
     fn updated_dependency_graph(
         &self,
         dependency_graph: &mut FetchDependencyGraph,
@@ -873,6 +900,11 @@ impl<'a> QueryPlanningTraversal<'a> {
         Ok(())
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::resolve_condition_plan"
+    )]
     fn resolve_condition_plan(
         &self,
         edge: EdgeIndex,

@@ -10,6 +10,8 @@ use indexmap::IndexMap;
 use indexmap::IndexSet;
 use petgraph::csr::NodeIndex;
 use petgraph::stable_graph::IndexType;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -190,10 +192,12 @@ pub struct QueryPlanner {
 }
 
 impl QueryPlanner {
+    #[instrument(level = "trace", skip_all, name = "QueryPlanner::new")]
     pub fn new(
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
+        trace!("Hello world");
         config.assert_valid();
 
         let supergraph_schema = supergraph.schema.clone();
@@ -301,6 +305,7 @@ impl QueryPlanner {
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
+    #[instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")]
     pub fn build_query_plan(
         &self,
         document: &Valid<ExecutableDocument>,
@@ -891,7 +896,7 @@ type User
         "###);
     }
 
-    #[test]
+    #[test_log::test]
     fn plan_simple_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
