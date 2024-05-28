@@ -1,6 +1,6 @@
-### Add graphql instruments ([PR #5215](https://github.com/apollographql/router/pull/5215))
+### Add graphql instruments ([PR #5215](https://github.com/apollographql/router/pull/5215), [PR #5257](https://github.com/apollographql/router/pull/5257))
 
-This PR adds experimental GraphQL instruments to telemetry as a commercial feature.
+This PR adds experimental GraphQL instruments to telemetry.
 
 It makes the following possible:
 ```
@@ -47,7 +47,9 @@ telemetry:
               - "topProducts"
 ```
 
-Note that users should not use this feature yet as it will have performance issues, may cause excessive metrics to be generated and we may change or remove this feature.
-It is for experimental purposes only and is not supported in production environments.
+Note that this will have a significant performance impact which will be addressed in a following release.
+Users should also be aware that large numbers of excessive metrics may be generated, and they should take care not to run up a large APM bill.
 
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5215
+For now, do not use these metrics in production.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5215 and https://github.com/apollographql/router/pull/5257
