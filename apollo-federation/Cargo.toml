@@ -32,6 +32,7 @@ insta.workspace = true
 sha1.workspace = true
 tempfile.workspace = true
 test-log = "0.2.16"
+tracing-subscriber = "0.3.18"
 
 [[test]]
 name = "main"

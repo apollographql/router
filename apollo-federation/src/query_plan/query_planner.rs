@@ -722,6 +722,10 @@ fn compute_plan_for_defer_conditionals(
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+
+    use tracing_subscriber::fmt::format::FmtSpan;
+
     use super::*;
     use crate::subgraph::Subgraph;
 
@@ -896,8 +900,19 @@ type User
         "###);
     }
 
-    #[test_log::test]
+    #[test]
     fn plan_simple_query_for_multiple_subgraphs() {
+        let log_file = File::create("my_cool_trace.log").expect("create log file");
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .json()
+            .flatten_event(true)
+            .with_span_events(FmtSpan::ACTIVE)
+            .with_file(true)
+            .with_line_number(true)
+            .with_writer(log_file)
+            .init();
+
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
 
