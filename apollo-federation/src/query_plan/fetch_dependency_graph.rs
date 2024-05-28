@@ -3203,8 +3203,8 @@ fn handle_requires(
                         dependency_graph
                             .remove_child_edge(current_parent.parent_node_id, created_node_id);
 
-                        let grand_parents: Vec<NodeIndex> = dependency_graph
-                            .parents_of(current_parent.parent_node_id)
+                        let grand_parents: Vec<ParentRelation> = dependency_graph
+                            .parents_relations_of(current_parent.parent_node_id)
                             .collect();
                         if grand_parents.is_empty() {
                             return Err(FederationError::internal(format!(
@@ -3212,12 +3212,12 @@ fn handle_requires(
                                 current_parent.parent_node_id.index()
                             )));
                         }
-                        for grand_parent_id in &grand_parents {
+                        for grand_parent_relation in &grand_parents {
                             dependency_graph.add_parent(
                                 created_node_id,
                                 ParentRelation {
-                                    parent_node_id: *grand_parent_id,
-                                    path_in_parent: current_parent.path_in_parent.clone(),
+                                    parent_node_id: grand_parent_relation.parent_node_id,
+                                    path_in_parent: concat_paths_in_parents(&grand_parent_relation.path_in_parent, &current_parent.path_in_parent),
                                 },
                             )
                         }
@@ -3225,10 +3225,7 @@ fn handle_requires(
                         // and that's probably not needed. Otherwise, we can check if `created_node_id` may be able to move even
                         // further up.
                         if grand_parents.len() == 1 {
-                            current_parent = ParentRelation {
-                                parent_node_id: grand_parents[0],
-                                path_in_parent: current_parent.path_in_parent.clone(),
-                            };
+                            current_parent = grand_parents[0].clone();
                         } else {
                             break;
                         }
