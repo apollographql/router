@@ -1,0 +1,18 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Test standard router metrics
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: true
+          http.server.request.duration: false
+---
+- name: http.server.active_requests
+  data:
+    datapoints:
+      - value: 0
+        attributes:
+          http.request.method: GET
