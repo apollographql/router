@@ -2874,7 +2874,8 @@ impl SelectionSet {
             Some((ele, &[])) => {
                 // PORT_NOTE: The JS code waited until the final selection was being constructed to
                 // turn the path and selection set into a selection. Because we are mutating things
-                // in-place, we eagerly construct the selection.
+                // in-place, we eagerly construct the selection that needs to be rebased on the target
+                // schema.
                 let element = OpPathElement::clone(ele);
                 let selection = Selection::from_element(
                     element,
@@ -2890,9 +2891,8 @@ impl SelectionSet {
                 )? {
                     self.add_selection(&ele.parent_type_position(), &schema, rebased_selection)?
                 }
-                // self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
             }
-            // If we don't have any path, we merge in the given subselections at the root.
+            // If we don't have any path, we rebase and merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
                     let schema = self.schema.clone();

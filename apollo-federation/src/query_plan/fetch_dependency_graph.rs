@@ -3490,6 +3490,11 @@ fn inputs_for_require(
         fetch_dependency_graph.supergraph_schema.clone(),
         input_type.clone(),
     );
+
+    // JS PORT NOTE: we are manipulating selection sets in place which means we need to rebase new
+    // elements before they can be merged. This is different from JS implementation which relied on
+    // selection set "updates" to capture changes and apply them all at once (with rebasing) when
+    // generating final selection set.
     let rebased_conditions = edge_conditions.rebase_on(
         &input_type,
         &NamedFragments::default(),
