@@ -1,5 +1,4 @@
 use std::fmt::Display;
-use std::fmt::Write;
 
 use nom::branch::alt;
 use nom::character::complete::char;

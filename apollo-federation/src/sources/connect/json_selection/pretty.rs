@@ -7,13 +7,12 @@
 
 use std::fmt::Write;
 
+use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::JSONSelection;
+use crate::sources::connect::json_selection::NamedSelection;
 use crate::sources::connect::json_selection::PathSelection;
+use crate::sources::connect::json_selection::StarSelection;
 use crate::sources::connect::json_selection::SubSelection;
-
-use super::Alias;
-use super::NamedSelection;
-use super::StarSelection;
 
 /// Pretty print trait
 ///
@@ -215,10 +214,12 @@ impl PrettyPrintable for StarSelection {
 
 #[cfg(test)]
 mod tests {
-    use crate::sources::connect::{
-        json_selection::{pretty::indent_chars, NamedSelection, PrettyPrintable, StarSelection},
-        PathSelection, SubSelection,
-    };
+    use crate::sources::connect::json_selection::pretty::indent_chars;
+    use crate::sources::connect::json_selection::NamedSelection;
+    use crate::sources::connect::json_selection::PrettyPrintable;
+    use crate::sources::connect::json_selection::StarSelection;
+    use crate::sources::connect::PathSelection;
+    use crate::sources::connect::SubSelection;
 
     // Test all valid pretty print permutations
     fn test_permutations(selection: impl PrettyPrintable, expected: &str) {
