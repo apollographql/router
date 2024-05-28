@@ -5,7 +5,6 @@ use indexmap::IndexMap;
 pub use validation::validate;
 pub use validation::Error as ValidationError;
 pub use validation::ErrorCode as ValidationErrorCode;
-pub use validation::GraphQLLocation;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;

@@ -626,18 +626,18 @@ impl IntoGraphQLErrors for ParseErrors {
             .errors
             .iter()
             .map(|diagnostic| {
+                let graphql_error = diagnostic.to_json();
                 Error::builder()
-                    .message(diagnostic.error.to_string())
+                    .message(graphql_error.message)
                     .locations(
-                        diagnostic
-                            .get_line_column()
-                            .map(|location| {
-                                vec![ErrorLocation {
-                                    line: location.line as u32,
-                                    column: location.column as u32,
-                                }]
+                        graphql_error
+                            .locations
+                            .into_iter()
+                            .map(|location| ErrorLocation {
+                                line: location.line as u32,
+                                column: location.column as u32,
                             })
-                            .unwrap_or_default(),
+                            .collect(),
                     )
                     .extension_code("GRAPHQL_PARSING_FAILED")
                     .build()

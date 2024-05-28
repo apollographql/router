@@ -59,6 +59,7 @@
 
 use std::collections::HashMap;
 use std::fmt::Display;
+use std::ops::Range;
 
 use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Value;
@@ -66,8 +67,8 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::LineColumn;
 use apollo_compiler::Node;
-use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
 use itertools::Itertools;
@@ -125,10 +126,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
             Ok(name) => valid_source_names
                 .entry(name)
                 .or_insert_with(Vec::new)
-                .extend(GraphQLLocation::from_node(
-                    directive.directive.node.location(),
-                    &source_map,
-                )),
+                .extend(transform_location(&directive.directive.node, &source_map)),
         }
     }
     for (name, locations) in valid_source_names {
@@ -181,9 +179,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                         message: format!(
                             "baseURL argument for {name} was not a valid URL: {inner}"
                         ),
-                        locations: GraphQLLocation::from_node(arg.location(), sources)
-                            .into_iter()
-                            .collect(),
+                        locations: transform_location(&arg, sources),
                     })
                 }
                 Ok(url) => url,
@@ -195,9 +191,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                     message: format!(
                         "baseURL argument for {name} must be http or https, got {scheme}"
                     ),
-                    locations: GraphQLLocation::from_node(arg.value.location(), sources)
-                        .into_iter()
-                        .collect(),
+                    locations: transform_location(&arg.value, sources),
                 });
             }
             None
@@ -259,9 +253,7 @@ fn validate_object(
                             object_name = object.name,
                             field_name = field.name,
                         ),
-                        locations: GraphQLLocation::from_node(source_name.location(), sources)
-                            .into_iter()
-                            .collect(),
+                        locations: transform_location(&source_name, sources)
                     });
             }
         }
@@ -344,19 +336,19 @@ impl SourceName {
             } => Err(Error {
                 message: format!("invalid characters in @{directive_name} name {value}, only alphanumeric and underscores are allowed"),
                 code: ErrorCode::InvalidSourceName,
-                locations: GraphQLLocation::from_node(value.location(), sources).into_iter().collect(),
+                locations: transform_location(&value, sources),
             }),
             Self::Empty { directive_name, value } => {
                 Err(Error {
                     code: ErrorCode::EmptySourceName,
                     message: format!("name argument to @{directive_name} can't be empty"),
-                    locations: GraphQLLocation::from_node(value.location(), sources).into_iter().collect(),
+                    locations: transform_location(&value, sources)
                 })
             }
             Self::Missing { directive_name, ast_node } => Err(Error {
                 code: ErrorCode::GraphQLError,
                 message: format!("missing name argument to @{directive_name}"),
-                locations: GraphQLLocation::from_node(ast_node.location(), sources).into_iter().collect()
+                locations: transform_location(&ast_node, sources)
             }),
         }
     }
@@ -395,35 +387,14 @@ impl PartialEq<str> for SourceName {
 pub struct Error {
     pub code: ErrorCode,
     pub message: String,
-    pub locations: Vec<GraphQLLocation>,
+    pub locations: Vec<Range<LineColumn>>,
 }
 
-#[derive(Debug)]
-pub struct GraphQLLocation {
-    pub start_line: usize,
-    pub start_column: usize,
-    pub end_line: usize,
-    pub end_column: usize,
-}
-
-impl GraphQLLocation {
-    // TODO: This is a ripoff of GraphQLLocation::from_node in apollo_compiler, contribute it back
-    fn from_node(node: Option<NodeLocation>, sources: &SourceMap) -> Option<Self> {
-        let node = node?;
-        let source = sources.get(&node.file_id())?;
-        let (start_line, start_column) = source
-            .get_line_column(node.offset())
-            .map(|(line, column)| (line + 1, column + 1))?;
-        let (end_line, end_column) = source
-            .get_line_column(node.end_offset())
-            .map(|(line, column)| (line + 1, column + 1))?;
-        Some(Self {
-            start_line,
-            start_column,
-            end_line,
-            end_column,
-        })
-    }
+fn transform_location<T>(node: &Node<T>, sources: &SourceMap) -> Vec<Range<LineColumn>> {
+    node.location()
+        .and_then(|location| location.line_column_range(sources))
+        .into_iter()
+        .collect()
 }
 
 impl Display for Error {
