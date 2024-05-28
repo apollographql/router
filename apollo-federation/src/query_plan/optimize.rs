@@ -419,7 +419,7 @@ impl FieldsConflictMultiBranchValidator {
             return Ok(true); // Nothing to check; Trivially ok.
         };
 
-        if validator.do_merge_with_all(self.validators.iter().map(Arc::as_ref))? {
+        if !validator.do_merge_with_all(self.validators.iter().map(Arc::as_ref))? {
             return Ok(false);
         }
 

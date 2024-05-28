@@ -25,19 +25,22 @@ const IMPLICIT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/fe
 /// This can all be remove when composition is implemented in Rust.
 macro_rules! planner {
     (
-        $( config = $config: expr, )?
+        config = $config: expr,
         $( $subgraph_name: tt: $subgraph_schema: expr),+
         $(,)?
     ) => {{
-        #[allow(unused_mut)]
-        let mut config = Default::default();
-        $( config = $config )?
         $crate::query_plan::build_query_plan_support::api_schema_and_planner(
             insta::_function_name!(),
-            config,
+            $config,
             &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
         )
     }};
+    (
+        $( $subgraph_name: tt: $subgraph_schema: expr),+
+        $(,)?
+    ) => {
+        planner!(config = Default::default(), $( $subgraph_name: $subgraph_schema),+)
+    };
 }
 
 macro_rules! subgraph_name {
