@@ -1,2 +1,3 @@
 /docs/ @apollographql/docs
 /apollo-federation/ @dariuszkuc @sachindshinde @goto-bus-stop @SimonSapin
+/apollo-federation/src/sources/connect/json_selection @benjamn

@@ -8,6 +8,7 @@ use indexmap::IndexSet;
 use petgraph::prelude::EdgeIndex;
 
 use crate::error::FederationError;
+use crate::query_plan::fetch_dependency_graph_processor::FETCH_COST;
 use crate::source_aware::federated_query_graph;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
 use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
@@ -34,15 +35,67 @@ use crate::sources::source::SourceId;
 pub(crate) struct FetchDependencyGraph;
 
 impl FetchDependencyGraphApi for FetchDependencyGraph {
-    fn can_reuse_node<'path_tree>(
+    fn edges_that_can_reuse_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
-        _merge_at: &[FetchDataPathElement],
-        _source_entering_edge: EdgeIndex,
-        _path_tree_edges: Vec<&'path_tree path_tree::ChildKey>,
-        _source_data: &source::fetch_dependency_graph::Node,
+        merge_at: &[FetchDataPathElement],
+        source_entering_edge: EdgeIndex,
+        path_tree_edges: Vec<&'path_tree path_tree::ChildKey>,
+        source_data: &source::fetch_dependency_graph::Node,
     ) -> Result<Vec<&'path_tree path_tree::ChildKey>, FederationError> {
-        todo!()
+        // We are within the context of connect, so ensure that's the case
+        let source::fetch_dependency_graph::Node::Connect(source_data) = source_data else {
+            return Err(FederationError::internal("expected connect node"));
+        };
+
+        // If we have distinct merge positions, or if the entering edge is different from the supplied node,
+        // then there is nothing in common and thus nothing reusable.
+        if source_entering_edge != source_data.source_entering_edge
+            || *merge_at != *source_data.merge_at
+        {
+            return Ok(Vec::new());
+        }
+
+        // Start collecting as many reusable portions as possible
+        let mut reusable_edges = Vec::new();
+        for edge in path_tree_edges {
+            // Grab the field from the edge's operation element, shorting out with an error if it
+            // isn't present.
+            let op_elem = edge
+                .operation_element
+                .as_ref()
+                .ok_or(FederationError::internal(
+                    "a child edge must have an operation element in order to reuse a node",
+                ))?;
+            let OperationPathElement::Field(op_elem) = op_elem.as_ref() else {
+                return Err(FederationError::internal(
+                    "a child edge's operation element must be a field in order to reuse a node",
+                ));
+            };
+
+            // If the names differ, then it isn't usable
+            let op_data = op_elem.data();
+            if op_data.response_name() != source_data.field_response_name {
+                continue;
+            }
+
+            // If the arguments differ, then we can't reuse the edge
+            if op_data.arguments.len() != source_data.field_arguments.len()
+                || op_data.arguments.iter().any(|arg| {
+                    !matches!(
+                        source_data.field_arguments.get(&arg.name),
+                        Some(source_arg) if *source_arg == arg.value
+                    )
+                })
+            {
+                continue;
+            }
+
+            // If we've gotten this far, then we can reuse the edge
+            reusable_edges.push(edge);
+        }
+
+        Ok(reusable_edges)
     }
 
     fn add_node<'path_tree>(
@@ -330,7 +383,9 @@ impl FetchDependencyGraphApi for FetchDependencyGraph {
         _source_id: SourceId,
         _source_data: &source::fetch_dependency_graph::Node,
     ) -> Result<QueryPlanCost, FederationError> {
-        todo!()
+        // REST doesn't let you (normally) select only a subset of the response,
+        // so the cost is constant regardless of what was selected.
+        Ok(FETCH_COST)
     }
 
     fn to_plan_node(
@@ -682,19 +737,29 @@ mod tests {
         use std::sync::Arc;
 
         use apollo_compiler::ast::Name;
+        use apollo_compiler::executable;
         use apollo_compiler::name;
+        use apollo_compiler::Schema;
         use indexmap::IndexMap;
         use insta::assert_debug_snapshot;
         use insta::assert_snapshot;
+        use itertools::Itertools;
         use petgraph::graph::DiGraph;
         use petgraph::prelude::EdgeIndex;
 
+        use crate::query_plan::operation::Field;
+        use crate::query_plan::operation::FieldData;
+        use crate::schema::position::FieldDefinitionPosition;
         use crate::schema::position::ObjectFieldDefinitionPosition;
         use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
         use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
         use crate::schema::position::ObjectTypeDefinitionPosition;
+        use crate::schema::ValidFederationSchema;
         use crate::source_aware::federated_query_graph;
+        use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;
+        use crate::source_aware::federated_query_graph::path_tree::ChildKey;
         use crate::source_aware::federated_query_graph::FederatedQueryGraph;
+        use crate::source_aware::query_plan::FetchDataPathElement;
         use crate::sources::connect;
         use crate::sources::connect::federated_query_graph::ConcreteFieldEdge;
         use crate::sources::connect::federated_query_graph::ConcreteNode;
@@ -715,6 +780,7 @@ mod tests {
             source_id: SourceId,
             source_entry_edges: Vec<EdgeIndex>,
             non_source_entry_edges: Vec<EdgeIndex>,
+            schema: ValidFederationSchema,
         }
         fn setup() -> SetupInfo {
             let mut graph = DiGraph::new();
@@ -822,12 +888,20 @@ mod tests {
                     Some(federated_query_graph::Edge::SourceEntering { .. })
                 )
             });
+
+            // Create a dummy schema for tests
+            let schema =
+                Schema::parse(include_str!("../tests/schemas/simple.graphql"), "").unwrap();
+            let schema = schema.validate().unwrap();
+            let schema = ValidFederationSchema::new(schema).unwrap();
+
             SetupInfo {
                 fetch_graph: FetchDependencyGraph,
                 query_graph: Arc::new(FederatedQueryGraph::with_graph(graph)),
                 source_id,
                 source_entry_edges: entry,
                 non_source_entry_edges: non_entry,
+                schema,
             }
         }
 
@@ -1249,10 +1323,10 @@ mod tests {
 
             let (unmatched, selection) = JSONSelection::parse(
                 ".foo.bar {
-                    qux: .qaax
-                    qax: .qaax {
-                      baz
-                    }
+                  qux: .qaax
+                  qax: .qaax {
+                    baz
+                  }
                 }",
             )
             .unwrap();
@@ -1349,6 +1423,229 @@ mod tests {
               }
             }
             "###);
+        }
+
+        #[test]
+        fn it_can_reuse_some_edges() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                schema,
+                ..
+            } = setup();
+
+            let args = Arc::new(vec![apollo_compiler::Node::new(
+                apollo_compiler::ast::Argument {
+                    name: name!("single_arg"),
+                    value: apollo_compiler::Node::new(apollo_compiler::ast::Value::String(
+                        "arg_value".into(),
+                    )),
+                },
+            )]);
+
+            let field_response_name = name!("_matching_name");
+            let last_edge_index = *source_entry_edges.last().unwrap();
+            let merge_at = [];
+            let source_data = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: Arc::new(merge_at.clone()),
+                    source_entering_edge: last_edge_index,
+                    field_response_name: field_response_name.clone(),
+                    field_arguments: IndexMap::from_iter(
+                        args.iter()
+                            .map(|node| (node.name.clone(), node.value.clone())),
+                    ),
+                    selection: None,
+                },
+            );
+
+            // Generate edges that match on even indices, but not index 2
+            let edges = Vec::from_iter((0..5).map(|index| ChildKey {
+                operation_element: Some(Arc::new(OperationPathElement::Field(Field::new(
+                    FieldData {
+                        schema: schema.clone(),
+                        field_position: FieldDefinitionPosition::Object(
+                            ObjectFieldDefinitionPosition {
+                                type_name: name!("_test_type"),
+                                field_name: name!("_test_field"),
+                            },
+                        ),
+                        alias: Some(if index % 2 == 0 {
+                            field_response_name.clone()
+                        } else {
+                            name!("_non_matching")
+                        }),
+                        arguments: if index != 2 {
+                            args.clone()
+                        } else {
+                            Arc::new(vec![apollo_compiler::Node::new(
+                                apollo_compiler::ast::Argument {
+                                    name: name!("single_arg_modified"),
+                                    value: apollo_compiler::Node::new(
+                                        apollo_compiler::ast::Value::String("arg_value".into()),
+                                    ),
+                                },
+                            )])
+                        },
+                        directives: Arc::new(executable::DirectiveList::new()),
+                        sibling_typename: None,
+                    },
+                )))),
+                edge: Some(EdgeIndex::new(index)),
+            }));
+            let edges = edges.iter().collect_vec();
+
+            let reusable_edges = fetch_graph
+                .edges_that_can_reuse_node(
+                    query_graph,
+                    &merge_at,
+                    last_edge_index,
+                    edges,
+                    &source_data,
+                )
+                .unwrap();
+
+            assert_debug_snapshot!(reusable_edges.into_iter().map(|edge| edge.edge.unwrap()).collect_vec(), @r###"
+            [
+                EdgeIndex(0),
+                EdgeIndex(4),
+            ]
+            "###);
+        }
+
+        #[test]
+        fn it_does_not_reuse_non_related_edges() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                schema,
+                ..
+            } = setup();
+
+            let args = Arc::new(vec![]);
+            let field_response_name = name!("User");
+            let last_edge_index = *source_entry_edges.last().unwrap();
+            let source_data = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: Arc::new([]),
+                    source_entering_edge: last_edge_index,
+                    field_response_name: field_response_name.clone(),
+                    field_arguments: IndexMap::new(),
+                    selection: None,
+                },
+            );
+
+            // Generate edges that would match, if not for the preconditions
+            let edges = Vec::from_iter((0..5).map(|index| ChildKey {
+                operation_element: Some(Arc::new(OperationPathElement::Field(Field::new(
+                    FieldData {
+                        schema: schema.clone(),
+                        field_position: FieldDefinitionPosition::Object(
+                            ObjectFieldDefinitionPosition {
+                                type_name: name!("_test_type"),
+                                field_name: name!("_test_field"),
+                            },
+                        ),
+                        alias: Some(field_response_name.clone()),
+                        arguments: args.clone(),
+                        directives: Arc::new(executable::DirectiveList::new()),
+                        sibling_typename: None,
+                    },
+                )))),
+                edge: Some(EdgeIndex::new(index)),
+            }));
+            let edges = edges.iter().collect_vec();
+
+            // Unrelated edges shouldn't be reusable
+            assert!(
+                fetch_graph
+                    .edges_that_can_reuse_node(
+                        query_graph.clone(),
+                        &[],
+                        EdgeIndex::end(),
+                        edges.clone(),
+                        &source_data,
+                    )
+                    .unwrap()
+                    .is_empty(),
+                "edge index mismatch should not reuse nodes"
+            );
+
+            // merge_at should match between the two
+            assert!(
+                fetch_graph
+                    .edges_that_can_reuse_node(
+                        query_graph,
+                        &[FetchDataPathElement::AnyIndex],
+                        EdgeIndex::end(),
+                        edges,
+                        &source_data,
+                    )
+                    .unwrap()
+                    .is_empty(),
+                "merge_at mismatch should not reuse nodes"
+            );
+        }
+
+        #[test]
+        fn it_does_not_reuse_non_matching_edges() {
+            let SetupInfo {
+                fetch_graph,
+                query_graph,
+                source_entry_edges,
+                schema,
+                ..
+            } = setup();
+
+            let args = Arc::new(Vec::new());
+            let field_response_name = name!("User");
+            let last_edge_index = *source_entry_edges.last().unwrap();
+            let source_data = source::fetch_dependency_graph::Node::Connect(
+                connect::fetch_dependency_graph::Node {
+                    merge_at: Arc::new([]),
+                    source_entering_edge: last_edge_index,
+                    field_response_name: field_response_name.clone(),
+                    field_arguments: IndexMap::new(),
+                    selection: None,
+                },
+            );
+
+            // Generate edges that won't match due to non-related names
+            let edges = Vec::from_iter((0..5).map(|index| ChildKey {
+                operation_element: Some(Arc::new(OperationPathElement::Field(Field::new(
+                    FieldData {
+                        schema: schema.clone(),
+                        field_position: FieldDefinitionPosition::Object(
+                            ObjectFieldDefinitionPosition {
+                                type_name: name!("_test_type"),
+                                field_name: name!("_test_field"),
+                            },
+                        ),
+                        alias: Some(name!("non_matching_name")),
+                        arguments: args.clone(),
+                        directives: Arc::new(executable::DirectiveList::new()),
+                        sibling_typename: None,
+                    },
+                )))),
+                edge: Some(EdgeIndex::new(index)),
+            }));
+            let edges = edges.iter().collect_vec();
+
+            assert!(
+                fetch_graph
+                    .edges_that_can_reuse_node(
+                        query_graph.clone(),
+                        &[],
+                        EdgeIndex::end(),
+                        edges.clone(),
+                        &source_data,
+                    )
+                    .unwrap()
+                    .is_empty(),
+                "non-matching response names should not be reused"
+            );
         }
     }
 

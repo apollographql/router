@@ -29,7 +29,7 @@ pub(crate) struct FetchDependencyGraph {
 }
 
 impl FetchDependencyGraphApi for FetchDependencyGraph {
-    fn can_reuse_node<'path_tree>(
+    fn edges_that_can_reuse_node<'path_tree>(
         &self,
         _query_graph: Arc<FederatedQueryGraph>,
         _merge_at: &[FetchDataPathElement],
