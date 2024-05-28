@@ -27,9 +27,20 @@ pub(crate) struct FederatedGraphPath {
 pub(crate) struct Edge {
     operation_element: Option<Arc<OperationPathElement>>,
     edge: Option<EdgeIndex>,
+    /// Conditions are imposed by query graph edges and resolved at earlier query graph nodes. When
+    /// resolution happens for this edge's condition during option generation, that resolution's ID
+    /// is stored in this map.
     self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
+    /// Conditions are imposed by query graph edges and resolved at earlier query graph nodes. When
+    /// resolution happens at this edge's head for some later source-entering edge's condition
+    /// during option generation, that resolution's information (including ID) is stored in this
+    /// map, keyed by condition ID.
     source_entering_condition_resolutions_at_head:
         IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
+    /// Conditions are imposed by query graph edges and resolved at earlier query graph nodes. When
+    /// resolution happens at this edge's head for some later non-source-entering edge's condition
+    /// during option generation, that resolution's information (including ID) is stored in this
+    /// map, keyed by condition ID.
     condition_resolutions_at_head: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
 }
 
