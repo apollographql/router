@@ -4,7 +4,6 @@ use std::hash::Hash;
 use std::hash::Hasher;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Name;
 use apollo_compiler::executable;
@@ -40,8 +39,6 @@ pub(crate) struct QueryHashVisitor<'a> {
     hasher: Sha256,
     fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
-    // name, field
-    hashed_fields: HashSet<(String, String)>,
     seen_introspection: bool,
     join_field_directive_name: Option<String>,
     join_type_directive_name: Option<String>,
@@ -53,13 +50,12 @@ impl<'a> QueryHashVisitor<'a> {
         schema_str: &'a str,
         executable: &'a executable::ExecutableDocument,
     ) -> Self {
-        Self {
+        let mut visitor = Self {
             schema,
             schema_str,
             hasher: Sha256::new(),
             fragments: executable.fragments.iter().collect(),
             hashed_types: HashSet::new(),
-            hashed_fields: HashSet::new(),
             seen_introspection: false,
             // should we just return an error if we do not find those directives?
             join_field_directive_name: Schema::directive_name(
@@ -74,7 +70,20 @@ impl<'a> QueryHashVisitor<'a> {
                 ">=0.1.0",
                 JOIN_TYPE_DIRECTIVE_NAME,
             ),
+        };
+
+        visitor.hash_schema();
+
+        visitor
+    }
+
+    pub(crate) fn hash_schema(&mut self) {
+        // FIXME: hash directive definitions?
+        "^SCHEMA".hash(self);
+        for directive in &self.schema.schema_definition.directives {
+            self.hash_directive(&directive);
         }
+        "^SCHEMA-END".hash(self);
     }
 
     pub(crate) fn hash_query(
@@ -95,21 +104,23 @@ impl<'a> QueryHashVisitor<'a> {
     }
 
     fn hash_directive(&mut self, directive: &Node<ast::Directive>) {
-        "DIRECTIVE".hash(self);
+        "^DIRECTIVE".hash(self);
         directive.name.as_str().hash(self);
         for argument in &directive.arguments {
             self.hash_argument(argument)
         }
+        "^DIRECTIVE-END".hash(self);
     }
 
     fn hash_argument(&mut self, argument: &Node<ast::Argument>) {
-        "ARGUMENT".hash(self);
+        "^ARGUMENT".hash(self);
         argument.name.hash(self);
         self.hash_value(&argument.value);
+        "^ARGUMENT-END".hash(self);
     }
 
     fn hash_value(&mut self, value: &ast::Value) {
-        "VALUE".hash(self);
+        "^VALUE".hash(self);
 
         match value {
             schema::Value::Null => "null".hash(self),
@@ -138,28 +149,29 @@ impl<'a> QueryHashVisitor<'a> {
                 b.hash(self);
             }
             schema::Value::List(l) => {
-                "list[".hash(self);
+                "^list[".hash(self);
                 for v in l.iter() {
                     self.hash_value(v);
                 }
-                "]".hash(self);
+                "^]".hash(self);
             }
             schema::Value::Object(o) => {
-                "object{".hash(self);
+                "^object{".hash(self);
                 for (k, v) in o.iter() {
-                    "key".hash(self);
+                    "^key".hash(self);
 
                     k.hash(self);
-                    ":".hash(self);
+                    "^:".hash(self);
                     self.hash_value(v);
                 }
                 "}".hash(self);
             }
         }
+        "^VALUE-END".hash(self);
     }
 
     fn hash_type_by_name(&mut self, name: &str) -> Result<(), BoxError> {
-        "TYPE_BY_NAME".hash(self);
+        "^TYPE_BY_NAME".hash(self);
 
         println!("hash_type_by_name: will hash type: {name}");
         name.hash(self);
@@ -173,22 +185,24 @@ impl<'a> QueryHashVisitor<'a> {
         if let Some(ty) = self.schema.types.get(name) {
             self.hash_extended_type(ty)?;
         }
+        "^TYPE_BY_NAME-END".hash(self);
+
         Ok(())
     }
 
     fn hash_extended_type(&mut self, t: &'a ExtendedType) -> Result<(), BoxError> {
-        "EXTENDED_TYPE".hash(self);
+        "^EXTENDED_TYPE".hash(self);
 
         match t {
             ExtendedType::Scalar(s) => {
-                "SCALAR".hash(self);
+                "^SCALAR".hash(self);
 
                 for directive in &s.directives {
                     self.hash_directive(&directive.node);
                 }
             }
             ExtendedType::Object(o) => {
-                "OBJECT".hash(self);
+                "^OBJECT".hash(self);
 
                 for directive in &o.directives {
                     self.hash_directive(&directive.node);
@@ -198,7 +212,7 @@ impl<'a> QueryHashVisitor<'a> {
                 //FIXME: hash implemented interfaces?
             }
             ExtendedType::Interface(i) => {
-                "INTERFACE".hash(self);
+                "^INTERFACE".hash(self);
 
                 for directive in &i.directives {
                     self.hash_directive(&directive.node);
@@ -207,7 +221,7 @@ impl<'a> QueryHashVisitor<'a> {
                 //FIXME: hash implemented interfaces?
             }
             ExtendedType::Union(u) => {
-                "UNION".hash(self);
+                "^UNION".hash(self);
 
                 for directive in &u.directives {
                     self.hash_directive(&directive.node);
@@ -218,14 +232,14 @@ impl<'a> QueryHashVisitor<'a> {
                 }
             }
             ExtendedType::Enum(e) => {
-                "ENUM".hash(self);
+                "^ENUM".hash(self);
 
                 for directive in &e.directives {
                     self.hash_directive(&directive.node);
                 }
 
                 for (value, def) in &e.values {
-                    "VALUE".hash(self);
+                    "^VALUE".hash(self);
 
                     value.hash(self);
                     for directive in &def.directives {
@@ -236,14 +250,14 @@ impl<'a> QueryHashVisitor<'a> {
                 }
             }
             ExtendedType::InputObject(o) => {
-                "INPUT_OBJECT".hash(self);
+                "^INPUT_OBJECT".hash(self);
 
                 for directive in &o.directives {
                     self.hash_directive(&directive.node);
                 }
 
                 for (name, ty) in &o.fields {
-                    "KEY".hash(self);
+                    "^KEY".hash(self);
 
                     //FIXME: always hash the name?
                     if ty.default_value.is_some() {
@@ -253,27 +267,31 @@ impl<'a> QueryHashVisitor<'a> {
                 }
             }
         }
+        "^EXTENDED_TYPE-END".hash(self);
+
         Ok(())
     }
 
     fn hash_type(&mut self, t: &ast::Type) -> Result<(), BoxError> {
-        "TYPE".hash(self);
+        "^TYPE".hash(self);
 
         match t {
-            schema::Type::Named(name) => self.hash_type_by_name(name.as_str()),
+            schema::Type::Named(name) => self.hash_type_by_name(name.as_str())?,
             schema::Type::NonNullNamed(name) => {
                 "!".hash(self);
-                self.hash_type_by_name(name.as_str())
+                self.hash_type_by_name(name.as_str())?;
             }
             schema::Type::List(t) => {
                 "[]".hash(self);
-                self.hash_type(t)
+                self.hash_type(t)?;
             }
             schema::Type::NonNullList(t) => {
                 "[]!".hash(self);
-                self.hash_type(t)
+                self.hash_type(t)?;
             }
         }
+        "^TYPE-END".hash(self);
+        Ok(())
     }
 
     fn hash_field(
@@ -283,7 +301,7 @@ impl<'a> QueryHashVisitor<'a> {
         field_def: &FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
-        "FIELD".hash(self);
+        "^FIELD".hash(self);
 
         self.hash_type_by_name(&parent_type)?;
 
@@ -311,6 +329,8 @@ impl<'a> QueryHashVisitor<'a> {
         }
 
         node.alias.hash(self);
+        "^FIELD-END".hash(self);
+
         Ok(())
     }
 
@@ -318,7 +338,7 @@ impl<'a> QueryHashVisitor<'a> {
         &mut self,
         t: &Node<ast::InputValueDefinition>,
     ) -> Result<(), BoxError> {
-        "INPUT_VALUE".hash(self);
+        "^INPUT_VALUE".hash(self);
 
         self.hash_type(&t.ty)?;
         for directive in &t.directives {
@@ -329,11 +349,12 @@ impl<'a> QueryHashVisitor<'a> {
         } else {
             "no default value".hash(self);
         }
+        "^INPUT_VALUE-END".hash(self);
         Ok(())
     }
 
     fn hash_join_type(&mut self, name: &Name, directives: &DirectiveList) -> Result<(), BoxError> {
-        "JOIN_TYPE".hash(self);
+        "^JOIN_TYPE".hash(self);
 
         if let Some(dir_name) = self.join_type_directive_name.as_deref() {
             if let Some(dir) = directives.get(dir_name) {
@@ -354,6 +375,7 @@ impl<'a> QueryHashVisitor<'a> {
                 }
             }
         }
+        "^JOIN_TYPE-END".hash(self);
 
         Ok(())
     }
@@ -363,7 +385,7 @@ impl<'a> QueryHashVisitor<'a> {
         parent_type: &str,
         directives: &ast::DirectiveList,
     ) -> Result<(), BoxError> {
-        "JOIN_FIELD".hash(self);
+        "^JOIN_FIELD".hash(self);
 
         if let Some(dir_name) = self.join_field_directive_name.as_deref() {
             if let Some(dir) = directives.get(dir_name) {
@@ -390,6 +412,7 @@ impl<'a> QueryHashVisitor<'a> {
                 }
             }
         }
+        "^JOIN_FIELD-END".hash(self);
 
         Ok(())
     }
@@ -413,7 +436,7 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
 
 impl<'a> Visitor for QueryHashVisitor<'a> {
     fn operation(&mut self, root_type: &str, node: &executable::Operation) -> Result<(), BoxError> {
-        "VISIT_OPERATION".hash(self);
+        "^VISIT_OPERATION".hash(self);
 
         root_type.hash(self);
         self.hash_type_by_name(root_type)?;
@@ -437,7 +460,9 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.hash_directive(directive);
         }
 
-        traverse::operation(self, root_type, node)
+        traverse::operation(self, root_type, node)?;
+        "^VISIT_OPERATION-END".hash(self);
+        Ok(())
     }
 
     fn field(
@@ -446,7 +471,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         field_def: &ast::FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
-        "VISIT_FIELD".hash(self);
+        "^VISIT_FIELD".hash(self);
 
         if !self.seen_introspection && (field_def.name == "__schema" || field_def.name == "__type")
         {
@@ -461,11 +486,13 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             node,
         )?;
 
-        traverse::field(self, field_def, node)
+        traverse::field(self, field_def, node)?;
+        "^VISIT_FIELD_END".hash(self);
+        Ok(())
     }
 
     fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
-        "VISIT_FRAGMENT".hash(self);
+        "^VISIT_FRAGMENT".hash(self);
 
         println!("will hash fragment: {node:?}");
         node.name.hash(self);
@@ -475,11 +502,14 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.hash_directive(&directive);
         }
 
-        traverse::fragment(self, node)
+        traverse::fragment(self, node)?;
+        "^VISIT_FRAGMENT-END".hash(self);
+
+        Ok(())
     }
 
     fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
-        "VISIT_FRAGMENT_SPREAD".hash(self);
+        "^VISIT_FRAGMENT_SPREAD".hash(self);
 
         println!("will hash fragment spread: {node:?}");
 
@@ -495,7 +525,10 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.hash_directive(&directive);
         }
 
-        traverse::fragment_spread(self, node)
+        traverse::fragment_spread(self, node)?;
+        "^VISIT_FRAGMENT_SPREAD-END".hash(self);
+
+        Ok(())
     }
 
     fn inline_fragment(
@@ -503,7 +536,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         parent_type: &str,
         node: &executable::InlineFragment,
     ) -> Result<(), BoxError> {
-        "VISIT_INLINE_FRAGMENT".hash(self);
+        "^VISIT_INLINE_FRAGMENT".hash(self);
 
         if let Some(type_condition) = &node.type_condition {
             self.hash_type_by_name(type_condition)?;
@@ -512,7 +545,9 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.hash_directive(&directive);
         }
 
-        traverse::inline_fragment(self, parent_type, node)
+        traverse::inline_fragment(self, parent_type, node)?;
+        "^VISIT_INLINE_FRAGMENT-END".hash(self);
+        Ok(())
     }
 
     fn schema(&self) -> &apollo_compiler::Schema {
@@ -1269,6 +1304,32 @@ mod tests {
 
         assert!(hash(schema, query_one).from_hash_query != hash(schema, query_two).from_hash_query);
         assert!(hash(schema, query_one).from_visitor != hash(schema, query_two).from_visitor);
+    }
+
+    #[test]
+    fn directive_argument_type_change_hash() {
+        let schema1: &str = r#"
+        directive @foo(a: Int) on FIELD
+        directive @bar on FIELD
+
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        directive @foo(a: Int!) on FIELD
+        directive @bar on FIELD
+
+        type Query {
+          test(arg: Int): String
+        }
+        "#;
+
+        let query = "{ test @foo(a: 1) }";
+
+        assert!(hash(schema1, query).from_hash_query != hash(schema2, query).from_hash_query);
+        assert!(hash(schema1, query).from_visitor != hash(schema2, query).from_visitor);
     }
 
     #[test]
