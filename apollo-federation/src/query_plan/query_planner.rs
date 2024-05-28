@@ -2,16 +2,21 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
+use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
+use crate::link::spec::Identity;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
 use crate::operation::RebasedFragments;
@@ -197,6 +202,7 @@ pub struct QueryPlanner {
 }
 
 impl QueryPlanner {
+    #[instrument(level = "trace", skip_all, name = "QueryPlanner::new")]
     pub fn new(
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
@@ -214,6 +220,19 @@ impl QueryPlanner {
             Some(true),
             Some(true),
         )?;
+
+        trace!(data = &query_graph.to_json().to_string(), "query graph");
+
+        let metadata = supergraph_schema.metadata().unwrap();
+
+        let federation_link = metadata.for_identity(&Identity::federation_identity());
+        let interface_object_directive =
+            federation_link.map_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC, |link| {
+                link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
+            });
+
+        let is_interface_object =
+            |ty: &ExtendedType| ty.is_object() && ty.directives().has(&interface_object_directive);
 
         let interface_types_with_interface_objects = supergraph
             .schema
@@ -309,6 +328,7 @@ impl QueryPlanner {
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
+    #[instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")]
     pub fn build_query_plan(
         &self,
         document: &Valid<ExecutableDocument>,
@@ -400,6 +420,16 @@ impl QueryPlanner {
         if normalized_operation.selection_set.selections.is_empty() {
             return Ok(QueryPlan::default());
         }
+
+        trace!(
+            data = serde_json_bytes::json!({
+                "kind": "Operation",
+                "original": &operation.serialize().to_string(),
+                "normalized": &normalized_operation.to_string()
+            })
+            .to_string(),
+            "normalized operation"
+        );
 
         let Some(root) = self
             .federated_query_graph
@@ -497,10 +527,14 @@ impl QueryPlanner {
             None => None,
         };
 
-        Ok(QueryPlan {
+        let plan = QueryPlan {
             node: root_node,
             statistics,
-        })
+        };
+
+        trace!(data = &plan.to_json().to_string(), "query plan");
+
+        Ok(plan)
     }
 
     /// Get Query Planner's API Schema.
@@ -598,6 +632,7 @@ fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<Arc<str>, Federati
     Ok(name.clone())
 }
 
+#[instrument(level = "trace", skip_all, name = "compute_root_fetch_groups")]
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
@@ -626,6 +661,10 @@ pub(crate) fn compute_root_fetch_groups(
         };
         let fetch_dependency_node =
             dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        trace!(
+            data = serde_json_bytes::json!(&dependency_graph.to_json()).to_string(),
+            "tree_with_root_node"
+        );
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -734,8 +773,25 @@ fn compute_plan_for_defer_conditionals(
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+
+    use tracing_subscriber::fmt::format::FmtSpan;
+
     use super::*;
     use crate::subgraph::Subgraph;
+
+    fn setup_tracing_subscriber() {
+        let log_file = std::fs::File::create("my_cool_trace.log").expect("create log file");
+        tracing_subscriber::fmt()
+            // .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .json()
+            .flatten_event(true)
+            .with_span_events(FmtSpan::ACTIVE)
+            // .with_file(true)
+            // .with_line_number(true)
+            .with_writer(log_file)
+            .init();
+    }
 
     const TEST_SUPERGRAPH: &str = r#"
 schema
@@ -908,8 +964,20 @@ type User
         "###);
     }
 
+    // #[test_log::test]
     #[test]
     fn plan_simple_query_for_multiple_subgraphs() {
+        let log_file = File::create("my_cool_trace.log").expect("create log file");
+        tracing_subscriber::fmt()
+            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .json()
+            .flatten_event(true)
+            .with_span_events(FmtSpan::ACTIVE)
+            .with_file(true)
+            .with_line_number(true)
+            .with_writer(log_file)
+            .init();
+
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
 

@@ -25,6 +25,21 @@ pub(crate) enum Conditions {
     Boolean(bool),
 }
 
+impl Conditions {
+    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
+        match self {
+            Conditions::Boolean(b) => serde_json_bytes::Value::Bool(*b),
+            Conditions::Variables(variables) => {
+                let mut map = serde_json_bytes::Map::new();
+                for (name, negated) in variables.iter() {
+                    map.insert(name.to_string(), serde_json_bytes::Value::Bool(negated));
+                }
+                serde_json_bytes::Value::Object(map)
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Condition {
     Variable(VariableCondition),

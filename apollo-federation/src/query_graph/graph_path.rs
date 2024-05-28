@@ -18,6 +18,7 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use tracing::debug;
 use tracing::debug_span;
+use tracing::instrument;
 
 use crate::display_helpers::write_indented_lines;
 use crate::display_helpers::DisplayOption;
@@ -1315,6 +1316,7 @@ where
             == Some(self.edges.len() - 2))
     }
 
+    #[instrument(skip_all, level = "trace", name = "GraphPath::can_satisfy_conditions")]
     fn can_satisfy_conditions(
         &self,
         edge: EdgeIndex,
@@ -1392,6 +1394,7 @@ where
     // composition, but we'll need to port that code when we port composition.
     // PORT_NOTE: In the JS codebase, this was named
     // `advancePathWithNonCollectingAndTypePreservingTransitions`.
+    #[instrument(skip_all, level = "trace")]
     fn advance_with_non_collecting_and_type_preserving_transitions(
         self: &Arc<Self>,
         context: &OpGraphPathContext,
@@ -2373,6 +2376,12 @@ impl OpGraphPath {
     /// have also created multiple options).
     ///
     /// For the second element, it is true if the result only has type-exploded results.
+    #[instrument(
+        skip_all,
+        level = "trace",
+        name = "GraphPath::advance_with_operation_element"
+        fields(label = operation_element.to_string())
+    )]
     fn advance_with_operation_element(
         &self,
         supergraph_schema: ValidFederationSchema,
@@ -3131,6 +3140,32 @@ impl Display for OpGraphPath {
             write!(f, "])")?;
         }
         Ok(())
+    }
+}
+
+impl OpGraphPath {
+    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
+        use serde_json_bytes::json;
+        let head = &self.graph.graph()[self.head];
+        let mut parts = vec![json!({ "node": self.head.index(), "label": head.to_string() })];
+        self.edges
+            .iter()
+            .cloned()
+            .enumerate()
+            .for_each(|(i, edge)| {
+                match edge {
+                    Some(e) => {
+                        let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
+                        let edge = &self.graph.graph()[e];
+                        parts.push(json!({ "edge": e.index(), "label": edge.transition.to_string() }));
+                        let node = &self.graph.graph()[tail];
+                        parts.push(json!({ "node": tail.index(), "label": node.to_string() }));
+                    }
+                    None => parts
+                        .push(json!({ "trigger": true, "label": self.edge_triggers[i].as_ref().to_string() })),
+                };
+            });
+        json!(parts)
     }
 }
 

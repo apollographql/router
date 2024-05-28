@@ -1,8 +1,13 @@
 use std::sync::Arc;
 
 use indexmap::IndexSet;
+use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use serde_json_bytes::json;
+use serde_json_bytes::Value;
+use tracing::instrument;
+use tracing::trace;
 
 use crate::error::FederationError;
 use crate::operation::Operation;
@@ -152,6 +157,7 @@ impl BestQueryPlanInfo {
 }
 
 impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
+    #[instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new")]
     pub fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
@@ -178,6 +184,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
     // Many arguments is okay for a private constructor function.
     #[allow(clippy::too_many_arguments)]
+    #[instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new_inner")]
     fn new_inner(
         parameters: &'a QueryPlanningParameters,
         selection_set: SelectionSet,
@@ -208,6 +215,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             parameters.head,
         )
         .unwrap();
+
         // In JS this is done *inside* create_initial_options, which would require awareness of the
         // query graph.
         let tail = parameters
@@ -238,20 +246,49 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_conditions,
         )?;
 
+        // trace!(
+        //     data = json!(initial_options.iter().map(|ib| ib.to_json()).collect_vec()).to_string(),
+        //     "initial_options"
+        // );
+
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
+
+        // trace!(
+        //     data = json!(traversal
+        //         .open_branches
+        //         .iter()
+        //         .map(|ob| ob.to_json())
+        //         .collect_vec())
+        //     .to_string(),
+        //     "open_branches"
+        // );
 
         Ok(traversal)
     }
 
     // PORT_NOTE: In JS, the traversal is still usable after finding the best plan. Here we consume
     // the struct so we do not need to return a reference, which is very unergonomic.
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::find_best_plan"
+    )]
     pub fn find_best_plan(mut self) -> Result<Option<BestQueryPlanInfo>, FederationError> {
         self.find_best_plan_inner()?;
         Ok(self.best_plan)
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::find_best_plan_inner"
+    )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
+            // trace!(
+            //     data = json!(current_branch.to_json()).to_string(),
+            //     "current_branch"
+            // );
             let Some(current_selection) = current_branch.selections.pop() else {
                 return Err(FederationError::internal(
                     "Sub-stack unexpectedly empty during query plan traversal",
@@ -279,6 +316,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
     /// Returns whether to terminate planning immediately, and any new open branches to push onto
     /// the stack.
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::handle_open_branch"
+    )]
     fn handle_open_branch(
         &mut self,
         selection: &Selection,
@@ -287,6 +329,17 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let operation_element = selection.element()?;
         let mut new_options = vec![];
         let mut no_followups: bool = false;
+
+        trace!(
+            data = json!(options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
+            "options"
+        );
+
+        trace!(
+            data = json!(operation_element.to_string()).to_string(),
+            "operation_element"
+        );
+
         for option in options.iter_mut() {
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
@@ -315,6 +368,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 }
             }
         }
+
+        trace!(
+            data = json!(new_options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
+            "new_options"
+        );
 
         if no_followups {
             // This operation element is valid from this option, but is guarantee to yield no result
@@ -455,6 +513,10 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
     fn record_closed_branch(&mut self, closed_branch: ClosedBranch) -> Result<(), FederationError> {
         let maybe_trimmed = closed_branch.maybe_eliminate_strictly_more_costly_paths()?;
+        trace!(
+            data = json!(maybe_trimmed.to_json()).to_string(),
+            "closed_branch"
+        );
         self.closed_branches.push(maybe_trimmed);
         Ok(())
     }
@@ -544,13 +606,38 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         }
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::compute_best_plan_from_closed_branches"
+    )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
+        trace!(
+            data = json!(self
+                .closed_branches
+                .iter()
+                .map(|cb| cb.to_json())
+                .collect_vec())
+            .to_string(),
+            "closed_branches"
+        );
+
         if self.closed_branches.is_empty() {
             return Ok(());
         }
         self.prune_closed_branches();
         self.sort_options_in_closed_branches()?;
         self.reduce_options_if_needed();
+
+        trace!(
+            data = json!(self
+                .closed_branches
+                .iter()
+                .map(|cb| cb.to_json())
+                .collect_vec())
+            .to_string(),
+            "closed_branches_after_reduce"
+        );
 
         // debug log
         // self.closed_branches
@@ -606,6 +693,12 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     cost,
                 }
                 .into();
+
+                trace!(
+                    data = json!(self.best_plan.as_ref().unwrap().to_json()).to_string(),
+                    "best_plan"
+                );
+
                 return Ok(());
             }
         }
@@ -642,6 +735,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             cost,
         }
         .into();
+
+        trace!(
+            data = json!(self.best_plan.as_ref().unwrap().to_json()).to_string(),
+            "best_plan"
+        );
         Ok(())
     }
 
@@ -875,6 +973,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::updated_dependency_graph"
+    )]
     fn updated_dependency_graph(
         &self,
         dependency_graph: &mut FetchDependencyGraph,
@@ -911,9 +1014,19 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 &Default::default(),
             )?;
         }
+
+        trace!(
+            data = json!(dependency_graph.to_json()).to_string(),
+            "updated_dependency_graph"
+        );
         Ok(())
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::resolve_condition_plan"
+    )]
     fn resolve_condition_plan(
         &self,
         edge: EdgeIndex,
@@ -1128,4 +1241,91 @@ fn test_prune_and_reorder_first_branch() {
     // The "run" can be a single branch:
     assert(&["abC", "lmn", "op"], &["lmn", "ab", "op"]);
     assert(&["abC", "lmn"], &["lmn", "ab"]);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// Instrumentation
+
+impl OpenBranchAndSelections {
+    pub(crate) fn to_json(&self) -> Value {
+        let selections = self
+            .selections
+            .iter()
+            .map(|selection| selection.to_json())
+            .collect_vec();
+        json!({
+            "kind": "OpenBranchAndSelections",
+            "openBranch": self.open_branch.to_json(),
+            "selections": selections,
+        })
+    }
+}
+
+impl Selection {
+    pub(crate) fn to_json(&self) -> Value {
+        let conditions = match self.conditions() {
+            Ok(c) => c.to_json(),
+            _ => Value::Null,
+        };
+        let selection = match self.selection_set() {
+            Ok(Some(selection_set)) => json!(selection_set.to_string()),
+            _ => Value::Null,
+        };
+        json!({
+            "kind": "Selection",
+            "conditions": conditions,
+            "selection": selection
+        })
+    }
+}
+
+impl OpenBranch {
+    pub(crate) fn to_json(&self) -> Value {
+        let paths = self.0.iter().map(|path| path.to_json()).collect_vec();
+        json!({
+            "kind": "OpenBranch",
+            "branch": paths,
+        })
+    }
+}
+
+impl ClosedBranch {
+    pub(crate) fn to_json(&self) -> Value {
+        let paths = self.0.iter().map(|path| path.to_json()).collect_vec();
+        json!({
+            "kind": "ClosedBranch",
+            "branch": paths,
+        })
+    }
+}
+
+impl SimultaneousPathsWithLazyIndirectPaths {
+    pub(crate) fn to_json(&self) -> Value {
+        let paths = self
+            .paths
+            .0
+            .iter()
+            .map(|path| path.to_json())
+            .collect::<Vec<_>>();
+        json!({
+            "kind": "SimultaneousPathsWithLazyIndirectPaths",
+            "paths": paths,
+        })
+    }
+}
+
+impl BestQueryPlanInfo {
+    pub(crate) fn to_json(&self) -> Value {
+        // let path_tree = self
+        //     .path_tree
+        //     .as_ref()
+        //     .map(|path_tree| path_tree.to_json())
+        //     .unwrap_or(Value::Null);
+        json!({
+            "kind": "BestQueryPlanInfo",
+            "fetchDependencyGraph": self.fetch_dependency_graph.to_json(),
+            "pathTree": "TODO",
+            "cost": self.cost,
+        })
+    }
 }

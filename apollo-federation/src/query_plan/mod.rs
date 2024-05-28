@@ -250,3 +250,15 @@ impl QueryPlan {
         }
     }
 }
+
+////////////////////////////////////////////////////////////////////////////////
+/// Instrumentation
+
+impl QueryPlan {
+    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
+        serde_json_bytes::json!({
+            "kind": "QueryPlan",
+            "formatted": self.to_string(),
+        })
+    }
+}
