@@ -230,7 +230,7 @@ impl ApolloOtlpExporter {
             events: EvictedQueue::new(0),
             links: EvictedQueue::new(0),
             status: span.status,
-            // TBD(tim): if the underlying exporter supported it, we could
+            // If the underlying exporter supported it, we could
             // group by resource attributes here and significantly reduce the
             // duplicate resource / scope data that will get sent on every span.
             resource: Cow::Owned(self.resource_template.to_owned()),
@@ -239,8 +239,8 @@ impl ApolloOtlpExporter {
     }
 
     /// Adds the "graphql.operation.subtype" attribute for subscription requests.
-    /// TBD(tim): we could do this for all OTLP?
-    /// or not do this at all and let the backend interpret?
+    /// TBD(tim): do this or let the backend interpret?
+    /// TBD(tim): should this be called `graphql.operation.subtype` or something Apollo-private?
     fn prepare_execution_span(&self, mut span: LightSpanData) -> SpanData {
         let op_type = span
             .attributes

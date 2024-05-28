@@ -209,8 +209,6 @@ pub(crate) enum Error {
     SystemTime(#[from] SystemTimeError),
 }
 
-// TBD(tim): explore ways to have different types of LightSpanData,
-// since we only need some of these extra fields if we are going to send to OTel.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct LightSpanData {
     pub(crate) trace_id: TraceId,
@@ -504,7 +502,7 @@ impl Exporter {
 
     /// Used by the OTLP exporter to build up a complete trace given an initial "root span".
     /// Iterates over all children and recursively collect the entire subtree.
-    /// TBD(tim): For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
+    /// For a future iteration, consider using the same algorithm in `groupbytrace` processor, which
     /// groups based on trace ID instead of connecting recursively by parent ID.
     fn group_by_trace(&mut self, span: LightSpanData) -> Vec<LightSpanData> {
         self.pop_spans_for_tree(span)

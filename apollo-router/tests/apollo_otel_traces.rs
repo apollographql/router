@@ -228,12 +228,12 @@ async fn traces_handler(
     Extension(state): Extension<Arc<Mutex<Vec<ExportTraceServiceRequest>>>>,
     bytes: Bytes,
 ) -> Result<Json<()>, http::StatusCode> {
-    // TBD(tim): OTel exporter via HTTP isn't using compression.
+    // Note OTel exporter via HTTP isn't using compression.
     // dbg!(base64::encode(&*bytes));  // useful for debugging with a protobuf parser
     if let Ok(traces_request) = ExportTraceServiceRequest::decode(&*bytes) {
         state.lock().await.push(traces_request);
-        // TBD(tim): Seems like we always receive some other unparseable data before receiving the request.
-        // Maybe it's a handshake or something but not sure.  Should we log an error in the "else" branch?
+        // Seems like we always receive some other unparseable data before receiving the request.
+        // Maybe it's a handshake or something but not sure.
     }
     Ok(Json(()))
 }

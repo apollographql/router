@@ -319,8 +319,6 @@ impl tower::Service<HttpRequest> for HttpClientService {
             let http_response = do_fetch(client, &context, &service_name, http_request)
                 .instrument(http_req_span)
                 .await?;
-            // TBD(tim): could we set the span status to "error" if this fetch fails, and / or the http status code?
-            // it would help with some of our error tracking in Studio.
 
             // Print out the debug for the response
             if display_headers {

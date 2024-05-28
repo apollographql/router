@@ -80,9 +80,7 @@ pub(crate) struct Config {
     pub(crate) experimental_otlp_tracing_sampler: SamplerOption,
 
     /// OTLP protocol used for OTel traces.
-    /// Note this only applies if OTel traces are enabled.
-    /// TBD(tim): we're only using this for integration tests to send HTTP instead of GRPC.  We could either port the tests to GRPC or
-    /// consider just checking some kind of "is_in_test" flag instead of providing this at the config level.
+    /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
     pub(crate) experimental_otlp_tracing_protocol: Protocol,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
