@@ -65,12 +65,26 @@ impl QueryAnalysisLayer {
         }
     }
 
-    pub(crate) fn parse_document(
+    pub(crate) async fn parse_document(
         &self,
         query: &str,
         operation_name: Option<&str>,
     ) -> Result<ParsedDocument, SpecError> {
-        Query::parse_document(query, operation_name, &self.schema, &self.configuration)
+        let query = query.to_string();
+        let operation_name = operation_name.map(|o| o.to_string());
+        let schema = self.schema.clone();
+        let conf = self.configuration.clone();
+
+        task::spawn_blocking(move || {
+            Query::parse_document(
+                &query,
+                operation_name.as_deref(),
+                schema.as_ref(),
+                conf.as_ref(),
+            )
+        })
+        .await
+        .expect("parse_document task panicked")
     }
 
     pub(crate) async fn supergraph_request(
@@ -120,18 +134,10 @@ impl QueryAnalysisLayer {
         let res = match entry {
             None => {
                 let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-
-                let schema = self.schema.clone();
-                let conf = self.configuration.clone();
-                let q = query.clone();
-                let op = op_name.clone();
-
-                let result = task::spawn_blocking(move || {
-                    Query::parse_document(q.as_str(), op.as_deref(), schema.as_ref(), conf.as_ref())
-                })
-                .instrument(span)
-                .await
-                .unwrap();
+                let result = self
+                    .parse_document(&query, op_name.as_deref())
+                    .instrument(span)
+                    .await;
 
                 match result {
                     Err(errors) => {
