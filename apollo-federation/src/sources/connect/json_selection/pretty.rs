@@ -37,7 +37,7 @@ pub trait PrettyPrintable {
 
 /// Helper method to generate indentation
 fn indent_chars(indent: usize) -> String {
-    (0..indent * 2).map(|_| ' ').collect::<String>()
+    "  ".repeat(indent)
 }
 
 impl PrettyPrintable for JSONSelection {
