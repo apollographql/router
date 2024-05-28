@@ -10,6 +10,7 @@ use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::InterfaceType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
@@ -78,7 +79,6 @@ impl<'a> QueryHashVisitor<'a> {
     }
 
     pub(crate) fn hash_schema(&mut self) -> Result<(), BoxError> {
-        // FIXME: hash directive definitions?
         "^SCHEMA".hash(self);
         for directive_definition in self.schema.directive_definitions.values() {
             self.hash_directive_definition(&directive_definition)?;
@@ -314,7 +314,6 @@ impl<'a> QueryHashVisitor<'a> {
     fn hash_field(
         &mut self,
         parent_type: String,
-        type_name: String,
         field_def: &FieldDefinition,
         node: &executable::Field,
     ) -> Result<(), BoxError> {
@@ -323,7 +322,7 @@ impl<'a> QueryHashVisitor<'a> {
         self.hash_type_by_name(&parent_type)?;
 
         field_def.name.hash(self);
-        self.hash_type_by_name(&type_name)?;
+        self.hash_type(&field_def.ty)?;
 
         for argument in &field_def.arguments {
             self.hash_input_value_definition(argument)?;
@@ -433,6 +432,24 @@ impl<'a> QueryHashVisitor<'a> {
 
         Ok(())
     }
+
+    fn hash_interface_implementers(
+        &mut self,
+        intf: &InterfaceType,
+        node: &executable::Field,
+    ) -> Result<(), BoxError> {
+        "^INTERFACE_IMPL".hash(self);
+
+        if let Some(implementers) = self.schema.implementers_map().get(&intf.name) {
+            for object in &implementers.objects {
+                self.hash_type_by_name(object)?;
+                traverse::selection_set(self, object, &node.selection_set.selections)?;
+            }
+        }
+
+        "^INTERFACE_IMPL-END".hash(self);
+        Ok(())
+    }
 }
 
 impl<'a> Hasher for QueryHashVisitor<'a> {
@@ -496,12 +513,13 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.schema_str.hash(self);
         }
 
-        self.hash_field(
-            parent_type.to_string(),
-            field_def.name.as_str().to_string(),
-            field_def,
-            node,
-        )?;
+        self.hash_field(parent_type.to_string(), field_def, node)?;
+
+        if let Some(ExtendedType::Interface(intf)) =
+            self.schema.types.get(field_def.ty.inner_named_type())
+        {
+            self.hash_interface_implementers(intf, node)?;
+        }
 
         traverse::field(self, field_def, node)?;
         "^VISIT_FIELD_END".hash(self);
@@ -1659,6 +1677,107 @@ mod tests {
         assert_ne!(
             hash(schema, query_one).from_visitor,
             hash(schema, query_two).from_visitor
+        );
+    }
+
+    #[test]
+    fn changing_interface_implementors_changes_hash() {
+        let schema1: &str = r#"
+        type Query {
+            data: I
+        }
+
+        interface I {
+            id: ID
+            value: String
+        }
+
+        type Foo implements I {
+          id: ID
+          value: String
+          foo: String
+        }
+
+        type Bar {
+          id: ID
+          value: String
+          bar: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        type Query {
+            data: I
+        }
+
+        interface I {
+            id: ID
+            value: String
+        }
+
+        type Foo implements I {
+          id: ID
+          value: String
+          foo2: String
+        }
+
+        type Bar {
+          id: ID
+          value: String
+          bar: String
+        }
+        "#;
+
+        let schema3: &str = r#"
+        type Query {
+            data: I
+        }
+
+        interface I {
+            id: ID
+            value: String
+        }
+
+        type Foo implements I {
+          id: ID
+          value: String
+          foo: String
+        }
+
+        type Bar implements I {
+          id: ID
+          value: String
+          bar: String
+        }
+        "#;
+
+        let query = r#"
+        { 
+          data {
+            id
+            value
+          }
+        }
+        "#;
+
+        // changing an unrelated field in implementors does not change the hash
+        assert_eq!(
+            hash(schema1, query).from_hash_query,
+            hash(schema2, query).from_hash_query
+        );
+        assert_eq!(
+            hash(schema1, query).from_visitor,
+            hash(schema2, query).from_visitor
+        );
+
+        // adding a new implementor changes the hash
+        assert_ne!(
+            hash(schema1, query).from_hash_query,
+            hash(schema3, query).from_hash_query
+        );
+        assert_ne!(
+            hash(schema1, query).from_visitor,
+            hash(schema3, query).from_visitor
         );
     }
 
