@@ -1,9 +1,12 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
+use sha2::Digest;
 use tower::BoxError;
 
+use crate::context::OPERATION_NAME;
 use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
 
@@ -65,7 +68,12 @@ pub(crate) enum GraphQLSelector {
         #[allow(dead_code)]
         type_name: TypeName,
     },
-
+    OperationName {
+        /// The operation name from the query.
+        operation_name: OperationName,
+        /// Optional default value.
+        default: Option<String>,
+    },
     StaticField {
         /// A static value
         r#static: AttributeValue,
@@ -92,7 +100,7 @@ impl Selector for GraphQLSelector {
     fn on_response_field(
         &self,
         typed_value: &TypedValue,
-        _ctx: &Context,
+        ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         match self {
             GraphQLSelector::ListLength { .. } => match typed_value {
@@ -142,6 +150,22 @@ impl Selector for GraphQLSelector {
                 TypedValue::Root(_) => None,
             },
             GraphQLSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            GraphQLSelector::OperationName {
+                operation_name,
+                default,
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
         }
     }
 }
@@ -259,5 +283,47 @@ mod tests {
         let typed_value = TypedValue::Bool(ty(), field(), &true);
         let result = selector.on_response_field(&typed_value, &Context::default());
         assert_eq!(result, Some(Value::String("static_value".into())));
+    }
+
+    #[test]
+    fn operation_name() {
+        let selector = GraphQLSelector::OperationName {
+            operation_name: OperationName::String,
+            default: None,
+        };
+        let typed_value = TypedValue::Bool(ty(), field(), &true);
+        let ctx = Context::default();
+        let _ = ctx.insert(OPERATION_NAME, "some-operation".to_string());
+        let result = selector.on_response_field(&typed_value, &ctx);
+        assert_eq!(result, Some(Value::String("some-operation".into())));
+    }
+
+    #[test]
+    fn operation_name_hash() {
+        let selector = GraphQLSelector::OperationName {
+            operation_name: OperationName::Hash,
+            default: None,
+        };
+        let typed_value = TypedValue::Bool(ty(), field(), &true);
+        let ctx = Context::default();
+        let _ = ctx.insert(OPERATION_NAME, "some-operation".to_string());
+        let result = selector.on_response_field(&typed_value, &ctx);
+        assert_eq!(
+            result,
+            Some(Value::String(
+                "1d507f770a74cffd6cb014b190ea31160d442ff41d9bde088b634847aeafaafd".into()
+            ))
+        );
+    }
+
+    #[test]
+    fn operation_name_defaulted() {
+        let selector = GraphQLSelector::OperationName {
+            operation_name: OperationName::String,
+            default: Some("no-operation".to_string()),
+        };
+        let typed_value = TypedValue::Bool(ty(), field(), &true);
+        let result = selector.on_response_field(&typed_value, &Context::default());
+        assert_eq!(result, Some(Value::String("no-operation".into())));
     }
 }

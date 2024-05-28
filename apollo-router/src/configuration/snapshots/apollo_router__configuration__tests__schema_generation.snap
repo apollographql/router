@@ -2801,6 +2801,12 @@ expression: "&schema"
           "nullable": true,
           "type": "boolean"
         },
+        "graphql.operation.name": {
+          "default": null,
+          "description": "The GraphQL operation name",
+          "nullable": true,
+          "type": "boolean"
+        },
         "graphql.type.name": {
           "default": null,
           "description": "The GraphQL type name",
@@ -2879,6 +2885,24 @@ expression: "&schema"
           },
           "required": [
             "type_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "operation_name"
           ],
           "type": "object"
         },
@@ -7635,6 +7659,12 @@ expression: "&schema"
         "graphql.list.length": {
           "default": null,
           "description": "If the field is a list, the length of the list",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.operation.name": {
+          "default": null,
+          "description": "The GraphQL operation name",
           "nullable": true,
           "type": "boolean"
         },
