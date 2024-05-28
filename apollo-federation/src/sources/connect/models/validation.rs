@@ -25,9 +25,6 @@
   - body is valid syntax
 - selection
   - Valid syntax
-- If source:
-  - Matches a @source
-  - Transport is the same as the @source
 - If no source:
   - http:
     - Path is a fully qualified URL (plus a URL path template)
@@ -63,16 +60,21 @@
 use std::collections::HashMap;
 use std::fmt::Display;
 
+use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
+use itertools::Itertools;
 use url::Url;
 
 use crate::link::Link;
+use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
@@ -101,6 +103,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
     };
     let source_map = schema.sources;
     let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
+    let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
     let source_directives: Vec<SourceDirective> = schema
         .schema_definition
         .directives
@@ -110,23 +113,25 @@ pub fn validate(schema: Schema) -> Vec<Error> {
         .collect();
 
     let mut errors = Vec::new();
-    let mut names = HashMap::new();
+    let mut valid_source_names = HashMap::new();
+    let all_source_names = source_directives
+        .iter()
+        .map(|directive| directive.name.clone())
+        .collect_vec();
     for directive in source_directives {
         errors.extend(directive.errors);
         match directive.name.into_value_or_error(&source_map) {
             Err(error) => errors.push(error),
-            Ok(name) => {
-                names
-                    .entry(name)
-                    .or_insert_with(Vec::new)
-                    .extend(GraphQLLocation::from_node(
-                        directive.directive.node.location(),
-                        &source_map,
-                    ))
-            }
+            Ok(name) => valid_source_names
+                .entry(name)
+                .or_insert_with(Vec::new)
+                .extend(GraphQLLocation::from_node(
+                    directive.directive.node.location(),
+                    &source_map,
+                )),
         }
     }
-    for (name, locations) in names {
+    for (name, locations) in valid_source_names {
         if locations.len() > 1 {
             errors.push(Error {
                 message: format!("every @{source_directive_name} name must be unique; found duplicate source name {name}"),
@@ -135,6 +140,22 @@ pub fn validate(schema: Schema) -> Vec<Error> {
             });
         }
     }
+    let connect_errors = schema
+        .types
+        .values()
+        .filter_map(|extended_type| match extended_type {
+            ExtendedType::Object(object) => Some(object),
+            _ => None,
+        })
+        .flat_map(|object| {
+            validate_object(
+                object,
+                &source_map,
+                &connect_directive_name,
+                &all_source_names,
+            )
+        });
+    errors.extend(connect_errors);
     errors
 }
 
@@ -197,6 +218,55 @@ struct SourceDirective {
     name: SourceName,
     errors: Vec<Error>,
     directive: Component<Directive>,
+}
+
+fn validate_object(
+    object: &Node<ObjectType>,
+    sources: &SourceMap,
+    connect_directive_name: &Name,
+    source_names: &[SourceName],
+) -> Vec<Error> {
+    let fields = object.fields.values();
+    let mut errors = Vec::new();
+    for field in fields {
+        let Some(connect_directive) = field
+            .directives
+            .iter()
+            .find(|directive| directive.name == *connect_directive_name)
+        else {
+            // TODO: return errors when a field is not resolvable by some combination of `@connect`
+            continue;
+        };
+        let Some((source_name, source_name_value)) =
+            connect_directive.arguments.iter().find_map(|arg| {
+                if arg.name == CONNECT_SOURCE_ARGUMENT_NAME {
+                    arg.value.as_str().map(|value| (arg, value))
+                } else {
+                    None
+                }
+            })
+        else {
+            // TODO: handle direct http connects, not just named sources
+            continue;
+        };
+        if let Some(first_source_name) = source_names.first() {
+            if source_names.iter().all(|name| name != source_name_value) {
+                // TODO: Pick a suggestion that's not just the first defined source
+                errors.push(Error {
+                        code: ErrorCode::GraphQLError,
+                        message: format!(
+                            "the source name \"{source_name_value}\" for `{object_name}.{field_name}` does not match any defined sources. Did you mean {first_source_name}?",
+                            object_name = object.name,
+                            field_name = field.name,
+                        ),
+                        locations: GraphQLLocation::from_node(source_name.location(), sources)
+                            .into_iter()
+                            .collect(),
+                    });
+            }
+        }
+    }
+    errors
 }
 
 /// The `name` argument of a `@source` directive.
@@ -306,6 +376,17 @@ impl Display for SourceName {
             Self::Empty { directive_name, .. } | Self::Missing { directive_name, .. } => {
                 write!(f, "unnamed @{directive_name}")
             }
+        }
+    }
+}
+
+impl PartialEq<str> for SourceName {
+    fn eq(&self, other: &str) -> bool {
+        match self {
+            Self::Valid { value, .. } | Self::Invalid { value, .. } => {
+                value.as_str().is_some_and(|str_val| str_val == other)
+            }
+            Self::Empty { .. } | Self::Missing { .. } => other.is_empty(),
         }
     }
 }
@@ -431,5 +512,14 @@ mod test_validate_source {
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
         assert_snapshot!(errors[0].to_string(), @r###"baseURL argument for @api "users" was not a valid URL: relative URL without a base"###);
+    }
+
+    #[test]
+    fn connect_source_name_mismatch() {
+        let schema = include_str!("test_data/connect_source_name_mismatch.graphql");
+        let schema = Schema::parse(schema, "test.graphql").unwrap();
+        let errors = validate(schema);
+        assert_eq!(errors.len(), 1);
+        assert_snapshot!(errors[0].to_string(), @r###"the source name "v1" for `Query.resources` does not match any defined sources. Did you mean @source "v2"?"###);
     }
 }
