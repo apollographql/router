@@ -2803,6 +2803,7 @@ expression: "&schema"
         },
         "graphql.operation.name": {
           "default": null,
+          "description": "The GraphQL operation name",
           "nullable": true,
           "type": "boolean"
         },
@@ -7663,6 +7664,7 @@ expression: "&schema"
         },
         "graphql.operation.name": {
           "default": null,
+          "description": "The GraphQL operation name",
           "nullable": true,
           "type": "boolean"
         },

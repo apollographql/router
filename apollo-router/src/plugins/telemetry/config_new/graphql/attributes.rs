@@ -30,6 +30,7 @@ pub(crate) struct GraphQLAttributes {
     /// If the field is a list, the length of the list
     #[serde(rename = "graphql.list.length")]
     pub(crate) list_length: Option<bool>,
+    /// The GraphQL operation name
     #[serde(rename = "graphql.operation.name")]
     pub(crate) operation_name: Option<bool>,
     /// The GraphQL type name
