@@ -17,7 +17,6 @@ use serde_json::Map;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
@@ -230,11 +229,15 @@ where
         attrs
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) -> Vec<KeyValue> {
-        let mut attrs = self.attributes.on_response_field(typed_value, ctx);
-        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
-            value
-                .on_response_field(typed_value, ctx)
+    fn on_response_field(
+        &self,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_response_field(field, value, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, v)| {
+            v.on_response_field(field, value, ctx)
                 .map(|v| KeyValue::new(key.clone(), v))
         });
         attrs.extend(custom_attributes);

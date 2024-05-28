@@ -10,12 +10,12 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use serde_json_bytes::Value;
 
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
-use super::schema_aware_response::SchemaAwareResponse;
-use super::schema_aware_response::TypedValue;
+use super::schema_aware_response::ResponseVisitor;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::query_planner::fetch::SubgraphOperation;
@@ -306,31 +306,6 @@ impl StaticCostCalculator {
         Ok(sum)
     }
 
-    fn score_json(value: &TypedValue) -> Result<f64, DemandControlError> {
-        match value {
-            TypedValue::Null => Ok(0.0),
-            TypedValue::Bool(_, _, _) => Ok(0.0),
-            TypedValue::Number(_, _, _) => Ok(0.0),
-            TypedValue::String(_, _, _) => Ok(0.0),
-            TypedValue::List(_, _, items) => Self::summed_score_of_values(items),
-            TypedValue::Object(_, _, children) => {
-                let cost_of_children = Self::summed_score_of_values(children.values())?;
-                Ok(1.0 + cost_of_children)
-            }
-            TypedValue::Root(children) => Self::summed_score_of_values(children.values()),
-        }
-    }
-
-    fn summed_score_of_values<'a, I: IntoIterator<Item = &'a TypedValue<'a>>>(
-        values: I,
-    ) -> Result<f64, DemandControlError> {
-        let mut score = 0.0;
-        for value in values {
-            score += Self::score_json(value)?;
-        }
-        Ok(score)
-    }
-
     pub(crate) fn estimated(
         &self,
         query: &ExecutableDocument,
@@ -355,8 +330,43 @@ impl StaticCostCalculator {
         request: &ExecutableDocument,
         response: &Response,
     ) -> Result<f64, DemandControlError> {
-        let schema_aware_response = SchemaAwareResponse::new(request, response)?;
-        Self::score_json(&schema_aware_response.value)
+        let mut visitor = ResponseCostCalculator::new();
+        visitor.visit(request, response)?;
+        Ok(visitor.cost)
+    }
+}
+
+pub(crate) struct ResponseCostCalculator {
+    pub(crate) cost: f64,
+}
+
+impl ResponseCostCalculator {
+    pub(crate) fn new() -> Self {
+        Self { cost: 0.0 }
+    }
+}
+
+impl ResponseVisitor for ResponseCostCalculator {
+    fn visit_field(
+        &mut self,
+        request: &ExecutableDocument,
+        ty: &NamedType,
+        field: &Field,
+        value: &Value,
+    ) -> Result<(), DemandControlError> {
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_field(request, ty, field, item)?;
+                }
+            }
+            Value::Object(children) => {
+                self.cost += 1.0;
+                self.visit_selections(request, &field.selection_set, children)?;
+            }
+        }
+        Ok(())
     }
 }
 

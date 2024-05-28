@@ -9,7 +9,6 @@ use tracing::Span;
 
 use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::Context;
@@ -40,7 +39,12 @@ pub(crate) trait Selectors {
         Vec::with_capacity(0)
     }
     fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
-    fn on_response_field(&self, _typed_value: &TypedValue, _ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_field(
+        &self,
+        _field: &apollo_compiler::executable::Field,
+        _value: &serde_json_bytes::Value,
+        _ctx: &Context,
+    ) -> Vec<KeyValue> {
         Vec::with_capacity(0)
     }
 }
@@ -62,7 +66,8 @@ pub(crate) trait Selector {
     fn on_error(&self, error: &BoxError) -> Option<opentelemetry::Value>;
     fn on_response_field(
         &self,
-        _typed_value: &TypedValue,
+        _field: &apollo_compiler::executable::Field,
+        _value: &serde_json_bytes::Value,
         _ctx: &Context,
     ) -> Option<opentelemetry::Value> {
         None

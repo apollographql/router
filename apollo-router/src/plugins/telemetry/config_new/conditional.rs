@@ -18,7 +18,6 @@ use serde::Deserializer;
 use serde_json::Map;
 use serde_json::Value;
 
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -294,7 +293,8 @@ where
 
     fn on_response_field(
         &self,
-        typed_value: &TypedValue,
+        field: &apollo_compiler::executable::Field,
+        field_value: &serde_json_bytes::Value,
         ctx: &Context,
     ) -> Option<opentelemetry_api::Value> {
         // We may have got the value from the request.
@@ -303,7 +303,10 @@ where
         match (value, &self.condition) {
             (State::Value(value), Some(condition)) => {
                 // We have a value already, let's see if the condition was evaluated to true.
-                if condition.lock().evaluate_response_field(typed_value, ctx) {
+                if condition
+                    .lock()
+                    .evaluate_response_field(field, field_value, ctx)
+                {
                     *self.value.lock() = State::Returned;
                     Some(value)
                 } else {
@@ -312,15 +315,18 @@ where
             }
             (State::Pending, Some(condition)) => {
                 // We don't have a value already, let's try to get it from the error if the condition was evaluated to true.
-                if condition.lock().evaluate_response_field(typed_value, ctx) {
-                    self.selector.on_response_field(typed_value, ctx)
+                if condition
+                    .lock()
+                    .evaluate_response_field(field, field_value, ctx)
+                {
+                    self.selector.on_response_field(field, field_value, ctx)
                 } else {
                     None
                 }
             }
             (State::Pending, None) => {
                 // We don't have a value already, and there is no condition.
-                self.selector.on_response_field(typed_value, ctx)
+                self.selector.on_response_field(field, field_value, ctx)
             }
             _ => None,
         }

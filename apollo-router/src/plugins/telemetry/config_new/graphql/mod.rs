@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::executable::Field;
+use apollo_compiler::ExecutableDocument;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
@@ -13,9 +17,8 @@ use super::instruments::Increment;
 use super::instruments::InstrumentsConfig;
 use super::instruments::METER_NAME;
 use crate::metrics;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::Visitor;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::ResponseVisitor;
+use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -193,27 +196,23 @@ impl Instrumented for GraphQLInstruments {
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
             if let Some(executable_document) = ctx.unsupported_executable_document() {
-                if let Ok(schema) =
-                    schema_aware_response::SchemaAwareResponse::new(&executable_document, response)
-                {
-                    GraphQLInstrumentsVisitor {
-                        ctx,
-                        instruments: self,
-                    }
-                    .visit(&schema.value)
+                GraphQLInstrumentsVisitor {
+                    ctx,
+                    instruments: self,
                 }
+                .visit(&executable_document, response);
             }
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(&self, field: &Field, value: &Value, ctx: &Context) {
         if let Some(field_length) = &self.list_length {
-            field_length.on_response_field(typed_value, ctx);
+            field_length.on_response_field(field, value, ctx);
         }
         if let Some(field_execution) = &self.field_execution {
-            field_execution.on_response_field(typed_value, ctx);
+            field_execution.on_response_field(field, value, ctx);
         }
-        self.custom.on_response_field(typed_value, ctx);
+        self.custom.on_response_field(field, value, ctx);
     }
 }
 
@@ -222,9 +221,16 @@ struct GraphQLInstrumentsVisitor<'a> {
     instruments: &'a GraphQLInstruments,
 }
 
-impl<'a> Visitor for GraphQLInstrumentsVisitor<'a> {
-    fn visit_field(&self, value: &TypedValue) {
-        self.instruments.on_response_field(value, self.ctx);
+impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
+    fn visit_field(
+        &mut self,
+        _request: &ExecutableDocument,
+        _ty: &NamedType,
+        field: &Field,
+        value: &Value,
+    ) -> Result<(), DemandControlError> {
+        self.instruments.on_response_field(field, value, self.ctx);
+        Ok(())
     }
 }
 

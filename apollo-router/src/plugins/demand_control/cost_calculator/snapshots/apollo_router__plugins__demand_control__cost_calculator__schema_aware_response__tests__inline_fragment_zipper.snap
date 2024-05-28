@@ -1,64 +1,11 @@
 ---
 source: apollo-router/src/plugins/demand_control/cost_calculator/schema_aware_response.rs
-expression: "zipped.expect(\"expected zipped response\")"
+expression: visitor.counts
 ---
-ships:
-  field: ships
-  items:
-    - children:
-        owner:
-          children:
-            licenseNumber:
-              field: licenseNumber
-              type: User
-              value: 1
-            name:
-              field: name
-              type: User
-              value: Kate Chopin
-          field: owner
-          type: Ship
-      field: ships
-      type: Query
-    - children:
-        owner:
-          children:
-            licenseNumber:
-              field: licenseNumber
-              type: User
-              value: 2
-            name:
-              field: name
-              type: User
-              value: Paul Auster
-          field: owner
-          type: Ship
-      field: ships
-      type: Query
-  type: Query
-users:
-  field: users
-  items:
-    - children:
-        licenseNumber:
-          field: licenseNumber
-          type: User
-          value: 1
-        name:
-          field: name
-          type: User
-          value: Kate Chopin
-      field: users
-      type: Query
-    - children:
-        licenseNumber:
-          field: licenseNumber
-          type: User
-          value: 2
-        name:
-          field: name
-          type: User
-          value: Paul Auster
-      field: users
-      type: Query
-  type: Query
+{
+    "owner": 2,
+    "ships": 2,
+    "licenseNumber": 4,
+    "name": 4,
+    "users": 2,
+}

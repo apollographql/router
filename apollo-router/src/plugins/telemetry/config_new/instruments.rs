@@ -15,6 +15,7 @@ use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -22,7 +23,6 @@ use super::attributes::HttpServerAttributes;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -662,7 +662,13 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
-    fn on_response_field(&self, _typed_value: &TypedValue, _ctx: &Context) {}
+    fn on_response_field(
+        &self,
+        _field: &apollo_compiler::executable::Field,
+        value: &Value,
+        _ctx: &Context,
+    ) {
+    }
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
@@ -691,8 +697,13 @@ where
         self.attributes.on_response_event(response, ctx);
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
-        self.attributes.on_response_field(typed_value, ctx);
+    fn on_response_field(
+        &self,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
+        self.attributes.on_response_field(field, value, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -914,12 +925,17 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
         for counter in &self.counters {
-            counter.on_response_field(typed_value, ctx);
+            counter.on_response_field(field, value, ctx);
         }
         for histogram in &self.histograms {
-            histogram.on_response_field(typed_value, ctx);
+            histogram.on_response_field(field, value, ctx);
         }
     }
 }
@@ -1339,9 +1355,14 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+        if !inner.condition.evaluate_response_field(field, value, ctx) {
             return;
         }
 
@@ -1350,7 +1371,7 @@ where
         if let Some(selectors) = inner.selectors.as_ref() {
             attrs.extend(
                 selectors
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(field, value, ctx)
                     .into_iter()
                     .collect::<Vec<_>>(),
             );
@@ -1359,7 +1380,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(typed_value, ctx))
+            .and_then(|s| s.on_response_field(field, value, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::FieldCustom(None) => {
@@ -1738,9 +1759,14 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+        if !inner.condition.evaluate_response_field(field, value, ctx) {
             return;
         }
 
@@ -1749,7 +1775,7 @@ where
         if let Some(selectors) = inner.selectors.as_ref() {
             attrs.extend(
                 selectors
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(field, value, ctx)
                     .into_iter()
                     .collect::<Vec<_>>(),
             );
@@ -1758,7 +1784,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(typed_value, ctx))
+            .and_then(|s| s.on_response_field(field, value, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::FieldCustom(None) => {
@@ -2229,9 +2255,18 @@ mod tests {
                                         .on_response_event(&response, &context);
                                 }
                                 Event::ResponseField { typed_value } => {
+                                    // TODO: Work out the types here
+                                    /*
                                     let typed_value_data: TypedValueData = typed_value.into();
-                                    let typed_value = TypedValue::from(&typed_value_data);
-                                    graphql_instruments.on_response_field(&typed_value, &context);
+                                    graphql_instruments.on_response_field(
+                                        &TypedValueData::field(
+                                            typed_value.field_ty,
+                                            typed_value.field_name,
+                                        ),
+                                        &serde_json_bytes::json!(typed_value_data.value),
+                                        &context,
+                                    );
+                                    */
                                 }
                                 Event::Context { map } => {
                                     for (key, value) in map {
@@ -2443,50 +2478,6 @@ mod tests {
 
         fn type_name(type_name: String) -> Name {
             NamedType::new(type_name).expect("valid type name")
-        }
-    }
-
-    impl<'a> From<&'a TypedValueData> for TypedValue<'a> {
-        fn from(value: &'a TypedValueData) -> Self {
-            match value {
-                TypedValueData::Null => TypedValue::Null,
-                TypedValueData::Bool {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::Bool(type_name, field_definition, value),
-                TypedValueData::Number {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::Number(type_name, field_definition, value),
-                TypedValueData::String {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::String(type_name, field_definition, value),
-                TypedValueData::List {
-                    type_name,
-                    field_definition,
-                    values,
-                } => TypedValue::List(
-                    type_name,
-                    field_definition,
-                    values.iter().map(|v| v.into()).collect(),
-                ),
-                TypedValueData::Object {
-                    type_name,
-                    field_definition,
-                    values,
-                } => TypedValue::Object(
-                    type_name,
-                    field_definition,
-                    values.iter().map(|(k, v)| (k.clone(), v.into())).collect(),
-                ),
-                TypedValueData::Root { values } => {
-                    TypedValue::Root(values.iter().map(|(k, v)| (k.clone(), v.into())).collect())
-                }
-            }
         }
     }
 
