@@ -13,7 +13,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -70,7 +70,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -106,7 +106,7 @@ resourceSpans:
                   stringValue: "{}"
               - key: apollo_private.http.response_headers
                 value:
-                  stringValue: "{\"my_trace_id\":[\"cc73821bbe0d19c5ab74a262a4f4c522\"]}"
+                  stringValue: "[redacted]"
               - key: client.name
                 value:
                   stringValue: ""
@@ -142,7 +142,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -190,7 +190,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -238,7 +238,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -268,7 +268,7 @@ resourceSpans:
             attributes:
               - key: apollo_private.graphql.variables
                 value:
-                  stringValue: "{\"if\":\"\"}"
+                  stringValue: "[redacted]"
               - key: apollo_private.operation_signature
                 value:
                   stringValue: "# -\nquery($if:Boolean!){topProducts{name...@defer(if:$if,label:\"\"){reviews{author{name}}reviews{author{name}}}}}"
@@ -292,7 +292,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -340,7 +340,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -388,7 +388,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -439,7 +439,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -487,7 +487,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -538,7 +538,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -586,7 +586,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -634,7 +634,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -664,7 +664,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: products
               - key: apollo_private.sent_time_offset
                 value:
                   stringValue: "[redacted]"
@@ -688,7 +688,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -718,10 +718,10 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: products
               - key: apollo_private.ftv1
                 value:
-                  stringValue: GgsIs5XSsgYQgLbcBSILCLOV0rIGEMCxnwVYndgRcvwBYvkBCgt0b3BQcm9kdWN0cxoJW1Byb2R1Y3RdQNn9CEjHtwpiRBAAYh8KA3VwYxoHU3RyaW5nIUDJxgxIl4wNagdQcm9kdWN0Yh8KBG5hbWUaBlN0cmluZ0Cfsw1I58gNagdQcm9kdWN0YkQQAWIfCgN1cGMaB1N0cmluZyFAm7gOSOHMDmoHUHJvZHVjdGIfCgRuYW1lGgZTdHJpbmdAgd0OSLP7DmoHUHJvZHVjdGJEEAJiHwoDdXBjGgdTdHJpbmchQN+gD0iRyQ9qB1Byb2R1Y3RiHwoEbmFtZRoGU3RyaW5nQIfdD0i77Q9qB1Byb2R1Y3RqBVF1ZXJ5+QEAAAAAAADwPw==
+                  stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -745,7 +745,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -793,7 +793,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -823,7 +823,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: products
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -847,7 +847,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -895,7 +895,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -946,7 +946,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -976,7 +976,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: reviews
               - key: apollo_private.sent_time_offset
                 value:
                   stringValue: "[redacted]"
@@ -1000,7 +1000,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1030,10 +1030,10 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: reviews
               - key: apollo_private.ftv1
                 value:
-                  stringValue: GgwIs5XSsgYQwJuOmAEiDAizldKyBhCAl9GXAVi/lBZynQNimgMKCV9lbnRpdGllcxoKW19FbnRpdHldIUDxzQlIz6EUYqMBEABingEKB3Jldmlld3MaCFtSZXZpZXddQLTRDEjqow1iOxAAYjcKBmF1dGhvchoEVXNlckCt/A1IvJAOYhcKAmlkGgNJRCFAqdgOSNn2DmoEVXNlcmoGUmV2aWV3YjsQAWI3CgZhdXRob3IaBFVzZXJAt7MPSKC/D2IXCgJpZBoDSUQhQPTmEEjt+RBqBFVzZXJqBlJldmlld2oHUHJvZHVjdGJlEAFiYQoHcmV2aWV3cxoIW1Jldmlld11A0rARSN/DEWI7EABiNwoGYXV0aG9yGgRVc2VyQPjpEUjr9RFiFwoCaWQaA0lEIUDJlxJIwKUSagRVc2VyagZSZXZpZXdqB1Byb2R1Y3RiZRACYmEKB3Jldmlld3MaCFtSZXZpZXddQLjXEkjk5hJiOxAAYjcKBmF1dGhvchoEVXNlckDMiBNI0ZMTYhcKAmlkGgNJRCFAvPUTSIaFFGoEVXNlcmoGUmV2aWV3agdQcm9kdWN0agVRdWVyefkBAAAAAAAA8D8=
+                  stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -1057,7 +1057,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1105,7 +1105,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1135,7 +1135,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: reviews
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -1159,7 +1159,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1207,7 +1207,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1258,7 +1258,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1288,7 +1288,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: accounts
               - key: apollo_private.sent_time_offset
                 value:
                   stringValue: "[redacted]"
@@ -1312,7 +1312,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1342,10 +1342,10 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: accounts
               - key: apollo_private.ftv1
                 value:
-                  stringValue: GgwIs5XSsgYQwIOquAIiDAizldKyBhDAg6q4AliU7g5ybGJqCglfZW50aXRpZXMaCltfRW50aXR5XSFA/v4ISJqaDWIgEABiHAoEbmFtZRoGU3RyaW5nQOPpC0iFswxqBFVzZXJiIBABYhwKBG5hbWUaBlN0cmluZ0DV7QxInPwMagRVc2VyagVRdWVyefkBAAAAAAAA8D8=
+                  stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -1369,7 +1369,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1417,7 +1417,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"
@@ -1447,7 +1447,7 @@ resourceSpans:
             attributes:
               - key: apollo.subgraph.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: accounts
               - key: graphql.operation.name
                 value:
                   stringValue: ""
@@ -1471,7 +1471,7 @@ resourceSpans:
             stringValue: "[redacted]"
         - key: apollo.graph.ref
           value:
-            stringValue: "[redacted]"
+            stringValue: test
         - key: apollo.router.id
           value:
             stringValue: "[redacted]"

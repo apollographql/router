@@ -175,12 +175,26 @@ macro_rules! assert_report {
             insta::with_settings!({sort_maps => true}, {
                     insta::assert_yaml_snapshot!($report, {
                         ".**.attributes" => insta::sorted_redaction(),
-                        ".**.attributes[]" => insta::dynamic_redaction(|mut value, path| {
-                            const REDACTED_FIELDS: [&'static str; 3] = ["trace_id", "apollo_private.duration_ns" , "apollo_private.sent_time_offset"];
+                        ".**.attributes[]" => insta::dynamic_redaction(|mut value, _| {
+                            const REDACTED_ATTRIBUTES: [&'static str; 11] = [
+                                "apollo.client.host",
+                                "apollo.client.uname",
+                                "apollo.router.id",
+                                "apollo.schema.id",
+                                "apollo.user.agent",
+                                "apollo_private.duration_ns" ,
+                                "apollo_private.ftv1",
+                                "apollo_private.graphql.variables",
+                                "apollo_private.http.response_headers",
+                                "apollo_private.sent_time_offset",
+                                "trace_id",
+                            ];
                             if let insta::internals::Content::Struct(name, key_value)  = &mut value{
                                 if name == &"KeyValue" {
-                                    if key_value[0].1.as_str().unwrap().starts_with("apollo.") || REDACTED_FIELDS.contains(&key_value[0].1.as_str().unwrap()) {
-                                        key_value[1].1 = insta::internals::Content::NewtypeVariant("Value", 0, "stringValue", Box::new(insta::internals::Content::from("[redacted]")));
+                                    if REDACTED_ATTRIBUTES.contains(&key_value[0].1.as_str().unwrap()) {
+                                        key_value[1].1 = insta::internals::Content::NewtypeVariant(
+                                            "Value", 0, "stringValue", Box::new(insta::internals::Content::from("[redacted]"))
+                                        );
                                     }
                                 }
                             }

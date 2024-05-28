@@ -6,17 +6,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -36,11 +42,14 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo_private.request
-                value: "[redacted]"
+                value:
+                  boolValue: true
               - key: graphql.operation.type
-                value: "[redacted]"
+                value:
+                  stringValue: query
               - key: http.request.method
-                value: "[redacted]"
+                value:
+                  stringValue: POST
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -54,17 +63,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -84,21 +99,29 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo_private.duration_ns
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
               - key: apollo_private.http.request_headers
-                value: "[redacted]"
+                value:
+                  stringValue: "{\"send-header\":[\"Header value\"]}"
               - key: apollo_private.http.response_headers
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
               - key: client.name
-                value: "[redacted]"
+                value:
+                  stringValue: ""
               - key: client.version
-                value: "[redacted]"
+                value:
+                  stringValue: ""
               - key: http.request.method
-                value: "[redacted]"
+                value:
+                  stringValue: POST
               - key: http.response.status_code
-                value: "[redacted]"
+                value:
+                  intValue: 200
               - key: trace_id
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -112,17 +135,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -154,17 +183,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -196,17 +231,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -226,9 +267,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo_private.graphql.variables
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
               - key: apollo_private.operation_signature
-                value: "[redacted]"
+                value:
+                  stringValue: "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -242,17 +285,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -284,17 +333,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -326,17 +381,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -356,7 +417,8 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.operation.type
-                value: "[redacted]"
+                value:
+                  stringValue: query
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -370,17 +432,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -412,17 +480,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -454,17 +528,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -484,9 +564,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: products
               - key: apollo_private.sent_time_offset
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -500,17 +582,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -530,11 +618,14 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: products
               - key: apollo_private.ftv1
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
               - key: graphql.operation.name
-                value: "[redacted]"
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -548,17 +639,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -590,17 +687,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -620,9 +723,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: products
               - key: graphql.operation.name
-                value: "[redacted]"
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -636,17 +741,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -678,17 +789,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -708,7 +825,8 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.path
-                value: "[redacted]"
+                value:
+                  stringValue: /topProducts/@
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -722,17 +840,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -752,9 +876,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: reviews
               - key: apollo_private.sent_time_offset
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -768,17 +894,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -798,11 +930,14 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: reviews
               - key: apollo_private.ftv1
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
               - key: graphql.operation.name
-                value: "[redacted]"
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -816,17 +951,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -858,17 +999,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -888,9 +1035,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: reviews
               - key: graphql.operation.name
-                value: "[redacted]"
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -904,17 +1053,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -946,17 +1101,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -976,7 +1137,8 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: graphql.path
-                value: "[redacted]"
+                value:
+                  stringValue: /topProducts/@/reviews/@/author
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -990,17 +1152,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1020,9 +1188,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: accounts
               - key: apollo_private.sent_time_offset
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1036,17 +1206,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1066,11 +1242,14 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: accounts
               - key: apollo_private.ftv1
-                value: "[redacted]"
+                value:
+                  stringValue: "[redacted]"
               - key: graphql.operation.name
-                value: "[redacted]"
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1084,17 +1263,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1126,17 +1311,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
@@ -1156,9 +1347,11 @@ resourceSpans:
             endTimeUnixNano: "[end_time]"
             attributes:
               - key: apollo.subgraph.name
-                value: "[redacted]"
+                value:
+                  stringValue: accounts
               - key: graphql.operation.name
-                value: "[redacted]"
+                value:
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1172,17 +1365,23 @@ resourceSpans:
   - resource:
       attributes:
         - key: apollo.client.host
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.client.uname
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.graph.ref
-          value: "[redacted]"
+          value:
+            stringValue: test
         - key: apollo.router.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.schema.id
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
         - key: apollo.user.agent
-          value: "[redacted]"
+          value:
+            stringValue: "[redacted]"
       droppedAttributesCount: 0
     scopeSpans:
       - scope:
