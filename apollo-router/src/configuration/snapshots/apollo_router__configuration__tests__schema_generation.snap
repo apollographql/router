@@ -2784,21 +2784,25 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "graphql.field.name": {
+          "default": null,
           "description": "The GraphQL field name",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.field.type": {
+          "default": null,
           "description": "The GraphQL field type",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.list.length": {
+          "default": null,
           "description": "If the field is a list, the length of the list",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.type.name": {
+          "default": null,
           "description": "The GraphQL type name",
           "nullable": true,
           "type": "boolean"
@@ -7617,21 +7621,25 @@ expression: "&schema"
       },
       "properties": {
         "graphql.field.name": {
+          "default": null,
           "description": "The GraphQL field name",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.field.type": {
+          "default": null,
           "description": "The GraphQL field type",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.list.length": {
+          "default": null,
           "description": "If the field is a list, the length of the list",
           "nullable": true,
           "type": "boolean"
         },
         "graphql.type.name": {
+          "default": null,
           "description": "The GraphQL type name",
           "nullable": true,
           "type": "boolean"
