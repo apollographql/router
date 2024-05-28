@@ -350,7 +350,7 @@ impl ResponseVisitor for ResponseCostCalculator {
     fn visit_field(
         &mut self,
         request: &ExecutableDocument,
-        ty: &NamedType,
+        _ty: &NamedType,
         field: &Field,
         value: &Value,
     ) {
@@ -358,7 +358,7 @@ impl ResponseVisitor for ResponseCostCalculator {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, ty, field, item);
+                    self.visit_field(request, _ty, field, item);
                 }
             }
             Value::Object(children) => {

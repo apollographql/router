@@ -203,7 +203,7 @@ impl Instrumented for GraphQLInstruments {
 
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
             if let Some(executable_document) = ctx.unsupported_executable_document() {
-                let _ = GraphQLInstrumentsVisitor {
+                GraphQLInstrumentsVisitor {
                     ctx,
                     instruments: self,
                 }

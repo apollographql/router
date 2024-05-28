@@ -627,7 +627,7 @@ mod tests {
         fn visit_field(
             &mut self,
             request: &ExecutableDocument,
-            ty: &apollo_compiler::executable::NamedType,
+            _ty: &apollo_compiler::executable::NamedType,
             field: &apollo_compiler::executable::Field,
             value: &Value,
         ) {
@@ -638,7 +638,7 @@ mod tests {
                 }
                 Value::Array(items) => {
                     for item in items {
-                        self.visit_field(request, ty, field, item);
+                        self.visit_field(request, _ty, field, item);
                     }
                 }
                 Value::Object(children) => {
