@@ -15,7 +15,6 @@ use serde_json_bytes::Value;
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
-use super::schema_aware_response::ResponseVisitor;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::query_planner::fetch::SubgraphOperation;
@@ -24,6 +23,7 @@ use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
+use crate::response::ResponseVisitor;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
@@ -331,7 +331,7 @@ impl StaticCostCalculator {
         response: &Response,
     ) -> Result<f64, DemandControlError> {
         let mut visitor = ResponseCostCalculator::new();
-        visitor.visit(request, response)?;
+        visitor.visit(request, response);
         Ok(visitor.cost)
     }
 }
@@ -353,20 +353,19 @@ impl ResponseVisitor for ResponseCostCalculator {
         ty: &NamedType,
         field: &Field,
         value: &Value,
-    ) -> Result<(), DemandControlError> {
+    ) {
         match value {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, ty, field, item)?;
+                    self.visit_field(request, ty, field, item);
                 }
             }
             Value::Object(children) => {
                 self.cost += 1.0;
-                self.visit_selections(request, &field.selection_set, children)?;
+                self.visit_selections(request, &field.selection_set, children);
             }
         }
-        Ok(())
     }
 }
 

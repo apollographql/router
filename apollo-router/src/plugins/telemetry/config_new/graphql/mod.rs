@@ -17,8 +17,6 @@ use super::instruments::Increment;
 use super::instruments::InstrumentsConfig;
 use super::instruments::METER_NAME;
 use crate::metrics;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::ResponseVisitor;
-use crate::plugins::demand_control::DemandControlError;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -31,6 +29,7 @@ use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrum
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::response::ResponseVisitor;
 use crate::services::supergraph;
 use crate::Context;
 
@@ -236,23 +235,21 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
         ty: &NamedType,
         field: &Field,
         value: &Value,
-    ) -> Result<(), DemandControlError> {
+    ) {
         self.instruments
             .on_response_field(ty, field, value, self.ctx);
 
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, ty, field, item)?;
+                    self.visit_field(request, ty, field, item);
                 }
             }
             Value::Object(children) => {
-                self.visit_selections(request, &field.selection_set, children)?;
+                self.visit_selections(request, &field.selection_set, children);
             }
             _ => {}
         }
-
-        Ok(())
     }
 }
 
