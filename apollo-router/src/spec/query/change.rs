@@ -33,7 +33,7 @@ pub(crate) const JOIN_TYPE_DIRECTIVE_NAME: &str = "join__type";
 pub(crate) struct QueryHashVisitor<'a> {
     schema: &'a schema::Schema,
     // TODO: remove once introspection has been moved out of query planning
-    // For now, introspection is stiull handled by the planner, so when an
+    // For now, introspection is still handled by the planner, so when an
     // introspection query is hashed, it should take the whole schema into account
     schema_str: &'a str,
     hasher: Sha256,
@@ -191,7 +191,6 @@ impl<'a> QueryHashVisitor<'a> {
     fn hash_type_by_name(&mut self, name: &str) -> Result<(), BoxError> {
         "^TYPE_BY_NAME".hash(self);
 
-        println!("hash_type_by_name: will hash type: {name}");
         name.hash(self);
 
         if self.hashed_types.contains(name) {
@@ -443,9 +442,9 @@ impl<'a> Hasher for QueryHashVisitor<'a> {
 
     fn write(&mut self, bytes: &[u8]) {
         // FIXME: hack I used to debug my code, remove
-        if bytes.len() != 1 || bytes[0] != 0xFF {
-            println!("{:?}", std::str::from_utf8(bytes).unwrap());
-        }
+        // if bytes.len() != 1 || bytes[0] != 0xFF {
+        //     println!("{:?}", std::str::from_utf8(bytes).unwrap());
+        // }
         // byte separator between each part that is hashed
         self.hasher.update(&[0xFF][..]);
         self.hasher.update(bytes);
@@ -512,9 +511,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
     fn fragment(&mut self, node: &executable::Fragment) -> Result<(), BoxError> {
         "^VISIT_FRAGMENT".hash(self);
 
-        println!("will hash fragment: {node:?}");
         node.name.hash(self);
-        println!("type condition: {:?}", node.type_condition());
         self.hash_type_by_name(node.type_condition())?;
         for directive in &node.directives {
             self.hash_directive(&directive);
@@ -528,8 +525,6 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
 
     fn fragment_spread(&mut self, node: &executable::FragmentSpread) -> Result<(), BoxError> {
         "^VISIT_FRAGMENT_SPREAD".hash(self);
-
-        println!("will hash fragment spread: {node:?}");
 
         node.fragment_name.hash(self);
         let type_condition = &self
