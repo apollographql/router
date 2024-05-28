@@ -13,4 +13,4 @@ telemetry:
           condition:
             eq:
               - response_header: "never-true"
-              - static: "true"
+              - "true"
