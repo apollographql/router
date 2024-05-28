@@ -1000,13 +1000,14 @@ impl SpanExporter for Exporter {
                     LightSpanData::from_span_data(span, &self.include_attr_names);
                 if send_otlp {
                     let grouped_trace_spans = self.group_by_trace(root_span);
-                    // TBD(tim): do we need to filter out traces w/o signatures?  What scenario(s) would cause that to happen?
-                    otlp_trace_spans.push(
-                        self.otlp_exporter
-                            .as_ref()
-                            .expect("otlp exporter required")
-                            .prepare_for_export(grouped_trace_spans),
-                    );
+                    if let Some(trace) = self
+                        .otlp_exporter
+                        .as_ref()
+                        .expect("otlp exporter required")
+                        .prepare_for_export(grouped_trace_spans)
+                    {
+                        otlp_trace_spans.push(trace);
+                    }
                 } else if send_reports {
                     match self.extract_traces(root_span) {
                         Ok(extracted_traces) => {

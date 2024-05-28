@@ -52,10 +52,12 @@ use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_TRACING_PROTOCOL_OTLP;
+use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::services::OperationKind;
 
@@ -155,14 +157,34 @@ impl ApolloOtlpExporter {
         });
     }
 
-    pub(crate) fn prepare_for_export(&self, trace_spans: Vec<LightSpanData>) -> Vec<SpanData> {
+    pub(crate) fn prepare_for_export(
+        &self,
+        trace_spans: Vec<LightSpanData>,
+    ) -> Option<Vec<SpanData>> {
         let mut export_spans: Vec<SpanData> = Vec::new();
+        let mut send_trace: bool = true;
 
         trace_spans.into_iter().for_each(|span| {
-            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
-                || self.include_span_names.contains(span.name.as_ref())
+            if send_trace
+                && (span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
+                    || self.include_span_names.contains(span.name.as_ref()))
             {
+                tracing::debug!("apollo otlp: preparing span '{}'", span.name);
                 match span.name.as_ref() {
+                    SUPERGRAPH_SPAN_NAME => {
+                        if span
+                            .attributes
+                            .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                            .is_some()
+                        {
+                            export_spans.push(self.prepare_subgraph_span(span));
+                        } else {
+                            // Mirrors the existing implementation in apollo_telemetry
+                            // which filters out traces that are missing the signature attribute.
+                            // In practice, this results in exclu   ding introspection queries.
+                            send_trace = false;
+                        }
+                    }
                     SUBGRAPH_SPAN_NAME => export_spans.push(self.prepare_subgraph_span(span)),
                     EXECUTION_SPAN_NAME => export_spans.push(self.prepare_execution_span(span)),
                     SUBSCRIPTION_EVENT_SPAN_NAME => {
@@ -177,9 +199,17 @@ impl ApolloOtlpExporter {
                     }
                     _ => export_spans.push(self.base_prepare_span(span)),
                 };
+            } else {
+                tracing::debug!("apollo otlp: dropping span '{}'", span.name);
             }
         });
-        export_spans
+        if send_trace {
+            tracing::debug!("apollo otlp: sending trace");
+            Some(export_spans)
+        } else {
+            tracing::debug!("apollo otlp: dropping trace");
+            None
+        }
     }
 
     fn base_prepare_span(&self, span: LightSpanData) -> SpanData {
