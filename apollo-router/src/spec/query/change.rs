@@ -49,7 +49,7 @@ impl<'a> QueryHashVisitor<'a> {
         schema: &'a schema::Schema,
         schema_str: &'a str,
         executable: &'a executable::ExecutableDocument,
-    ) -> Self {
+    ) -> Result<Self, BoxError> {
         let mut visitor = Self {
             schema,
             schema_str,
@@ -72,18 +72,22 @@ impl<'a> QueryHashVisitor<'a> {
             ),
         };
 
-        visitor.hash_schema();
+        visitor.hash_schema()?;
 
-        visitor
+        Ok(visitor)
     }
 
-    pub(crate) fn hash_schema(&mut self) {
+    pub(crate) fn hash_schema(&mut self) -> Result<(), BoxError> {
         // FIXME: hash directive definitions?
         "^SCHEMA".hash(self);
+        for directive_definition in self.schema.directive_definitions.values() {
+            self.hash_directive_definition(&directive_definition)?;
+        }
         for directive in &self.schema.schema_definition.directives {
             self.hash_directive(&directive);
         }
         "^SCHEMA-END".hash(self);
+        Ok(())
     }
 
     pub(crate) fn hash_query(
@@ -92,7 +96,7 @@ impl<'a> QueryHashVisitor<'a> {
         executable: &'a executable::ExecutableDocument,
         operation_name: Option<&str>,
     ) -> Result<Vec<u8>, BoxError> {
-        let mut visitor = QueryHashVisitor::new(schema, schema_str, executable);
+        let mut visitor = QueryHashVisitor::new(schema, schema_str, executable)?;
         traverse::document(&mut visitor, executable, operation_name)?;
         //FIXME: temporarily deactivate this to trigger test failures. This muist be reactivated before merging
         //executable.to_string().hash(&mut visitor);
@@ -101,6 +105,20 @@ impl<'a> QueryHashVisitor<'a> {
 
     pub(crate) fn finish(self) -> Vec<u8> {
         self.hasher.finalize().as_slice().into()
+    }
+
+    fn hash_directive_definition(
+        &mut self,
+        directive_definition: &Node<ast::DirectiveDefinition>,
+    ) -> Result<(), BoxError> {
+        "^DIRECTIVE_DEFINITION".hash(self);
+        directive_definition.name.as_str().hash(self);
+        for argument in &directive_definition.arguments {
+            self.hash_input_value_definition(&argument)?;
+        }
+        "^DIRECTIVE_DEFINITION-END".hash(self);
+
+        Ok(())
     }
 
     fn hash_directive(&mut self, directive: &Node<ast::Directive>) {
@@ -605,7 +623,7 @@ mod tests {
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec);
+        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec).unwrap();
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         (
@@ -624,7 +642,7 @@ mod tests {
             .unwrap()
             .validate(&schema)
             .unwrap();
-        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec);
+        let mut visitor = QueryHashVisitor::new(&schema, schema_str, &exec).unwrap();
         traverse::document(&mut visitor, &exec, None).unwrap();
 
         hex::encode(visitor.finish())

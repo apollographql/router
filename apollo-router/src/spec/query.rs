@@ -355,7 +355,9 @@ impl Query {
             .collect::<Result<Vec<_>, SpecError>>()?;
 
         let mut visitor =
-            QueryHashVisitor::new(schema.supergraph_schema(), &schema.raw_sdl, document);
+            QueryHashVisitor::new(schema.supergraph_schema(), &schema.raw_sdl, document).map_err(
+                |e| SpecError::QueryHashing(format!("could not calculate the query hash: {e}")),
+            )?;
         traverse::document(&mut visitor, document, operation_name).map_err(|e| {
             SpecError::QueryHashing(format!("could not calculate the query hash: {e}"))
         })?;
