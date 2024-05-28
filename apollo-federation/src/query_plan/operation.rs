@@ -1222,8 +1222,6 @@ mod normalized_field_selection {
             self,
             selection_set: Option<SelectionSet>,
         ) -> FieldSelection {
-            // self.parent_type_position()
-
             FieldSelection {
                 field: self,
                 selection_set,

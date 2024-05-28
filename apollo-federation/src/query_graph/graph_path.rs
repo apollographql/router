@@ -3614,18 +3614,15 @@ pub(crate) fn concat_op_paths(head: &OpPath, tail: &OpPath) -> OpPath {
     // may start with: [ ... on X @include(if: $c1), ... on X @skip(if: $c2), (...)], but if `head`
     // already ends on type `X` _and_ both the conditions on `$c1` and `$c2` are already found on `head`,
     // then we can remove both fragments in `tail`.
-    while tail_index < tail_path.len()
-        && is_useless_followup_element(last_of_head, &tail_path[tail_index], &conditionals)
-            .is_ok_and(|is_useless| is_useless)
-    {
-        tail_index += 1;
-    }
-    if tail_index < tail_path.len() {
-        while tail_index < tail_path.len() {
-            result.0.push(tail_path[tail_index].clone());
-            tail_index += 1;
+    let mut tail_iter = tail_path.iter();
+    for tail_node in tail_iter {
+        let is_useless = is_useless_followup_element(last_of_head, tail_node, &conditionals)?;
+        if !is_useless {
+            result.0.push(tail_node.clone());
+            break;
         }
     }
+    result.0.extend(tail_iter.cloned());
     result
 }
 

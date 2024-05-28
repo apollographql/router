@@ -1380,7 +1380,7 @@ impl FetchDependencyGraph {
         };
         let Some(child_path_in_this) = relation_to_child.path_in_parent else {
             return Err(FederationError::internal(format!(
-                "Cannot merge {} into {}: the path of the former into the later is unknown",
+                "Cannot merge {} into {}: the path of the former into the latter is unknown",
                 child_id.index(),
                 node_id.index()
             )));
@@ -3114,7 +3114,7 @@ fn handle_requires(
     // node we're coming from is our "direct parent", we can merge it to said direct parent (which
     // effectively means that the parent node will collect the provides before taking the edge
     // to our current node).
-    if parents.len() == 1 && paths_has_only_fragments(&fetch_node_path.path_in_node) {
+    if parents.len() == 1 && path_has_only_fragments(&fetch_node_path.path_in_node) {
         let parent = &parents[0];
 
         // We start by computing the nodes for the conditions. We do this using a copy of the current
@@ -3443,7 +3443,7 @@ fn handle_requires(
     }
 }
 
-fn paths_has_only_fragments(path: &Arc<OpPath>) -> bool {
+fn path_has_only_fragments(path: &Arc<OpPath>) -> bool {
     // JS PORT NOTE: this was checking for FragmentElement which was used for both inline fragments and spreads
     path.0
         .iter()
