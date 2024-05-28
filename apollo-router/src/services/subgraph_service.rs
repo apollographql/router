@@ -1511,14 +1511,6 @@ impl SubgraphServiceFactory {
                 .fold(service, |acc, (_, e)| e.subgraph_service(name, acc))
         })
     }
-
-    #[cfg(test)]
-    pub(crate) fn empty() -> Self {
-        Self {
-            services: Default::default(),
-            plugins: Default::default(),
-        }
-    }
 }
 
 /// make new instances of the subgraph service
