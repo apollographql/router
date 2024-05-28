@@ -18,6 +18,7 @@ use crate::schema::position::SchemaRootDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphBuilderApi;
 use crate::source_aware::federated_query_graph::builder::IntraSourceQueryGraphSubBuilderApi;
+use crate::sources::graphql::federated_query_graph::ConcreteFieldEdge;
 use crate::sources::graphql::federated_query_graph::TypeConditionEdge;
 use crate::sources::graphql::GraphqlId;
 use crate::sources::source;
@@ -25,8 +26,6 @@ use crate::sources::source::federated_query_graph::builder::FederatedQueryGraphB
 use crate::sources::source::federated_query_graph::EnumNode;
 use crate::sources::source::federated_query_graph::ScalarNode;
 use crate::ValidFederationSubgraph;
-
-use super::ConcreteFieldEdge;
 
 #[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
