@@ -194,6 +194,14 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        if let Some(field_length) = &self.list_length {
+            field_length.on_response_event(response, ctx);
+        }
+        if let Some(field_execution) = &self.field_execution {
+            field_execution.on_response_event(response, ctx);
+        }
+        self.custom.on_response_event(response, ctx);
+
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
             if let Some(executable_document) = ctx.unsupported_executable_document() {
                 let _ = GraphQLInstrumentsVisitor {
@@ -224,13 +232,26 @@ struct GraphQLInstrumentsVisitor<'a> {
 impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
     fn visit_field(
         &mut self,
-        _request: &ExecutableDocument,
+        request: &ExecutableDocument,
         ty: &NamedType,
         field: &Field,
         value: &Value,
     ) -> Result<(), DemandControlError> {
         self.instruments
             .on_response_field(ty, field, value, self.ctx);
+
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_field(request, ty, field, item)?;
+                }
+            }
+            Value::Object(children) => {
+                self.visit_selections(request, &field.selection_set, children)?;
+            }
+            _ => {}
+        }
+
         Ok(())
     }
 }
