@@ -201,18 +201,19 @@ impl Instrumented for GraphQLInstruments {
                     instruments: self,
                 }
                 .visit(&executable_document, response);
+                // TODO: Use the result here
             }
         }
     }
 
-    fn on_response_field(&self, field: &Field, value: &Value, ctx: &Context) {
+    fn on_response_field(&self, ty: &NamedType, field: &Field, value: &Value, ctx: &Context) {
         if let Some(field_length) = &self.list_length {
-            field_length.on_response_field(field, value, ctx);
+            field_length.on_response_field(ty, field, value, ctx);
         }
         if let Some(field_execution) = &self.field_execution {
-            field_execution.on_response_field(field, value, ctx);
+            field_execution.on_response_field(ty, field, value, ctx);
         }
-        self.custom.on_response_field(field, value, ctx);
+        self.custom.on_response_field(ty, field, value, ctx);
     }
 }
 
@@ -225,11 +226,12 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
     fn visit_field(
         &mut self,
         _request: &ExecutableDocument,
-        _ty: &NamedType,
+        ty: &NamedType,
         field: &Field,
         value: &Value,
     ) -> Result<(), DemandControlError> {
-        self.instruments.on_response_field(field, value, self.ctx);
+        self.instruments
+            .on_response_field(ty, field, value, self.ctx);
         Ok(())
     }
 }

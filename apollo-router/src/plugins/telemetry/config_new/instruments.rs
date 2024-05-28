@@ -664,6 +664,7 @@ pub(crate) trait Instrumented {
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
     fn on_response_field(
         &self,
+        _type: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
         value: &Value,
         _ctx: &Context,
@@ -699,11 +700,12 @@ where
 
     fn on_response_field(
         &self,
+        ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
         ctx: &Context,
     ) {
-        self.attributes.on_response_field(field, value, ctx);
+        self.attributes.on_response_field(ty, field, value, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -927,15 +929,16 @@ where
 
     fn on_response_field(
         &self,
+        ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
         ctx: &Context,
     ) {
         for counter in &self.counters {
-            counter.on_response_field(field, value, ctx);
+            counter.on_response_field(ty, field, value, ctx);
         }
         for histogram in &self.histograms {
-            histogram.on_response_field(field, value, ctx);
+            histogram.on_response_field(ty, field, value, ctx);
         }
     }
 }
@@ -1357,12 +1360,16 @@ where
 
     fn on_response_field(
         &self,
+        ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &serde_json_bytes::Value,
         ctx: &Context,
     ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(field, value, ctx) {
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
             return;
         }
 
@@ -1371,7 +1378,7 @@ where
         if let Some(selectors) = inner.selectors.as_ref() {
             attrs.extend(
                 selectors
-                    .on_response_field(field, value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .into_iter()
                     .collect::<Vec<_>>(),
             );
@@ -1380,7 +1387,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(field, value, ctx))
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::FieldCustom(None) => {
@@ -1761,12 +1768,16 @@ where
 
     fn on_response_field(
         &self,
+        ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &serde_json_bytes::Value,
         ctx: &Context,
     ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(field, value, ctx) {
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
             return;
         }
 
@@ -1775,7 +1786,7 @@ where
         if let Some(selectors) = inner.selectors.as_ref() {
             attrs.extend(
                 selectors
-                    .on_response_field(field, value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .into_iter()
                     .collect::<Vec<_>>(),
             );
@@ -1784,7 +1795,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(field, value, ctx))
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::FieldCustom(None) => {

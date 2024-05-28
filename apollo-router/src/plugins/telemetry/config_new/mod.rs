@@ -41,6 +41,7 @@ pub(crate) trait Selectors {
     fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
     fn on_response_field(
         &self,
+        _ty: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
         _value: &serde_json_bytes::Value,
         _ctx: &Context,
@@ -66,6 +67,7 @@ pub(crate) trait Selector {
     fn on_error(&self, error: &BoxError) -> Option<opentelemetry::Value>;
     fn on_response_field(
         &self,
+        _ty: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
         _value: &serde_json_bytes::Value,
         _ctx: &Context,

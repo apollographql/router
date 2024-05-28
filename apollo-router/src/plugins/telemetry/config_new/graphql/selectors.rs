@@ -1,4 +1,5 @@
 use apollo_compiler::executable::Field;
+use apollo_compiler::executable::NamedType;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
@@ -100,6 +101,7 @@ impl Selector for GraphQLSelector {
 
     fn on_response_field(
         &self,
+        ty: &NamedType,
         field: &Field,
         value: &Value,
         ctx: &Context,
@@ -129,7 +131,7 @@ impl Selector for GraphQLSelector {
             },
             GraphQLSelector::TypeName { .. } => match value {
                 Value::Null => None,
-                _ => todo!("This needs to have ty plumbed through"), // Some(ty.to_string().into()),
+                _ => Some(ty.to_string().into()),
             },
             GraphQLSelector::StaticField { r#static } => Some(r#static.clone().into()),
             GraphQLSelector::OperationName {

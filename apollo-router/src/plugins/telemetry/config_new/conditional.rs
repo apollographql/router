@@ -293,8 +293,9 @@ where
 
     fn on_response_field(
         &self,
+        ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
-        field_value: &serde_json_bytes::Value,
+        response_value: &serde_json_bytes::Value,
         ctx: &Context,
     ) -> Option<opentelemetry_api::Value> {
         // We may have got the value from the request.
@@ -305,7 +306,7 @@ where
                 // We have a value already, let's see if the condition was evaluated to true.
                 if condition
                     .lock()
-                    .evaluate_response_field(field, field_value, ctx)
+                    .evaluate_response_field(ty, field, response_value, ctx)
                 {
                     *self.value.lock() = State::Returned;
                     Some(value)
@@ -317,16 +318,18 @@ where
                 // We don't have a value already, let's try to get it from the error if the condition was evaluated to true.
                 if condition
                     .lock()
-                    .evaluate_response_field(field, field_value, ctx)
+                    .evaluate_response_field(ty, field, response_value, ctx)
                 {
-                    self.selector.on_response_field(field, field_value, ctx)
+                    self.selector
+                        .on_response_field(ty, field, response_value, ctx)
                 } else {
                     None
                 }
             }
             (State::Pending, None) => {
                 // We don't have a value already, and there is no condition.
-                self.selector.on_response_field(field, field_value, ctx)
+                self.selector
+                    .on_response_field(ty, field, response_value, ctx)
             }
             _ => None,
         }

@@ -1,4 +1,5 @@
 use apollo_compiler::executable::Field;
+use apollo_compiler::executable::NamedType;
 use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -72,13 +73,19 @@ impl Selectors for GraphQLAttributes {
         Vec::default()
     }
 
-    fn on_response_field(&self, field: &Field, value: &Value, ctx: &Context) -> Vec<KeyValue> {
+    fn on_response_field(
+        &self,
+        ty: &NamedType,
+        field: &Field,
+        value: &Value,
+        ctx: &Context,
+    ) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
         if let Some(true) = self.field_name {
             if let Some(name) = (GraphQLSelector::FieldName {
                 field_name: FieldName::String,
             })
-            .on_response_field(field, value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.field.name", name));
             }
@@ -87,7 +94,7 @@ impl Selectors for GraphQLAttributes {
             if let Some(ty) = (GraphQLSelector::FieldType {
                 field_type: FieldType::Name,
             })
-            .on_response_field(field, value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.field.type", ty));
             }
@@ -96,7 +103,7 @@ impl Selectors for GraphQLAttributes {
             if let Some(ty) = (GraphQLSelector::TypeName {
                 type_name: TypeName::String,
             })
-            .on_response_field(field, value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.type.name", ty));
             }
@@ -105,7 +112,7 @@ impl Selectors for GraphQLAttributes {
             if let Some(length) = (GraphQLSelector::ListLength {
                 list_length: ListLength::Value,
             })
-            .on_response_field(field, value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.list.length", length));
             }
@@ -115,7 +122,7 @@ impl Selectors for GraphQLAttributes {
                 operation_name: OperationName::String,
                 default: None,
             })
-            .on_response_field(field, value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.operation.name", length));
             }
@@ -160,7 +167,7 @@ mod test {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
-        let result = attributes.on_response_field(&field(), &json!(true), &ctx);
+        let result = attributes.on_response_field(&ty(), &field(), &json!(true), &ctx);
         assert_eq!(result.len(), 4);
         assert_eq!(result[0].key.as_str(), "graphql.field.name");
         assert_eq!(result[0].value.as_str(), "field_name");
@@ -183,7 +190,8 @@ mod test {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
-        let result = attributes.on_response_field(&field(), &json!(vec![true, true, true]), &ctx);
+        let result =
+            attributes.on_response_field(&ty(), &field(), &json!(vec![true, true, true]), &ctx);
         assert_eq!(result.len(), 5);
         assert_eq!(result[0].key.as_str(), "graphql.field.name");
         assert_eq!(result[0].value.as_str(), "field_name");
