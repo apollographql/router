@@ -666,7 +666,7 @@ pub(crate) trait Instrumented {
         &self,
         _type: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
-        value: &Value,
+        _value: &Value,
         _ctx: &Context,
     ) {
     }
@@ -2053,6 +2053,108 @@ mod tests {
         },
     }
 
+    impl TypedValueMirror {
+        fn field(&self) -> Option<apollo_compiler::executable::Field> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Number {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::String {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::List {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Object {
+                    field_name,
+                    field_type,
+                    ..
+                } => Some(Self::create_field(field_type.clone(), field_name.clone())),
+            }
+        }
+
+        fn ty(&self) -> Option<NamedType> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool { type_name, .. }
+                | TypedValueMirror::Number { type_name, .. }
+                | TypedValueMirror::String { type_name, .. }
+                | TypedValueMirror::List { type_name, .. }
+                | TypedValueMirror::Object { type_name, .. } => {
+                    Some(Self::create_type_name(type_name.clone()))
+                }
+            }
+        }
+
+        fn value(&self) -> Option<Value> {
+            match self {
+                TypedValueMirror::Null => Some(Value::Null),
+                TypedValueMirror::Bool { value, .. } => Some(serde_json_bytes::json!(*value)),
+                TypedValueMirror::Number { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::String { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::List { values, .. } => {
+                    let values = values.iter().filter_map(|v| v.value()).collect();
+                    Some(Value::Array(values))
+                }
+                TypedValueMirror::Object { values, .. } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+                TypedValueMirror::Root { values } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+            }
+        }
+
+        fn create_field(
+            field_type: String,
+            field_name: String,
+        ) -> apollo_compiler::executable::Field {
+            apollo_compiler::executable::Field {
+                definition: apollo_compiler::schema::FieldDefinition {
+                    description: None,
+                    name: NamedType::new(field_name.clone()).expect("valid field name"),
+                    arguments: vec![],
+                    ty: apollo_compiler::schema::Type::Named(
+                        NamedType::new(field_type.clone()).expect("valid type name"),
+                    ),
+                    directives: Default::default(),
+                }
+                .into(),
+                alias: None,
+                name: NamedType::new(field_name.clone()).expect("valid field name"),
+                arguments: vec![],
+                directives: Default::default(),
+                selection_set: SelectionSet::new(
+                    NamedType::new(field_name).expect("valid field name"),
+                ),
+            }
+        }
+
+        fn create_type_name(type_name: String) -> Name {
+            NamedType::new(type_name).expect("valid type name")
+        }
+    }
+
     #[derive(Deserialize, JsonSchema)]
     #[serde(deny_unknown_fields, rename_all = "snake_case")]
     struct TestDefinition {
@@ -2266,18 +2368,12 @@ mod tests {
                                         .on_response_event(&response, &context);
                                 }
                                 Event::ResponseField { typed_value } => {
-                                    // TODO: Work out the types here
-                                    /*
-                                    let typed_value_data: TypedValueData = typed_value.into();
                                     graphql_instruments.on_response_field(
-                                        &TypedValueData::field(
-                                            typed_value.field_ty,
-                                            typed_value.field_name,
-                                        ),
-                                        &serde_json_bytes::json!(typed_value_data.value),
+                                        &typed_value.ty().expect("type should exist"),
+                                        &typed_value.field().expect("field should exist"),
+                                        &typed_value.value().expect("value should exist"),
                                         &context,
                                     );
-                                    */
                                 }
                                 Event::Context { map } => {
                                     for (key, value) in map {
@@ -2369,127 +2465,6 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(schema.unwrap().as_bytes())
             .expect("write schema");
-    }
-
-    enum TypedValueData {
-        Null,
-        Bool {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: bool,
-        },
-        Number {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: serde_json::Number,
-        },
-        String {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: String,
-        },
-        List {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            values: Vec<TypedValueData>,
-        },
-        Object {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            values: HashMap<String, TypedValueData>,
-        },
-        Root {
-            values: HashMap<String, TypedValueData>,
-        },
-    }
-
-    impl From<TypedValueMirror> for TypedValueData {
-        fn from(value: TypedValueMirror) -> Self {
-            match value {
-                TypedValueMirror::Null => TypedValueData::Null,
-                TypedValueMirror::Bool {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::Bool {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::Number {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::Number {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::String {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::String {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::List {
-                    type_name,
-                    field_type,
-                    field_name,
-                    values,
-                } => TypedValueData::List {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    values: values.into_iter().map(|v| v.into()).collect(),
-                },
-                TypedValueMirror::Object {
-                    type_name,
-                    field_type,
-                    field_name,
-                    values,
-                } => TypedValueData::Object {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
-                },
-                TypedValueMirror::Root { values } => TypedValueData::Root {
-                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
-                },
-            }
-        }
-    }
-
-    impl TypedValueData {
-        fn field(field_type: String, field_name: String) -> apollo_compiler::executable::Field {
-            apollo_compiler::executable::Field {
-                definition: apollo_compiler::schema::FieldDefinition {
-                    description: None,
-                    name: NamedType::new(field_name.clone()).expect("valid field name"),
-                    arguments: vec![],
-                    ty: apollo_compiler::schema::Type::Named(
-                        NamedType::new(field_type.clone()).expect("valid type name"),
-                    ),
-                    directives: Default::default(),
-                }
-                .into(),
-                alias: None,
-                name: NamedType::new(field_name.clone()).expect("valid field name"),
-                arguments: vec![],
-                directives: Default::default(),
-                selection_set: SelectionSet::new(
-                    NamedType::new(field_name).expect("valid field name"),
-                ),
-            }
-        }
-
-        fn type_name(type_name: String) -> Name {
-            NamedType::new(type_name).expect("valid type name")
-        }
     }
 
     #[tokio::test]

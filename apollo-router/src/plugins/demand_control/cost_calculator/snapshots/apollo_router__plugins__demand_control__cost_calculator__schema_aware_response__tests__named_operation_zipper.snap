@@ -1,9 +1,7 @@
 ---
 source: apollo-router/src/plugins/demand_control/cost_calculator/schema_aware_response.rs
-expression: visitor.counts
+expression: visitor
 ---
-{
-    "users": 2,
-    "licenseNumber": 2,
-    "name": 2,
-}
+licenseNumber: 2
+name: 2
+users: 2

@@ -196,12 +196,11 @@ impl Instrumented for GraphQLInstruments {
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
             if let Some(executable_document) = ctx.unsupported_executable_document() {
-                GraphQLInstrumentsVisitor {
+                let _ = GraphQLInstrumentsVisitor {
                     ctx,
                     instruments: self,
                 }
                 .visit(&executable_document, response);
-                // TODO: Use the result here
             }
         }
     }

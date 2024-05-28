@@ -81,7 +81,10 @@ mod tests {
     use apollo_compiler::ExecutableDocument;
     use apollo_compiler::Schema;
     use bytes::Bytes;
-    use insta::assert_debug_snapshot;
+    use insta::assert_yaml_snapshot;
+    use serde::ser::SerializeMap;
+    use serde::Serialize;
+    use serde::Serializer;
 
     use super::*;
     use crate::graphql::Response;
@@ -139,7 +142,7 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response).unwrap();
-        insta::with_settings!({sort_maps=>true}, { assert_debug_snapshot!(visitor.counts) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
     #[test]
@@ -154,7 +157,7 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response).unwrap();
-        insta::with_settings!({sort_maps=>true}, { assert_debug_snapshot!(visitor.counts) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
     #[test]
@@ -169,7 +172,7 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response).unwrap();
-        insta::with_settings!({sort_maps=>true}, { assert_debug_snapshot!(visitor.counts) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
     #[test]
@@ -184,6 +187,19 @@ mod tests {
 
         let mut visitor = FieldCounter::new();
         visitor.visit(&request, &response).unwrap();
-        insta::with_settings!({sort_maps=>true}, { assert_debug_snapshot!(visitor.counts) })
+        insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
+    }
+
+    impl Serialize for FieldCounter {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut map = serializer.serialize_map(Some(self.counts.len()))?;
+            for (key, value) in &self.counts {
+                map.serialize_entry(key, value)?;
+            }
+            map.end()
+        }
     }
 }
