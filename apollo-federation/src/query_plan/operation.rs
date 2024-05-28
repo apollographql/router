@@ -694,17 +694,19 @@ pub(crate) enum Selection {
 
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
-        let selections_without_unnecessary_fragments = sub_selections
-            .map(|s| s.without_unnecessary_fragments());
-        Self::Field(Arc::new(field.with_subselection(selections_without_unnecessary_fragments)))
+        let selections_without_unnecessary_fragments =
+            sub_selections.map(|s| s.without_unnecessary_fragments());
+        Self::Field(Arc::new(
+            field.with_subselection(selections_without_unnecessary_fragments),
+        ))
     }
 
     pub(crate) fn from_inline_fragment(
         inline_fragment: InlineFragment,
         sub_selections: SelectionSet,
     ) -> Self {
-        let selections_without_unnecessary_fragments = sub_selections
-            .without_unnecessary_fragments();
+        let selections_without_unnecessary_fragments =
+            sub_selections.without_unnecessary_fragments();
         let inline_fragment_selection = InlineFragmentSelection {
             inline_fragment,
             selection_set: selections_without_unnecessary_fragments,
@@ -2887,7 +2889,7 @@ impl SelectionSet {
                     &parent_type_position,
                     &NamedFragments::default(),
                     &schema,
-                    RebaseErrorHandlingOption::ThrowError
+                    RebaseErrorHandlingOption::ThrowError,
                 )? {
                     self.add_selection(&ele.parent_type_position(), &schema, rebased_selection)?
                 }
@@ -2898,21 +2900,18 @@ impl SelectionSet {
                     let schema = self.schema.clone();
                     let parent_type = self.type_position.clone();
                     let selection_type = &sel.type_position;
-                    sel.selections
-                        .values()
-                        .cloned()
-                        .try_for_each(|s| {
-                            if let Some(rebased) = s.rebase_on(
-                                &parent_type,
-                                &NamedFragments::default(),
-                                &schema,
-                                RebaseErrorHandlingOption::ThrowError
-                            )? {
-                                self.add_selection(selection_type, &schema, rebased)
-                            } else {
-                                Ok(())
-                            }
-                        })?;
+                    sel.selections.values().cloned().try_for_each(|s| {
+                        if let Some(rebased) = s.rebase_on(
+                            &parent_type,
+                            &NamedFragments::default(),
+                            &schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )? {
+                            self.add_selection(selection_type, &schema, rebased)
+                        } else {
+                            Ok(())
+                        }
+                    })?;
                 }
             }
         }
@@ -3325,10 +3324,10 @@ impl SelectionSet {
                     } else {
                         final_selections.insert(selection.clone());
                     }
-                },
+                }
                 _ => {
                     final_selections.insert(selection.clone());
-                },
+                }
             }
         }
         SelectionSet {
@@ -4470,7 +4469,12 @@ impl InlineFragmentSelection {
 
     fn is_unnecessary(&self, maybe_parent: &CompositeTypeDefinitionPosition) -> bool {
         self.inline_fragment.data().directives.is_empty()
-            && self.inline_fragment.data().type_condition_position.clone().is_some_and(|t| t == *maybe_parent)
+            && self
+                .inline_fragment
+                .data()
+                .type_condition_position
+                .clone()
+                .is_some_and(|t| t == *maybe_parent)
     }
 }
 

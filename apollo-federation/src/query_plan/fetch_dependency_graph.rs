@@ -1517,7 +1517,8 @@ impl FetchDependencyGraph {
                 continue;
             }
 
-            let path_in_merged = self.parent_relation(child_id, merged_id)
+            let path_in_merged = self
+                .parent_relation(child_id, merged_id)
                 .and_then(|r| r.path_in_parent);
             let concatenated_paths =
                 concat_paths_in_parents(&Some(Arc::new(path_in_this.clone())), &path_in_merged);
@@ -1690,14 +1691,11 @@ impl FetchDependencyGraphNode {
         Ok(())
     }
 
-    fn copy_inputs(
-        &mut self,
-        other: &FetchDependencyGraphNode,
-    ) -> Result<(), FederationError> {
+    fn copy_inputs(&mut self, other: &FetchDependencyGraphNode) -> Result<(), FederationError> {
         if let Some(other_inputs) = other.inputs.clone() {
-            let inputs = self
-                .inputs
-                .get_or_insert_with(|| Arc::new(FetchInputs::empty(other_inputs.supergraph_schema.clone())));
+            let inputs = self.inputs.get_or_insert_with(|| {
+                Arc::new(FetchInputs::empty(other_inputs.supergraph_schema.clone()))
+            });
             Arc::make_mut(inputs).add_all(&other_inputs)?;
             self.on_inputs_updated();
 
@@ -1714,7 +1712,8 @@ impl FetchDependencyGraphNode {
         if let Some(inputs) = &mut self.inputs {
             self.cached_cost = None;
             for (_, selection) in &inputs.selection_sets_per_parent_type {
-                fetch_selection_set.selection_set = Arc::new(fetch_selection_set.selection_set.minus(selection)?);
+                fetch_selection_set.selection_set =
+                    Arc::new(fetch_selection_set.selection_set.minus(selection)?);
             }
         }
         Ok(())
@@ -2126,7 +2125,7 @@ impl FetchSelectionSet {
             &self.selection_set.type_position,
             &NamedFragments::default(),
             &self.selection_set.schema,
-            RebaseErrorHandlingOption::ThrowError
+            RebaseErrorHandlingOption::ThrowError,
         )?;
         Arc::make_mut(&mut self.selection_set).merge_into(iter::once(&rebased_selections))?;
         Ok(())
@@ -3217,7 +3216,10 @@ fn handle_requires(
                                 created_node_id,
                                 ParentRelation {
                                     parent_node_id: grand_parent_relation.parent_node_id,
-                                    path_in_parent: concat_paths_in_parents(&grand_parent_relation.path_in_parent, &current_parent.path_in_parent),
+                                    path_in_parent: concat_paths_in_parents(
+                                        &grand_parent_relation.path_in_parent,
+                                        &current_parent.path_in_parent,
+                                    ),
                                 },
                             )
                         }
@@ -3282,10 +3284,7 @@ fn handle_requires(
             .0;
             let fetch_node =
                 FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, fetch_node_id)?;
-            fetch_node.add_inputs(
-                &selection,
-                iter::empty(),
-            )?;
+            fetch_node.add_inputs(&selection, iter::empty())?;
             return Ok((fetch_node_id, fetch_node_path.clone()));
         }
 
@@ -3395,13 +3394,12 @@ fn handle_requires(
         let parent_type = new_node.parent_type.clone();
         for created_node_id in &new_created_nodes {
             let created_node = dependency_graph.node_weight(*created_node_id)?;
-            let new_path = if merge_at == created_node.merge_at
-                && parent_type == created_node.parent_type
-            {
-                Some(Arc::new(OpPath::default()))
-            } else {
-                None
-            };
+            let new_path =
+                if merge_at == created_node.merge_at && parent_type == created_node.parent_type {
+                    Some(Arc::new(OpPath::default()))
+                } else {
+                    None
+                };
             let new_parent_relation = ParentRelation {
                 parent_node_id: new_node_id,
                 // Usually, computing the path of our new group into the created groups
@@ -3499,7 +3497,7 @@ fn inputs_for_require(
         &input_type,
         &NamedFragments::default(),
         &fetch_dependency_graph.supergraph_schema,
-        RebaseErrorHandlingOption::ThrowError
+        RebaseErrorHandlingOption::ThrowError,
     )?;
     full_selection_set.merge_into(iter::once(&rebased_conditions))?;
     if include_key_inputs {
@@ -3554,10 +3552,8 @@ fn inputs_for_require(
         // the case of an @interfaceObject downcast, that's the subgraph with said @interfaceObject, so in that case we
         // should just use `entity_type` (that @interfaceObject type), not input type which will be an implementation the
         // subgraph does not know in that particular case.
-        let mut key_inputs = SelectionSet::for_composite_type(
-            edge_conditions.schema.clone(),
-            input_type.clone(),
-        );
+        let mut key_inputs =
+            SelectionSet::for_composite_type(edge_conditions.schema.clone(), input_type.clone());
         key_inputs.merge_into(iter::once(&key_condition))?;
 
         Ok((
@@ -3607,10 +3603,7 @@ fn add_post_require_inputs(
     );
     let post_require_node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, post_require_node_id)?;
-    post_require_node.add_inputs(
-        &inputs,
-        input_rewrites.into_iter().flatten(),
-    )?;
+    post_require_node.add_inputs(&inputs, input_rewrites.into_iter().flatten())?;
     if let Some(key_inputs) = key_inputs {
         // It could be the key used to resume fetching after the @requires is already fetched in the original node, but we cannot
         // guarantee it, so we add it now (and if it was already selected, this is a no-op).

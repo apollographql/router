@@ -3614,7 +3614,9 @@ pub(crate) fn concat_op_paths(head: &OpPath, tail: &OpPath) -> OpPath {
     // then we can remove both fragments in `tail`.
     let mut tail_iter = tail_path.iter();
     for tail_node in &mut tail_iter {
-        if !is_useless_followup_element(last_of_head, tail_node, &conditionals).is_ok_and(|is_useless| is_useless) {
+        if !is_useless_followup_element(last_of_head, tail_node, &conditionals)
+            .is_ok_and(|is_useless| is_useless)
+        {
             result.0.push(tail_node.clone());
             break;
         }
