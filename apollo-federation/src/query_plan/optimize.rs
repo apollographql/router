@@ -1002,10 +1002,10 @@ impl Selection {
         validator: &mut FieldsConflictMultiBranchValidator,
     ) -> Result<Selection, FederationError> {
         match self {
-            Selection::Field(field) => field.optimize(fragments, validator),
+            Selection::Field(field) => Ok(field.optimize(fragments, validator)?.into()),
             Selection::FragmentSpread(_) => Ok(self.clone()), // Do nothing
             Selection::InlineFragment(inline_fragment) => {
-                inline_fragment.optimize(fragments, validator)
+                Ok(inline_fragment.optimize(fragments, validator)?.into())
             }
         }
     }
@@ -1016,14 +1016,14 @@ impl FieldSelection {
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
-    ) -> Result<Selection, FederationError> {
+    ) -> Result<Self, FederationError> {
         let Some(base_composite_type): Option<CompositeTypeDefinitionPosition> =
             self.field.data().output_base_type()?.try_into().ok()
         else {
-            return Ok(self.clone().into());
+            return Ok(self.clone());
         };
         let Some(ref selection_set) = self.selection_set else {
-            return Ok(self.clone().into());
+            return Ok(self.clone());
         };
 
         let mut field_validator = validator.for_field(&self.field);
@@ -1051,7 +1051,24 @@ impl FieldSelection {
             }
         }
         optimized = optimized.optimize(fragments, &mut field_validator)?;
-        Ok(self.with_updated_selection_set(Some(optimized)).into())
+        Ok(self.with_updated_selection_set(Some(optimized)))
+    }
+}
+
+/// Return type for `InlineFragmentSelection::optimize`.
+#[derive(derive_more::From)]
+enum InlineOrFragmentSelection {
+    // Note: Enum variants are named to match those of `Selection`.
+    InlineFragment(InlineFragmentSelection),
+    FragmentSpread(FragmentSpreadSelection),
+}
+
+impl From<InlineOrFragmentSelection> for Selection {
+    fn from(value: InlineOrFragmentSelection) -> Self {
+        match value {
+            InlineOrFragmentSelection::InlineFragment(inline_fragment) => inline_fragment.into(),
+            InlineOrFragmentSelection::FragmentSpread(fragment_spread) => fragment_spread.into(),
+        }
     }
 }
 
@@ -1060,7 +1077,7 @@ impl InlineFragmentSelection {
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
-    ) -> Result<Selection, FederationError> {
+    ) -> Result<InlineOrFragmentSelection, FederationError> {
         let mut optimized = self.selection_set.clone();
 
         let type_condition_position = &self.inline_fragment.data().type_condition_position;
@@ -1185,20 +1202,16 @@ impl SelectionSet {
         // Otherwise, it's our wrapping inline fragment with the sub-selections optimized, and we
         // just return that subselection.
         match optimized {
-            Selection::FragmentSpread(_) => {
+            InlineOrFragmentSelection::FragmentSpread(_) => {
                 let self_selections = Arc::make_mut(&mut self.selections);
                 self_selections.clear();
-                self_selections.insert(optimized);
+                self_selections.insert(optimized.into());
             }
 
-            Selection::InlineFragment(inline_fragment) => {
+            InlineOrFragmentSelection::InlineFragment(inline_fragment) => {
                 // Note: `inline_fragment.selection_set` can't be moved (since it's inside Arc).
                 // So, it's cloned.
                 *self = inline_fragment.selection_set.clone();
-            }
-
-            Selection::Field(_field_selection) => {
-                unreachable!("Inline fragment should not be optimized to a field selection");
             }
         }
         Ok(())
