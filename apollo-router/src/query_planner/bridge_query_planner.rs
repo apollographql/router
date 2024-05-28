@@ -169,10 +169,10 @@ impl PlannerMode {
             debug: Default::default(),
         };
 
-        return Ok(Arc::new(QueryPlanner::new(
+        Ok(Arc::new(QueryPlanner::new(
             schema.federation_supergraph(),
             config,
-        )?));
+        )?))
     }
 
     fn source_aware_rust(
@@ -192,10 +192,10 @@ impl PlannerMode {
             debug: Default::default(),
         };
 
-        return Ok(Arc::new(SourceAwareQueryPlanner::new(
+        Ok(Arc::new(SourceAwareQueryPlanner::new(
             schema.federation_supergraph(),
             config,
-        )?));
+        )?))
     }
 
     async fn js(
