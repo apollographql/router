@@ -175,10 +175,17 @@ macro_rules! assert_report {
             insta::with_settings!({sort_maps => true}, {
                     insta::assert_yaml_snapshot!($report, {
                         ".**.attributes" => insta::sorted_redaction(),
-                        ".**.attributes[].value" => "[redacted]", // TBD(tim): this is too aggressive and redacts all attr values
-                        // ".resourceSpans[].resource.attributes[].value" => "[redacted]", // TBD(tim): ideally this and the line below
-                        // ".**.attributes[][\"apollo_private.ftv1\"].value" => "[ftv1]", // TBD(tim): this doesn't work
-                        // TBD(tim): let's explore https://insta.rs/docs/redactions/#dynamic-redactions to only redact certain attributes
+                        ".**.attributes[]" => insta::dynamic_redaction(|mut value, path| {
+                            const REDACTED_FIELDS: [&'static str; 3] = ["trace_id", "apollo_private.duration_ns" , "apollo_private.sent_time_offset"];
+                            if let insta::internals::Content::Struct(name, key_value)  = &mut value{
+                                if name == &"KeyValue" {
+                                    if key_value[0].1.as_str().unwrap().starts_with("apollo.") || REDACTED_FIELDS.contains(&key_value[0].1.as_str().unwrap()) {
+                                        key_value[1].1 = insta::internals::Content::NewtypeVariant("Value", 0, "stringValue", Box::new(insta::internals::Content::from("[redacted]")));
+                                    }
+                                }
+                            }
+                            value
+                        }),
                         ".resourceSpans[].scopeSpans[].scope.version" => "[version]",
                         ".**.traceId" => "[trace_id]",
                         ".**.spanId" => "[span_id]",
