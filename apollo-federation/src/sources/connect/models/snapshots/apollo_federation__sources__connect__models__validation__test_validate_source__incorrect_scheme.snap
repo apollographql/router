@@ -1,5 +1,0 @@
----
-source: apollo-federation/src/sources/connect/models/validation.rs
-expression: "errors[0].to_string()"
----
-baseURL argument for @source "v1" must be http or https, got file
