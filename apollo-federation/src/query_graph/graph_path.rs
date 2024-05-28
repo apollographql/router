@@ -3597,16 +3597,14 @@ pub(crate) fn concat_paths_in_parents(
 pub(crate) fn concat_op_paths(head: &OpPath, tail: &OpPath) -> OpPath {
     // While this is mainly a simple array concatenation, we optimize slightly by recognizing if the
     // tail path starts by a fragment selection that is useless given the end of the head path
-    if head.is_empty() {
+    let Some(last_of_head) = head.last() else {
         return tail.clone();
-    }
+    };
     let mut result = head.clone();
     if tail.is_empty() {
         return result;
     }
     let conditionals = head.conditional_directives();
-    let last_of_head = head.last().unwrap();
-    let mut tail_index = 0;
     let tail_path = tail.0.clone();
 
     // Note that in practice, we may be able to eliminate a few elements at the beginning of the path
@@ -3615,9 +3613,8 @@ pub(crate) fn concat_op_paths(head: &OpPath, tail: &OpPath) -> OpPath {
     // already ends on type `X` _and_ both the conditions on `$c1` and `$c2` are already found on `head`,
     // then we can remove both fragments in `tail`.
     let mut tail_iter = tail_path.iter();
-    for tail_node in tail_iter {
-        let is_useless = is_useless_followup_element(last_of_head, tail_node, &conditionals)?;
-        if !is_useless {
+    for tail_node in &mut tail_iter {
+        if !is_useless_followup_element(last_of_head, tail_node, &conditionals).is_ok_and(|is_useless| is_useless) {
             result.0.push(tail_node.clone());
             break;
         }
