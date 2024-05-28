@@ -1597,14 +1597,15 @@ impl FetchDependencyGraph {
                     let field_type = field_definition.ty.inner_named_type();
                     let type_: Result<CompositeTypeDefinitionPosition, FederationError> =
                         field.data().schema.get_type(field_type.clone())?.try_into();
-                    return if type_.is_ok() {
-                        type_
-                    } else {
-                        Err(FederationError::internal(format!(
-                            "Invalid call from {} starting at {}: {} is not composite",
-                            path, parent_type, field_position
-                        )))
-                    };
+                    return type_.map_or_else(
+                        |_| {
+                            Err(FederationError::internal(format!(
+                                "Invalid call from {} starting at {}: {} is not composite",
+                                path, parent_type, field_position
+                            )))
+                        },
+                        Ok,
+                    );
                 }
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition_position) = &fragment.data().type_condition_position
