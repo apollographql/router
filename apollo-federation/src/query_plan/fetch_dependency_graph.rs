@@ -1435,7 +1435,7 @@ impl FetchDependencyGraph {
         };
 
         let concatenated_path =
-            concat_op_paths(&grand_child_parent_path, &grand_child_grand_parent_path);
+            concat_op_paths(&grand_child_grand_parent_path, &grand_child_parent_path);
         self.merge_in_internal(node_id, grand_child_id, &concatenated_path, false)
     }
 
