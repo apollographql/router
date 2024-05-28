@@ -3396,7 +3396,6 @@ fn handle_requires(
         for created_node_id in &new_created_nodes {
             let created_node = dependency_graph.node_weight(*created_node_id)?;
             let new_path = if merge_at == created_node.merge_at
-                && subgraph_name == created_node.subgraph_name
                 && parent_type == created_node.parent_type
             {
                 Some(Arc::new(OpPath::default()))
