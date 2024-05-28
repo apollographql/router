@@ -179,7 +179,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                         message: format!(
                             "baseURL argument for {name} was not a valid URL: {inner}"
                         ),
-                        locations: transform_location(&arg, sources),
+                        locations: transform_location(arg, sources),
                     })
                 }
                 Ok(url) => url,
@@ -253,7 +253,7 @@ fn validate_object(
                             object_name = object.name,
                             field_name = field.name,
                         ),
-                        locations: transform_location(&source_name, sources)
+                        locations: transform_location(source_name, sources)
                     });
             }
         }
