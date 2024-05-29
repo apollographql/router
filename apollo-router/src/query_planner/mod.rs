@@ -16,7 +16,6 @@ mod bridge_query_planner_pool;
 mod caching_query_planner;
 mod convert;
 mod execution;
-pub(crate) use execution::ExecutionParameters;
 pub(crate) mod fetch;
 mod labeler;
 mod plan;

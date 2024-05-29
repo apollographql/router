@@ -5,16 +5,21 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
+use apollo_federation::sources::connect::Connectors;
 // use apollo_federation::sources::connect::Connectors;
 use futures::future::BoxFuture;
 use tower::BoxError;
+use tower::ServiceExt;
 
+use super::fetch::BoxService;
+use super::new_service::ServiceFactory;
 use super::SubgraphRequest;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
-// use crate::plugins::subscription::SubscriptionConfig;
+use crate::plugins::connectors::process_source_node;
+use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Protocol;
@@ -24,19 +29,17 @@ use crate::services::FetchRequest;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Schema;
-use crate::Context;
 
 #[derive(Clone)]
 pub(crate) struct FetchService {
-    pub(crate) context: Context,
     pub(crate) service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    // pub(crate) subscription_config: Option<SubscriptionConfig>,
-    // pub(crate) connectors: Connectors,
+    pub(crate) _subscription_config: Option<SubscriptionConfig>,
+    pub(crate) connectors: Connectors,
 }
 
-impl<'a> tower::Service<FetchRequest<'a>> for FetchService {
+impl tower::Service<FetchRequest> for FetchService {
     type Response = FetchResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
@@ -45,13 +48,14 @@ impl<'a> tower::Service<FetchRequest<'a>> for FetchService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: FetchRequest<'a>) -> Self::Future {
+    fn call(&mut self, request: FetchRequest) -> Self::Future {
         let FetchRequest {
             fetch_node,
             supergraph_request,
             deferred_fetches,
             data,
             current_dir,
+            context,
         } = request;
 
         let FetchNode {
@@ -75,8 +79,8 @@ impl<'a> tower::Service<FetchRequest<'a>> for FetchService {
         } = match Variables::new(
             &requires,
             &variable_usages,
-            data,
-            current_dir,
+            &data,
+            &current_dir,
             // Needs the original request here
             supergraph_request.body(),
             self.schema.as_ref(),
@@ -154,7 +158,7 @@ impl<'a> tower::Service<FetchRequest<'a>> for FetchService {
             )
             .subgraph_name(subgraph_service_name)
             .operation_kind(operation_kind)
-            .context(self.context.clone())
+            .context(context)
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
@@ -165,13 +169,22 @@ impl<'a> tower::Service<FetchRequest<'a>> for FetchService {
         let sf = self.service_factory.clone();
         let current_dir = current_dir.clone();
         let deferred_fetches = deferred_fetches.clone();
+        let connectors = self.connectors.clone();
         // TODO: dont' panic Oo
         let service = sf
             .create(&sns)
             .expect("we already checked that the service exists during planning; qed");
 
         Box::pin(async move {
-            let fut = FetchNode::subgraph_fetch(
+            if let Some(apollo_federation::sources::source::query_plan::FetchNode::Connect(
+                connect_node,
+            )) = fetch_node.source_node.as_deref()
+            {
+                // TODO: Dispatch into the ConnectorService eventually
+                let _ = process_source_node(connect_node, connectors, data, paths.clone()).await;
+            }
+
+            Ok(FetchNode::subgraph_fetch(
                 service,
                 subgraph_request,
                 &sns,
@@ -184,21 +197,57 @@ impl<'a> tower::Service<FetchRequest<'a>> for FetchService {
                 &deferred_fetches,
                 &aqs,
                 variables,
-            );
-            Ok(fut.await)
+            )
+            .await)
         })
     }
 }
 
-// #[derive(Clone)]
-// pub(crate) struct FetchServiceFactory {
-//     pub(crate) _subgraph_service_factory: Arc<SubgraphServiceFactory>,
-// }
+#[derive(Clone)]
+pub(crate) struct FetchServiceFactory {
+    pub(crate) schema: Arc<Schema>,
+    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) subscription_config: Option<SubscriptionConfig>,
+    pub(crate) connectors: Connectors,
+}
 
-// impl FetchServiceFactory {
-//     pub(crate) fn new(subgraph_service_factory: Arc<SubgraphServiceFactory>) -> Self {
-//         Self {
-//             subgraph_service_factory,
-//         }
-//     }
-// }
+impl FetchServiceFactory {
+    pub(crate) fn new(
+        schema: Arc<Schema>,
+        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        subgraph_service_factory: Arc<SubgraphServiceFactory>,
+        subscription_config: Option<SubscriptionConfig>,
+        connectors: Connectors,
+    ) -> Self {
+        Self {
+            subgraph_service_factory,
+            subgraph_schemas,
+            schema,
+            subscription_config,
+            connectors,
+        }
+    }
+
+    pub(crate) fn subgraph_service_for_subscriptions(
+        &self,
+        service_name: &str,
+    ) -> Option<crate::services::subgraph::BoxService> {
+        self.subgraph_service_factory.create(service_name)
+    }
+}
+
+impl ServiceFactory<FetchRequest> for FetchServiceFactory {
+    type Service = BoxService;
+
+    fn create(&self) -> Self::Service {
+        FetchService {
+            service_factory: self.subgraph_service_factory.clone(),
+            schema: self.schema.clone(),
+            subgraph_schemas: self.subgraph_schemas.clone(),
+            _subscription_config: self.subscription_config.clone(),
+            connectors: self.connectors.clone(),
+        }
+        .boxed()
+    }
+}

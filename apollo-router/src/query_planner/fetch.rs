@@ -24,7 +24,6 @@ use super::rewrites;
 use super::rewrites::DataRewrite;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
-use super::subgraph_context::build_operation_with_aliasing;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
 use super::PlanNode;
@@ -35,7 +34,6 @@ use crate::error::QueryPlannerError;
 use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
-use crate::http_ext;
 use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -411,140 +409,6 @@ impl Variables {
 }
 
 impl FetchNode {
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fetch_node<'a>(
-        &'a self,
-        parameters: &'a ExecutionParameters<'a>,
-        data: &'a Value,
-        current_dir: &'a Path,
-    ) -> (Value, Vec<Error>) {
-        if self.source_node.is_some() {
-            return self
-                .process_source_node(parameters, data, current_dir)
-                .await;
-        }
-        let FetchNode {
-            operation,
-            operation_kind,
-            operation_name,
-            service_name,
-            ..
-        } = self;
-
-        let Variables {
-            variables,
-            inverted_paths: paths,
-            contextual_arguments,
-        } = match Variables::new(
-            &self.requires,
-            &self.variable_usages,
-            data,
-            current_dir,
-            // Needs the original request here
-            parameters.supergraph_request.body(),
-            parameters.schema,
-            &self.input_rewrites,
-            &self.context_rewrites,
-        ) {
-            Some(variables) => variables,
-            None => {
-                return (Value::Object(Object::default()), Vec::new());
-            }
-        };
-
-        let service_name_string = service_name.to_string();
-
-        let (service_name, subgraph_service_name) = match &*self.protocol {
-            Protocol::RestFetch(RestFetchNode {
-                connector_service_name,
-                parent_service_name,
-                ..
-            }) => (parent_service_name, connector_service_name),
-            _ => (&service_name_string, &service_name_string),
-        };
-
-        let uri = parameters
-            .schema
-            .subgraph_url(service_name)
-            .unwrap_or_else(|| {
-                panic!("schema uri for subgraph '{service_name}' should already have been checked")
-            })
-            .clone();
-
-        let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
-        let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
-            if let Some(subgraph_schema) =
-                parameters.subgraph_schemas.get(&service_name.to_string())
-            {
-                match build_operation_with_aliasing(operation, &ctx_arg, subgraph_schema) {
-                    Ok(op) => {
-                        alias_query_string = op.serialize().no_indent().to_string();
-                        alias_query_string.as_str()
-                    }
-                    Err(errors) => {
-                        tracing::debug!(
-                            "couldn't generate a valid executable document? {:?}",
-                            errors
-                        );
-                        operation.as_serialized()
-                    }
-                }
-            } else {
-                tracing::debug!(
-                    "couldn't find a subgraph schema for service {:?}",
-                    &service_name
-                );
-                operation.as_serialized()
-            }
-        } else {
-            operation.as_serialized()
-        };
-
-        let mut subgraph_request = SubgraphRequest::builder()
-            .supergraph_request(parameters.supergraph_request.clone())
-            .subgraph_request(
-                http_ext::Request::builder()
-                    .method(http::Method::POST)
-                    .uri(uri)
-                    .body(
-                        Request::builder()
-                            .query(aliased_operation)
-                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.clone())
-                            .build(),
-                    )
-                    .build()
-                    .expect("it won't fail because the url is correct and already checked; qed"),
-            )
-            .subgraph_name(subgraph_service_name)
-            .operation_kind(*operation_kind)
-            .context(parameters.context.clone())
-            .build();
-        subgraph_request.query_hash = self.schema_aware_hash.clone();
-        subgraph_request.authorization = self.authorization.clone();
-
-        let service = parameters
-            .service_factory
-            .create(service_name)
-            .expect("we already checked that the service exists during planning; qed");
-
-        Self::subgraph_fetch(
-            service,
-            subgraph_request,
-            service_name,
-            current_dir,
-            &self.requires,
-            &self.output_rewrites,
-            parameters.schema,
-            paths,
-            self.id.clone(),
-            parameters.deferred_fetches,
-            aliased_operation,
-            variables,
-        )
-        .await
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub(crate) async fn subgraph_fetch(
         service: BoxService,

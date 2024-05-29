@@ -12,6 +12,7 @@ pub(crate) use supergraph::ConnectorSupergraphError;
 pub(crate) use self::directives::Source;
 pub(crate) mod configuration;
 mod fetch;
+pub(crate) use fetch::process_source_node;
 mod http_json_transport;
 mod request_inputs;
 mod request_response;
