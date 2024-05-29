@@ -1,0 +1,28 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom histogram should not be incremented as the condition is not true on drop.
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          custom.histogram.duration:
+            description: histogram of requests
+            type: histogram
+            unit: unit
+            value: duration
+            condition:
+              eq:
+                - request_header: always-true
+                - static: "true"
+---
+- name: custom.histogram.duration
+  description: histogram of requests
+  unit: unit
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes: {}

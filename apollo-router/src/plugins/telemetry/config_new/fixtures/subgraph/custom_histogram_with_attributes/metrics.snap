@@ -1,0 +1,29 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom histogram with attributes
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        subgraph:
+          custom.histogram:
+            description: histogram of requests
+            type: histogram
+            unit: unit
+            value: unit
+            attributes:
+              subgraph.graphql.document: true
+              custom_attribute:
+                subgraph_request_header: custom_header
+---
+- name: custom.histogram
+  description: histogram of requests
+  unit: unit
+  data:
+    datapoints:
+      - sum: 1
+        attributes:
+          custom_attribute: custom_value
+          subgraph.graphql.document: "query { hello }"

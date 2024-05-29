@@ -546,6 +546,11 @@ message Report {
   // operations. If this is false, each operation is described in precisely
   // one of those two fields.
   bool traces_pre_aggregated = 7;
+
+  // This indicates whether or not extended references are enabled, which are within the stats with context and contain
+  // input type and enum value references. We need this flag so we can tell if the option is enabled even when there are
+  // no extended references to report.
+  bool extended_references_enabled = 9;
 }
 
 
@@ -555,6 +560,9 @@ message ContextualizedStats {
   // Key is type name. This structure provides data for the count and latency of individual
   // field executions and thus only reflects operations for which field-level tracing occurred.
   map<string, TypeStat> per_type_stat = 3;
+
+  // Extended references including input types and enum values.
+  ExtendedReferences extended_references = 6;
 
   // Per type stats that are obtained directly by the router or gateway rather than FTV1.
   map<string, LocalTypeStat> local_per_type_stat = 7;
@@ -576,6 +584,34 @@ message QueryMetadata {
   string signature = 2;
   // (Optional) Persisted query ID that was used to request this operation.
   string pq_id = 3;
+}
+
+message ExtendedReferences {
+  map<string, InputTypeStats> input_types = 1;
+
+  // Map of enum name to stats about that enum.
+  map<string, EnumStats> enum_values = 2;
+}
+
+message InputTypeStats {
+  // Map of input object type to the stats about the fields within that object.
+  map<string, InputFieldStats> field_names = 1;
+}
+
+message InputFieldStats {
+  // The total number of operations that reference the input object field.
+  uint64 refs = 1;
+
+  // The number of operations that reference the input object field as a null value.
+  uint64 null_refs = 2;
+
+  // The number of operations that don't reference this input object field (the field is missing or undefined).
+  uint64 missing = 3;
+}
+
+message EnumStats {
+  // Map of enum value name to the number of referencing operations.
+  map<string, uint64> enum_values = 1;
 }
 
 // A sequence of traces and stats. If Report.traces_pre_aggregated (at the top

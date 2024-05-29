@@ -1,0 +1,7 @@
+description: Custom counter where the router response does not happen. This should still increment the metric on Drop.
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
