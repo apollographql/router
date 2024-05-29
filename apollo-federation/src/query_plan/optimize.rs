@@ -1294,7 +1294,7 @@ mod tests {
         )
         .unwrap();
         let operation = executable_document.get_operation(None).unwrap();
-        let named_fragments = NamedFragments::new(&executable_document.fragments, &schema);
+        let named_fragments = NamedFragments::new(&executable_document.fragments, schema);
         let selection_set =
             SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
                 .unwrap();
