@@ -581,12 +581,6 @@ impl BridgeQueryPlanner {
                     usage_reporting.stats_report_key = sig;
                 }
 
-                tracing::info!(
-                    "experimental_apollo_metrics_generation_mode: {:?}",
-                    self.configuration
-                        .experimental_apollo_metrics_generation_mode
-                );
-
                 if matches!(
                     self.configuration
                         .experimental_apollo_metrics_generation_mode,
