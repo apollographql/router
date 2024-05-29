@@ -309,11 +309,11 @@ impl StaticCostCalculator {
     fn score_json(value: &TypedValue) -> Result<f64, DemandControlError> {
         match value {
             TypedValue::Null => Ok(0.0),
-            TypedValue::Bool(_, _) => Ok(0.0),
-            TypedValue::Number(_, _) => Ok(0.0),
-            TypedValue::String(_, _) => Ok(0.0),
-            TypedValue::Array(_, items) => Self::summed_score_of_values(items),
-            TypedValue::Object(_, children) => {
+            TypedValue::Bool(_, _, _) => Ok(0.0),
+            TypedValue::Number(_, _, _) => Ok(0.0),
+            TypedValue::String(_, _, _) => Ok(0.0),
+            TypedValue::List(_, _, items) => Self::summed_score_of_values(items),
+            TypedValue::Object(_, _, children) => {
                 let cost_of_children = Self::summed_score_of_values(children.values())?;
                 Ok(1.0 + cost_of_children)
             }

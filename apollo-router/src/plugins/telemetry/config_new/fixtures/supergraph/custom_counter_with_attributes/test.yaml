@@ -1,0 +1,23 @@
+description: Custom counter with attributes
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: custom_value
+        body: |
+          hello
+    - supergraph_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          custom_header: custom_value
+        query: "query { hello }"
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"
+    - router_response:
+        body: |
+          hello
+        status: 200
