@@ -9,6 +9,7 @@ use walkdir::WalkDir;
 use xtask::*;
 
 use crate::commands::changeset::slurp_and_remove_changesets;
+mod process;
 
 #[derive(Debug, clap::Subcommand)]
 pub enum Command {
@@ -17,6 +18,9 @@ pub enum Command {
 
     /// Verify that a release is ready to be published
     PreVerify,
+
+    Start(process::Start),
+    Continue,
 }
 
 impl Command {
@@ -24,6 +28,8 @@ impl Command {
         match self {
             Command::Prepare(command) => command.run(),
             Command::PreVerify => PreVerify::run(),
+            Command::Start(start) => process::Process::start(start),
+            Command::Continue => process::Process::cont(),
         }
     }
 }
