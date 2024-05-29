@@ -1112,7 +1112,6 @@ type User
         }
         "###);
     }
-<<<<<<< HEAD
 
     #[test]
     fn test_optimize_basic() {

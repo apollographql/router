@@ -1464,7 +1464,7 @@ impl FetchDependencyGraph {
         merge_parent_dependencies: bool,
     ) -> Result<(), FederationError> {
         let (node, merged) = self.graph.index_twice_mut(node_id, merged_id);
-        if !node.is_top_level() {
+        if merged.is_top_level() {
             return Err(FederationError::internal(
                 "Shouldn't remove top level nodes",
             ));
@@ -3117,7 +3117,7 @@ fn handle_requires(
     // node we're coming from is our "direct parent", we can merge it to said direct parent (which
     // effectively means that the parent node will collect the provides before taking the edge
     // to our current node).
-    if parents.len() == 1 && path_has_only_fragments(&fetch_node_path.path_in_node) {
+    if parents.len() == 1 && fetch_node_path.path_in_node.has_only_fragments() {
         let parent = &parents[0];
 
         // We start by computing the nodes for the conditions. We do this using a copy of the current
@@ -3172,9 +3172,9 @@ fn handle_requires(
         // Note: it is to be sure this test is not polluted by other things in `node` that we created `new_node`.
         dependency_graph.remove_inputs_from_selection(new_node_id)?;
 
-        let new_node_is_unneeded = dependency_graph.is_node_unneeded(new_node_id, parent)?;
+        let new_node_is_not_needed = dependency_graph.is_node_unneeded(new_node_id, parent)?;
         let mut unmerged_node_ids: Vec<NodeIndex> = Vec::new();
-        if new_node_is_unneeded {
+        if new_node_is_not_needed {
             // Up to this point, `new_node` had no parent, so let's first merge `new_node` to the parent, thus "rooting"
             // its children to it. Note that we just checked that `new_node` selection was just its inputs, so
             // we know that merging it to the parent is mostly a no-op from that POV, except maybe for requesting
@@ -3313,7 +3313,7 @@ fn handle_requires(
         }
         // That node also need, in general, to depend on the current `fetch_node`. That said, if we detected that the @require
         // didn't need anything of said `node` (if `new_node_is_unneeded`), then we can depend on the parent instead.
-        if new_node_is_unneeded {
+        if new_node_is_not_needed {
             dependency_graph.add_parent(post_require_node_id, parent.clone());
         } else {
             dependency_graph.add_parent(
@@ -3393,7 +3393,6 @@ fn handle_requires(
         )?;
         let new_node = dependency_graph.node_weight(new_node_id)?;
         let merge_at = new_node.merge_at.clone();
-        let subgraph_name = new_node.subgraph_name.clone();
         let parent_type = new_node.parent_type.clone();
         for created_node_id in &new_created_nodes {
             let created_node = dependency_graph.node_weight(*created_node_id)?;
@@ -3439,13 +3438,6 @@ fn handle_requires(
         let new_path = fetch_node_path.for_new_key_fetch(initial_fetch_path);
         Ok((new_node_id, new_path))
     }
-}
-
-fn path_has_only_fragments(path: &Arc<OpPath>) -> bool {
-    // JS PORT NOTE: this was checking for FragmentElement which was used for both inline fragments and spreads
-    path.0
-        .iter()
-        .all(|p| matches!(p.as_ref(), OpPathElement::InlineFragment(_)))
 }
 
 fn defer_context_for_conditions(base_context: &DeferContext) -> DeferContext {
@@ -3548,7 +3540,13 @@ fn inputs_for_require(
             )?;
             full_selection_set.merge_into(iter::once(&key_condition_as_input))?;
         } else {
-            full_selection_set.merge_into(iter::once(&key_condition))?;
+            let rebased_key_condition = key_condition.rebase_on(
+                &input_type,
+                &NamedFragments::default(),
+                &fetch_dependency_graph.supergraph_schema,
+                RebaseErrorHandlingOption::ThrowError,
+            )?;
+            full_selection_set.merge_into(iter::once(&rebased_key_condition))?;
         }
 
         // Note that `key_inputs` are used to ensure those input are fetch on the original group, the one having `edge`. In

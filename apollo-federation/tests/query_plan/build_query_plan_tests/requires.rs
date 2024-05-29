@@ -1,7 +1,3 @@
-use apollo_compiler::ExecutableDocument;
-use apollo_federation::query_plan::query_planner::QueryPlanner;
-use apollo_federation::Supergraph;
-
 mod include_skip;
 
 #[test]
@@ -71,7 +67,7 @@ fn handles_simple_requires() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure after optimize is merged
 fn it_handles_multiple_requires_within_the_same_entity_fetch() {
     let planner = planner!(
         Subgraph1: r#"
@@ -186,7 +182,7 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure after optimize is merged
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1175,8 +1171,8 @@ fn it_handles_complex_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")]
-// TODO: investigate this failure
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure after optimize is merged
 fn it_handes_diamond_shape_depedencies() {
     // The idea of this test is that to be able to fulfill the @require in subgraph D, we need
     // both values from C for the @require and values from B for the key itself, but both

@@ -3562,6 +3562,13 @@ impl OpPath {
         }
         OpPath(filtered)
     }
+
+    pub(crate) fn has_only_fragments(&self) -> bool {
+        // JS PORT NOTE: this was checking for FragmentElement which was used for both inline fragments and spreads
+        self.0
+            .iter()
+            .all(|p| matches!(p.as_ref(), OpPathElement::InlineFragment(_)))
+    }
 }
 
 impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
