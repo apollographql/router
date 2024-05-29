@@ -27,6 +27,7 @@ use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
 use parking_lot::Mutex;
 use sys_info::hostname;
+use tonic::codec::CompressionEncoding;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
 use tower::BoxError;
@@ -93,20 +94,36 @@ impl ApolloOtlpExporter {
         let mut metadata = MetadataMap::new();
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let otlp_exporter = match protocol {
-            Protocol::Grpc => Arc::new(Mutex::new(
-                SpanExporterBuilder::from(
+            Protocol::Grpc => {
+                let mut span_exporter = SpanExporterBuilder::from(
                     opentelemetry_otlp::new_exporter()
                         .tonic()
                         .with_timeout(batch_config.max_export_timeout)
                         .with_endpoint(endpoint.to_string())
-                        .with_metadata(metadata),
-                    // TBD(tim): figure out why compression seems to be turned off on our collector
-                    // .with_compression(opentelemetry_otlp::Compression::Gzip),
+                        .with_metadata(metadata)
+                        .with_compression(opentelemetry_otlp::Compression::Gzip),
                 )
                 // TBD(tim): do we need another batch processor for this?
                 // Seems like we've already set up a batcher earlier in the pipe but not quite sure.
-                .build_span_exporter()?,
-            )),
+                .build_span_exporter()?;
+
+                span_exporter = if let opentelemetry_otlp::SpanExporter::Tonic {
+                    trace_exporter,
+                    metadata,
+                    timeout,
+                } = span_exporter
+                {
+                    opentelemetry_otlp::SpanExporter::Tonic {
+                        timeout,
+                        metadata,
+                        trace_exporter: trace_exporter.accept_compressed(CompressionEncoding::Gzip),
+                    }
+                } else {
+                    span_exporter
+                };
+
+                Arc::new(Mutex::new(span_exporter))
+            }
             // So far only using HTTP path for testing - the Studio backend only accepts GRPC today.
             Protocol::Http => Arc::new(Mutex::new(
                 SpanExporterBuilder::from(
