@@ -94,7 +94,7 @@ impl FilterMeterProvider {
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    r"apollo\.(graphos\.cloud|router\.(operations?|config|schema|query))(\..*|$)",
+                    r"apollo\.(graphos\.cloud|router\.(operations?|config|schema|query|query_planning))(\..*|$)",
                 )
                 .expect("regex should have been valid"),
             )
@@ -280,6 +280,10 @@ mod test {
             .add(1, &[]);
         filtered
             .u64_counter("apollo.router.unknown.test")
+            .init()
+            .add(1, &[]);
+        filtered
+            .u64_counter("apollo.router.query_planning.test")
             .init()
             .add(1, &[]);
         meter_provider.force_flush(&cx).unwrap();
