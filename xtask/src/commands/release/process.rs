@@ -201,16 +201,16 @@ impl Process {
         let gh = which::which("gh")?;
 
         // step 8
-        let pr_text = r#"" > **Note** \
-        > **This particular PR must be true-merged to \`main\`.** \
- \
-        * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title). \
-        * It will act as a staging branch until we are ready to finalize the release. \
-        * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it. \
-        * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**: \
-            - Does this PR target the right branch? (usually, \`main\`) \
-            - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?" \
-            - If those things look good, this PR is good to merge!""#;
+        let pr_text = r#"> **Note**
+> **This particular PR must be true-merged to \`main\`.**
+
+* This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title).
+* It will act as a staging branch until we are ready to finalize the release.
+* We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it.
+* This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**:
+    - Does this PR target the right branch? (usually, \`main\`)
+    - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
+    - If those things look good, this PR is good to merge!"#;
 
         let output = std::process::Command::new(&gh)
             .args([
