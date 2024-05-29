@@ -36,6 +36,7 @@ mod named_fragments_preservation;
 mod provides;
 mod requires;
 mod shareable_root_fields;
+mod skip_include_merging;
 
 // TODO: port the rest of query-planner-js/src/__tests__/buildPlan.test.ts
 
