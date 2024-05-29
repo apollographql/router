@@ -22,6 +22,7 @@ impl QueryGraph {
             if let Some((n1, n2)) = self.graph().edge_endpoints(i) {
                 let edge = &self.graph()[i];
                 edges.push(json!({
+                  "id": i.index(),
                   "head": n1.index(),
                   "tail": n2.index(),
                   "label": edge.to_string(),
