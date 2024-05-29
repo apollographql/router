@@ -78,8 +78,8 @@ impl SubscriptionNode {
 impl FetchNode {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
         let Self {
-            operation_variables,
-            input_conditions,
+            operation_variables: _,
+            input_conditions: _,
             source_data,
             // subgraph_name,
             // id,
@@ -121,7 +121,7 @@ impl FetchNode {
             source::query_plan::FetchNode::Graphql(fetch) => {
                 write_operation(state, &fetch.operation_document.clone().into_inner())?;
             }
-            source::query_plan::FetchNode::Connect(fetch) => {
+            source::query_plan::FetchNode::Connect(_fetch) => {
                 // TODO
             }
         };
