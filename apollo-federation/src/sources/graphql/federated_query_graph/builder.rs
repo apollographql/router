@@ -134,7 +134,7 @@ fn process_type(
         Some(Either::Left(concrete_ty)) => concrete_ty
             .field_positions(subgraph_schema.schema())?
             .try_for_each(|subgraph_field| {
-            if !is_field_ignored(subgraph_field.clone().into(), subgraph_schema)? {
+            if is_field_ignored(subgraph_field.clone().into(), subgraph_schema)? {
                 return Ok(());
             }
             subgraph_field
