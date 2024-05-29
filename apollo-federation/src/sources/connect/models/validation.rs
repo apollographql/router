@@ -256,13 +256,13 @@ fn validate_object(
             // TODO: Pick a suggestion that's not just the first defined source
             let message = if let Some(first_source_name) = source_names.first() {
                 format!(
-                        "the source {SOURCE_NAME_ARGUMENT} \"{source_name_value}\" for `{object_name}.{field_name}` does not match any defined sources. Did you mean {first_source_name}?",
+                        "The value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT}: \"{source_name_value}\")` on  `{object_name}.{field_name}` does not match any defined sources. Did you mean {first_source_name}?",
                         object_name = object.name,
                         field_name = field.name,
                     )
             } else {
                 format!(
-                        "`{object_name}.{field_name}` specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
+                        "The value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT}:) on `{object_name}.{field_name}` specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
                         object_name = object.name,
                         field_name = field.name,
                         source_directive_name = source_directive_name,
