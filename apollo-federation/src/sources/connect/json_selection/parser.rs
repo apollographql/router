@@ -48,6 +48,20 @@ impl JSONSelection {
             all_consuming(map(PathSelection::parse, Self::Path)),
         ))(input)
     }
+
+    pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
+        match self {
+            JSONSelection::Named(subselect) => Some(subselect),
+            JSONSelection::Path(path) => path.next_subselection(),
+        }
+    }
+
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match self {
+            JSONSelection::Named(subselect) => Some(subselect),
+            JSONSelection::Path(path) => path.next_mut_subselection(),
+        }
+    }
 }
 
 // NamedSelection       ::= NamedPathSelection | NamedFieldSelection | NamedQuotedSelection | NamedGroupSelection
@@ -65,7 +79,7 @@ pub enum NamedSelection {
 }
 
 impl NamedSelection {
-    fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
         alt((
             // We must try parsing NamedPathSelection before NamedFieldSelection
             // and NamedQuotedSelection because a NamedPathSelection without a
@@ -154,6 +168,21 @@ impl NamedSelection {
             _ => None,
         }
     }
+
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match self {
+            // Paths are complicated because they can have a subselection deeply nested
+            NamedSelection::Path(_, path) => path.next_mut_subselection(),
+
+            // The other options have it at the root
+            NamedSelection::Field(_, _, Some(sub))
+            | NamedSelection::Quoted(_, _, Some(sub))
+            | NamedSelection::Group(_, sub) => Some(sub),
+
+            // Every other option does not have a subselection
+            _ => None,
+        }
+    }
 }
 
 // PathSelection ::= (VarPath | KeyPath) SubSelection?
@@ -172,7 +201,7 @@ pub enum PathSelection {
 }
 
 impl PathSelection {
-    fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
         match Self::parse_with_depth(input, 0) {
             Ok((remainder, Self::Empty)) => Err(nom::Err::Error(nom::error::Error::new(
                 remainder,
@@ -280,6 +309,16 @@ impl PathSelection {
             PathSelection::Empty => None,
         }
     }
+
+    /// Find the next subselection, traversing nested chains if needed. Returns a mutable reference
+    pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        match self {
+            PathSelection::Var(_, path) => path.next_mut_subselection(),
+            PathSelection::Key(_, path) => path.next_mut_subselection(),
+            PathSelection::Selection(sub) => Some(sub),
+            PathSelection::Empty => None,
+        }
+    }
 }
 
 // SubSelection ::= "{" NakedSubSelection "}"
@@ -291,7 +330,7 @@ pub struct SubSelection {
 }
 
 impl SubSelection {
-    fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             spaces_or_comments,
             char('{'),
@@ -315,7 +354,7 @@ impl SubSelection {
 pub struct StarSelection(pub Option<Alias>, pub Option<Box<SubSelection>>);
 
 impl StarSelection {
-    fn parse(input: &str) -> IResult<&str, Self> {
+    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
         tuple((
             // The spaces_or_comments separators are necessary here because
             // Alias::parse and SubSelection::parse only consume surrounding
