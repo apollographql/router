@@ -169,6 +169,7 @@ async fn process_responses(
 
                     // todo: errors
                     if let Some(d) = d {
+                        // todo: use json_ext to merge stuff
                         data.insert(source_node.field_response_name.to_string(), d);
                     }
                 });

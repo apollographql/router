@@ -25,22 +25,22 @@ use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Protocol;
 use crate::query_planner::fetch::RestFetchNode;
 use crate::query_planner::fetch::Variables;
-use crate::services::FetchRequest;
-use crate::services::FetchResponse;
+use crate::services::ConnectRequest;
+use crate::services::ConnectResponse;
 use crate::services::SubgraphServiceFactory;
 use crate::spec::Schema;
 
 #[derive(Clone)]
-pub(crate) struct FetchService {
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+pub(crate) struct ConnectorService {
+    pub(crate) http_service_factory: Arc<()>, // TODO: HTTP SERVICE
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors: Connectors,
 }
 
-impl tower::Service<FetchRequest> for FetchService {
-    type Response = FetchResponse;
+impl tower::Service<ConnectRequest> for ConnectorService {
+    type Response = ConnectResponse;
     type Error = BoxError;
     type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
 
@@ -48,7 +48,7 @@ impl tower::Service<FetchRequest> for FetchService {
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, request: FetchRequest) -> Self::Future {
+    fn call(&mut self, request: ConnectRequest) -> Self::Future {
         let FetchRequest {
             fetch_node,
             supergraph_request,
@@ -203,45 +203,38 @@ impl tower::Service<FetchRequest> for FetchService {
 }
 
 #[derive(Clone)]
-pub(crate) struct FetchServiceFactory {
+pub(crate) struct ConnectorServiceFactory {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) http_service_factory: Arc<()>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors: Connectors,
 }
 
-impl FetchServiceFactory {
+impl ConnectorServiceFactory {
     pub(crate) fn new(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-        subgraph_service_factory: Arc<SubgraphServiceFactory>,
+        http_service_factory: Arc<()>,
         subscription_config: Option<SubscriptionConfig>,
         connectors: Connectors,
     ) -> Self {
         Self {
-            subgraph_service_factory,
+            http_service_factory: Arc::new(()),
             subgraph_schemas,
             schema,
             subscription_config,
             connectors,
         }
     }
-
-    pub(crate) fn subgraph_service_for_subscriptions(
-        &self,
-        service_name: &str,
-    ) -> Option<crate::services::subgraph::BoxService> {
-        self.subgraph_service_factory.create(service_name)
-    }
 }
 
-impl ServiceFactory<FetchRequest> for FetchServiceFactory {
+impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
     type Service = BoxService;
 
     fn create(&self) -> Self::Service {
-        FetchService {
-            subgraph_service_factory: self.subgraph_service_factory.clone(),
+        ConnectorService {
+            http_service_factory: Arc::new(()),
             schema: self.schema.clone(),
             subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
