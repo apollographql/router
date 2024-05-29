@@ -3037,6 +3037,32 @@ impl Display for OpGraphPath {
     }
 }
 
+impl OpGraphPath {
+    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
+        use serde_json_bytes::json;
+        let head = &self.graph.graph()[self.head];
+        let mut parts = vec![json!({ "node": self.head.index(), "label": head.to_string() })];
+        self.edges
+            .iter()
+            .cloned()
+            .enumerate()
+            .for_each(|(i, edge)| {
+                match edge {
+                    Some(e) => {
+                        let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
+                        let edge = &self.graph.graph()[e];
+                        parts.push(json!({ "edge": e.index(), "label": edge.transition.to_string() }));
+                        let node = &self.graph.graph()[tail];
+                        parts.push(json!({ "node": tail.index(), "label": node.to_string() }));
+                    }
+                    None => parts
+                        .push(json!({ "trigger": true, "label": self.edge_triggers[i].as_ref().to_string() })),
+                };
+            });
+        json!(parts)
+    }
+}
+
 impl SimultaneousPaths {
     /// Given options generated for the advancement of each path of a `SimultaneousPaths`, generate
     /// the options for the `SimultaneousPaths` as a whole.

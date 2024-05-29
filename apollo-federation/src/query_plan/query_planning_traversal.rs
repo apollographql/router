@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
 use indexmap::IndexSet;
+use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use serde_json_bytes::json;
+use serde_json_bytes::Value;
 use tracing::instrument;
+use tracing::trace;
 
 use crate::error::FederationError;
 use crate::query_graph::condition_resolver::ConditionResolution;
@@ -180,6 +184,7 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     // Many arguments is okay for a private constructor function.
     #[allow(clippy::too_many_arguments)]
+    #[instrument(level = "trace", skip_all, name = "QueryPlanningTraversal::new_inner")]
     fn new_inner(
         parameters: &'a QueryPlanningParameters,
         selection_set: SelectionSet,
@@ -240,7 +245,22 @@ impl<'a> QueryPlanningTraversal<'a> {
             excluded_conditions,
         )?;
 
+        trace!(
+            data = json!(initial_options.iter().map(|ib| ib.to_json()).collect_vec()).to_string(),
+            "initial_options"
+        );
+
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
+
+        trace!(
+            data = json!(traversal
+                .open_branches
+                .iter()
+                .map(|ob| ob.to_json())
+                .collect::<Vec<_>>())
+            .to_string(),
+            "open_branches"
+        );
 
         Ok(traversal)
     }
@@ -257,6 +277,11 @@ impl<'a> QueryPlanningTraversal<'a> {
         Ok(self.best_plan)
     }
 
+    #[instrument(
+        level = "trace",
+        skip_all,
+        name = "QueryPlanningTraversal::find_best_plan_inner"
+    )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
             let Some(current_selection) = current_branch.selections.pop() else {
@@ -548,12 +573,32 @@ impl<'a> QueryPlanningTraversal<'a> {
         name = "QueryPlanningTraversal::compute_best_plan_from_closed_branches"
     )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
+        trace!(
+            data = json!(self
+                .closed_branches
+                .iter()
+                .map(|cb| cb.to_json())
+                .collect_vec())
+            .to_string(),
+            "closed_branches"
+        );
+
         if self.closed_branches.is_empty() {
             return Ok(());
         }
         self.prune_closed_branches();
         self.sort_options_in_closed_branches()?;
         self.reduce_options_if_needed();
+
+        trace!(
+            data = json!(self
+                .closed_branches
+                .iter()
+                .map(|cb| cb.to_json())
+                .collect_vec())
+            .to_string(),
+            "closed_branches_after_reduce"
+        );
 
         // debug log
         // self.closed_branches
@@ -1120,4 +1165,75 @@ fn test_prune_and_reorder_first_branch() {
     // The "run" can be a single branch:
     assert(&["abC", "lmn", "op"], &["lmn", "ab", "op"]);
     assert(&["abC", "lmn"], &["lmn", "ab"]);
+}
+
+////////////////////////////////////////////////////////////////////////////////
+/// Instrumentation
+
+impl OpenBranchAndSelections {
+    pub(crate) fn to_json(&self) -> Value {
+        let selections = self
+            .selections
+            .iter()
+            .map(|selection| selection.to_json())
+            .collect_vec();
+        json!({
+            "kind": "OpenBranchAndSelections",
+            "openBranch": self.open_branch.to_json(),
+            "selections": selections,
+        })
+    }
+}
+
+impl Selection {
+    pub(crate) fn to_json(&self) -> Value {
+        let has_conditions = match self.conditions() {
+            Ok(_) => true,
+            _ => false,
+        };
+        let selection = match self.selection_set() {
+            Ok(Some(selection_set)) => json!(selection_set.to_string()),
+            _ => Value::Null,
+        };
+        json!({
+            "kind": "Selection",
+            "has_conditions": has_conditions,
+            "selection": selection
+        })
+    }
+}
+
+impl OpenBranch {
+    pub(crate) fn to_json(&self) -> Value {
+        let paths = self.0.iter().map(|path| path.to_json()).collect_vec();
+        json!({
+            "kind": "OpenBranch",
+            "branch": paths,
+        })
+    }
+}
+
+impl ClosedBranch {
+    pub(crate) fn to_json(&self) -> Value {
+        let paths = self.0.iter().map(|path| path.to_json()).collect_vec();
+        json!({
+            "kind": "ClosedBranch",
+            "branch": paths,
+        })
+    }
+}
+
+impl SimultaneousPathsWithLazyIndirectPaths {
+    pub(crate) fn to_json(&self) -> Value {
+        let paths = self
+            .paths
+            .0
+            .iter()
+            .map(|path| path.to_json())
+            .collect::<Vec<_>>();
+        json!({
+            "kind": "SimultaneousPathsWithLazyIndirectPaths",
+            "paths": paths,
+        })
+    }
 }

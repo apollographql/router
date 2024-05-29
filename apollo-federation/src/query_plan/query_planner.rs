@@ -197,7 +197,6 @@ impl QueryPlanner {
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
     ) -> Result<Self, FederationError> {
-        trace!("Hello world");
         config.assert_valid();
 
         let supergraph_schema = supergraph.schema.clone();
@@ -211,6 +210,8 @@ impl QueryPlanner {
             Some(true),
             Some(true),
         )?;
+
+        trace!(data = &query_graph.to_json().to_string(), "query graph");
 
         let metadata = supergraph_schema.metadata().unwrap();
 
