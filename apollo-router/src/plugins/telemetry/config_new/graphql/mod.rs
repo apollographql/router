@@ -242,7 +242,7 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, ty, field, item);
+                    self.visit_field(request, field.ty().inner_named_type(), field, item);
                 }
             }
             Value::Object(children) => {
@@ -303,7 +303,7 @@ pub(crate) mod test {
                 2.0,
                 "graphql.field.name" = "users",
                 "graphql.field.type" = "User",
-                "graphql.type.name" = "Query"
+                "graphql.type.name" = "User"
             );
         }
         .with_metrics()
@@ -351,14 +351,14 @@ pub(crate) mod test {
                 2.0,
                 "graphql.field.name" = "ships",
                 "graphql.field.type" = "Ship",
-                "graphql.type.name" = "Query"
+                "graphql.type.name" = "Ship"
             );
             assert_histogram_sum!(
                 "graphql.field.list.length",
                 2.0,
                 "graphql.field.name" = "users",
                 "graphql.field.type" = "User",
-                "graphql.type.name" = "Query"
+                "graphql.type.name" = "User"
             );
         }
         .with_metrics()

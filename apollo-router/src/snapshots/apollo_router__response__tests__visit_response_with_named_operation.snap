@@ -2,6 +2,11 @@
 source: apollo-router/src/response.rs
 expression: visitor
 ---
-licenseNumber: 2
-name: 2
-users: 2
+field_counts:
+  licenseNumber: 2
+  name: 2
+  users: 2
+type_counts:
+  ID: 2
+  String: 2
+  User: 2
