@@ -768,6 +768,7 @@ mod tests {
         use crate::sources::connect::json_selection::Alias;
         use crate::sources::connect::json_selection::Key;
         use crate::sources::connect::json_selection::NamedSelection;
+        use crate::sources::connect::json_selection::PrettyPrintable;
         use crate::sources::connect::ConnectId;
         use crate::sources::connect::JSONSelection;
         use crate::sources::source;
@@ -1175,7 +1176,7 @@ mod tests {
             assert_eq!(result.source_entering_edge, source_entering_edge);
             assert_eq!(result.field_response_name.as_str(), "_simple_path_test");
             assert_eq!(result.field_arguments, IndexMap::new());
-            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            assert_snapshot!(result.selection.unwrap().pretty_print().unwrap(), @r###"
             {
               a
               b
@@ -1264,7 +1265,7 @@ mod tests {
             assert_eq!(result.source_entering_edge, source_entering_edge);
             assert_eq!(result.field_response_name.as_str(), "_nested_path_test");
             assert_eq!(result.field_arguments, IndexMap::new());
-            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            assert_snapshot!(result.selection.unwrap().pretty_print().unwrap(), @r###"
             {
               a
               b {
@@ -1407,7 +1408,7 @@ mod tests {
                 "_merge_nested_path_test"
             );
             assert_eq!(result.field_arguments, IndexMap::new());
-            assert_snapshot!(result.selection.unwrap().pretty_print(None).unwrap(), @r###"
+            assert_snapshot!(result.selection.unwrap().pretty_print().unwrap(), @r###"
             .foo.bar {
               qux: .qaax
               qax: .qaax {
