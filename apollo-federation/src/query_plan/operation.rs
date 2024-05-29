@@ -2329,6 +2329,7 @@ impl SelectionSet {
                     } else {
                         // convert to inline fragment
                         let expanded = InlineFragmentSelection::from_fragment_spread_selection(
+                            selection_set.type_position.clone(), // the parent type of this inline selection
                             spread_selection,
                         )?;
                         destination.push(Selection::InlineFragment(Arc::new(expanded)));
@@ -3994,13 +3995,14 @@ impl InlineFragmentSelection {
     }
 
     pub(crate) fn from_fragment_spread_selection(
+        parent_type_position: CompositeTypeDefinitionPosition,
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let fragment_spread_data = fragment_spread_selection.spread.data();
         Ok(InlineFragmentSelection {
             inline_fragment: InlineFragment::new(InlineFragmentData {
                 schema: fragment_spread_data.schema.clone(),
-                parent_type_position: fragment_spread_data.type_condition_position.clone(),
+                parent_type_position,
                 type_condition_position: Some(fragment_spread_data.type_condition_position.clone()),
                 directives: fragment_spread_data.directives.clone(),
                 selection_id: SelectionId::new(),

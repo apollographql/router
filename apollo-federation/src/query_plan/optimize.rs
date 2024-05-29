@@ -853,8 +853,10 @@ impl Selection {
                         Ok(expanded_sub_selections.into())
                     } else {
                         // Create an inline fragment since type condition is necessary.
-                        let inline =
-                            InlineFragmentSelection::from_fragment_spread_selection(fragment)?;
+                        let inline = InlineFragmentSelection::from_fragment_spread_selection(
+                            parent_type.clone(),
+                            fragment,
+                        )?;
                         Ok(Selection::from(inline).into())
                     }
                 }
