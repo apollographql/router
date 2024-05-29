@@ -290,25 +290,7 @@ fn it_avoid_fragments_usable_only_once() {
     );
 }
 
-#[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
-
-fn respects_query_planner_option_reuse_query_fragments_true() {
-    respects_query_planner_option_reuse_query_fragments(true)
-}
-#[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
-
-fn respects_query_planner_option_reuse_query_fragments_false() {
-    respects_query_planner_option_reuse_query_fragments(false)
-}
-
-fn respects_query_planner_option_reuse_query_fragments(reuse_query_fragments: bool) {
-    let planner = planner!(
-      config = QueryPlannerConfig {reuse_query_fragments, ..Default::default()},
-      Subgraph1: r#"
+const SUBGRAPH: &str = r#"
             type Query {
               t: T
             }
@@ -322,9 +304,9 @@ fn respects_query_planner_option_reuse_query_fragments(reuse_query_fragments: bo
               x: Int
               y: Int
             }
-        "#,
-    );
-    let query = r#"
+"#;
+
+const QUERY: &str = r#"
             query {
               t {
                 a1 {
@@ -340,12 +322,21 @@ fn respects_query_planner_option_reuse_query_fragments(reuse_query_fragments: bo
               x
               y
             }
-          "#;
-    if reuse_query_fragments {
-        assert_plan!(
-            &planner,
-            query,
-            @r#"
+"#;
+
+#[test]
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
+
+fn respects_query_planner_option_reuse_query_fragments_true() {
+    let planner = planner!(
+      config = QueryPlannerConfig { reuse_query_fragments: true, ..Default::default()},
+      Subgraph1: SUBGRAPH,
+    );
+    assert_plan!(
+        &planner,
+        QUERY,
+        @r#"
         QueryPlan {
           Fetch(service: "Subgraph1") {
             {
@@ -365,13 +356,23 @@ fn respects_query_planner_option_reuse_query_fragments(reuse_query_fragments: bo
             }
           },
         }
-            "#
-        );
-    } else {
-        assert_plan!(
-            &planner,
-            query,
-            @r#"
+        "#
+    );
+}
+
+#[test]
+#[should_panic(expected = "not yet implemented")]
+// TODO: investigate this failure
+
+fn respects_query_planner_option_reuse_query_fragments_false() {
+    let planner = planner!(
+      config = QueryPlannerConfig { reuse_query_fragments: false, ..Default::default()},
+      Subgraph1: SUBGRAPH,
+    );
+    assert_plan!(
+        &planner,
+        QUERY,
+        @r#"
         QueryPlan {
           Fetch(service: "Subgraph1") {
             {
@@ -388,9 +389,8 @@ fn respects_query_planner_option_reuse_query_fragments(reuse_query_fragments: bo
             }
           },
         }
-            "#
-        );
-    }
+      "#
+    );
 }
 
 #[test]
@@ -464,7 +464,7 @@ fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved()
 
 #[test]
 #[should_panic(
-    expected = "Error: variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"
+    expected = "variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"
 )]
 // TODO: investigate this failure
 fn it_preserves_directives_when_fragment_not_used() {
