@@ -1149,7 +1149,8 @@ type User
                 ...userFields
               }
             }
-                fragment userFields on User {
+
+            fragment userFields on User {
               name
               email
             }
@@ -1209,7 +1210,8 @@ type User
                 ...userFields
               }
             }
-                fragment userFields on User {
+
+            fragment userFields on User {
               name
               email
             }
@@ -1263,7 +1265,8 @@ type User
                 ...F2
               }
             }
-                fragment F2 on User {
+
+            fragment F2 on User {
               name
               email
               id
