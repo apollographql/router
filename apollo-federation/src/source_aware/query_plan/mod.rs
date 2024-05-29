@@ -7,6 +7,7 @@ use indexmap::IndexSet;
 
 use crate::sources::source;
 
+mod display;
 mod query_planner;
 pub use query_planner::QueryPlanner;
 
@@ -15,12 +16,6 @@ pub type QueryPlanCost = i64;
 #[derive(Debug, Default)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
-}
-
-impl std::fmt::Display for QueryPlan {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "todo!") // Do we copy display.rs? Make a From<source_aware::QueryPlan> for QueryPlan?
-    }
 }
 
 impl QueryPlan {
