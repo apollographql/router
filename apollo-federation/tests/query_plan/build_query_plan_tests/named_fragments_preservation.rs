@@ -1,8 +1,8 @@
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure - missing `__typename` under `a`
 fn it_works_with_nested_fragments_1() {
     let planner = planner!(
         Subgraph1: r#"
@@ -127,8 +127,6 @@ fn it_works_with_nested_fragments_1() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
 fn it_avoid_fragments_usable_only_once() {
     let planner = planner!(
             Subgraph1: r#"
@@ -248,49 +246,52 @@ fn it_avoid_fragments_usable_only_once() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "Subgraph1") {
-              {
-                t {
-                  __typename
-                  id
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            t {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "t") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T {
+                v2 {
+                  ...OnV
+                }
+                v3 {
+                  ...OnV
                 }
               }
-            },
-            Flatten(path: "t") {
-              Fetch(service: "Subgraph2") {
-                {
-                  ... on T {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on T {
-                    v2 {
-                      ...OnV
-                    }
-                    v3 {
-                      ...OnV
-                    }
-                  }
-                }
-                
-                fragment OnV on V {
-                  a
-                  b
-                  c
-                }
-              },
-            },
+            }
+
+            fragment OnV on V {
+              a
+              b
+              c
+            }
           },
-        }
-      "###
+        },
+      },
+    }
+    "###
     );
 }
 
-const SUBGRAPH: &str = r#"
+mod respects_query_planner_option_reuse_query_fragments {
+    use super::*;
+
+    const SUBGRAPH1: &str = r#"
             type Query {
               t: T
             }
@@ -304,9 +305,8 @@ const SUBGRAPH: &str = r#"
               x: Int
               y: Int
             }
-"#;
-
-const QUERY: &str = r#"
+    "#;
+    const QUERY: &str = r#"
             query {
               t {
                 a1 {
@@ -317,26 +317,26 @@ const QUERY: &str = r#"
                 }
               }
             }
-  
+
             fragment Selection on A {
               x
               y
             }
-"#;
+    "#;
 
-#[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
+    #[test]
+    fn respects_query_planner_option_reuse_query_fragments_true() {
+        let reuse_query_fragments = true;
+        let planner = planner!(
+          config = QueryPlannerConfig {reuse_query_fragments, ..Default::default()},
+          Subgraph1: SUBGRAPH1,
+        );
+        let query = QUERY;
 
-fn respects_query_planner_option_reuse_query_fragments_true() {
-    let planner = planner!(
-      config = QueryPlannerConfig { reuse_query_fragments: true, ..Default::default()},
-      Subgraph1: SUBGRAPH,
-    );
-    assert_plan!(
-        &planner,
-        QUERY,
-        @r#"
+        assert_plan!(
+            &planner,
+            query,
+            @r###"
         QueryPlan {
           Fetch(service: "Subgraph1") {
             {
@@ -349,53 +349,52 @@ fn respects_query_planner_option_reuse_query_fragments_true() {
                 }
               }
             }
-            
+
             fragment Selection on A {
               x
               y
             }
           },
         }
-        "#
-    );
-}
+        "###
+        );
+    }
 
-#[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
+    #[test]
+    fn respects_query_planner_option_reuse_query_fragments_false() {
+        let reuse_query_fragments = false;
+        let planner = planner!(
+          config = QueryPlannerConfig {reuse_query_fragments, ..Default::default()},
+          Subgraph1: SUBGRAPH1,
+        );
+        let query = QUERY;
 
-fn respects_query_planner_option_reuse_query_fragments_false() {
-    let planner = planner!(
-      config = QueryPlannerConfig { reuse_query_fragments: false, ..Default::default()},
-      Subgraph1: SUBGRAPH,
-    );
-    assert_plan!(
-        &planner,
-        QUERY,
-        @r#"
-        QueryPlan {
-          Fetch(service: "Subgraph1") {
-            {
-              t {
-                a1 {
-                  x
-                  y
+        assert_plan!(
+            &planner,
+            query,
+            @r#"
+            QueryPlan {
+              Fetch(service: "Subgraph1") {
+                {
+                  t {
+                    a1 {
+                      x
+                      y
+                    }
+                    a2 {
+                      x
+                      y
+                    }
+                  }
                 }
-                a2 {
-                  x
-                  y
-                }
-              }
+              },
             }
-          },
-        }
-      "#
-    );
+            "#
+        );
+    }
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
 fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved() {
     let planner = planner!(
         Subgraph1: r#"
@@ -463,10 +462,8 @@ fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved()
 }
 
 #[test]
-#[should_panic(
-    expected = "variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"
-)]
-// TODO: investigate this failure
+#[should_panic(expected = r#"called `Result::unwrap()` on an `Err` value: "#)]
+// TODO: investigate this failure (Error: variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`)
 fn it_preserves_directives_when_fragment_not_used() {
     // (because used only once)
     let planner = planner!(
@@ -651,8 +648,8 @@ fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure - snapshot mismatch (complicated)
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_differs() {
     // This test is designed such that type `Outer` implements the interface `I` in `Subgraph1`
     // but not in `Subgraph2`, yet `I` exists in `Subgraph2` (but only `Inner` implements it
@@ -999,8 +996,8 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
+#[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
+// TODO: investigate this failure (Object type "Outer" has no field "v")
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relation_differs() {
     // This test is similar to the subtyping case (it tests the same problems), but test the case
     // of unions instead of interfaces.
