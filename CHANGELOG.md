@@ -112,7 +112,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ## 📃 Configuration
 
-### Sending query planner metrics to Apollo ([PR #5267](https://github.com/apollographql/router/pull/5267))
+### Send query planner metrics to Apollo ([PR #5267](https://github.com/apollographql/router/pull/5267))
 
 To allow us to measure how much of an improvement the new query planner implementation makes, we are now transmitting metrics that start with:
 
@@ -124,7 +124,7 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 ## 🧪 Experimental
 
-### Add graphql instruments ([PR #5215](https://github.com/apollographql/router/pull/5215), [PR #5257](https://github.com/apollographql/router/pull/5257))
+### Graphql instruments ([PR #5215](https://github.com/apollographql/router/pull/5215), [PR #5257](https://github.com/apollographql/router/pull/5257))
 
 This PR adds experimental GraphQL instruments to telemetry.
 
