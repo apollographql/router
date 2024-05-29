@@ -10,6 +10,7 @@ use apollo_federation::sources::connect::query_plan::FetchNode as ConnectFetchNo
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::ConnectId;
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::Connectors;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::SubSelection;
@@ -21,18 +22,11 @@ use tower::BoxError;
 use super::http_json_transport::http_json_transport;
 use super::http_json_transport::HttpJsonTransportError;
 use crate::error::Error;
-use crate::graphql::Request as GraphQLRequest;
-use crate::http_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Protocol;
 use crate::query_planner::fetch::RestFetchNode;
-use crate::query_planner::fetch::Variables;
-use crate::query_planner::ExecutionParameters;
-use crate::services::subgraph::Request as SubgraphRequest;
 use crate::services::trust_dns_connector::new_async_http_connector;
 
 impl From<FetchNode> for source::query_plan::FetchNode {
@@ -85,174 +79,16 @@ impl FetchNode {
         let as_fednext_node: source::query_plan::FetchNode = self.clone().into();
         self.source_node = Some(Arc::new(as_fednext_node));
     }
-
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn process_source_node<'a>(
-        &'a self,
-        parameters: &'a ExecutionParameters<'a>,
-        data: &'a Value,
-        current_dir: &'a Path,
-    ) -> (Value, Vec<Error>) {
-        if let Some(source_node) = self.source_node.clone() {
-            let Variables {
-                variables,
-                inverted_paths: paths,
-                .. // TODO: context
-            } = match Variables::new(
-                &self.requires,
-                &self.variable_usages,
-                data,
-                current_dir,
-                // Needs the original request here
-                parameters.supergraph_request.body(),
-                parameters.schema,
-                &self.input_rewrites,
-                &self.context_rewrites,
-            ) {
-                Some(variables) => variables,
-                None => {
-                    return (Value::Object(Object::default()), Vec::new());
-                }
-            };
-            if let source::query_plan::FetchNode::Connect(c) = source_node.as_ref() {
-                let _ = process_source_node(c, parameters, variables, paths).await;
-                // TODO: return instead of let _ once the source aware planner lands
-            }
-        }
-
-        // TODO: remove this once the source aware planner lands
-        let FetchNode {
-            operation,
-            operation_kind,
-            operation_name,
-            service_name,
-            ..
-        } = self;
-
-        let Variables {
-            variables,
-            inverted_paths: paths,
-            contextual_arguments,
-        } = match Variables::new(
-            &self.requires,
-            &self.variable_usages,
-            data,
-            current_dir,
-            // Needs the original request here
-            parameters.supergraph_request.body(),
-            parameters.schema,
-            &self.input_rewrites,
-            &self.context_rewrites,
-        ) {
-            Some(variables) => variables,
-            None => {
-                return (Value::Object(Object::default()), Vec::new());
-            }
-        };
-
-        let service_name_string = service_name.to_string();
-
-        let (service_name, subgraph_service_name) = match &*self.protocol {
-            Protocol::RestFetch(RestFetchNode {
-                connector_service_name,
-                parent_service_name,
-                ..
-            }) => (parent_service_name, connector_service_name),
-            _ => (&service_name_string, &service_name_string),
-        };
-
-        let uri = parameters
-            .schema
-            .subgraph_url(service_name)
-            .unwrap_or_else(|| {
-                panic!("schema uri for subgraph '{service_name}' should already have been checked")
-            })
-            .clone();
-
-        let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
-        let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
-            if let Some(subgraph_schema) =
-                parameters.subgraph_schemas.get(&service_name.to_string())
-            {
-                match build_operation_with_aliasing(operation, &ctx_arg, subgraph_schema) {
-                    Ok(op) => {
-                        alias_query_string = op.serialize().no_indent().to_string();
-                        alias_query_string.as_str()
-                    }
-                    Err(errors) => {
-                        tracing::debug!(
-                            "couldn't generate a valid executable document? {:?}",
-                            errors
-                        );
-                        operation.as_serialized()
-                    }
-                }
-            } else {
-                tracing::debug!(
-                    "couldn't find a subgraph schema for service {:?}",
-                    &service_name
-                );
-                operation.as_serialized()
-            }
-        } else {
-            operation.as_serialized()
-        };
-
-        let mut subgraph_request = SubgraphRequest::builder()
-            .supergraph_request(parameters.supergraph_request.clone())
-            .subgraph_request(
-                http_ext::Request::builder()
-                    .method(http::Method::POST)
-                    .uri(uri)
-                    .body(
-                        GraphQLRequest::builder()
-                            .query(aliased_operation)
-                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.clone())
-                            .build(),
-                    )
-                    .build()
-                    .expect("it won't fail because the url is correct and already checked; qed"),
-            )
-            .subgraph_name(subgraph_service_name)
-            .operation_kind(*operation_kind)
-            .context(parameters.context.clone())
-            .build();
-        subgraph_request.query_hash = self.schema_aware_hash.clone();
-        subgraph_request.authorization = self.authorization.clone();
-
-        let service = parameters
-            .service_factory
-            .create(service_name)
-            .expect("we already checked that the service exists during planning; qed");
-
-        Self::subgraph_fetch(
-            service,
-            subgraph_request,
-            service_name,
-            current_dir,
-            &self.requires,
-            &self.output_rewrites,
-            parameters.schema,
-            paths,
-            self.id.clone(),
-            parameters.deferred_fetches,
-            aliased_operation,
-            variables,
-        )
-        .await
-    }
 }
 
-async fn process_source_node<'a>(
-    source_node: &'a ConnectFetchNode,
-    execution_parameters: &'a ExecutionParameters<'a>,
-    data: Object,
+pub(crate) async fn process_source_node(
+    source_node: &ConnectFetchNode,
+    connectors: Connectors,
+    data: Value,
     _paths: Vec<Vec<Path>>,
 ) -> (Value, Vec<Error>) {
-    let connector = if let Some(connector) = execution_parameters
-        .connectors
-        .get(&SourceId::Connect(source_node.source_id.clone()))
+    let connector = if let Some(connector) =
+        connectors.get(&SourceId::Connect(source_node.source_id.clone()))
     {
         connector
     } else {
@@ -269,7 +105,7 @@ async fn process_source_node<'a>(
 
 fn create_requests(
     connector: &Connector,
-    data: &Object,
+    data: &Value,
 ) -> Result<Vec<http::Request<hyper::Body>>, HttpJsonTransportError> {
     match &connector.transport {
         connect::Transport::HttpJson(json_transport) => {
@@ -280,12 +116,9 @@ fn create_requests(
 
 fn create_request(
     json_transport: &HttpJsonTransport,
-    data: &Object,
+    data: &Value,
 ) -> Result<http::Request<hyper::Body>, HttpJsonTransportError> {
-    http_json_transport::make_request(
-        json_transport,
-        serde_json_bytes::Value::Object(data.clone()),
-    )
+    http_json_transport::make_request(json_transport, data.clone())
 }
 
 async fn make_requests(
@@ -360,14 +193,6 @@ mod soure_node_tests {
     use super::*;
     use crate::plugins::connectors::tests::mock_api;
     use crate::plugins::connectors::tests::mock_subgraph;
-    use crate::query_planner::fetch::SubgraphOperation;
-    use crate::query_planner::PlanNode;
-    use crate::services::OperationKind;
-    use crate::services::SubgraphServiceFactory;
-    use crate::spec::Query;
-    use crate::spec::Schema;
-
-    const SCHEMA: &str = include_str!("./test_supergraph.graphql");
 
     #[tokio::test]
     async fn test_process_source_node() {
@@ -375,43 +200,8 @@ mod soure_node_tests {
         mock_api::mount_all(&mock_server).await;
         mock_subgraph::start_join().mount(&mock_server).await;
 
-        let context = Default::default();
-        let service_factory = Arc::new(SubgraphServiceFactory::empty());
-        let schema = Arc::new(Schema::parse_test(SCHEMA, &Default::default()).unwrap());
-        let supergraph_request = Default::default();
-        let deferred_fetches = Default::default();
-        let query = Arc::new(Query::empty());
-
-        let fetch_node = FetchNode {
-            service_name: NodeStr::new("kitchen-sink.a: GET /hello"),
-            requires: Default::default(),
-            variable_usages: Default::default(),
-            operation: SubgraphOperation::from_string("{hello{__typename id}}"),
-            operation_name: Default::default(),
-            operation_kind: OperationKind::Query,
-            id: Default::default(),
-            input_rewrites: Default::default(),
-            output_rewrites: Default::default(),
-            schema_aware_hash: Default::default(),
-            authorization: Default::default(),
-            protocol: Arc::new(Protocol::RestFetch(RestFetchNode {
-                connector_service_name: "CONNECTOR_QUERY_HELLO_6".to_string(),
-                connector_graph_key: Arc::new("CONNECTOR_QUERY_HELLO_6".to_string()),
-                parent_service_name: "kitchen-sink".to_string(),
-            })),
-            source_node: Some(Arc::new(source::query_plan::FetchNode::Connect(
-                fake_source_node(),
-            ))),
-            context_rewrites: Default::default(),
-        };
-        let root_node = PlanNode::Fetch(fetch_node);
-
-        let subscription_handle = Default::default();
-        let subscription_config = Default::default();
-
         let mut connectors: IndexMap<SourceId, Connector> = Default::default();
         let id = fake_connect_id();
-
         connectors.insert(
             SourceId::Connect(id.clone()),
             Connector {
@@ -427,26 +217,15 @@ mod soure_node_tests {
             },
         );
 
-        let execution_parameters = ExecutionParameters {
-            context: &context,
-            service_factory: &service_factory,
-            schema: &schema,
-            supergraph_request: &supergraph_request,
-            deferred_fetches: &deferred_fetches,
-            query: &query,
-            root_node: &root_node,
-            subscription_handle: &subscription_handle,
-            subscription_config: &subscription_config,
-            connectors: &Arc::new(connectors),
-            subgraph_schemas: &Default::default(),
-        };
+        let connectors = Arc::new(connectors);
+
         let source_node = fake_source_node();
         let data = Default::default();
         let paths = Default::default();
 
         let expected = (json!({ "data": { "id": 42 } }), Default::default());
 
-        let actual = process_source_node(&source_node, &execution_parameters, data, paths).await;
+        let actual = process_source_node(&source_node, connectors, data, paths).await;
 
         assert_eq!(expected, actual);
     }

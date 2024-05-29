@@ -27,6 +27,7 @@ use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::request;
+use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::services::SubgraphResponse;
@@ -102,13 +103,20 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
-            "product".into(),
-            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+
+    let sf = Arc::new(FetchServiceFactory::new(
+        Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+        Default::default(),
+        Arc::new(SubgraphServiceFactory {
+            services: Arc::new(HashMap::from([(
+                "product".into(),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+            )])),
+            plugins: Default::default(),
+        }),
+        None,
+        Default::default(),
+    ));
 
     let result = query_plan
         .execute(
@@ -165,13 +173,19 @@ async fn fetch_includes_operation_name() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
-            "product".into(),
-            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+    let sf = Arc::new(FetchServiceFactory::new(
+        Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+        Default::default(),
+        Arc::new(SubgraphServiceFactory {
+            services: Arc::new(HashMap::from([(
+                "product".into(),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+            )])),
+            plugins: Default::default(),
+        }),
+        None,
+        Default::default(),
+    ));
 
     let _response = query_plan
         .execute(
@@ -225,20 +239,27 @@ async fn fetch_makes_post_requests() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
-            "product".into(),
-            Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+    let schema = Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap());
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(SubgraphServiceFactory::new(
+            vec![(
+                "product".into(),
+                Arc::new(mock_products_service) as Arc<dyn MakeSubgraphService>,
+            )],
+            Default::default(),
+        )),
+        None,
+        Default::default(),
+    ));
 
     let _response = query_plan
         .execute(
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &schema,
             &Default::default(),
             sender,
             None,
@@ -377,19 +398,26 @@ async fn defer() {
 
     let schema = include_str!("testdata/defer_schema.graphql");
     let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([
-            (
-                "X".into(),
-                Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
-            ),
-            (
-                "Y".into(),
-                Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
-            ),
-        ])),
-        plugins: Default::default(),
-    });
+
+    let sf = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(SubgraphServiceFactory {
+            services: Arc::new(HashMap::from([
+                (
+                    "X".into(),
+                    Arc::new(mock_x_service) as Arc<dyn MakeSubgraphService>,
+                ),
+                (
+                    "Y".into(),
+                    Arc::new(mock_y_service) as Arc<dyn MakeSubgraphService>,
+                ),
+            ])),
+            plugins: Default::default(),
+        }),
+        None,
+        Default::default(),
+    ));
 
     let response = query_plan
         .execute(
@@ -486,13 +514,20 @@ async fn defer_if_condition() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
     let mut receiver_stream = ReceiverStream::new(receiver);
 
-    let service_factory = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([(
-            "accounts".into(),
-            Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
-        )])),
-        plugins: Default::default(),
-    });
+    let service_factory = Arc::new(FetchServiceFactory::new(
+        schema.clone(),
+        Default::default(),
+        Arc::new(SubgraphServiceFactory {
+            services: Arc::new(HashMap::from([(
+                "accounts".into(),
+                Arc::new(mocked_accounts) as Arc<dyn MakeSubgraphService>,
+            )])),
+            plugins: Default::default(),
+        }),
+        None,
+        Default::default(),
+    ));
+
     let defer_primary_response = query_plan
         .execute(
             &Context::new(),
@@ -666,19 +701,25 @@ async fn dependent_mutations() {
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
     mock_b_service.expect_call().never();
 
-    let sf = Arc::new(SubgraphServiceFactory {
-        services: Arc::new(HashMap::from([
-            (
-                "A".into(),
-                Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
-            ),
-            (
-                "B".into(),
-                Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
-            ),
-        ])),
-        plugins: Default::default(),
-    });
+    let sf = Arc::new(FetchServiceFactory::new(
+        Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+        Default::default(),
+        Arc::new(SubgraphServiceFactory {
+            services: Arc::new(HashMap::from([
+                (
+                    "A".into(),
+                    Arc::new(mock_a_service) as Arc<dyn MakeSubgraphService>,
+                ),
+                (
+                    "B".into(),
+                    Arc::new(mock_b_service) as Arc<dyn MakeSubgraphService>,
+                ),
+            ])),
+            plugins: Default::default(),
+        }),
+        None,
+        Default::default(),
+    ));
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
     let _response = query_plan

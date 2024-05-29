@@ -9,6 +9,7 @@ use futures::prelude::*;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
+use tower::ServiceExt;
 use tracing::Instrument;
 
 use super::log;
@@ -38,7 +39,9 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
-use crate::services::SubgraphServiceFactory;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::new_service::ServiceFactory;
+use crate::services::FetchRequest;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Context;
@@ -49,7 +52,7 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<SubgraphServiceFactory>,
+        service_factory: &'a Arc<FetchServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
         subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
@@ -104,7 +107,7 @@ impl QueryPlan {
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
+    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
@@ -284,15 +287,25 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        let (v, e) = fetch_node
-                            .fetch_node(parameters, parent_value, current_dir)
+                        let service = parameters.service_factory.create();
+                        let request = FetchRequest::builder()
+                            .context(parameters.context.clone())
+                            .fetch_node(fetch_node.clone())
+                            .supergraph_request(parameters.supergraph_request.clone())
+                            .data(parent_value.clone())
+                            .current_dir(current_dir.clone())
+                            .deferred_fetches(parameters.deferred_fetches.clone())
+                            .build();
+                        let (v, e) = service
+                            .oneshot(request)
                             .instrument(tracing::info_span!(
                                 FETCH_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
                                 "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
-                            .await;
+                            .await
+                            .unwrap();
                         value = v;
                         errors = e;
                     }
