@@ -152,6 +152,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
                 object,
                 &source_map,
                 &connect_directive_name,
+                &source_directive_name,
                 &all_source_names,
             )
         });
@@ -224,6 +225,7 @@ fn validate_object(
     object: &Node<ObjectType>,
     sources: &SourceMap,
     connect_directive_name: &Name,
+    source_directive_name: &Name,
     source_names: &[SourceName],
 ) -> Vec<Error> {
     let fields = object.fields.values();
@@ -249,21 +251,31 @@ fn validate_object(
             // TODO: handle direct http connects, not just named sources
             continue;
         };
-        if let Some(first_source_name) = source_names.first() {
-            if source_names.iter().all(|name| name != source_name_value) {
-                // TODO: Pick a suggestion that's not just the first defined source
-                errors.push(Error {
-                        code: ErrorCode::GraphQLError,
-                        message: format!(
-                            "the source name \"{source_name_value}\" for `{object_name}.{field_name}` does not match any defined sources. Did you mean {first_source_name}?",
-                            object_name = object.name,
-                            field_name = field.name,
-                        ),
-                        locations: GraphQLLocation::from_node(source_name.location(), sources)
-                            .into_iter()
-                            .collect(),
-                    });
-            }
+
+        if source_names.iter().all(|name| name != source_name_value) {
+            // TODO: Pick a suggestion that's not just the first defined source
+            let message = if let Some(first_source_name) = source_names.first() {
+                format!(
+                        "the source {SOURCE_NAME_ARGUMENT} \"{source_name_value}\" for `{object_name}.{field_name}` does not match any defined sources. Did you mean {first_source_name}?",
+                        object_name = object.name,
+                        field_name = field.name,
+                    )
+            } else {
+                format!(
+                        "`{object_name}.{field_name}` specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
+                        object_name = object.name,
+                        field_name = field.name,
+                        source_directive_name = source_directive_name,
+                        source_name_value = source_name_value,
+                    )
+            };
+            errors.push(Error {
+                code: ErrorCode::GraphQLError,
+                message,
+                locations: GraphQLLocation::from_node(source_name.location(), sources)
+                    .into_iter()
+                    .collect(),
+            });
         }
     }
     errors
@@ -521,5 +533,14 @@ mod test_validate_source {
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
         assert_snapshot!(errors[0].to_string(), @r###"the source name "v1" for `Query.resources` does not match any defined sources. Did you mean @source "v2"?"###);
+    }
+
+    #[test]
+    fn connect_source_undefined() {
+        let schema = include_str!("test_data/connect_source_undefined.graphql");
+        let schema = Schema::parse(schema, "test.graphql").unwrap();
+        let errors = validate(schema);
+        assert_eq!(errors.len(), 1);
+        assert_snapshot!(errors[0].to_string(), @r###"`Query.resources` specifies a source, but none are defined. Try adding @source(name: "v1") to the schema."###);
     }
 }
