@@ -101,7 +101,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
     let Some(link) = link else {
         return vec![]; // There are no connectors-related directives to validate
     };
-    let source_map = schema.sources;
+    let source_map = &schema.sources;
     let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
     let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
     let source_directives: Vec<SourceDirective> = schema
@@ -120,14 +120,14 @@ pub fn validate(schema: Schema) -> Vec<Error> {
         .collect_vec();
     for directive in source_directives {
         errors.extend(directive.errors);
-        match directive.name.into_value_or_error(&source_map) {
+        match directive.name.into_value_or_error(source_map) {
             Err(error) => errors.push(error),
             Ok(name) => valid_source_names
                 .entry(name)
                 .or_insert_with(Vec::new)
                 .extend(GraphQLLocation::from_node(
                     directive.directive.node.location(),
-                    &source_map,
+                    source_map,
                 )),
         }
     }
@@ -150,7 +150,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
         .flat_map(|object| {
             validate_object_fields(
                 object,
-                &source_map,
+                &schema,
                 &connect_directive_name,
                 &source_directive_name,
                 &all_source_names,
@@ -225,11 +225,26 @@ struct SourceDirective {
 /// are resolvable by some combination of `@connect` directives.
 fn validate_object_fields(
     object: &Node<ObjectType>,
-    sources: &SourceMap,
+    schema: &Schema,
     connect_directive_name: &Name,
     source_directive_name: &Name,
     source_names: &[SourceName],
 ) -> Vec<Error> {
+    let source_map = &schema.sources;
+    let is_subscription = schema
+        .schema_definition
+        .subscription
+        .as_ref()
+        .is_some_and(|sub| sub.name == object.name);
+    if is_subscription {
+        return vec![Error {
+            code: ErrorCode::SubscriptionInConnectors,
+            message: "connectors can't be used to create subscriptions".to_string(),
+            locations: GraphQLLocation::from_node(object.location(), source_map)
+                .into_iter()
+                .collect(),
+        }];
+    }
     let fields = object.fields.values();
     let mut errors = Vec::new();
     for field in fields {
@@ -272,9 +287,9 @@ fn validate_object_fields(
                     )
             };
             errors.push(Error {
-                code: ErrorCode::GraphQLError,
+                code: ErrorCode::SourceNameMismatch,
                 message,
-                locations: GraphQLLocation::from_node(source_name.location(), sources)
+                locations: GraphQLLocation::from_node(source_name.location(), source_map)
                     .into_iter()
                     .collect(),
             });
@@ -456,6 +471,8 @@ pub enum ErrorCode {
     EmptySourceName,
     SourceUrl,
     SourceScheme,
+    SourceNameMismatch,
+    SubscriptionInConnectors,
 }
 
 #[cfg(test)]
@@ -544,5 +561,14 @@ mod test_validate_source {
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
         assert_snapshot!(errors[0].to_string(), @r###"the value `@connect(name: "v1")` on `Query.resources` specifies a source, but none are defined. Try adding @source(name: "v1") to the schema."###);
+    }
+
+    #[test]
+    fn subscriptions_with_connectors() {
+        let schema = include_str!("test_data/subscriptions_with_connectors.graphql");
+        let schema = Schema::parse(schema, "test.graphql").unwrap();
+        let errors = validate(schema);
+        assert_eq!(errors.len(), 1);
+        assert_snapshot!(errors[0].to_string(), @r###"connectors can't be used to create subscriptions"###);
     }
 }
