@@ -264,7 +264,7 @@ fn validate_object_fields(
                     )
             } else {
                 format!(
-                        "the value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:) on `{object_name}.{field_name}` specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
+                        "the value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\")` on `{object_name}.{field_name}` specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
                         object_name = object.name,
                         field_name = field.name,
                         source_directive_name = source_directive_name,
@@ -543,6 +543,6 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"the value `@connect(name:) on `Query.resources` specifies a source, but none are defined. Try adding @source(name: "v1") to the schema."###);
+        assert_snapshot!(errors[0].to_string(), @r###"the value `@connect(name: "v1")` on `Query.resources` specifies a source, but none are defined. Try adding @source(name: "v1") to the schema."###);
     }
 }
