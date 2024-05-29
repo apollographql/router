@@ -1,0 +1,18 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        "custom.histogram":
+          description: "histogram of requests"
+          type: histogram
+          unit: "unit"
+          value: unit
+          attributes:
+            subgraph.graphql.document: true
+            "custom_attribute":
+              subgraph_request_header: "custom_header"
+          condition:
+            eq:
+              - subgraph_request_header: "custom_header"
+              - "allowed"
