@@ -94,7 +94,7 @@ impl FilterMeterProvider {
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    r"apollo\.(graphos\.cloud|router\.(operations?|config|schema|query|query_planning))(\..*|$)",
+                    r"apollo\.(graphos\.cloud|router\.(operations?|lifecycle|config|schema|query|query_planning))(\..*|$)",
                 )
                 .expect("regex should have been valid"),
             )
@@ -286,6 +286,10 @@ mod test {
             .u64_counter("apollo.router.query_planning.test")
             .init()
             .add(1, &[]);
+        filtered
+            .u64_counter("apollo.router.lifecycle.api_schema")
+            .init()
+            .add(1, &[]);
         meter_provider.force_flush(&cx).unwrap();
 
         let metrics: Vec<_> = exporter
@@ -308,6 +312,10 @@ mod test {
         assert!(!metrics
             .iter()
             .any(|m| m.name == "apollo.router.unknown.test"));
+
+        assert!(metrics
+            .iter()
+            .any(|m| m.name == "apollo.router.lifecycle.api_schema"));
     }
 
     #[tokio::test(flavor = "multi_thread")]
