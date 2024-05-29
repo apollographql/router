@@ -107,6 +107,7 @@ impl ApolloOtlpExporter {
                 // Seems like we've already set up a batcher earlier in the pipe but not quite sure.
                 .build_span_exporter()?;
 
+                // This is a hack and won't be needed anymore once opentelemetry_otlp will be upgraded
                 span_exporter = if let opentelemetry_otlp::SpanExporter::Tonic {
                     trace_exporter,
                     metadata,
