@@ -47,6 +47,7 @@ impl Process {
         if path.exists() {
             if Confirm::new()
                 .with_prompt("A release state file already exists, do you want to remove it and start a new one?")
+                .default(false)
                 .interact()
                 ?{
                     std::fs::remove_file(path)?;
@@ -58,7 +59,11 @@ impl Process {
         // generate the structure
         let version = match &arguments.version {
             Some(v) => v.clone(),
-            None => Input::new().with_prompt("Version?").interact_text()?,
+            None => Input::new()
+                .with_prompt("Version?")
+                //FIXME: used for quicker testing, remove before merging
+                .default("1.2.3456".to_string())
+                .interact_text()?,
         };
 
         let git_origin = match &arguments.git_origin {
@@ -148,11 +153,16 @@ impl Process {
     fn run(&mut self) -> Result<bool> {
         match self.state {
             State::Start => self.state_start(),
+            State::CreateReleasePR => self.create_release_pr(),
         }
     }
 
     fn state_start(&mut self) -> Result<bool> {
+        println!(">> Setting up the repository");
+
         let git = which::which("git")?;
+
+        // step 5
         let output = std::process::Command::new(&git)
             .args(["checkout", "dev"])
             .status()?;
@@ -166,10 +176,74 @@ impl Process {
                 .status()?;
         }
 
+        // step 6
         let output = std::process::Command::new(&git)
             .args(["checkout", "-b", self.version.as_str()])
             .status()?;
 
+        // step 7
+        let output = std::process::Command::new(&git)
+            .args([
+                "push",
+                "--set-upstream",
+                self.git_origin.as_str(),
+                self.version.as_str(),
+            ])
+            .status()?;
+
+        self.state = State::CreateReleasePR;
+        Ok(true)
+    }
+
+    fn create_release_pr(&mut self) -> Result<bool> {
+        println!(">> Creating the release PR");
+
+        let gh = which::which("gh")?;
+
+        // step 8
+        let pr_text = r#"" > **Note** \
+        > **This particular PR must be true-merged to \`main\`.** \
+ \
+        * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title). \
+        * It will act as a staging branch until we are ready to finalize the release. \
+        * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it. \
+        * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**: \
+            - Does this PR target the right branch? (usually, \`main\`) \
+            - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?" \
+            - If those things look good, this PR is good to merge!""#;
+
+        let output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "pr",
+                "create",
+                "--draft",
+                "--label",
+                "release",
+                "-B",
+                "main",
+                "--title",
+                &format!("\"release: v{}\"", self.version.as_str()),
+                "--body",
+                pr_text,
+            ])
+            .status()?;
+
+        /*
+             cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
+        > **Note**
+        > **This particular PR must be true-merged to \`main\`.**
+
+        * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title).
+        * It will act as a staging branch until we are ready to finalize the release.
+        * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it.
+        * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**:
+            - Does this PR target the right branch? (usually, \`main\`)
+            - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
+            - If those things look good, this PR is good to merge!
+        EOM
+              */
         Ok(false)
     }
 }
@@ -177,4 +251,5 @@ impl Process {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum State {
     Start,
+    CreateReleasePR,
 }
