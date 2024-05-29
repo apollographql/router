@@ -89,7 +89,6 @@ pub trait FallibleIterator: Sized + Itertools {
     /// let vals = (1..6).fallible_filter(|i| is_prime(*i));
     /// itertools::assert_equal(vals, vec![Err(()), Ok(2), Ok(3)]);
     /// ```
-    // TODO(@TylerBloom): Write an example (or two) and rewrite the docs.
     fn fallible_filter<F, E>(self, predicate: F) -> FallibleFilter<Self, F>
     where
         F: FnMut(&Self::Item) -> Result<bool, E>,
@@ -103,8 +102,21 @@ pub trait FallibleIterator: Sized + Itertools {
     // NOTE: There is a `filter_ok` method on `Itertools`, but there is not a `filter_err`. That
     // might be useful at some point.
 
-    /// This method functions similarly to (fallible_filter)[FalliableIterator::fallible_filter],
-    /// but filters out results.
+    /// ```rust
+    /// use apollo_federation::utils::FallibleIterator;
+    ///
+    /// // A totally accurate prime checker
+    /// fn is_prime(i: usize) -> Result<bool, ()> {
+    ///   match i {
+    ///     0 | 1 => Err(()), // 0 and 1 are neither prime or composite
+    ///     2 | 3 => Ok(true),
+    ///     _ => Ok(false), // Every other number is composite, I guess
+    ///   }
+    /// }
+    ///
+    /// let vals = vec![Ok(0), Err(()), Err(()), Ok(3), Ok(4)].and_then_filter(|i| is_prime(*i));
+    /// itertools::assert_equal(vals, vec![Err(()), Err(()), Err(()), Ok(3)]);
+    /// ```
     // TODO(@TylerBloom): Write an example (or two) and rewrite the docs.
     fn and_then_filter<T, E, F>(self, predicate: F) -> AndThenFilter<Self, F>
     where
@@ -224,7 +236,7 @@ pub trait FallibleIterator: Sized + Itertools {
         F: FnMut(T) -> Result<bool, E>,
     {
         let mut digest = false;
-        for val in self.by_ref() {
+        for val in self {
             digest |= val.and_then(&mut predicate)?;
             if digest {
                 break;
@@ -233,8 +245,7 @@ pub trait FallibleIterator: Sized + Itertools {
         Ok(digest)
     }
 
-    /// A convenience method for `.map(|result| result.or_else(fallible_thing()))`.
-    // TODO(@TylerBloom): Write an example (or two) and write the docs.
+    /// A convenience method that is equivalent to calling `.map(|result| result.and_then(fallible_fn))`.
     fn and_then<T, E, U, F>(self, map: F) -> AndThen<Self, F>
     where
         Self: Iterator<Item = Result<T, E>>,
@@ -243,8 +254,7 @@ pub trait FallibleIterator: Sized + Itertools {
         AndThen { iter: self, map }
     }
 
-    /// A convenience method for `.map(|result| result.or_else(fallible_thing()))`.
-    // TODO(@TylerBloom): Write an example (or two) and write the docs.
+    /// A convenience method that is equivalent to calling `.map(|result| result.or_else(fallible_fn))`.
     fn or_else<T, E, EE, F>(self, map: F) -> OrElse<Self, F>
     where
         Self: Iterator<Item = Result<T, E>>,
