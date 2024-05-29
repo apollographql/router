@@ -944,36 +944,36 @@ impl NamedFragments {
 
         // Short-circuiting: Nothing was used => Drop everything (selection_set is unchanged).
         if usages.is_empty() {
-            self.retain_rev(|_, _| false);
+            self.retain(|_, _| false);
             return Ok(selection_set.clone());
         }
 
         // Determine which one to retain.
-        // - If a fragment is to keep, fragments that are used in it are also kept.
-        // - If a fragment is to drop, fragments that are used in it increase their usage count.
+        // - Calculate the usage count of each fragment in both query and other fragment definitions.
+        //   - If a fragment is to keep, fragments used in it are counted.
+        //   - If a fragment is to drop, fragments used in it are counted and multiplied by its usage.
         // - Decide in reverse dependency order, so that at each step, the fragment being visited
         //   has following properties:
         //   - It is either indirectly used by a previous fragment; Or, not used directly by any
         //     one visited & retained before.
-        //   - Its usage count should be correctly calculated assuming dropped fragments were expanded.
-        // - Also, we can take advantage of the fact that `NamedFragments` is already sorted in
-        //   dependency order.
+        //   - Its usage count should be correctly calculated as if dropped fragments were expanded.
+        // - We take advantage of the fact that `NamedFragments` is already sorted in dependency
+        //   order.
         let min_usage_to_optimize: i32 = min_usage_to_optimize.try_into().unwrap_or(i32::MAX);
         let original_size = self.size();
-        let mut indirect_deps: HashSet<Name> = HashSet::new();
-        self.retain_rev(|name, fragment| {
-            let usage_count = usages.get(name).copied().unwrap_or_default();
-            if usage_count >= min_usage_to_optimize || indirect_deps.contains(name) {
-                // Update `indirect_deps` with transitive dependencies.
-                for name in fragment.fragment_usages().keys() {
-                    indirect_deps.insert(name.clone());
-                }
-                true // Keep this
+        for fragment in self.iter_rev() {
+            let usage_count = usages.get(&fragment.name).copied().unwrap_or_default();
+            if usage_count >= min_usage_to_optimize {
+                // Count indirect usages within the fragment definition.
+                fragment.collect_used_fragment_names(&mut usages);
             } else {
-                // Estimate the new usage count after expanding the `fragment`.
+                // Compute the new usage count after expanding the `fragment`.
                 Self::update_usages(&mut usages, fragment, usage_count);
-                false // Drop this
             }
+        }
+        self.retain(|name, _fragment| {
+            let usage_count = usages.get(name).copied().unwrap_or_default();
+            usage_count >= min_usage_to_optimize
         });
 
         // Short-circuiting: Nothing was dropped (fully used) => Nothing to change.
@@ -981,6 +981,17 @@ impl NamedFragments {
             return Ok(selection_set.clone());
         }
 
+        // Update the fragment definitions in `self` after reduction.
+        // Note: This is an unfortunate clone, since `self` can't be passed to `retain_fragments`,
+        //       while being mutated.
+        let fragments_to_keep = self.clone();
+        for (_, fragment) in self.iter_mut() {
+            Node::make_mut(fragment).selection_set = fragment
+                .selection_set
+                .retain_fragments(&fragments_to_keep)?;
+        }
+
+        // Compute the new selection set based on the new reduced set of fragments.
         selection_set.retain_fragments(self)
     }
 
@@ -1247,5 +1258,432 @@ impl Operation {
         self.selection_set = final_selection_set;
         self.named_fragments = final_fragments;
         Ok(())
+    }
+
+    // Mainly for testing.
+    fn expand_all_fragments(&self) -> Result<Self, FederationError> {
+        let selection_set = self.selection_set.expand_all_fragments()?;
+        Ok(Self {
+            named_fragments: Default::default(),
+            selection_set,
+            ..self.clone()
+        })
+    }
+}
+
+//=============================================================================
+// Tests
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::schema::Schema;
+
+    use super::*;
+    use crate::schema::ValidFederationSchema;
+
+    fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
+        let schema = Schema::parse_and_validate(schema_doc, "schema.graphql").unwrap();
+        ValidFederationSchema::new(schema).unwrap()
+    }
+
+    fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
+        let executable_document = apollo_compiler::ExecutableDocument::parse_and_validate(
+            schema.schema(),
+            query,
+            "query.graphql",
+        )
+        .unwrap();
+        let operation = executable_document.get_operation(None).unwrap();
+        let named_fragments = NamedFragments::new(&executable_document.fragments, &schema);
+        let selection_set =
+            SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
+                .unwrap();
+
+        Operation {
+            schema: schema.clone(),
+            root_kind: operation.operation_type.into(),
+            name: operation.name.clone(),
+            variables: Arc::new(operation.variables.clone()),
+            directives: Arc::new(operation.directives.clone()),
+            selection_set,
+            named_fragments,
+        }
+    }
+
+    macro_rules! assert_without_fragments {
+        ($operation: expr, @$expected: literal) => {{
+            let without_fragments = $operation.expand_all_fragments().unwrap();
+            insta::assert_snapshot!(without_fragments, @$expected);
+            without_fragments
+        }};
+    }
+
+    macro_rules! assert_optimized {
+        ($operation: expr, $named_fragments: expr, @$expected: literal) => {{
+            let mut optimized = $operation.clone();
+            optimized.optimize(&$named_fragments).unwrap();
+            insta::assert_snapshot!(optimized, @$expected)
+        }};
+    }
+
+    #[test]
+    fn optimize_fragments_using_other_fragments_when_possible() {
+        let schema = r#"
+              type Query {
+                t: I
+              }
+
+              interface I {
+                b: Int
+                u: U
+              }
+
+              type T1 implements I {
+                a: Int
+                b: Int
+                u: U
+              }
+
+              type T2 implements I {
+                x: String
+                y: String
+                b: Int
+                u: U
+              }
+
+              union U = T1 | T2
+        "#;
+
+        let query = r#"
+              fragment OnT1 on T1 {
+                a
+                b
+              }
+
+              fragment OnT2 on T2 {
+                x
+                y
+              }
+
+              fragment OnI on I {
+                b
+              }
+
+              fragment OnU on U {
+                ...OnI
+                ...OnT1
+                ...OnT2
+              }
+
+              query {
+                t {
+                  ...OnT1
+                  ...OnT2
+                  ...OnI
+                  u {
+                    ...OnU
+                  }
+                }
+              }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema), query);
+
+        let expanded = assert_without_fragments!(
+            operation,
+            @r###"
+        {
+          t {
+            ... on T1 {
+              a
+              b
+            }
+            ... on T2 {
+              x
+              y
+            }
+            b
+            u {
+              ... on I {
+                b
+              }
+              ... on T1 {
+                a
+                b
+              }
+              ... on T2 {
+                x
+                y
+              }
+            }
+          }
+        }
+        "###
+        );
+
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+              fragment OnU on U {
+                ... on I {
+                  b
+                }
+                ... on T1 {
+                  a
+                  b
+                }
+                ... on T2 {
+                  x
+                  y
+                }
+              }
+
+              {
+                t {
+                  ...OnU
+                  u {
+                    ...OnU
+                  }
+                }
+              }
+        "###);
+    }
+
+    #[test]
+    #[ignore] // Appears to be an expansion bug.
+    fn handles_fragments_using_other_fragments() {
+        let schema = r#"
+              type Query {
+                t: I
+              }
+
+              interface I {
+                b: Int
+                c: Int
+                u1: U
+                u2: U
+              }
+
+              type T1 implements I {
+                a: Int
+                b: Int
+                c: Int
+                me: T1
+                u1: U
+                u2: U
+              }
+
+              type T2 implements I {
+                x: String
+                y: String
+                b: Int
+                c: Int
+                u1: U
+                u2: U
+              }
+
+              union U = T1 | T2
+        "#;
+
+        let query = r#"
+              fragment OnT1 on T1 {
+                a
+                b
+              }
+
+              fragment OnT2 on T2 {
+                x
+                y
+              }
+
+              fragment OnI on I {
+                b
+                c
+              }
+
+              fragment OnU on U {
+                ...OnI
+                ...OnT1
+                ...OnT2
+              }
+
+              query {
+                t {
+                  ...OnT1
+                  ...OnT2
+                  u1 {
+                    ...OnU
+                  }
+                  u2 {
+                    ...OnU
+                  }
+                  ... on T1 {
+                    me {
+                      ...OnI
+                    }
+                  }
+                }
+              }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema), query);
+
+        let expanded = assert_without_fragments!(
+            &operation,
+            @r###"
+              {
+                t {
+                  ... on T1 {
+                    a
+                    b
+                    me {
+                      b
+                      c
+                    }
+                  }
+                  ... on T2 {
+                    x
+                    y
+                  }
+                  u1 {
+                    ... on I {
+                      b
+                      c
+                    }
+                    ... on T1 {
+                      a
+                      b
+                    }
+                    ... on T2 {
+                      x
+                      y
+                    }
+                  }
+                  u2 {
+                    ... on I {
+                      b
+                      c
+                    }
+                    ... on T1 {
+                      a
+                      b
+                    }
+                    ... on T2 {
+                      x
+                      y
+                    }
+                  }
+                }
+              }
+        "###);
+
+        // We should reuse and keep all fragments, because 1) onU is used twice and 2)
+        // all the other ones are used once in the query, and once in onU definition.
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+              fragment OnT1 on T1 {
+                a
+                b
+              }
+
+              fragment OnT2 on T2 {
+                x
+                y
+              }
+
+              fragment OnI on I {
+                b
+                c
+              }
+
+              fragment OnU on U {
+                ...OnI
+                ...OnT1
+                ...OnT2
+              }
+
+              {
+                t {
+                  ... on T1 {
+                    ...OnT1
+                    me {
+                      ...OnI
+                    }
+                  }
+                  ...OnT2
+                  u1 {
+                    ...OnU
+                  }
+                  u2 {
+                    ...OnU
+                  }
+                }
+              }
+        "###);
+    }
+
+    macro_rules! test_fragments_roundtrip {
+        ($schema_doc: expr, $query: expr, @$expanded: literal) => {{
+            let schema = parse_schema($schema_doc);
+            let operation = parse_operation(&schema, $query);
+            let without_fragments = operation.expand_all_fragments().unwrap();
+            insta::assert_snapshot!(without_fragments, @$expanded);
+
+            let mut optimized = without_fragments;
+            optimized.optimize(&operation.named_fragments).unwrap();
+            assert_eq!(optimized.to_string(), operation.to_string());
+        }};
+    }
+
+    #[test]
+    fn handles_fragments_with_nested_selections() {
+        let schema_doc = r#"
+              type Query {
+                t1a: T1
+                t2a: T1
+              }
+
+              type T1 {
+                t2: T2
+              }
+
+              type T2 {
+                x: String
+                y: String
+              }
+        "#;
+
+        let query = r#"
+                fragment OnT1 on T1 {
+                  t2 {
+                    x
+                  }
+                }
+
+                query {
+                  t1a {
+                    ...OnT1
+                    t2 {
+                      y
+                    }
+                  }
+                  t2a {
+                    ...OnT1
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip!(schema_doc, query, @r###"
+                {
+                  t1a {
+                    t2 {
+                      x
+                      y
+                    }
+                  }
+                  t2a {
+                    t2 {
+                      x
+                    }
+                  }
+                }
+        "###);
     }
 }

@@ -4550,6 +4550,19 @@ impl NamedFragments {
         self.fragments.values()
     }
 
+    pub(crate) fn iter_rev(&self) -> impl Iterator<Item = &Node<Fragment>> {
+        self.fragments.values().rev()
+    }
+
+    pub(crate) fn iter_mut(&mut self) -> indexmap::map::IterMut<'_, Name, Node<Fragment>> {
+        Arc::make_mut(&mut self.fragments).iter_mut()
+    }
+
+    // Calls `retain` on the underlying `IndexMap`.
+    pub(crate) fn retain(&mut self, mut predicate: impl FnMut(&Name, &Node<Fragment>) -> bool) {
+        Arc::make_mut(&mut self.fragments).retain(|name, fragment| predicate(name, fragment));
+    }
+
     fn insert(&mut self, fragment: Fragment) {
         Arc::make_mut(&mut self.fragments).insert(fragment.name.clone(), Node::new(fragment));
     }
@@ -4572,18 +4585,6 @@ impl NamedFragments {
 
     pub(crate) fn contains(&self, name: &Name) -> bool {
         self.fragments.contains_key(name)
-    }
-
-    // Calls `retain` on the underlying `IndexMap`, but iterates in reverse dependency order.
-    pub(crate) fn retain_rev(&mut self, mut predicate: impl FnMut(&Name, &Node<Fragment>) -> bool) {
-        let underlying = Arc::make_mut(&mut self.fragments);
-        let mut to_remove: HashSet<Name> = HashSet::new();
-        for (name, fragment) in underlying.iter().rev() {
-            if !predicate(name, fragment) {
-                to_remove.insert(name.clone());
-            }
-        }
-        underlying.retain(|name, _| !to_remove.contains(name));
     }
 
     /**
@@ -5085,6 +5086,10 @@ impl Display for Operation {
             Ok(operation) => operation,
             Err(_) => return Err(std::fmt::Error),
         };
+        for fragment_def in self.named_fragments.iter() {
+            fragment_def.fmt(f)?;
+            f.write_str("\n\n")?;
+        }
         operation.serialize().fmt(f)
     }
 }
@@ -5338,23 +5343,23 @@ type Foo {
             .named_operations
             .get_mut("NamedFragmentQuery")
         {
-            let normalized_operation = normalize_operation(
+            let mut normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
             .unwrap();
-
-            let expected = r#"query NamedFragmentQuery {
-  foo {
-    id
-    bar
-    baz
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
+            normalized_operation.named_fragments = Default::default();
+            insta::assert_snapshot!(normalized_operation, @r###"
+                query NamedFragmentQuery {
+                  foo {
+                    id
+                    bar
+                    baz
+                  }
+                }
+            "###);
         }
     }
 
@@ -5392,23 +5397,23 @@ type Foo {
         let (schema, mut executable_document) =
             parse_schema_and_operation(operation_with_named_fragment);
         if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
+            let mut normalized_operation = normalize_operation(
                 operation,
                 NamedFragments::new(&executable_document.fragments, &schema),
                 &schema,
                 &IndexSet::new(),
             )
             .unwrap();
-
-            let expected = r#"query NestedFragmentQuery {
-  foo {
-    id
-    bar
-    baz
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
+            normalized_operation.named_fragments = Default::default();
+            insta::assert_snapshot!(normalized_operation, @r###"
+              query NestedFragmentQuery {
+                foo {
+                  id
+                  bar
+                  baz
+                }
+              }
+            "###);
         }
     }
 
@@ -7123,6 +7128,10 @@ type T {
             None,
         )
         .unwrap(), @r###"
+        fragment frag on HasA {
+          intfField
+        }
+
         {
           intf {
             ... on HasA {

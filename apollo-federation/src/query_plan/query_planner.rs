@@ -1262,12 +1262,9 @@ type User
                 ...F2
               }
             }
-                fragment F1 on User {
+                fragment F2 on User {
               name
               email
-            }
-                fragment F2 on User {
-              ...F1
               id
             }
           },
