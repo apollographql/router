@@ -18,6 +18,8 @@ pub struct Start {
     github_repository: Option<String>,
     #[clap(short = 's', long = "suffix")]
     prerelease_suffix: Option<String>,
+    #[clap(short = 'c', long = "commit")]
+    commit: Option<String>,
 }
 
 const STATE_FILE: &str = ".release-state.json";
@@ -28,6 +30,14 @@ pub(super) struct Process {
     git_origin: String,
     github_repository: String,
     prerelease_suffix: String,
+    commit: Commit,
+    state: State,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub(super) enum Commit {
+    Head,
+    Id(String),
 }
 
 impl Process {
@@ -45,6 +55,7 @@ impl Process {
                 }
         }
 
+        // generate the structure
         let version = match &arguments.version {
             Some(v) => v.clone(),
             None => Input::new().with_prompt("Version?").interact_text()?,
@@ -62,7 +73,7 @@ impl Process {
             Some(v) => v.clone(),
             None => Input::new()
                 .with_prompt("Github repository?")
-                .default("apollo/router".to_string())
+                .default("apollographql/router".to_string())
                 .interact_text()?,
         };
 
@@ -74,21 +85,39 @@ impl Process {
                 .interact_text()?,
         };
 
-        let process = Self {
+        let commit = match &arguments.commit {
+            Some(v) => v.clone(),
+            None => Input::new()
+                .with_prompt("Git ref?")
+                .default("HEAD".to_string())
+                .interact_text()?,
+        };
+
+        let commit = if &commit == "HEAD" {
+            Commit::Head
+        } else {
+            Commit::Id(commit)
+        };
+
+        let mut process = Self {
             version,
             git_origin,
             github_repository,
             prerelease_suffix,
+            commit,
+            state: State::Start,
         };
 
+        // store the file
         println!("process: {:#?}", process);
         process.save()?;
 
-        // generate the structure
-        // store the file
         // start asking questions
-
-        Ok(())
+        loop {
+            if !process.run()? {
+                return Ok(());
+            }
+        }
     }
 
     pub(super) fn cont() -> Result<()> {
@@ -114,6 +143,34 @@ impl Process {
         file.read_to_string(&mut data)?;
 
         Ok(serde_json::from_str(&data)?)
+    }
+
+    fn run(&mut self) -> Result<bool> {
+        match self.state {
+            State::Start => self.state_start(),
+        }
+    }
+
+    fn state_start(&mut self) -> Result<bool> {
+        let git = which::which("git")?;
+        let output = std::process::Command::new(&git)
+            .args(["checkout", "dev"])
+            .status()?;
+        let output = std::process::Command::new(&git)
+            .args(["pull", self.git_origin.as_str()])
+            .status()?;
+
+        if let Commit::Id(id) = &self.commit {
+            let output = std::process::Command::new(&git)
+                .args(["checkout", id])
+                .status()?;
+        }
+
+        let output = std::process::Command::new(&git)
+            .args(["checkout", "-b", self.version.as_str()])
+            .status()?;
+
+        Ok(false)
     }
 }
 
