@@ -32,6 +32,7 @@ fn some_name() {
 */
 
 mod fetch_operation_names;
+mod field_merging_with_skip_and_include;
 mod named_fragments_preservation;
 mod provides;
 mod requires;
