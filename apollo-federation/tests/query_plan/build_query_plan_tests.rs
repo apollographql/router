@@ -215,8 +215,8 @@ fn field_covariance_and_type_explosion() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure - unexpected inline spread
 fn handles_non_intersecting_fragment_conditions() {
     let planner = planner!(
         Subgraph1: r#"
