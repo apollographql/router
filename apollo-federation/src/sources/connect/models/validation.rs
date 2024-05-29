@@ -148,7 +148,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
             _ => None,
         })
         .flat_map(|object| {
-            validate_object(
+            validate_object_fields(
                 object,
                 &source_map,
                 &connect_directive_name,
@@ -221,7 +221,9 @@ struct SourceDirective {
     directive: Component<Directive>,
 }
 
-fn validate_object(
+/// Make sure that any `@connect` directives on object fields are valid, and that all fields
+/// are resolvable by some combination of `@connect` directives.
+fn validate_object_fields(
     object: &Node<ObjectType>,
     sources: &SourceMap,
     connect_directive_name: &Name,
@@ -256,13 +258,13 @@ fn validate_object(
             // TODO: Pick a suggestion that's not just the first defined source
             let message = if let Some(first_source_name) = source_names.first() {
                 format!(
-                        "The value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT}: \"{source_name_value}\")` on  `{object_name}.{field_name}` does not match any defined sources. Did you mean {first_source_name}?",
+                        "the value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\")` on  `{object_name}.{field_name}` does not match any defined sources. Did you mean {first_source_name}?",
                         object_name = object.name,
                         field_name = field.name,
                     )
             } else {
                 format!(
-                        "The value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT}:) on `{object_name}.{field_name}` specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
+                        "the value `@{connect_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:) on `{object_name}.{field_name}` specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
                         object_name = object.name,
                         field_name = field.name,
                         source_directive_name = source_directive_name,
@@ -532,7 +534,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"the source name "v1" for `Query.resources` does not match any defined sources. Did you mean @source "v2"?"###);
+        assert_snapshot!(errors[0].to_string(), @r###"the value `@connect(name: "v1")` on  `Query.resources` does not match any defined sources. Did you mean @source "v2"?"###);
     }
 
     #[test]
@@ -541,6 +543,6 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"`Query.resources` specifies a source, but none are defined. Try adding @source(name: "v1") to the schema."###);
+        assert_snapshot!(errors[0].to_string(), @r###"the value `@connect(name:) on `Query.resources` specifies a source, but none are defined. Try adding @source(name: "v1") to the schema."###);
     }
 }
