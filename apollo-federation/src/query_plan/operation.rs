@@ -2602,6 +2602,7 @@ impl SelectionSet {
     // `Arc::make_mut` on the `Arc` fields of `self` didn't seem better than cloning Arc instances.
     pub(crate) fn lazy_map(
         &self,
+        named_fragments: &NamedFragments,
         mut mapper: impl FnMut(&Selection) -> Result<SelectionMapperReturn, FederationError>,
     ) -> Result<SelectionSet, FederationError> {
         let mut iter = self.selections.values();
@@ -2650,12 +2651,12 @@ impl SelectionSet {
             &self.schema,
             &self.type_position,
             updated_selections.values().map(|v| v.iter()),
-            /*named_fragments*/ &Default::default(),
+            named_fragments,
         )
     }
 
     pub(crate) fn add_back_typename_in_attachments(&self) -> Result<SelectionSet, FederationError> {
-        self.lazy_map(|selection| {
+        self.lazy_map(/*named_fragments*/ &Default::default(), |selection| {
             let selection_element = selection.element()?;
             let updated = selection
                 .map_selection_set(|ss| ss.add_back_typename_in_attachments().map(Some))?;
@@ -7247,7 +7248,7 @@ type T {
             ss: &SelectionSet,
             pred: &impl Fn(&Selection) -> bool,
         ) -> Result<SelectionSet, FederationError> {
-            ss.lazy_map(|s| {
+            ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
                 if !pred(s) {
                     return Ok(SelectionMapperReturn::None);
                 }
@@ -7334,7 +7335,7 @@ type T {
             ss: &SelectionSet,
             pred: &impl Fn(&Selection) -> bool,
         ) -> Result<SelectionSet, FederationError> {
-            ss.lazy_map(|s| {
+            ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
                 let to_add_typename = pred(s);
                 let updated = s.map_selection_set(|ss| add_typename_if(ss, pred).map(Some))?;
                 if !to_add_typename {

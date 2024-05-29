@@ -892,7 +892,7 @@ impl SelectionSet {
         &self,
         fragments_to_keep: &NamedFragments,
     ) -> Result<Self, FederationError> {
-        self.lazy_map(|selection| {
+        self.lazy_map(fragments_to_keep, |selection| {
             Ok(selection
                 .retain_fragments(&self.type_position, fragments_to_keep)?
                 .into())
@@ -1158,7 +1158,9 @@ impl SelectionSet {
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
     ) -> Result<SelectionSet, FederationError> {
-        self.lazy_map(|selection| Ok(vec![selection.optimize(fragments, validator)?].into()))
+        self.lazy_map(fragments, |selection| {
+            Ok(vec![selection.optimize(fragments, validator)?].into())
+        })
     }
 
     /// Specialized version of `optimize` for top-level sub-selections under Operation
