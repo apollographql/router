@@ -1,0 +1,11 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        "custom.histogram":
+          description: "histogram of requests"
+          type: histogram
+          unit: "unit"
+          value:
+            subgraph_request_header: "count_header"

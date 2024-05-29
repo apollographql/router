@@ -82,7 +82,7 @@ axum = { version = "0.6.20", features = ["headers", "json", "original-uri"] }
 base64 = "0.21.7"
 bloomfilter = "1.0.13"
 buildstructor = "0.5.4"
-bytes = "1.5.0"
+bytes = "1.6.0"
 clap = { version = "4.5.1", default-features = false, features = [
     "env",
     "derive",
@@ -188,9 +188,9 @@ regex = "1.10.3"
 reqwest.workspace = true
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.21+v2.7.5"
+router-bridge = "=0.5.25+v2.8.0"
 
-rust-embed = "8.2.0"
+rust-embed = { version = "8.2.0", features = ["include-exclude"] }
 rustls = "0.21.11"
 rustls-native-certs = "0.6.3"
 rustls-pemfile = "1.0.4"

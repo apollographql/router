@@ -1322,6 +1322,7 @@ impl FetchDependencyGraphNode {
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
             output_rewrites,
+            context_rewrites: Default::default(),
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {

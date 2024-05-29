@@ -1,0 +1,14 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        "custom_counter":
+          description: "count of requests"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            subgraph.graphql.document: true
+            "custom_attribute":
+              subgraph_request_header: "custom_header"

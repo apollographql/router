@@ -91,6 +91,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
@@ -578,13 +579,17 @@ impl Plugin for Telemetry {
                         .instruments
                         .new_supergraph_instruments();
                     custom_instruments.on_request(req);
+                    let custom_graphql_instruments:GraphQLInstruments = (&config
+                        .instrumentation
+                        .instruments).into();
+                    custom_graphql_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
-                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events)
+                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments)
                 },
-                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
+                move |(ctx, custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -598,11 +603,13 @@ impl Plugin for Telemetry {
                                 span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
                                 custom_instruments.on_response(resp);
                                 supergraph_events.on_response(resp);
+                                custom_graphql_instruments.on_response(resp);
                             },
                             Err(err) => {
                                 span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
+                                custom_graphql_instruments.on_error(err, &ctx);
                             },
                         }
                         result = Self::update_otel_metrics(
@@ -612,6 +619,7 @@ impl Plugin for Telemetry {
                             start.elapsed(),
                             custom_instruments,
                             supergraph_events,
+                            custom_graphql_instruments,
                         )
                         .await;
                         Self::update_metrics_on_response_events(
@@ -925,6 +933,7 @@ impl Telemetry {
         request_duration: Duration,
         custom_instruments: SupergraphInstruments,
         custom_events: SupergraphEvents,
+        custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
         let mut metric_attrs = {
             context
@@ -951,9 +960,26 @@ impl Telemetry {
                 let ctx = context.clone();
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
+                let config_cloned = config.clone();
                 let stream = stream.inspect(move |resp| {
+                    let has_errors = !resp.errors.is_empty();
+                    // Useful for selector in spans/instruments/events
+                    ctx.insert_json_value(
+                        CONTAINS_GRAPHQL_ERROR,
+                        serde_json_bytes::Value::Bool(has_errors),
+                    );
+                    let span = Span::current();
+                    span.set_span_dyn_attributes(
+                        config_cloned
+                            .instrumentation
+                            .spans
+                            .supergraph
+                            .attributes
+                            .on_response_event(resp, &ctx),
+                    );
                     custom_instruments.on_response_event(resp, &ctx);
                     custom_events.on_response_event(resp, &ctx);
+                    custom_graphql_instruments.on_response_event(resp, &ctx);
                 });
                 let (first_response, rest) = stream.into_future().await;
 
@@ -1269,11 +1295,6 @@ impl Telemetry {
                         .enumerate()
                         .map(move |(idx, response)| {
                             let has_errors = !response.errors.is_empty();
-                            // Useful for selector in spans/instruments/events
-                            ctx.insert_json_value(
-                                CONTAINS_GRAPHQL_ERROR,
-                                serde_json_bytes::Value::Bool(has_errors),
-                            );
 
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {

@@ -86,6 +86,9 @@ pub struct FetchNode {
     /// Similar to `input_rewrites`, but for optional "rewrites" to apply to the data that is
     /// received from a fetch (and before it is applied to the current in-memory results).
     pub output_rewrites: Vec<Arc<FetchDataRewrite>>,
+    /// Similar to the other kinds of rewrites. This is a mechanism to convert a contextual path into
+    /// an argument to a resolver
+    pub context_rewrites: Vec<Arc<FetchDataRewrite>>,
 }
 
 #[derive(Debug, Clone)]

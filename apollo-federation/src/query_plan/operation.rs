@@ -911,9 +911,16 @@ impl Selection {
             Selection::Field(field) => Ok(Selection::from(
                 field.with_updated_selection_set(selection_set),
             )),
-            Selection::InlineFragment(inline_fragment) => Ok(Selection::from(
-                inline_fragment.with_updated_selection_set(selection_set),
-            )),
+            Selection::InlineFragment(inline_fragment) => {
+                let Some(selection_set) = selection_set else {
+                    return Err(FederationError::internal(
+                        "updating inline fragment without a sub-selection set",
+                    ));
+                };
+                Ok(inline_fragment
+                    .with_updated_selection_set(selection_set)
+                    .into())
+            }
             Selection::FragmentSpread(_) => {
                 Err(FederationError::internal("unexpected fragment spread"))
             }
@@ -1675,14 +1682,10 @@ mod normalized_inline_fragment_selection {
     }
 
     impl InlineFragmentSelection {
-        pub(crate) fn with_updated_selection_set(
-            &self,
-            selection_set: Option<SelectionSet>,
-        ) -> Self {
+        pub(crate) fn with_updated_selection_set(&self, selection_set: SelectionSet) -> Self {
             Self {
                 inline_fragment: self.inline_fragment.clone(),
-                //FIXME
-                selection_set: selection_set.unwrap(),
+                selection_set,
             }
         }
 

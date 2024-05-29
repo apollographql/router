@@ -67,14 +67,14 @@ telemetry:
           description: "my description"
         acme.request.size: # The name of your custom instrument/metric
           value:
-           request_header: "content-length"
+            request_header: "content-length"
           type: counter
           unit: s
-          description: "my description" 
-            
+          description: "my description"
+
         acme.request.length: # The name of your custom instrument/metric
           value:
-           request_header: "content-length"
+            request_header: "content-length"
           type: histogram
           unit: s
           description: "my description"
@@ -96,9 +96,12 @@ telemetry:
           description: "supergraph requests"
           condition:
             exists:
-             subgraph_response_data: "$.products[*].price1"
+              subgraph_response_data: "$.products[*].price1"
           attributes:
             subgraph.name: true
+      graphql:
+        list.length: true
+        field.execution: true
     events:
       router:
         # Standard events
