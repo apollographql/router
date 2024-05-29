@@ -357,19 +357,9 @@ impl QueryPlanner {
         }
 
         let reuse_query_fragments = self.config.reuse_query_fragments;
-        let mut named_fragments = NamedFragments::new(&document.fragments, &self.api_schema);
-        if reuse_query_fragments {
-            // For all subgraph fetches we query `__typename` on every abstract types (see
-            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
-            // fragments, we should make sure those fragments also query `__typename` for every
-            // abstract type.
-            named_fragments =
-                named_fragments.add_typename_field_for_abstract_types_in_named_fragments()?;
-        }
-
         let normalized_operation = normalize_operation(
             operation,
-            named_fragments,
+            NamedFragments::new(&document.fragments, &self.api_schema),
             &self.api_schema,
             &self.interface_types_with_interface_objects,
         )?;
@@ -413,9 +403,22 @@ impl QueryPlanner {
             );
         };
 
+        let rebased_fragments = if reuse_query_fragments {
+            // For all subgraph fetches we query `__typename` on every abstract types (see
+            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
+            // fragments, we should make sure those fragments also query `__typename` for every
+            // abstract type.
+            Some(RebasedFragments::new(
+                normalized_operation
+                    .named_fragments
+                    .add_typename_field_for_abstract_types_in_named_fragments()?,
+            ))
+        } else {
+            None
+        };
         let processor = FetchDependencyGraphToQueryPlanProcessor::new(
             operation.variables.clone(),
-            Some(RebasedFragments::new(&normalized_operation.named_fragments)),
+            rebased_fragments,
             operation.name.clone(),
             assigned_defer_labels,
         );

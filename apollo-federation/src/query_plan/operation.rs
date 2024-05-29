@@ -4870,9 +4870,9 @@ pub(crate) struct RebasedFragments {
 }
 
 impl RebasedFragments {
-    pub(crate) fn new(fragments: &NamedFragments) -> Self {
+    pub(crate) fn new(fragments: NamedFragments) -> Self {
         Self {
-            original_fragments: fragments.clone(),
+            original_fragments: fragments,
             rebased_fragments: Arc::new(HashMap::new()),
         }
     }
