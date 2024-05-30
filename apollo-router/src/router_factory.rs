@@ -427,6 +427,43 @@ pub(crate) async fn create_subgraph_services(
     >,
     BoxError,
 > {
+    let http_services = create_http_services(plugins, schema, configuration).await?;
+
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
+
+    let subscription_plugin_conf = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+        .map(|p| p.config.clone());
+
+    let mut subgraph_services = IndexMap::new();
+
+    for (name, http_service_factory) in http_services.into_iter() {
+        let subgraph_service = shaping.subgraph_service_internal(
+            name.as_ref(),
+            SubgraphService::from_config(
+                name.clone(),
+                configuration,
+                subscription_plugin_conf.clone(),
+                http_service_factory,
+            )?,
+        );
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
+}
+
+pub(crate) async fn create_http_services(
+    plugins: &Arc<Plugins>,
+    schema: &Schema,
+    configuration: &Configuration,
+) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
     let tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
@@ -435,19 +472,13 @@ pub(crate) async fn create_subgraph_services(
         .transpose()?
         .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
 
-    let subscription_plugin_conf = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-        .map(|p| p.config.clone());
-
     let shaping = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
-    let mut subgraph_services = IndexMap::new();
+    let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
@@ -458,20 +489,9 @@ pub(crate) async fn create_subgraph_services(
 
         let http_service_factory =
             HttpClientServiceFactory::new(Arc::new(http_service), plugins.clone());
-
-        let subgraph_service = shaping.subgraph_service_internal(
-            name,
-            SubgraphService::from_config(
-                name,
-                configuration,
-                subscription_plugin_conf.clone(),
-                http_service_factory,
-            )?,
-        );
-        subgraph_services.insert(name.clone(), subgraph_service);
+        http_services.insert(name.clone(), http_service_factory);
     }
-
-    Ok(subgraph_services)
+    Ok(http_services)
 }
 
 impl TlsClient {

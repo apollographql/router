@@ -20,29 +20,21 @@ use tower::ServiceExt;
 use super::connect::BoxService;
 use super::new_service::ServiceFactory;
 use super::trust_dns_connector::new_async_http_connector;
-use super::SubgraphRequest;
 use crate::graphql::Error;
-use crate::graphql::Request as GraphQLRequest;
-use crate::http_ext;
-use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::plugins::connectors::http_json_transport::http_json_transport;
 use crate::plugins::connectors::http_json_transport::HttpJsonTransportError;
 use crate::plugins::subscription::SubscriptionConfig;
-use crate::query_planner::build_operation_with_aliasing;
-use crate::query_planner::fetch::Protocol;
-use crate::query_planner::fetch::RestFetchNode;
-use crate::query_planner::fetch::Variables;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
 
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
-    pub(crate) http_service_factory: Arc<()>, // TODO: HTTP SERVICE
-    pub(crate) schema: Arc<Schema>,
-    pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+    pub(crate) _http_service_factory: Arc<()>, // TODO: HTTP SERVICE
+    pub(crate) _schema: Arc<Schema>,
+    pub(crate) _subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors: Connectors,
 }
@@ -59,10 +51,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
         let ConnectRequest {
             fetch_node,
-            supergraph_request,
             data,
             current_dir,
-            context,
+            ..
         } = request;
 
         let connectors = self.connectors.clone();
@@ -190,7 +181,7 @@ impl ConnectorServiceFactory {
         connectors: Connectors,
     ) -> Self {
         Self {
-            http_service_factory: Arc::new(()),
+            http_service_factory,
             subgraph_schemas,
             schema,
             subscription_config,
@@ -205,7 +196,7 @@ impl ConnectorServiceFactory {
             subgraph_schemas: Default::default(),
             subscription_config: Default::default(),
             connectors: Default::default(),
-            schema
+            schema,
         }
     }
 }
@@ -215,9 +206,9 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
 
     fn create(&self) -> Self::Service {
         ConnectorService {
-            http_service_factory: Arc::new(()),
-            schema: self.schema.clone(),
-            subgraph_schemas: self.subgraph_schemas.clone(),
+            _http_service_factory: self.http_service_factory.clone(),
+            _schema: self.schema.clone(),
+            _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
             connectors: self.connectors.clone(),
         }
@@ -244,11 +235,8 @@ mod soure_node_tests {
 
     use apollo_compiler::name;
     use apollo_federation::schema::ObjectFieldDefinitionPosition;
-    use apollo_federation::sources::connect;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::SubSelection;
-    use apollo_federation::sources::source;
 
     #[tokio::test]
     async fn test_process_source_node() {

@@ -706,7 +706,7 @@ async fn dependent_mutations() {
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
     mock_b_service.expect_call().never();
 
-    let parsed_schema =   Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
 
     let sf = Arc::new(FetchServiceFactory::new(
         parsed_schema.clone(),

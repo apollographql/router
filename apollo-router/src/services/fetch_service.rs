@@ -5,13 +5,11 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
-use apollo_federation::sources::connect::Connectors;
 // use apollo_federation::sources::connect::Connectors;
 use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
 
-use super::connector_service::process_source_node;
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::BoxService;
 use super::new_service::ServiceFactory;

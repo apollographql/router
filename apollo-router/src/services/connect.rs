@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use apollo_federation::sources::connect::query_plan::FetchNode;
 use serde_json_bytes::Value;
-use tokio::sync::broadcast;
 use tower::BoxError;
 
 // use tokio_stream::Stream;
@@ -23,9 +22,9 @@ pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError
 #[derive(Clone)]
 #[non_exhaustive]
 pub(crate) struct Request {
-    pub(crate) context: Context,
+    pub(crate) _context: Context,
     pub(crate) fetch_node: FetchNode,
-    pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
+    pub(crate) _supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) data: Value,
     pub(crate) current_dir: Path,
 }
@@ -46,9 +45,9 @@ impl Request {
         current_dir: Path,
     ) -> Self {
         Self {
-            context,
+            _context: context,
             fetch_node,
-            supergraph_request,
+            _supergraph_request: supergraph_request,
             data,
             current_dir,
         }
