@@ -153,7 +153,8 @@ impl Process {
             State::PreReleasePRChoose => self.choose_pre_release_pr(),
             State::PreReleasePRCreate => self.create_pre_release_pr(),
             State::PreReleasePRGitAdd => self.git_add_pre_release_pr(),
-            State::ReleaseFinish => panic!(),
+            State::ReleaseFinalPRCreate => self.create_final_release_pr(),
+            State::ReleaseFinalPRGitAdd => self.git_add_final_release_pr(),
         }
     }
 
@@ -251,7 +252,7 @@ impl Process {
                 self.state = State::PreReleasePRCreate;
             }
             1 => {
-                self.state = State::ReleaseFinish;
+                self.state = State::ReleaseFinalPRCreate;
             }
             _ => unreachable!(),
         };
@@ -303,8 +304,8 @@ impl Process {
 
     fn git_add_pre_release_pr(&mut self) -> Result<bool> {
         let git = which::which("git")?;
-        // step 7
 
+        // step 7
         println!("please check the changes and add them with `git add -up .`");
         let _output = std::process::Command::new(&git)
             .args(["add", "-up", "."])
@@ -363,6 +364,147 @@ impl Process {
 
         Ok(false)
     }
+
+    fn create_final_release_pr(&mut self) -> Result<bool> {
+        let git = which::which("git")?;
+
+        // step 4
+        let _output = std::process::Command::new(&git)
+            .args(["checkout", &self.version])
+            .status()?;
+        let _output = std::process::Command::new(&git)
+            .args(["pull", &self.git_origin, &self.version])
+            .status()?;
+
+        //step 5
+        //git checkout -b "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
+        let _output = std::process::Command::new(&git)
+            .args(["checkout", "-b", &format!("prep-{}", self.version)])
+            .status()?;
+
+        // step 6
+        // cargo xtask release prepare $APOLLO_ROUTER_RELEASE_VERSION
+        let prepare = super::Prepare {
+            skip_license_check: true,
+            pre_release: false,
+            version: super::Version::Version(self.version.clone()),
+        };
+
+        prepare.prepare_release()?;
+
+        self.state = State::ReleaseFinalPRGitAdd;
+        self.save()?;
+
+        println!("prep release branch created.\n**MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.\n This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).");
+        println!(
+            r#"Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
+
+        These things should have *ALWAYS* been resolved earlier in the review process of the PRs that introduced the changes, but they must be double checked:
+    
+         - There are no breaking changes.
+         - Entries are in categories (e.g., Fixes vs Features) that make sense.
+         - Titles stand alone and work without their descriptions.
+         - You don't need to read the title for the description to make sense.
+         - Grammar is good.  (Or great! But don't let perfect be the enemy of good.)
+         - Formatting looks nice when rendered as markdown and follows common convention."#
+        );
+
+        Ok(false)
+    }
+
+    fn git_add_final_release_pr(&mut self) -> Result<bool> {
+        let git = which::which("git")?;
+
+        // step 11
+        println!("please check the changes and add them with `git add -up .`");
+        let _output = std::process::Command::new(&git)
+            .args(["add", "-up", "."])
+            .status()?;
+
+        let _output = std::process::Command::new(&git)
+            .args(["commit", "-m", &format!("prep release: v{}", self.version)])
+            .status()?;
+
+        //step 14
+        //    git push --set-upstream "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
+        let _output = std::process::Command::new(&git)
+            .args([
+                "push",
+                "--set-upstream",
+                &self.git_origin,
+                &format!("prep-{}", self.version),
+            ])
+            .status()?;
+
+        //Step 15
+        //FIXME: replace this step with an askama template
+        let perl = which::which("perl")?;
+        let output = std::process::Command::new(&perl)
+            .args([
+                "0777",
+                "-sne",
+                r#"print "$1\n" if m{
+                (?:\#\s               # Look for H1 Markdown (line starting with "\# ")
+                \[v?\Q$version\E\]    # ...followed by [$version] (optionally with a "v")
+                                      #    since some versions had that in the past.
+                \s.*?\n$)             # ... then "space" until the end of the line.
+                \s*                   # Ignore PRE-entry-whitespace
+                (.*?)                 # Capture the ACTUAL body of the release.  But do it
+                                      # in a non-greedy way, leading us to stop when we
+                                      # reach the next version boundary/heading.
+                \s*                   # Ignore POST-entry-whitespace
+                (?=^\#\s\[[^\]]+\]\s) # Once again, look for a version boundary.  This is
+                                      # the same bit at the start, just on one line.
+              }msx"#,
+                "--",
+                "-version",
+                &self.version,
+                "CHANGELOG.md",
+            ])
+            .output()?;
+
+        let mut f = std::fs::File::create("this_release.md")?;
+        f.write_all(&output.stdout)?;
+
+        //step 16
+        let apollo_prep_release_header = format!(
+            r#"> **Note**
+>
+> When approved, this PR will merge into **the \`{}\` branch** which will — upon being approved itself — merge into \`main\`.
+>
+> **Things to review in this PR**:
+>  - Changelog correctness (There is a preview below, but it is not necessarily the most up to date.  See the _Files Changed_ for the true reality.)
+>  - Version bumps
+>  - That it targets the right release branch (\`${}\` in this case!).
+>
+---
+
+{}"#,
+            &self.version,
+            &self.version,
+            std::str::from_utf8(&output.stdout)?
+        );
+
+        //echo "${apollo_prep_release_header}\n${apollo_prep_release_notes}" | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create -B "${APOLLO_ROUTER_RELEASE_VERSION}" --title "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
+
+        let gh = which::which("gh")?;
+
+        let _output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "pr",
+                "create",
+                "-B",
+                &self.version,
+                "--title",
+                &format!("\"prep release: v{}\"", self.version.as_str()),
+                "--body",
+                &apollo_prep_release_header,
+            ])
+            .status()?;
+        Ok(false)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -372,5 +514,6 @@ enum State {
     PreReleasePRChoose,
     PreReleasePRCreate,
     PreReleasePRGitAdd,
-    ReleaseFinish,
+    ReleaseFinalPRCreate,
+    ReleaseFinalPRGitAdd,
 }
