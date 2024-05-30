@@ -93,8 +93,6 @@ impl ApolloOtlpExporter {
                         .with_metadata(metadata)
                         .with_compression(opentelemetry_otlp::Compression::Gzip),
                 )
-                // TBD(tim): do we need another batch processor for this?
-                // Seems like we've already set up a batcher earlier in the pipe but not quite sure.
                 .build_span_exporter()?;
 
                 // This is a hack and won't be needed anymore once opentelemetry_otlp will be upgraded
