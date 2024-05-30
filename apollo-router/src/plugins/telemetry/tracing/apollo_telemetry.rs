@@ -139,7 +139,6 @@ const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
 
 /// Additional attributes to include when sending to the OTLP protocol.
 const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
-    // TBD(tim): operation subtype is not yet implemented but we'll need it for parity with the reports protocol
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
     opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
@@ -1355,18 +1354,47 @@ mod test {
 
     #[test]
     fn test_extract_ftv1_trace_with_error_count() {
-        // TBD(tim): this should use subgraph mocks as we have them in the integration tests.
-        // Where is a good place for them to live if they were shared?
-        let trace = Trace::default();
+        let mut trace = Trace::default();
+        let sub_node = Node {
+            error: vec![Error {
+                message: "this is my error".to_string(),
+                location: Vec::new(),
+                time_ns: 5,
+                json: String::from(r#"{"foo": "bar"}"#),
+            }],
+            ..Default::default()
+        };
+        let mut node = Node {
+            error: vec![
+                Error {
+                    message: "this is my error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+                Error {
+                    message: "this is my other error".to_string(),
+                    location: Vec::new(),
+                    time_ns: 5,
+                    json: String::from(r#"{"foo": "bar"}"#),
+                },
+            ],
+            ..Default::default()
+        };
+        node.child.push(sub_node);
+        trace.root = Some(node);
         let encoded = encode_ftv1_trace(&trace);
         let extracted = extract_ftv1_trace_with_error_count(
             &Value::String(encoded.into()),
-            &ErrorConfiguration::default(),
+            &ErrorConfiguration {
+                send: true,
+                redact: false,
+            },
         )
         .expect("there was a trace here")
         .expect("the trace must be decoded");
         assert_eq!(*extracted.0, trace);
-        assert_eq!(extracted.1, 0u64);
+        assert_eq!(extracted.1, 3);
     }
 
     #[test]
@@ -1402,7 +1430,8 @@ mod test {
             send: true,
             redact: true,
         };
-        preprocess_errors(&mut node, &error_config);
+        let error_count = preprocess_errors(&mut node, &error_config);
+        assert_eq!(error_count, 3);
         assert!(node.error[0].json.is_empty());
         assert!(node.error[0].location.is_empty());
         assert_eq!(node.error[0].message.as_str(), "<redacted>");
@@ -1448,7 +1477,8 @@ mod test {
             send: true,
             redact: false,
         };
-        preprocess_errors(&mut node, &error_config);
+        let error_count = preprocess_errors(&mut node, &error_config);
+        assert_eq!(error_count, 3);
         assert_eq!(node.error[0].message.as_str(), "this is my error");
         assert_eq!(node.error[0].time_ns, 5u64);
         assert!(!node.error[1].json.is_empty());
@@ -1493,7 +1523,8 @@ mod test {
             send: false,
             redact: true,
         };
-        preprocess_errors(&mut node, &error_config);
+        let error_count = preprocess_errors(&mut node, &error_config);
+        assert_eq!(error_count, 0);
         assert!(node.error.is_empty());
         assert!(node.child[0].error.is_empty());
     }
