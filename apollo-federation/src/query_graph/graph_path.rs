@@ -19,6 +19,7 @@ use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
+use tracing::instrument;
 
 use crate::error::FederationError;
 use crate::indented_display::write_indented_lines;
@@ -1317,6 +1318,7 @@ where
             == Some(self.edges.len() - 2))
     }
 
+    #[instrument(skip_all, level = "trace", name = "GraphPath::can_satisfy_conditions")]
     fn can_satisfy_conditions(
         &self,
         edge: EdgeIndex,
@@ -2320,6 +2322,11 @@ impl OpGraphPath {
     /// have also created multiple options).
     ///
     /// For the second element, it is true if the result only has type-exploded results.
+    #[instrument(
+        skip_all,
+        level = "trace",
+        name = "GraphPath::advance_with_operation_element"
+    )]
     fn advance_with_operation_element(
         &self,
         supergraph_schema: ValidFederationSchema,

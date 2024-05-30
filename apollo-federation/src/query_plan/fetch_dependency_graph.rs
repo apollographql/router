@@ -21,6 +21,9 @@ use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
+use serde_json_bytes::json;
+use serde_json_bytes::Value;
+use tracing::instrument;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -112,6 +115,26 @@ pub(crate) struct FetchDependencyGraphNode {
     is_known_useful: bool,
 }
 
+impl FetchDependencyGraphNode {
+    pub(crate) fn to_json(&self) -> Value {
+        json!({
+            "subgraph_name": self.subgraph_name.to_string(),
+            "root_kind": self.root_kind.to_string(),
+            "parent_type": self.parent_type.to_string(),
+            "selection_set": self.selection_set.selection_set.to_string(),
+            "is_entity_fetch": self.is_entity_fetch,
+            "inputs": "TODO", //self.inputs.as_ref().map(|inputs| inputs.selection_sets_per_parent_type.iter().map(|(k, v)| (k.to_string(), v.to_json())).collect::<IndexMap<_, _>>()),
+            "input_rewrites": "TODO",// self.input_rewrites.iter().map(|rewrite| rewrite.to_json()).collect::<Vec<_>>(),
+            "merge_at": self.merge_at.as_ref().map(|merge_at| merge_at.iter().map(|element| element.to_string()).collect::<Vec<_>>()),
+            "id": self.id.get().map(|id| id.to_string()),
+            "defer_ref": self.defer_ref.as_ref().map(|defer_ref| defer_ref.to_string()),
+            "cached_cost": self.cached_cost.map(|n| Value::Number(n.into())).unwrap_or(Value::Null),
+            "must_preserve_selection_set": self.must_preserve_selection_set,
+            "is_known_useful": self.is_known_useful,
+        })
+    }
+}
+
 /// Safely generate IDs for fetch dependency nodes without mutable access.
 #[derive(Debug)]
 struct FetchIdGenerator {
@@ -175,6 +198,15 @@ pub(crate) struct FetchDependencyGraphEdge {
     path: Option<Arc<OpPath>>,
 }
 
+impl FetchDependencyGraphEdge {
+    pub(crate) fn to_json(&self) -> Value {
+        self.path
+            .as_ref()
+            .map(|path| json!(path.to_string()))
+            .unwrap_or(Value::Null)
+    }
+}
+
 type FetchDependencyGraphPetgraph =
     StableDiGraph<Arc<FetchDependencyGraphNode>, Arc<FetchDependencyGraphEdge>>;
 
@@ -206,6 +238,39 @@ pub(crate) struct FetchDependencyGraph {
     /// Whether this fetch dependency graph has undergone optimization (e.g. transitive reduction,
     /// removing empty/useless fetches, merging fetches with the same subgraph/path).
     is_optimized: bool,
+}
+
+impl FetchDependencyGraph {
+    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
+        let mut nodes = Vec::new();
+        let mut edges = Vec::new();
+
+        for i in self.graph.node_indices() {
+            let node = &self.graph[i];
+            nodes.push(json!({
+              "id": i.index(),
+              "data": node.to_json(),
+            }));
+        }
+
+        for i in self.graph.edge_indices() {
+            if let Some((n1, n2)) = self.graph.edge_endpoints(i) {
+                let edge = &self.graph[i];
+                edges.push(json!({
+                  "id": i.index(),
+                  "head": n1.index(),
+                  "tail": n2.index(),
+                  "data": edge.to_json(),
+                }));
+            }
+        }
+
+        json!({
+          "kind": "FetchDependencyGraph",
+          "nodes": nodes,
+          "edges": edges,
+        })
+    }
 }
 
 // TODO: Write docstrings
@@ -1841,6 +1906,7 @@ struct ComputeNodesStackItem<'a> {
     defer_context: DeferContext,
 }
 
+#[instrument(skip_all, level = "trace")]
 pub(crate) fn compute_nodes_for_tree(
     dependency_graph: &mut FetchDependencyGraph,
     initial_tree: &OpPathTree,

@@ -215,6 +215,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             parameters.head,
         )
         .unwrap();
+
         // In JS this is done *inside* create_initial_options, which would require awareness of the
         // query graph.
         let tail = parameters
@@ -245,22 +246,22 @@ impl<'a> QueryPlanningTraversal<'a> {
             excluded_conditions,
         )?;
 
-        trace!(
-            data = json!(initial_options.iter().map(|ib| ib.to_json()).collect_vec()).to_string(),
-            "initial_options"
-        );
+        // trace!(
+        //     data = json!(initial_options.iter().map(|ib| ib.to_json()).collect_vec()).to_string(),
+        //     "initial_options"
+        // );
 
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
 
-        trace!(
-            data = json!(traversal
-                .open_branches
-                .iter()
-                .map(|ob| ob.to_json())
-                .collect::<Vec<_>>())
-            .to_string(),
-            "open_branches"
-        );
+        // trace!(
+        //     data = json!(traversal
+        //         .open_branches
+        //         .iter()
+        //         .map(|ob| ob.to_json())
+        //         .collect_vec())
+        //     .to_string(),
+        //     "open_branches"
+        // );
 
         Ok(traversal)
     }
@@ -284,6 +285,10 @@ impl<'a> QueryPlanningTraversal<'a> {
     )]
     fn find_best_plan_inner(&mut self) -> Result<Option<&BestQueryPlanInfo>, FederationError> {
         while let Some(mut current_branch) = self.open_branches.pop() {
+            // trace!(
+            //     data = json!(current_branch.to_json()).to_string(),
+            //     "current_branch"
+            // );
             let Some(current_selection) = current_branch.selections.pop() else {
                 return Err(FederationError::internal(
                     "Sub-stack unexpectedly empty during query plan traversal",
@@ -324,6 +329,17 @@ impl<'a> QueryPlanningTraversal<'a> {
         let operation_element = selection.element()?;
         let mut new_options = vec![];
         let mut no_followups: bool = false;
+
+        trace!(
+            data = json!(options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
+            "options"
+        );
+
+        trace!(
+            data = json!(operation_element.to_string()).to_string(),
+            "operation_element"
+        );
+
         for option in options.iter_mut() {
             let followups_for_option = option.advance_with_operation_element(
                 self.parameters.supergraph_schema.clone(),
@@ -352,6 +368,11 @@ impl<'a> QueryPlanningTraversal<'a> {
                 }
             }
         }
+
+        trace!(
+            data = json!(new_options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
+            "new_options"
+        );
 
         if no_followups {
             // This operation element is valid from this option, but is guarantee to yield no result
@@ -492,6 +513,10 @@ impl<'a> QueryPlanningTraversal<'a> {
 
     fn record_closed_branch(&mut self, closed_branch: ClosedBranch) -> Result<(), FederationError> {
         let maybe_trimmed = closed_branch.maybe_eliminate_strictly_more_costly_paths()?;
+        trace!(
+            data = json!(maybe_trimmed.to_json()).to_string(),
+            "closed_branch"
+        );
         self.closed_branches.push(maybe_trimmed);
         Ok(())
     }
@@ -654,6 +679,12 @@ impl<'a> QueryPlanningTraversal<'a> {
                     cost,
                 }
                 .into();
+
+                trace!(
+                    data = json!(self.best_plan.as_ref().unwrap().to_json()).to_string(),
+                    "best_plan"
+                );
+
                 return Ok(());
             }
         }
@@ -690,6 +721,11 @@ impl<'a> QueryPlanningTraversal<'a> {
             cost,
         }
         .into();
+
+        trace!(
+            data = json!(self.best_plan.as_ref().unwrap().to_json()).to_string(),
+            "best_plan"
+        );
         Ok(())
     }
 
@@ -876,11 +912,6 @@ impl<'a> QueryPlanningTraversal<'a> {
         }
     }
 
-    #[instrument(
-        level = "trace",
-        skip_all,
-        name = "QueryPlanningTraversal::new_dependency_graph"
-    )]
     pub(crate) fn new_dependency_graph(&self) -> FetchDependencyGraph {
         let root_type = if self.is_top_level && self.has_defers {
             self.parameters
@@ -942,6 +973,11 @@ impl<'a> QueryPlanningTraversal<'a> {
                 &Default::default(),
             )?;
         }
+
+        trace!(
+            data = json!(dependency_graph.to_json()).to_string(),
+            "updated_dependency_graph"
+        );
         Ok(())
     }
 
@@ -1187,9 +1223,9 @@ impl OpenBranchAndSelections {
 
 impl Selection {
     pub(crate) fn to_json(&self) -> Value {
-        let has_conditions = match self.conditions() {
-            Ok(_) => true,
-            _ => false,
+        let conditions = match self.conditions() {
+            Ok(c) => c.to_json(),
+            _ => Value::Null,
         };
         let selection = match self.selection_set() {
             Ok(Some(selection_set)) => json!(selection_set.to_string()),
@@ -1197,7 +1233,7 @@ impl Selection {
         };
         json!({
             "kind": "Selection",
-            "has_conditions": has_conditions,
+            "conditions": conditions,
             "selection": selection
         })
     }
@@ -1234,6 +1270,22 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         json!({
             "kind": "SimultaneousPathsWithLazyIndirectPaths",
             "paths": paths,
+        })
+    }
+}
+
+impl BestQueryPlanInfo {
+    pub(crate) fn to_json(&self) -> Value {
+        // let path_tree = self
+        //     .path_tree
+        //     .as_ref()
+        //     .map(|path_tree| path_tree.to_json())
+        //     .unwrap_or(Value::Null);
+        json!({
+            "kind": "BestQueryPlanInfo",
+            "fetchDependencyGraph": self.fetch_dependency_graph.to_json(),
+            "pathTree": "TODO",
+            "cost": self.cost,
         })
     }
 }

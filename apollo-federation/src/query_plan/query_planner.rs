@@ -605,6 +605,7 @@ fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, Federat
     Ok(index.index() as u32)
 }
 
+#[instrument(level = "trace", skip_all, name = "compute_root_fetch_groups")]
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
