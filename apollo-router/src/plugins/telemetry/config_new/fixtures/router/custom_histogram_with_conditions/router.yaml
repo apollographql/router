@@ -1,0 +1,19 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: false
+        http.server.request.duration: false
+        "custom.histogram":
+          description: "histogram of requests"
+          type: histogram
+          unit: "unit"
+          value: unit
+          attributes:
+            http.request.method: true
+            "custom_attribute":
+              request_header: "custom_header"
+          condition:
+            eq:
+              - request_header: "custom_header"
+              - "allowed"
