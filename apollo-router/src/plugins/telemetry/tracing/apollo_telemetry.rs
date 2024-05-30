@@ -83,7 +83,10 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::http::service::HTTP_REQUEST_SPAN_NAME;
+use crate::services::layers::query_analysis::QUERY_PARSING_SPAN_NAME;
 use crate::services::QUERY_PLANNING_SPAN_NAME;
+use crate::services::SUBGRAPH_REQUEST_SPAN_NAME;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -111,9 +114,6 @@ const OPERATION_NAME: Key = Key::from_static_str("graphql.operation.name");
 const OPERATION_TYPE: Key = Key::from_static_str("graphql.operation.type");
 pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.operation.subtype");
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
-pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query"; // TBD(tim): this should be an import
-pub(crate) const HTTP_REQUEST_SPAN_NAME: &str = "http_request"; // TBD(tim): this should be an import
-pub(crate) const SUBGRAPH_REQUEST_SPAN_NAME: &str = "subgraph_request"; // TBD(tim): this should be an import
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
 const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
