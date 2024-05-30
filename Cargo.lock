@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.47.0"
+version = "12.3.456-rc.1"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -262,7 +262,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.47.0"
+version = "12.3.456-rc.1"
 dependencies = [
  "access-json",
  "anyhow",
