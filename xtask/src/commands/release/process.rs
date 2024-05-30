@@ -5,7 +5,7 @@ use std::{
 };
 
 use anyhow::Result;
-use dialoguer::{Confirm, Input};
+use dialoguer::{Confirm, Input, Select};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, clap::Parser)]
@@ -16,8 +16,8 @@ pub struct Start {
     git_origin: Option<String>,
     #[clap(short = 'r', long = "repository")]
     github_repository: Option<String>,
-    #[clap(short = 's', long = "suffix")]
-    prerelease_suffix: Option<String>,
+    //#[clap(short = 's', long = "suffix")]
+    //prerelease_suffix: Option<String>,
     #[clap(short = 'c', long = "commit")]
     commit: Option<String>,
 }
@@ -82,14 +82,6 @@ impl Process {
                 .interact_text()?,
         };
 
-        let prerelease_suffix = match &arguments.prerelease_suffix {
-            Some(v) => v.clone(),
-            None => Input::new()
-                .with_prompt(&format!("prerelease suffix? {version}-"))
-                .allow_empty(true)
-                .interact_text()?,
-        };
-
         let commit = match &arguments.commit {
             Some(v) => v.clone(),
             None => Input::new()
@@ -108,7 +100,7 @@ impl Process {
             version,
             git_origin,
             github_repository,
-            prerelease_suffix,
+            prerelease_suffix: String::new(),
             commit,
             state: State::Start,
         };
@@ -126,9 +118,13 @@ impl Process {
     }
 
     pub(super) fn cont() -> Result<()> {
-        let process = Process::restore()?;
+        let mut process = Process::restore()?;
 
-        Ok(())
+        loop {
+            if !process.run()? {
+                return Ok(());
+            }
+        }
     }
 
     fn save(&self) -> Result<()> {
@@ -153,7 +149,11 @@ impl Process {
     fn run(&mut self) -> Result<bool> {
         match self.state {
             State::Start => self.state_start(),
-            State::CreateReleasePR => self.create_release_pr(),
+            State::ReleasePRCreate => self.create_release_pr(),
+            State::PreReleasePRChoose => self.choose_pre_release_pr(),
+            State::PreReleasePRCreate => self.create_pre_release_pr(),
+            State::PreReleasePRGitAdd => self.git_add_pre_release_pr(),
+            State::ReleaseFinish => panic!(),
         }
     }
 
@@ -163,26 +163,26 @@ impl Process {
         let git = which::which("git")?;
 
         // step 5
-        let output = std::process::Command::new(&git)
+        let _output = std::process::Command::new(&git)
             .args(["checkout", "dev"])
             .status()?;
-        let output = std::process::Command::new(&git)
+        let _output = std::process::Command::new(&git)
             .args(["pull", self.git_origin.as_str()])
             .status()?;
 
         if let Commit::Id(id) = &self.commit {
-            let output = std::process::Command::new(&git)
+            let _output = std::process::Command::new(&git)
                 .args(["checkout", id])
                 .status()?;
         }
 
         // step 6
-        let output = std::process::Command::new(&git)
+        let _output = std::process::Command::new(&git)
             .args(["checkout", "-b", self.version.as_str()])
             .status()?;
 
         // step 7
-        let output = std::process::Command::new(&git)
+        let _output = std::process::Command::new(&git)
             .args([
                 "push",
                 "--set-upstream",
@@ -191,7 +191,9 @@ impl Process {
             ])
             .status()?;
 
-        self.state = State::CreateReleasePR;
+        self.state = State::ReleasePRCreate;
+        self.save()?;
+
         Ok(true)
     }
 
@@ -212,7 +214,7 @@ impl Process {
     - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
     - If those things look good, this PR is good to merge!"#;
 
-        let output = std::process::Command::new(&gh)
+        let _output = std::process::Command::new(&gh)
             .args([
                 "--repo",
                 self.github_repository.as_str(),
@@ -230,20 +232,84 @@ impl Process {
             ])
             .status()?;
 
-        /*
-             cat <<EOM | gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --draft --label release -B "main" --title "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --body-file -
-        > **Note**
-        > **This particular PR must be true-merged to \`main\`.**
+        self.state = State::PreReleasePRChoose;
+        self.save()?;
+        Ok(false)
+    }
 
-        * This PR is only ready to review when it is marked as "Ready for Review".  It represents the merge to the \`main\` branch of an upcoming release (version number in the title).
-        * It will act as a staging branch until we are ready to finalize the release.
-        * We may cut any number of alpha and release candidate (RC) versions off this branch prior to formalizing it.
-        * This PR is **primarily a merge commit**, so reviewing every individual commit shown below is **not necessary** since those have been reviewed in their own PR.  However, things important to review on this PR **once it's marked "Ready for Review"**:
-            - Does this PR target the right branch? (usually, \`main\`)
-            - Are the appropriate **version bumps** and **release note edits** in the end of the commit list (or within the last few commits).  In other words, "Did the 'release prep' PR actually land on this branch?"
-            - If those things look good, this PR is good to merge!
-        EOM
-              */
+    fn choose_pre_release_pr(&mut self) -> Result<bool> {
+        println!("will choose?");
+        let items = vec!["create a prerelease", "finish the release process"];
+
+        let selection = Select::new()
+            .with_prompt("Next step?")
+            .items(&items)
+            .interact()?;
+
+        match selection {
+            0 => {
+                self.state = State::PreReleasePRCreate;
+            }
+            1 => {
+                self.state = State::ReleaseFinish;
+            }
+            _ => unreachable!(),
+        };
+        self.save()?;
+        Ok(true)
+    }
+
+    fn create_pre_release_pr(&mut self) -> Result<bool> {
+        println!(">> Creating the release PR");
+
+        let prerelease_suffix = Input::new()
+            .with_prompt(&format!("prerelease suffix? {}-", self.version))
+            .with_initial_text(self.prerelease_suffix.clone())
+            .interact_text()?;
+
+        let git = which::which("git")?;
+
+        // step 5
+        let _output = std::process::Command::new(&git)
+            .args(["checkout", &self.version])
+            .status()?;
+        let _output = std::process::Command::new(&git)
+            .args(["pull", &self.git_origin, &self.version])
+            .status()?;
+
+        if let Commit::Id(id) = &self.commit {
+            let _output = std::process::Command::new(&git)
+                .args(["checkout", id])
+                .status()?;
+        }
+
+        let new_version = format!("{}-{}", self.version, prerelease_suffix);
+        println!("prerelease version: {new_version}");
+        // step 6
+        let prepare = super::Prepare {
+            skip_license_check: true,
+            pre_release: true,
+            version: super::Version::Version(new_version),
+        };
+
+        prepare.prepare_release()?;
+
+        self.prerelease_suffix = prerelease_suffix;
+        self.state = State::PreReleasePRGitAdd;
+        self.save()?;
+
+        Ok(true)
+    }
+
+    fn git_add_pre_release_pr(&mut self) -> Result<bool> {
+        let git = which::which("git")?;
+        // step 7
+
+        println!("please check the changes and add them with `git add -up .`");
+        let _output = std::process::Command::new(&git)
+            .args(["add", "-up", "."])
+            .status()?;
+
         Ok(false)
     }
 }
@@ -251,5 +317,9 @@ impl Process {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 enum State {
     Start,
-    CreateReleasePR,
+    ReleasePRCreate,
+    PreReleasePRChoose,
+    PreReleasePRCreate,
+    PreReleasePRGitAdd,
+    ReleaseFinish,
 }

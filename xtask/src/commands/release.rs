@@ -35,7 +35,7 @@ impl Command {
 }
 
 #[derive(Debug, Clone, Eq, PartialEq)]
-enum Version {
+pub(crate) enum Version {
     Major,
     Minor,
     Patch,
@@ -84,14 +84,10 @@ macro_rules! replace_in_file {
 
 impl Prepare {
     pub fn run(&self) -> Result<()> {
-        tokio::runtime::Builder::new_multi_thread()
-            .enable_all()
-            .build()
-            .unwrap()
-            .block_on(async { self.prepare_release().await })
+        self.prepare_release()
     }
 
-    async fn prepare_release(&self) -> Result<(), Error> {
+    fn prepare_release(&self) -> Result<(), Error> {
         self.ensure_pristine_checkout()?;
         self.ensure_prereqs()?;
         let version = self.update_cargo_tomls(&self.version)?;
