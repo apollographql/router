@@ -87,6 +87,12 @@ fn merge_and_remap_condition_resolution_ids(
 impl FederatedPathTree {
     // This is not generic in practice: the EdgeIter and PathIter types are just not
     // nameable.
+    //
+    // Each recursive call to `from_paths_inner` advances all `EdgeIter`s once, in lockstep. Each
+    // iteration adds one depth level to its subtree, potentially many nodes side-by-side.
+    //
+    // XXX(@goto-bus-stop): can this be simplified by walking each path in order? i.e. depth-first
+    // rather than breadth-first.
     fn from_paths_inner<'a, EdgeIter, PathIter>(
         graph: Arc<FederatedQueryGraph>,
         node: NodeIndex,
@@ -137,6 +143,9 @@ impl FederatedPathTree {
 
             // Marginally inefficient: we look up edge endpoints even if the edge already exists.
             // This is to make the ? error propagate.
+            // XXX(@goto-bus-stop): Should we store the endpoint on the graph path edges? Then this
+            // code would not need to return a result. The query graph is not mutable at this point so
+            // it can not get out of sync.
             let for_edge = merged.entry(edge.edge).or_insert(ByUniqueEdge {
                 target_node: if let Some(edge) = &edge.edge {
                     let (_source, target) = graph.edge_endpoints(*edge)?;
@@ -204,8 +213,6 @@ impl FederatedPathTree {
     }
 
     /// Create a path tree by merging the given graph paths.
-    /// XXX(@goto-bus-stop): Do we need to keep the FederatedGraphPaths around independently of the
-    /// path tree? Or can we just take ownership in this function?
     pub fn from_paths<'a>(
         graph: Arc<FederatedQueryGraph>,
         node: NodeIndex,
