@@ -32,7 +32,6 @@ use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec_definition::SpecDefinition;
-use crate::query_graph::QueryGraphNodeType;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::referencer::EnumTypeReferencers;
 use crate::schema::referencer::InputObjectTypeReferencers;
@@ -82,28 +81,20 @@ impl TypeDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema ExtendedType, FederationError> {
-        let type_name = self.type_name();
-        let type_ = schema
+        let ty = schema
             .types
-            .get(type_name)
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: format!("Schema has no type \"{}\"", self),
-            })?;
-        let type_matches = match type_ {
-            ExtendedType::Scalar(_) => matches!(self, TypeDefinitionPosition::Scalar(_)),
-            ExtendedType::Object(_) => matches!(self, TypeDefinitionPosition::Object(_)),
-            ExtendedType::Interface(_) => matches!(self, TypeDefinitionPosition::Interface(_)),
-            ExtendedType::Union(_) => matches!(self, TypeDefinitionPosition::Union(_)),
-            ExtendedType::Enum(_) => matches!(self, TypeDefinitionPosition::Enum(_)),
-            ExtendedType::InputObject(_) => matches!(self, TypeDefinitionPosition::InputObject(_)),
-        };
-        if type_matches {
-            Ok(type_)
-        } else {
-            Err(SingleFederationError::Internal {
-                message: format!("Schema type \"{}\" is the wrong kind", self),
-            }
-            .into())
+            .get(self.type_name())
+            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+        match (ty, self) {
+            (ExtendedType::Scalar(_), TypeDefinitionPosition::Scalar(_))
+            | (ExtendedType::Object(_), TypeDefinitionPosition::Object(_))
+            | (ExtendedType::Interface(_), TypeDefinitionPosition::Interface(_))
+            | (ExtendedType::Union(_), TypeDefinitionPosition::Union(_))
+            | (ExtendedType::Enum(_), TypeDefinitionPosition::Enum(_))
+            | (ExtendedType::InputObject(_), TypeDefinitionPosition::InputObject(_)) => Ok(ty),
+            _ => Err(FederationError::internal(format!(
+                r#"Schema type "{self}" is the wrong kind"#
+            ))),
         }
     }
 
@@ -112,6 +103,124 @@ impl TypeDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema ExtendedType> {
         self.get(schema).ok()
+    }
+}
+
+impl TryFrom<TypeDefinitionPosition> for ScalarTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            TypeDefinitionPosition::Scalar(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a scalar type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<TypeDefinitionPosition> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            TypeDefinitionPosition::Object(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<TypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            TypeDefinitionPosition::Interface(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an interface type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<TypeDefinitionPosition> for UnionTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            TypeDefinitionPosition::Union(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a union type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<TypeDefinitionPosition> for EnumTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            TypeDefinitionPosition::Enum(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an enum type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<TypeDefinitionPosition> for InputObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            TypeDefinitionPosition::InputObject(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an input object type"#
+            ))),
+        }
+    }
+}
+
+impl From<OutputTypeDefinitionPosition> for TypeDefinitionPosition {
+    fn from(value: OutputTypeDefinitionPosition) -> Self {
+        match value {
+            OutputTypeDefinitionPosition::Scalar(value) => value.into(),
+            OutputTypeDefinitionPosition::Object(value) => value.into(),
+            OutputTypeDefinitionPosition::Interface(value) => value.into(),
+            OutputTypeDefinitionPosition::Union(value) => value.into(),
+            OutputTypeDefinitionPosition::Enum(value) => value.into(),
+        }
+    }
+}
+
+impl From<CompositeTypeDefinitionPosition> for TypeDefinitionPosition {
+    fn from(value: CompositeTypeDefinitionPosition) -> Self {
+        match value {
+            CompositeTypeDefinitionPosition::Object(value) => value.into(),
+            CompositeTypeDefinitionPosition::Interface(value) => value.into(),
+            CompositeTypeDefinitionPosition::Union(value) => value.into(),
+        }
+    }
+}
+
+impl From<AbstractTypeDefinitionPosition> for TypeDefinitionPosition {
+    fn from(value: AbstractTypeDefinitionPosition) -> Self {
+        match value {
+            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
+            AbstractTypeDefinitionPosition::Union(value) => value.into(),
+        }
+    }
+}
+
+impl From<ObjectOrInterfaceTypeDefinitionPosition> for TypeDefinitionPosition {
+    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
+        match value {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
+        }
     }
 }
 
@@ -151,23 +260,19 @@ impl OutputTypeDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema ExtendedType, FederationError> {
-        let ty =
-            schema
-                .types
-                .get(self.type_name())
-                .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                })?;
+        let ty = schema
+            .types
+            .get(self.type_name())
+            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
         match (ty, self) {
-            (ExtendedType::Object(_), OutputTypeDefinitionPosition::Object(_))
+            (ExtendedType::Scalar(_), OutputTypeDefinitionPosition::Scalar(_))
+            | (ExtendedType::Object(_), OutputTypeDefinitionPosition::Object(_))
             | (ExtendedType::Interface(_), OutputTypeDefinitionPosition::Interface(_))
             | (ExtendedType::Union(_), OutputTypeDefinitionPosition::Union(_))
-            | (ExtendedType::Scalar(_), OutputTypeDefinitionPosition::Scalar(_))
             | (ExtendedType::Enum(_), OutputTypeDefinitionPosition::Enum(_)) => Ok(ty),
-            _ => Err(SingleFederationError::Internal {
-                message: format!("Schema type \"{}\" is the wrong kind", self),
-            }
-            .into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Schema type "{self}" is the wrong kind"#
+            ))),
         }
     }
 
@@ -179,26 +284,94 @@ impl OutputTypeDefinitionPosition {
     }
 }
 
+impl TryFrom<OutputTypeDefinitionPosition> for ScalarTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            OutputTypeDefinitionPosition::Scalar(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a scalar type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<OutputTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            OutputTypeDefinitionPosition::Object(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<OutputTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            OutputTypeDefinitionPosition::Interface(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an interface type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<OutputTypeDefinitionPosition> for UnionTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            OutputTypeDefinitionPosition::Union(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a union type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<OutputTypeDefinitionPosition> for EnumTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            OutputTypeDefinitionPosition::Enum(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an enum type"#
+            ))),
+        }
+    }
+}
+
 impl TryFrom<TypeDefinitionPosition> for OutputTypeDefinitionPosition {
     type Error = FederationError;
 
     fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            TypeDefinitionPosition::Scalar(value) => {
-                Ok(OutputTypeDefinitionPosition::Scalar(value))
-            }
-            TypeDefinitionPosition::Object(value) => {
-                Ok(OutputTypeDefinitionPosition::Object(value))
-            }
-            TypeDefinitionPosition::Interface(value) => {
-                Ok(OutputTypeDefinitionPosition::Interface(value))
-            }
-            TypeDefinitionPosition::Union(value) => Ok(OutputTypeDefinitionPosition::Union(value)),
-            TypeDefinitionPosition::Enum(value) => Ok(OutputTypeDefinitionPosition::Enum(value)),
-            _ => Err(SingleFederationError::Internal {
-                message: format!("Type \"{}\" was unexpectedly not an output type", value,),
-            }
-            .into()),
+            TypeDefinitionPosition::Scalar(value) => Ok(value.into()),
+            TypeDefinitionPosition::Object(value) => Ok(value.into()),
+            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            TypeDefinitionPosition::Enum(value) => Ok(value.into()),
+            TypeDefinitionPosition::Union(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an output type"#
+            ))),
+        }
+    }
+}
+
+impl From<CompositeTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: CompositeTypeDefinitionPosition) -> Self {
+        match value {
+            CompositeTypeDefinitionPosition::Object(value) => value.into(),
+            CompositeTypeDefinitionPosition::Interface(value) => value.into(),
+            CompositeTypeDefinitionPosition::Union(value) => value.into(),
         }
     }
 }
@@ -206,12 +379,17 @@ impl TryFrom<TypeDefinitionPosition> for OutputTypeDefinitionPosition {
 impl From<AbstractTypeDefinitionPosition> for OutputTypeDefinitionPosition {
     fn from(value: AbstractTypeDefinitionPosition) -> Self {
         match value {
-            AbstractTypeDefinitionPosition::Interface(value) => {
-                OutputTypeDefinitionPosition::Interface(value)
-            }
-            AbstractTypeDefinitionPosition::Union(value) => {
-                OutputTypeDefinitionPosition::Union(value)
-            }
+            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
+            AbstractTypeDefinitionPosition::Union(value) => value.into(),
+        }
+    }
+}
+
+impl From<ObjectOrInterfaceTypeDefinitionPosition> for OutputTypeDefinitionPosition {
+    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
+        match value {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
         }
     }
 }
@@ -270,14 +448,11 @@ impl CompositeTypeDefinitionPosition {
                 if *field.field_name() == field_name {
                     Ok(field.into())
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!(
-                            "Union types don't have field \"{}\", only \"{}\"",
-                            field_name,
-                            field.field_name(),
-                        ),
-                    }
-                    .into())
+                    Err(FederationError::internal(format!(
+                        r#"Union types don't have field "{}", only "{}""#,
+                        field_name,
+                        field.field_name(),
+                    )))
                 }
             }
         }
@@ -301,28 +476,17 @@ impl CompositeTypeDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema ExtendedType, FederationError> {
-        let type_name = self.type_name();
-        let type_ = schema
+        let ty = schema
             .types
-            .get(type_name)
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: format!("Schema has no type \"{}\"", self),
-            })?;
-        let type_matches = match type_ {
-            ExtendedType::Object(_) => matches!(self, CompositeTypeDefinitionPosition::Object(_)),
-            ExtendedType::Interface(_) => {
-                matches!(self, CompositeTypeDefinitionPosition::Interface(_))
-            }
-            ExtendedType::Union(_) => matches!(self, CompositeTypeDefinitionPosition::Union(_)),
-            _ => false,
-        };
-        if type_matches {
-            Ok(type_)
-        } else {
-            Err(SingleFederationError::Internal {
-                message: format!("Schema type \"{}\" is the wrong kind", self),
-            }
-            .into())
+            .get(self.type_name())
+            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+        match (ty, self) {
+            (ExtendedType::Object(_), CompositeTypeDefinitionPosition::Object(_))
+            | (ExtendedType::Interface(_), CompositeTypeDefinitionPosition::Interface(_))
+            | (ExtendedType::Union(_), CompositeTypeDefinitionPosition::Union(_)) => Ok(ty),
+            _ => Err(FederationError::internal(format!(
+                r#"Schema type "{self}" is the wrong kind"#
+            ))),
         }
     }
 
@@ -343,24 +507,56 @@ impl CompositeTypeDefinitionPosition {
     }
 }
 
+impl TryFrom<CompositeTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            CompositeTypeDefinitionPosition::Object(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<CompositeTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            CompositeTypeDefinitionPosition::Interface(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an interface type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<CompositeTypeDefinitionPosition> for UnionTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            CompositeTypeDefinitionPosition::Union(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a union type"#
+            ))),
+        }
+    }
+}
+
 impl TryFrom<TypeDefinitionPosition> for CompositeTypeDefinitionPosition {
     type Error = FederationError;
 
     fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            TypeDefinitionPosition::Object(value) => {
-                Ok(CompositeTypeDefinitionPosition::Object(value))
-            }
-            TypeDefinitionPosition::Interface(value) => {
-                Ok(CompositeTypeDefinitionPosition::Interface(value))
-            }
-            TypeDefinitionPosition::Union(value) => {
-                Ok(CompositeTypeDefinitionPosition::Union(value))
-            }
-            _ => Err(SingleFederationError::Internal {
-                message: format!(r#"Type "{value}" was unexpectedly not a composite type"#),
-            }
-            .into()),
+            TypeDefinitionPosition::Object(value) => Ok(value.into()),
+            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            TypeDefinitionPosition::Union(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a composite type"#
+            ))),
         }
     }
 }
@@ -370,30 +566,11 @@ impl TryFrom<OutputTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
 
     fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            OutputTypeDefinitionPosition::Object(value) => {
-                Ok(CompositeTypeDefinitionPosition::Object(value))
-            }
-            OutputTypeDefinitionPosition::Interface(value) => {
-                Ok(CompositeTypeDefinitionPosition::Interface(value))
-            }
-            OutputTypeDefinitionPosition::Union(value) => {
-                Ok(CompositeTypeDefinitionPosition::Union(value))
-            }
+            OutputTypeDefinitionPosition::Object(value) => Ok(value.into()),
+            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            OutputTypeDefinitionPosition::Union(value) => Ok(value.into()),
             _ => Err(FederationError::internal(format!(
-                "Type `{value}` was unexpectedly not a composite type"
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                "Type `{value}` was unexpectedly not an object type"
+                r#"Type "{value}" was unexpectedly not a composite type"#
             ))),
         }
     }
@@ -413,45 +590,6 @@ impl From<ObjectOrInterfaceTypeDefinitionPosition> for CompositeTypeDefinitionPo
         match value {
             ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
             ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
-
-impl TryFrom<QueryGraphNodeType> for CompositeTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
-        match value {
-            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
-            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
-                "Type `{value}` was unexpectedly not a composite type"
-            ))),
-        }
-    }
-}
-
-impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
-        match value {
-            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
-            QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
-                "Type `{value}` was unexpectedly not a composite type"
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                "Type `{value}` was unexpectedly not an object type"
-            ))),
         }
     }
 }
@@ -478,6 +616,88 @@ impl AbstractTypeDefinitionPosition {
             AbstractTypeDefinitionPosition::Union(type_) => &type_.type_name,
         }
     }
+
+    pub(crate) fn field(
+        &self,
+        field_name: Name,
+    ) -> Result<FieldDefinitionPosition, FederationError> {
+        match self {
+            AbstractTypeDefinitionPosition::Interface(type_) => Ok(type_.field(field_name).into()),
+            AbstractTypeDefinitionPosition::Union(type_) => {
+                let field = type_.introspection_typename_field();
+                if *field.field_name() == field_name {
+                    Ok(field.into())
+                } else {
+                    Err(FederationError::internal(format!(
+                        r#"Union types don't have field "{}", only "{}""#,
+                        field_name,
+                        field.field_name(),
+                    )))
+                }
+            }
+        }
+    }
+
+    pub(crate) fn introspection_typename_field(&self) -> FieldDefinitionPosition {
+        match self {
+            AbstractTypeDefinitionPosition::Interface(type_) => {
+                type_.introspection_typename_field().into()
+            }
+            AbstractTypeDefinitionPosition::Union(type_) => {
+                type_.introspection_typename_field().into()
+            }
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema ExtendedType, FederationError> {
+        let ty = schema
+            .types
+            .get(self.type_name())
+            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+        match (ty, self) {
+            (ExtendedType::Interface(_), AbstractTypeDefinitionPosition::Interface(_))
+            | (ExtendedType::Union(_), AbstractTypeDefinitionPosition::Union(_)) => Ok(ty),
+            _ => Err(FederationError::internal(format!(
+                r#"Schema type "{self}" is the wrong kind"#
+            ))),
+        }
+    }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema ExtendedType> {
+        self.get(schema).ok()
+    }
+}
+
+impl TryFrom<AbstractTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            AbstractTypeDefinitionPosition::Interface(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an interface type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<AbstractTypeDefinitionPosition> for UnionTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            AbstractTypeDefinitionPosition::Union(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not a union type"#
+            ))),
+        }
+    }
 }
 
 impl TryFrom<TypeDefinitionPosition> for AbstractTypeDefinitionPosition {
@@ -485,15 +705,10 @@ impl TryFrom<TypeDefinitionPosition> for AbstractTypeDefinitionPosition {
 
     fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            TypeDefinitionPosition::Interface(value) => {
-                Ok(AbstractTypeDefinitionPosition::Interface(value))
-            }
-            TypeDefinitionPosition::Union(value) => {
-                Ok(AbstractTypeDefinitionPosition::Union(value))
-            }
+            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            TypeDefinitionPosition::Union(value) => Ok(value.into()),
             _ => Err(FederationError::internal(format!(
-                "Type \"{}\" was unexpectedly not an interface/union type",
-                value,
+                r#"Type "{value}" was unexpectedly not an abstract type"#
             ))),
         }
     }
@@ -504,15 +719,37 @@ impl TryFrom<OutputTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
 
     fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            OutputTypeDefinitionPosition::Interface(value) => {
-                Ok(AbstractTypeDefinitionPosition::Interface(value))
-            }
-            OutputTypeDefinitionPosition::Union(value) => {
-                Ok(AbstractTypeDefinitionPosition::Union(value))
-            }
+            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            OutputTypeDefinitionPosition::Union(value) => Ok(value.into()),
             _ => Err(FederationError::internal(format!(
-                "Type \"{}\" was unexpectedly not an interface/union type",
-                value,
+                r#"Type "{value}" was unexpectedly not an abstract type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<CompositeTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            CompositeTypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            CompositeTypeDefinitionPosition::Union(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an abstract type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an abstract type"#
             ))),
         }
     }
@@ -551,6 +788,69 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
             }
         }
     }
+
+    pub(crate) fn introspection_typename_field(&self) -> FieldDefinitionPosition {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
+                type_.introspection_typename_field().into()
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
+                type_.introspection_typename_field().into()
+            }
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema ExtendedType, FederationError> {
+        let ty = schema
+            .types
+            .get(self.type_name())
+            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+        match (ty, self) {
+            (ExtendedType::Object(_), ObjectOrInterfaceTypeDefinitionPosition::Object(_))
+            | (ExtendedType::Interface(_), ObjectOrInterfaceTypeDefinitionPosition::Interface(_)) => {
+                Ok(ty)
+            }
+            _ => Err(FederationError::internal(format!(
+                r#"Schema type "{self}" is the wrong kind"#
+            ))),
+        }
+    }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema ExtendedType> {
+        self.get(schema).ok()
+    }
+}
+
+impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => Ok(value),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an interface type"#
+            ))),
+        }
+    }
 }
 
 impl TryFrom<TypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
@@ -558,19 +858,11 @@ impl TryFrom<TypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition
 
     fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            TypeDefinitionPosition::Object(value) => {
-                Ok(ObjectOrInterfaceTypeDefinitionPosition::Object(value))
-            }
-            TypeDefinitionPosition::Interface(value) => {
-                Ok(ObjectOrInterfaceTypeDefinitionPosition::Interface(value))
-            }
-            _ => Err(SingleFederationError::Internal {
-                message: format!(
-                    "Type \"{}\" was unexpectedly not an object/interface type",
-                    value,
-                ),
-            }
-            .into()),
+            TypeDefinitionPosition::Object(value) => Ok(value.into()),
+            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object/interface type"#
+            ))),
         }
     }
 }
@@ -580,19 +872,38 @@ impl TryFrom<OutputTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPo
 
     fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
         match value {
-            OutputTypeDefinitionPosition::Object(value) => {
-                Ok(ObjectOrInterfaceTypeDefinitionPosition::Object(value))
-            }
-            OutputTypeDefinitionPosition::Interface(value) => {
-                Ok(ObjectOrInterfaceTypeDefinitionPosition::Interface(value))
-            }
-            _ => Err(SingleFederationError::Internal {
-                message: format!(
-                    "Output type \"{}\" was unexpectedly not an object/interface type",
-                    value,
-                ),
-            }
-            .into()),
+            OutputTypeDefinitionPosition::Object(value) => Ok(value.into()),
+            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object/interface type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<CompositeTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            CompositeTypeDefinitionPosition::Object(value) => Ok(value.into()),
+            CompositeTypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object/interface type"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<AbstractTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            AbstractTypeDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object/interface type"#
+            ))),
         }
     }
 }
@@ -742,6 +1053,20 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => {
                 field.remove_directive(schema, directive)
             }
+        }
+    }
+}
+
+impl TryFrom<FieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            FieldDefinitionPosition::Object(value) => Ok(value.into()),
+            FieldDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object/interface field"#
+            ))),
         }
     }
 }

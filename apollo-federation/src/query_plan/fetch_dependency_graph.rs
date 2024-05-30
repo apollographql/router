@@ -488,6 +488,16 @@ impl FetchDependencyGraph {
         }
     }
 
+    pub(crate) fn next_fetch_id(&self) -> u64 {
+        self.fetch_id_generation.next_id()
+    }
+
+    pub(crate) fn root_node_by_subgraph_iter(
+        &self,
+    ) -> impl Iterator<Item = (&NodeStr, &NodeIndex)> {
+        self.root_nodes_by_subgraph.iter()
+    }
+
     /// Must be called every time the "shape" of the graph is modified
     /// to know that the graph may not be minimal/optimized anymore.
     fn on_modification(&mut self) {
@@ -1291,9 +1301,11 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let fragments = fragments
-            .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema));
-        operation.optimize(fragments, Default::default());
+        if let Some(fragments) = fragments
+            .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
+        {
+            operation.optimize(fragments)?;
+        }
         let operation_document = operation.try_into()?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
@@ -1310,6 +1322,7 @@ impl FetchDependencyGraphNode {
             operation_kind: self.root_kind.into(),
             input_rewrites: self.input_rewrites.clone(),
             output_rewrites,
+            context_rewrites: Default::default(),
         }));
 
         Ok(Some(if let Some(path) = self.merge_at.clone() {
@@ -1450,18 +1463,17 @@ fn operation_for_entities_fetch(
     );
 
     let query_type_name = subgraph_schema.schema().root_operation(OperationType::Query).ok_or_else(||
-    FederationError::SingleFederationError(SingleFederationError::InvalidGraphQL {
+    SingleFederationError::InvalidGraphQL {
         message: "Subgraphs should always have a query root (they should at least provides _entities)".to_string()
-    }))?;
+    })?;
 
     let query_type = match subgraph_schema.get_type(query_type_name.clone())? {
         crate::schema::position::TypeDefinitionPosition::Object(o) => o,
         _ => {
-            return Err(FederationError::SingleFederationError(
-                SingleFederationError::InvalidGraphQL {
-                    message: "the root query type must be an object".to_string(),
-                },
-            ))
+            return Err(SingleFederationError::InvalidGraphQL {
+                message: "the root query type must be an object".to_string(),
+            }
+            .into())
         }
     };
 
@@ -1470,11 +1482,10 @@ fn operation_for_entities_fetch(
         .fields
         .contains_key(&ENTITIES_QUERY)
     {
-        return Err(FederationError::SingleFederationError(
-            SingleFederationError::InvalidGraphQL {
-                message: "Subgraphs should always have the _entities field".to_string(),
-            },
-        ));
+        return Err(SingleFederationError::InvalidGraphQL {
+            message: "Subgraphs should always have the _entities field".to_string(),
+        }
+        .into());
     }
 
     let entities = FieldDefinitionPosition::Object(query_type.field(ENTITIES_QUERY.clone()));

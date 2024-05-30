@@ -1,0 +1,13 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        "custom_counter":
+          description: "count of requests"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            on.graphql.error:
+              on_graphql_error: true
