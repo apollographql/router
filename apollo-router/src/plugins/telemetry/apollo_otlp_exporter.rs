@@ -256,9 +256,7 @@ impl ApolloOtlpExporter {
         }
     }
 
-    /// Adds the "graphql.operation.subtype" attribute for subscription requests.
-    /// TBD(tim): do this or let the backend interpret?
-    /// TBD(tim): should this be called `graphql.operation.subtype` or something Apollo-private?
+    /// Adds the "apollo_private.operation.subtype" attribute for subscription requests.
     fn prepare_execution_span(&self, mut span: LightSpanData) -> SpanData {
         let op_type = span
             .attributes
