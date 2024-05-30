@@ -51,11 +51,13 @@ use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::CachingQueryPlanner;
 use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlanResult;
+use crate::router_factory::create_http_services;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
 use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::http::HttpClientServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
 use crate::services::layers::content_negotiation;
 use crate::services::layers::persisted_queries::PersistedQueryLayer;
@@ -537,7 +539,14 @@ async fn subscription_task(
                             break;
                         },
                     };
-                    let subgraph_services = match create_subgraph_services(&plugins, &execution_service_factory.schema, &conf).await {
+                    let http_service_factory = match create_http_services(&plugins, &execution_service_factory.schema, &conf).await {
+                        Ok(http_service_factory) => http_service_factory,
+                        Err(err) => {
+                            tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
+                            break;
+                        },                    };
+
+                    let subgraph_services = match create_subgraph_services(&http_service_factory, &plugins, &conf).await {
                         Ok(subgraph_services) => subgraph_services,
                         Err(err) => {
                             tracing::error!("cannot re-create subgraph service with the new configuration (closing existing subscription): {err:?}");
@@ -565,7 +574,7 @@ async fn subscription_task(
                                     Arc::new(ConnectorServiceFactory::new(
                                         execution_service_factory.schema.clone(),
                                         execution_service_factory.subgraph_schemas.clone(),
-                                        Arc::new(()),
+                                        Arc::new(http_service_factory),
                                         subscription_plugin_conf,
                                         Default::default(),
                                     )),
@@ -756,6 +765,7 @@ fn clone_supergraph_request(
 pub(crate) struct PluggableSupergraphServiceBuilder {
     plugins: Arc<Plugins>,
     subgraph_services: Vec<(String, Box<dyn MakeSubgraphService>)>,
+    http_service_factory: IndexMap<String, HttpClientServiceFactory>,
     configuration: Option<Arc<Configuration>>,
     planner: BridgeQueryPlannerPool,
 }
@@ -765,6 +775,7 @@ impl PluggableSupergraphServiceBuilder {
         Self {
             plugins: Arc::new(Default::default()),
             subgraph_services: Default::default(),
+            http_service_factory: Default::default(),
             configuration: None,
             planner,
         }
@@ -788,6 +799,14 @@ impl PluggableSupergraphServiceBuilder {
     {
         self.subgraph_services
             .push((name.to_string(), Box::new(service_maker)));
+        self
+    }
+
+    pub(crate) fn with_http_service_factory(
+        mut self,
+        http_service_factory: IndexMap<String, HttpClientServiceFactory>,
+    ) -> PluggableSupergraphServiceBuilder {
+        self.http_service_factory = http_service_factory;
         self
     }
 
@@ -843,7 +862,7 @@ impl PluggableSupergraphServiceBuilder {
             Arc::new(ConnectorServiceFactory::new(
                 schema.clone(),
                 subgraph_schemas,
-                Arc::new(()),
+                Arc::new(self.http_service_factory),
                 subscription_plugin_conf,
                 Default::default(),
             )),

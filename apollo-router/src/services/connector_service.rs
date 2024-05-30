@@ -13,13 +13,15 @@ use apollo_federation::sources::connect::Connectors;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::source::SourceId;
 use futures::future::BoxFuture;
-use hyper_rustls::ConfigBuilderExt;
+use indexmap::IndexMap;
 use tower::BoxError;
 use tower::ServiceExt;
 
 use super::connect::BoxService;
+use super::http::HttpClientServiceFactory;
+use super::http::HttpRequest;
+use super::http::HttpResponse;
 use super::new_service::ServiceFactory;
-use super::trust_dns_connector::new_async_http_connector;
 use crate::graphql::Error;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
@@ -29,10 +31,11 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
+use crate::Context;
 
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
-    pub(crate) _http_service_factory: Arc<()>, // TODO: HTTP SERVICE
+    pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) _schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
@@ -53,22 +56,31 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             fetch_node,
             data,
             current_dir,
+            context,
             ..
         } = request;
 
         let connectors = self.connectors.clone();
 
-        Box::pin(
-            async move { Ok(process_source_node(fetch_node, connectors, data, current_dir).await) },
-        )
+        // TODO: unwrap
+        let sf = self
+            .http_service_factory
+            .get(fetch_node.source_id.subgraph_name.as_str())
+            .unwrap()
+            .clone();
+        Box::pin(async move {
+            Ok(process_source_node(sf, fetch_node, connectors, data, current_dir, context).await)
+        })
     }
 }
 
 pub(crate) async fn process_source_node(
+    http_client: HttpClientServiceFactory,
     source_node: FetchNode,
     connectors: Connectors,
     data: Value,
     _paths: Path,
+    context: Context,
 ) -> (Value, Vec<Error>) {
     let connector = if let Some(connector) =
         connectors.get(&SourceId::Connect(source_node.source_id.clone()))
@@ -79,9 +91,15 @@ pub(crate) async fn process_source_node(
     };
 
     // TODO: remove unwraps
-    let requests = create_requests(connector, &data).unwrap();
+    let requests = create_requests(connector, &data, context).unwrap();
 
-    let responses = make_requests(requests).await.unwrap();
+    let responses = make_requests(
+        http_client,
+        source_node.source_id.subgraph_name.as_str(),
+        requests,
+    )
+    .await
+    .unwrap();
 
     process_responses(responses, source_node).await
 }
@@ -89,10 +107,11 @@ pub(crate) async fn process_source_node(
 fn create_requests(
     connector: &Connector,
     data: &Value,
-) -> Result<Vec<http::Request<hyper::Body>>, HttpJsonTransportError> {
+    context: Context,
+) -> Result<Vec<HttpRequest>, HttpJsonTransportError> {
     match &connector.transport {
         connect::Transport::HttpJson(json_transport) => {
-            Ok(vec![create_request(json_transport, data)?])
+            Ok(create_request(json_transport, data, context.clone())?)
         }
     }
 }
@@ -100,35 +119,22 @@ fn create_requests(
 fn create_request(
     json_transport: &HttpJsonTransport,
     data: &Value,
-) -> Result<http::Request<hyper::Body>, HttpJsonTransportError> {
-    http_json_transport::make_request(json_transport, data.clone())
+    context: Context,
+) -> Result<Vec<HttpRequest>, HttpJsonTransportError> {
+    Ok(vec![HttpRequest {
+        context,
+        http_request: http_json_transport::make_request(json_transport, data.clone())?,
+    }])
 }
 
 async fn make_requests(
-    requests: Vec<http::Request<hyper::Body>>,
-) -> Result<Vec<http::Response<hyper::Body>>, BoxError> {
-    let mut http_connector = new_async_http_connector()?;
-    http_connector.set_nodelay(true);
-    http_connector.set_keepalive(Some(std::time::Duration::from_secs(60)));
-    http_connector.enforce_http(false);
-
-    let tls_config = rustls::ClientConfig::builder()
-        .with_safe_defaults()
-        .with_native_roots()
-        .with_no_client_auth();
-
-    let http_connector = hyper_rustls::HttpsConnectorBuilder::new()
-        .with_tls_config(tls_config)
-        .https_or_http()
-        .enable_http1()
-        .enable_http2()
-        .wrap_connector(http_connector);
-    //TODO: add decompression
-    let client = hyper::Client::builder().build(http_connector);
-
+    http_client: HttpClientServiceFactory,
+    subgraph_name: &str,
+    requests: Vec<HttpRequest>,
+) -> Result<Vec<HttpResponse>, BoxError> {
     let tasks = requests.into_iter().map(|req| {
-        let client = client.clone();
-        async move { client.request(req).await }
+        let client = http_client.create(subgraph_name);
+        async move { client.oneshot(req).await }
     });
     futures::future::try_join_all(tasks)
         .await
@@ -136,14 +142,14 @@ async fn make_requests(
 }
 
 async fn process_responses(
-    responses: Vec<http::Response<hyper::Body>>,
+    responses: Vec<HttpResponse>,
     source_node: FetchNode,
 ) -> (Value, Vec<Error>) {
     let mut data = serde_json_bytes::Map::new();
     let errors = Vec::new();
 
     for response in responses {
-        let (parts, body) = response.into_parts();
+        let (parts, body) = response.http_response.into_parts();
 
         let _ = hyper::body::to_bytes(body).await.map(|body| {
             if parts.status.is_success() {
@@ -167,7 +173,7 @@ async fn process_responses(
 pub(crate) struct ConnectorServiceFactory {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    pub(crate) http_service_factory: Arc<()>,
+    pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
     pub(crate) connectors: Connectors,
 }
@@ -176,7 +182,7 @@ impl ConnectorServiceFactory {
     pub(crate) fn new(
         schema: Arc<Schema>,
         subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-        http_service_factory: Arc<()>,
+        http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         subscription_config: Option<SubscriptionConfig>,
         connectors: Connectors,
     ) -> Self {
@@ -192,7 +198,7 @@ impl ConnectorServiceFactory {
     #[cfg(test)]
     pub(crate) fn empty(schema: Arc<Schema>) -> Self {
         Self {
-            http_service_factory: Arc::new(()),
+            http_service_factory: Arc::new(Default::default()),
             subgraph_schemas: Default::default(),
             subscription_config: Default::default(),
             connectors: Default::default(),
@@ -206,7 +212,7 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
 
     fn create(&self) -> Self::Service {
         ConnectorService {
-            _http_service_factory: self.http_service_factory.clone(),
+            http_service_factory: self.http_service_factory.clone(),
             _schema: self.schema.clone(),
             _subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
@@ -218,11 +224,15 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
 
 #[cfg(test)]
 mod soure_node_tests {
+    use apollo_compiler::name;
     use apollo_compiler::NodeStr;
+    use apollo_federation::schema::ObjectFieldDefinitionPosition;
     use apollo_federation::schema::ObjectOrInterfaceFieldDefinitionPosition;
     use apollo_federation::schema::ObjectOrInterfaceFieldDirectivePosition;
+    use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
+    use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::Transport;
     use apollo_federation::sources::connect::URLPathTemplate;
     use indexmap::IndexMap;
@@ -232,11 +242,8 @@ mod soure_node_tests {
     use super::*;
     use crate::plugins::connectors::tests::mock_api;
     use crate::plugins::connectors::tests::mock_subgraph;
-
-    use apollo_compiler::name;
-    use apollo_federation::schema::ObjectFieldDefinitionPosition;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::JSONSelection;
+    use crate::plugins::traffic_shaping::Http2Config;
+    use crate::Configuration;
 
     #[tokio::test]
     async fn test_process_source_node() {
@@ -269,7 +276,20 @@ mod soure_node_tests {
 
         let expected = (json!({ "data": { "id": 42 } }), Default::default());
 
-        let actual = process_source_node(source_node, connectors, data, paths).await;
+        let http_client_factory = HttpClientServiceFactory::from_config(
+            "test",
+            &Configuration::default(),
+            Http2Config::Enable,
+        );
+        let actual = process_source_node(
+            http_client_factory,
+            source_node,
+            connectors,
+            data,
+            paths,
+            Default::default(),
+        )
+        .await;
 
         assert_eq!(expected, actual);
     }

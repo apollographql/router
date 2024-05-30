@@ -22,7 +22,7 @@ pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError
 #[derive(Clone)]
 #[non_exhaustive]
 pub(crate) struct Request {
-    pub(crate) _context: Context,
+    pub(crate) context: Context,
     pub(crate) fetch_node: FetchNode,
     pub(crate) _supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) data: Value,
@@ -45,7 +45,7 @@ impl Request {
         current_dir: Path,
     ) -> Self {
         Self {
-            _context: context,
+            context,
             fetch_node,
             _supergraph_request: supergraph_request,
             data,

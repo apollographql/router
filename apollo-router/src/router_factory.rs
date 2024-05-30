@@ -386,8 +386,11 @@ impl YamlRouterFactory {
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
             builder = builder.with_configuration(configuration.clone());
+            let http_service_factory =
+                create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&plugins, &schema, &configuration).await?;
+                create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
+            builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = if let Some(connector) = connector_subgraphs.get(&name) {
                     builder.with_subgraph_service(name.as_str(), connector.clone())
@@ -407,8 +410,8 @@ impl YamlRouterFactory {
 }
 
 pub(crate) async fn create_subgraph_services(
+    http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
     plugins: &Arc<Plugins>,
-    schema: &Schema,
     configuration: &Configuration,
 ) -> Result<
     IndexMap<
@@ -427,8 +430,6 @@ pub(crate) async fn create_subgraph_services(
     >,
     BoxError,
 > {
-    let http_services = create_http_services(plugins, schema, configuration).await?;
-
     let shaping = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
@@ -443,14 +444,14 @@ pub(crate) async fn create_subgraph_services(
 
     let mut subgraph_services = IndexMap::new();
 
-    for (name, http_service_factory) in http_services.into_iter() {
+    for (name, http_service_factory) in http_service_factory.iter() {
         let subgraph_service = shaping.subgraph_service_internal(
             name.as_ref(),
             SubgraphService::from_config(
                 name.clone(),
                 configuration,
                 subscription_plugin_conf.clone(),
-                http_service_factory,
+                http_service_factory.clone(),
             )?,
         );
         subgraph_services.insert(name.clone(), subgraph_service);
