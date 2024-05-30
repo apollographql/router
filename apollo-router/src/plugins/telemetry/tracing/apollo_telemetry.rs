@@ -36,7 +36,6 @@ use url::Url;
 
 use crate::plugins::rhai::RHAI_SPAN_NAME;
 use crate::plugins::telemetry;
-use crate::plugins::telemetry::apollo::ApolloTracingProtocol;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
 use crate::plugins::telemetry::apollo::OperationSubType;
@@ -270,7 +269,6 @@ pub(crate) struct Exporter {
     report_exporter: Option<Arc<ApolloExporter>>,
     #[derivative(Debug = "ignore")]
     otlp_exporter: Option<Arc<ApolloOtlpExporter>>,
-    apollo_tracing_protocol: ApolloTracingProtocol,
     otlp_tracing_ratio: f64,
     field_execution_weight: f64,
     errors_configuration: ErrorsConfiguration,
@@ -336,43 +334,33 @@ impl Exporter {
                 Sampler::AlwaysOff => 0f64,
             },
         };
-        let apollo_tracing_protocol = if otlp_tracing_ratio == 0f64 {
-            ApolloTracingProtocol::Apollo
-        } else if otlp_tracing_ratio == 1f64 {
-            ApolloTracingProtocol::Otlp
-        } else {
-            ApolloTracingProtocol::ApolloAndOtlp
-        };
         Ok(Self {
             spans_by_parent_id: LruCache::new(buffer_size),
-            report_exporter: match apollo_tracing_protocol {
-                ApolloTracingProtocol::Apollo | ApolloTracingProtocol::ApolloAndOtlp => {
-                    Some(Arc::new(ApolloExporter::new(
-                        endpoint,
-                        batch_config,
-                        apollo_key,
-                        apollo_graph_ref,
-                        schema_id,
-                    )?))
-                }
-                ApolloTracingProtocol::Otlp => None,
+            report_exporter: if otlp_tracing_ratio < 1f64 {
+                Some(Arc::new(ApolloExporter::new(
+                    endpoint,
+                    batch_config,
+                    apollo_key,
+                    apollo_graph_ref,
+                    schema_id,
+                )?))
+            } else {
+                None
             },
-            otlp_exporter: match apollo_tracing_protocol {
-                ApolloTracingProtocol::Apollo => None,
-                ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => {
-                    Some(Arc::new(ApolloOtlpExporter::new(
-                        otlp_endpoint,
-                        otlp_tracing_protocol,
-                        batch_config,
-                        apollo_key,
-                        apollo_graph_ref,
-                        schema_id,
-                        errors_configuration,
-                        HashSet::from(OTLP_INCLUDE_SPANS),
-                    )?))
-                }
+            otlp_exporter: if otlp_tracing_ratio > 0f64 {
+                Some(Arc::new(ApolloOtlpExporter::new(
+                    otlp_endpoint,
+                    otlp_tracing_protocol,
+                    batch_config,
+                    apollo_key,
+                    apollo_graph_ref,
+                    schema_id,
+                    errors_configuration,
+                    HashSet::from(OTLP_INCLUDE_SPANS),
+                )?))
+            } else {
+                None
             },
-            apollo_tracing_protocol,
             otlp_tracing_ratio,
             field_execution_weight: match field_execution_sampler {
                 SamplerOption::Always(Sampler::AlwaysOn) => 1.0,
@@ -382,13 +370,12 @@ impl Exporter {
             errors_configuration: errors_configuration.clone(),
             use_legacy_request_span: use_legacy_request_span.unwrap_or_default(),
             include_span_names: REPORTS_INCLUDE_SPANS.into(),
-            include_attr_names: match apollo_tracing_protocol {
-                ApolloTracingProtocol::Apollo => Some(HashSet::from(REPORTS_INCLUDE_ATTRS)),
-                ApolloTracingProtocol::Otlp | ApolloTracingProtocol::ApolloAndOtlp => {
-                    Some(HashSet::from_iter(
-                        [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
-                    ))
-                }
+            include_attr_names: if otlp_tracing_ratio > 0f64 {
+                Some(HashSet::from_iter(
+                    [&REPORTS_INCLUDE_ATTRS[..], &OTLP_EXT_INCLUDE_ATTRS[..]].concat(),
+                ))
+            } else {
+                Some(HashSet::from(REPORTS_INCLUDE_ATTRS))
             },
         })
     }

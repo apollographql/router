@@ -202,18 +202,6 @@ impl Default for Config {
     }
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, PartialEq)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum ApolloTracingProtocol {
-    /// Use only the Apollo usage reporting protobuf over http
-    Apollo,
-    /// Use only OTLP over GRPC
-    Otlp,
-    /// Use both the Apollo usage reporting protobuf AND OTLP
-    /// (note this is an experimental mode - use experimental_otlp_tracing_pct to configure)
-    ApolloAndOtlp,
-}
-
 schemar_fn!(
     forward_headers_only,
     Vec<String>,
