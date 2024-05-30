@@ -310,6 +310,57 @@ impl Process {
             .args(["add", "-up", "."])
             .status()?;
 
+        // step 8
+        if Confirm::new()
+            .with_prompt("Commit the changes and build the prerelease?")
+            .default(false)
+            .interact()?
+        {
+            let prerelease_version = format!("{}-{}", self.version, self.prerelease_suffix);
+
+            let _output = std::process::Command::new(&git)
+                .args([
+                    "commit",
+                    "-m",
+                    &format!("prep release: v{}", prerelease_version),
+                ])
+                .status()?;
+
+            //step 9
+            let _output = std::process::Command::new(&git)
+                .args(["push", &self.git_origin, &self.version])
+                .status()?;
+
+            // step 10
+            let _output = std::process::Command::new(&git)
+                .args([
+                    "tag",
+                    "-a",
+                    &format!("v{}", prerelease_version),
+                    "-m",
+                    &prerelease_version,
+                ])
+                .status()?;
+            let _output = std::process::Command::new(&git)
+                .args([
+                    "push",
+                    &self.git_origin,
+                    &self.version,
+                    &format!("v{}", prerelease_version),
+                ])
+                .status()?;
+
+            // step 11
+            println!(
+                "publish the crates:\ncargo publish -p apollo-federation@{prerelease_version}\ncargo publish -p apollo-router@{prerelease_version}"
+            );
+
+            self.state = State::PreReleasePRChoose;
+            self.save()?;
+        } else {
+            return Ok(false);
+        }
+
         Ok(false)
     }
 }
