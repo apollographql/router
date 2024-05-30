@@ -239,7 +239,9 @@ fn validate_object_fields(
     if is_subscription {
         return vec![Error {
             code: ErrorCode::SubscriptionInConnectors,
-            message: "connectors can't be used to create subscriptions".to_string(),
+            message: format!(
+                "a subscription root type is not supported when using `@{connect_directive_name}`"
+            ),
             locations: GraphQLLocation::from_node(object.location(), source_map)
                 .into_iter()
                 .collect(),
@@ -569,6 +571,6 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"connectors can't be used to create subscriptions"###);
+        assert_snapshot!(errors[0].to_string(), @r###"a subscription root type is not supported when using `@connect`"###);
     }
 }
