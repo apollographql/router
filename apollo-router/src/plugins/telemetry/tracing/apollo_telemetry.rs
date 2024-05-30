@@ -182,13 +182,13 @@ const OTLP_INCLUDE_SPANS: [&str; 20] = [
     CONDITION_ELSE_SPAN_NAME,
     EXECUTION_SPAN_NAME,
     SUBSCRIBE_SPAN_NAME,
-    // Dropping these for now since they are not working with protobuf anyway.
-    // SUBSCRIPTION_EVENT_SPAN_NAME,
     QUERY_PARSING_SPAN_NAME,
     QUERY_PLANNING_SPAN_NAME,
     HTTP_REQUEST_SPAN_NAME,
     SUBGRAPH_REQUEST_SPAN_NAME,
     RHAI_SPAN_NAME,
+    // Dropping subscription events for now since they are not working with protobuf anyway.
+    // SUBSCRIPTION_EVENT_SPAN_NAME
 ];
 
 #[derive(Error, Debug)]

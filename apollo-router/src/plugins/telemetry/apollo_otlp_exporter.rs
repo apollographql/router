@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
-use std::time::Duration;
 
 use derivative::Derivative;
 use futures::future;
@@ -13,8 +12,6 @@ use opentelemetry::sdk::export::trace::SpanExporter;
 use opentelemetry::sdk::trace::EvictedQueue;
 use opentelemetry::sdk::Resource;
 use opentelemetry::trace::SpanContext;
-use opentelemetry::trace::SpanId;
-use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
 use opentelemetry::trace::TraceState;
@@ -22,8 +19,6 @@ use opentelemetry::InstrumentationLibrary;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::trace::EvictedHashMap;
-use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_NAME;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
 use parking_lot::Mutex;
 use sys_info::hostname;
@@ -37,15 +32,11 @@ use uuid::Uuid;
 use super::apollo::ErrorsConfiguration;
 use super::apollo::OperationSubType;
 use super::config_new::attributes::SUBGRAPH_NAME;
-use super::otel::PreSampledTracer;
 use super::otlp::Protocol;
-use super::reload::OPENTELEMETRY_TRACER_HANDLE;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
 use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
-use super::tracing::apollo_telemetry::extract_i64;
 use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
-use super::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS_KEY;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
 use super::tracing::apollo_telemetry::OPERATION_SUBTYPE;
@@ -59,7 +50,6 @@ use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
-use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::services::OperationKind;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
@@ -205,23 +195,13 @@ impl ApolloOtlpExporter {
                     }
                     SUBGRAPH_SPAN_NAME => export_spans.push(self.prepare_subgraph_span(span)),
                     EXECUTION_SPAN_NAME => export_spans.push(self.prepare_execution_span(span)),
-                    SUBSCRIPTION_EVENT_SPAN_NAME => {
-                        if let Some(request_span) =
-                            self.synthesize_request_span_for_subscription_event(&span)
-                        {
-                            let child_span =
-                                self.prepare_subscription_event_span(span, &request_span);
-                            export_spans.push(request_span);
-                            export_spans.push(child_span);
-                        }
-                    }
                     _ => export_spans.push(self.base_prepare_span(span)),
                 };
             } else {
                 tracing::debug!("apollo otlp: dropping span '{}'", span.name);
             }
         });
-        if send_trace {
+        if send_trace && !export_spans.is_empty() {
             tracing::debug!("apollo otlp: sending trace");
             Some(export_spans)
         } else {
@@ -270,77 +250,6 @@ impl ApolloOtlpExporter {
                 OperationSubType::SubscriptionRequest.as_str(),
             ));
         }
-        self.base_prepare_span(span)
-    }
-
-    fn synthesize_request_span_for_subscription_event(
-        &self,
-        sub_event_span: &LightSpanData,
-    ) -> Option<SpanData> {
-        let tracer = OPENTELEMETRY_TRACER_HANDLE
-            .get()
-            .expect("expected a tracer");
-        let span_id = tracer.new_span_id();
-        let span_name = format!(
-            "{} {}",
-            OperationKind::Subscription.as_apollo_operation_type(),
-            sub_event_span
-                .attributes
-                .get(&GRAPHQL_OPERATION_NAME)
-                .and_then(extract_string)
-                .unwrap_or_default()
-        );
-        let mut request_span = SpanData {
-            span_context: SpanContext::new(
-                sub_event_span.trace_id,
-                span_id,
-                TraceFlags::default().with_sampled(true),
-                true,
-                TraceState::default(),
-            ),
-            parent_span_id: SpanId::from(0u64),
-            span_kind: SpanKind::Server,
-            name: span_name.into(),
-            start_time: sub_event_span.start_time,
-            end_time: sub_event_span.end_time,
-            attributes: EvictedHashMap::new(10, 10),
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
-            status: sub_event_span.status.clone(),
-            resource: Cow::Owned(self.resource_template.to_owned()),
-            instrumentation_lib: self.intrumentation_library.clone(),
-        };
-        request_span
-            .attributes
-            .insert(KeyValue::new(APOLLO_PRIVATE_REQUEST, true));
-        Some(request_span)
-    }
-
-    /// Sets the parent span ID
-    fn prepare_subscription_event_span(
-        &self,
-        mut span: LightSpanData,
-        request_span: &SpanData,
-    ) -> SpanData {
-        if let Some(duration_ns) = span
-            .attributes
-            .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
-            .and_then(extract_i64)
-            .map(|f| f as u64)
-        {
-            span.end_time = span.start_time
-                + Duration::new(
-                    duration_ns / 1_000_000_000,
-                    (duration_ns % 1_000_000_000)
-                        .try_into()
-                        .expect("math should work"),
-                );
-        }
-        span.parent_span_id = request_span.span_context.span_id();
-        span.attributes.insert(KeyValue::new(
-            OPERATION_SUBTYPE,
-            OperationSubType::SubscriptionEvent.as_str(),
-        ));
         self.base_prepare_span(span)
     }
 
