@@ -38,6 +38,12 @@ pub(crate) struct ChildKey {
     pub(crate) edge: Option<EdgeIndex>,
 }
 
+/// Merge two maps of conditions at a node, keeping the cheapest way to resolve each condition if
+/// there is a conflict.
+///
+/// `remapped_condition_ids` is a map of "losing" condition IDs to "winning" condition IDs in case
+/// of conflicts. This can be used to replace references to the "losing" conditions by the "winning"
+/// ones down the tree.
 fn merge_condition_resolutions(
     condition_resolutions: &mut IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
     other_condition_resolutions: &IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
@@ -63,16 +69,18 @@ fn merge_and_remap_condition_resolution_ids(
     other: &IndexMap<SelfConditionIndex, ConditionResolutionId>,
     remapped_condition_ids: &HashMap<ConditionResolutionId, ConditionResolutionId>,
 ) {
+    // Resolution IDs need to be remapped, but it needs to be done for *every* ID in the
+    // merged map, so it's easier to first combine the maps and then patch up the IDs afterward.
+    existing.extend(
+        other
+            .iter()
+            .map(|(condition_index, resolution_id)| (*condition_index, *resolution_id)),
+    );
+
     for condition_id in existing.values_mut() {
-        *condition_id = *remapped_condition_ids
-            .get(condition_id)
-            .unwrap_or(condition_id);
-    }
-    for (selection_index, condition_id) in other {
-        let condition_id = *remapped_condition_ids
-            .get(condition_id)
-            .unwrap_or(condition_id);
-        existing.entry(*selection_index).or_insert(condition_id);
+        if let Some(remapped_id) = remapped_condition_ids.get(condition_id) {
+            *condition_id = *remapped_id;
+        }
     }
 }
 
