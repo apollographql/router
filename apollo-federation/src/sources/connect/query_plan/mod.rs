@@ -10,7 +10,7 @@ pub mod query_planner;
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchNode {
     pub source_id: ConnectId,
-    pub field_response_name: Name,
-    pub field_arguments: IndexMap<Name, Value>,
-    pub selection: JSONSelection,
+    pub field_response_name: Name, // aliasing
+    pub field_arguments: IndexMap<Name, Value>, // req
+    pub selection: JSONSelection, // res
 }

@@ -1,10 +1,8 @@
 #![allow(missing_docs)] // FIXME
 
-use std::collections::HashMap;
-// use std::pin::Pin;
 use std::sync::Arc;
 
-use apollo_compiler::NodeStr;
+use apollo_federation::sources::connect::query_plan::FetchNode;
 use serde_json_bytes::Value;
 use tokio::sync::broadcast;
 use tower::BoxError;
@@ -15,7 +13,6 @@ use crate::error::Error;
 // use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::json_ext::Path;
-use crate::query_planner::fetch::FetchNode;
 use crate::Context;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -31,7 +28,6 @@ pub(crate) struct Request {
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) data: Value,
     pub(crate) current_dir: Path,
-    pub(crate) deferred_fetches: HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
 }
 
 pub(crate) type Response = (Value, Vec<Error>);
@@ -48,7 +44,6 @@ impl Request {
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         data: Value,
         current_dir: Path,
-        deferred_fetches: HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> Self {
         Self {
             context,
@@ -56,7 +51,6 @@ impl Request {
             supergraph_request,
             data,
             current_dir,
-            deferred_fetches,
         }
     }
 }

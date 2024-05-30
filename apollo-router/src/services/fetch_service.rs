@@ -11,6 +11,7 @@ use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
 
+use super::connector_service::process_source_node;
 use super::fetch::BoxService;
 use super::new_service::ServiceFactory;
 use super::SubgraphRequest;
@@ -18,7 +19,6 @@ use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
-use crate::plugins::connectors::process_source_node;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
@@ -180,7 +180,7 @@ impl tower::Service<FetchRequest> for FetchService {
             )) = fetch_node.source_node.as_deref()
             {
                 // TODO: Dispatch into the ConnectorService eventually
-                let _ = process_source_node(connect_node, connectors, data, paths.clone()).await;
+                let _ = process_source_node(connect_node.clone(), connectors, data, current_dir.clone()).await;
             }
 
             Ok(FetchNode::subgraph_fetch(
