@@ -38,6 +38,44 @@ pub(crate) struct ChildKey {
     pub(crate) edge: Option<EdgeIndex>,
 }
 
+fn merge_condition_resolutions(
+    condition_resolutions: &mut IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
+    other_condition_resolutions: &IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
+    remapped_condition_ids: &mut HashMap<ConditionResolutionId, ConditionResolutionId>,
+) {
+    for (&condition_index, resolution) in other_condition_resolutions {
+        condition_resolutions
+            .entry(condition_index)
+            .and_modify(|existing_resolution| {
+                if existing_resolution.cost > resolution.cost {
+                    remapped_condition_ids.insert(existing_resolution.id, resolution.id);
+                    existing_resolution.clone_from(resolution);
+                } else {
+                    remapped_condition_ids.insert(resolution.id, existing_resolution.id);
+                }
+            })
+            .or_insert_with(|| resolution.clone());
+    }
+}
+
+fn merge_and_remap_condition_resolution_ids(
+    existing: &mut IndexMap<SelfConditionIndex, ConditionResolutionId>,
+    other: &IndexMap<SelfConditionIndex, ConditionResolutionId>,
+    remapped_condition_ids: &HashMap<ConditionResolutionId, ConditionResolutionId>,
+) {
+    for condition_id in existing.values_mut() {
+        *condition_id = *remapped_condition_ids
+            .get(condition_id)
+            .unwrap_or(&condition_id);
+    }
+    for (selection_index, condition_id) in other {
+        let condition_id = *remapped_condition_ids
+            .get(condition_id)
+            .unwrap_or(&condition_id);
+        existing.entry(*selection_index).or_insert(condition_id);
+    }
+}
+
 impl FederatedPathTree {
     // This is not generic in practice: the EdgeIter and PathIter types are just not
     // nameable.
@@ -70,26 +108,6 @@ impl FederatedPathTree {
             self_condition_resolutions_for_edge:
                 IndexMap<SelfConditionIndex, ConditionResolutionId>,
             sub_paths_and_selections: Vec<(EdgeIter, Option<Arc<SelectionSet>>)>,
-        }
-
-        fn merge_condition_resolutions(
-            condition_resolutions: &mut IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
-            other_condition_resolutions: &IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
-            remapped_condition_ids: &mut HashMap<ConditionResolutionId, ConditionResolutionId>,
-        ) {
-            for (&condition_index, resolution) in other_condition_resolutions {
-                condition_resolutions
-                    .entry(condition_index)
-                    .and_modify(|existing_resolution| {
-                        if existing_resolution.cost > resolution.cost {
-                            remapped_condition_ids.insert(existing_resolution.id, resolution.id);
-                            existing_resolution.clone_from(resolution);
-                        } else {
-                            remapped_condition_ids.insert(resolution.id, existing_resolution.id);
-                        }
-                    })
-                    .or_insert_with(|| resolution.clone());
-            }
         }
 
         let mut merged = IndexMap::new();
@@ -128,21 +146,11 @@ impl FederatedPathTree {
             {
                 indexmap::map::Entry::Occupied(existing) => {
                     let existing = existing.into_mut();
-                    for condition_id in existing.self_condition_resolutions_for_edge.values_mut() {
-                        *condition_id = *remapped_condition_ids
-                            .get(condition_id)
-                            .unwrap_or(&condition_id);
-                    }
-                    for (selection_index, condition_id) in &edge.self_condition_resolutions_for_edge
-                    {
-                        let condition_id = *remapped_condition_ids
-                            .get(condition_id)
-                            .unwrap_or(&condition_id);
-                        existing
-                            .self_condition_resolutions_for_edge
-                            .entry(*selection_index)
-                            .or_insert(condition_id);
-                    }
+                    merge_and_remap_condition_resolution_ids(
+                        &mut existing.self_condition_resolutions_for_edge,
+                        &edge.self_condition_resolutions_for_edge,
+                        remapped_condition_ids,
+                    );
                     existing
                         .sub_paths_and_selections
                         .push((graph_path_iter, selection));
@@ -217,7 +225,11 @@ impl FederatedPathTree {
         }
     }
 
-    pub fn merge(&self, other: &Self) -> Self {
+    fn merge_inner(
+        self: &Arc<Self>,
+        other: &Arc<Self>,
+        remapped_condition_ids: &mut HashMap<ConditionResolutionId, ConditionResolutionId>,
+    ) -> Arc<Self> {
         if other.childs.is_empty() {
             return self.clone();
         }
@@ -225,7 +237,18 @@ impl FederatedPathTree {
             return other.clone();
         }
 
-        let mut merged = self.clone();
+        let mut merged = (**self).clone();
+
+        merge_condition_resolutions(
+            &mut merged.source_entering_condition_resolutions_at_node,
+            &other.source_entering_condition_resolutions_at_node,
+            remapped_condition_ids,
+        );
+        merge_condition_resolutions(
+            &mut merged.condition_resolutions_at_node,
+            &other.condition_resolutions_at_node,
+            remapped_condition_ids,
+        );
 
         for other_child in &other.childs {
             if let Some(child) = merged
@@ -239,13 +262,17 @@ impl FederatedPathTree {
                     self_condition_resolutions_for_edge: child
                         .self_condition_resolutions_for_edge
                         .clone(),
-                    tree: child.tree.merge(&other_child.tree).into(),
+                    tree: child
+                        .tree
+                        .merge_inner(&other_child.tree, remapped_condition_ids),
                 })
             }
         }
 
-        // TODO(@goto-bus-stop): handle conditions merging
+        merged.into()
+    }
 
-        merged
+    pub fn merge(self: &Arc<Self>, other: &Arc<Self>) -> Arc<Self> {
+        self.merge_inner(other, &mut Default::default())
     }
 }
