@@ -32,6 +32,7 @@ pub(super) struct Process {
     prerelease_suffix: String,
     commit: Commit,
     state: State,
+    final_pr_prepared: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,6 +104,7 @@ impl Process {
             prerelease_suffix: String::new(),
             commit,
             state: State::Start,
+            final_pr_prepared: false,
         };
 
         // store the file
@@ -155,6 +157,9 @@ impl Process {
             State::PreReleasePRGitAdd => self.git_add_pre_release_pr(),
             State::ReleaseFinalPRCreate => self.create_final_release_pr(),
             State::ReleaseFinalPRGitAdd => self.git_add_final_release_pr(),
+            State::ReleaseFinalPRMerge => self.merge_final_release_pr(),
+            State::ReleaseFinalPRMerge2 => self.merge_final_release_pr2(),
+            State::WaitForMergeToMain => self.tag_and_release(),
         }
     }
 
@@ -240,24 +245,45 @@ impl Process {
 
     fn choose_pre_release_pr(&mut self) -> Result<bool> {
         println!("will choose?");
-        let items = vec!["create a prerelease", "finish the release process"];
+        if !self.final_pr_prepared {
+            let items = vec!["create a prerelease", "create the final release PR"];
 
-        let selection = Select::new()
-            .with_prompt("Next step?")
-            .items(&items)
-            .interact()?;
+            let selection = Select::new()
+                .with_prompt("Next step?")
+                .items(&items)
+                .interact()?;
 
-        match selection {
-            0 => {
-                self.state = State::PreReleasePRCreate;
-            }
-            1 => {
-                self.state = State::ReleaseFinalPRCreate;
-            }
-            _ => unreachable!(),
-        };
-        self.save()?;
-        Ok(true)
+            match selection {
+                0 => {
+                    self.state = State::PreReleasePRCreate;
+                }
+                1 => {
+                    self.state = State::ReleaseFinalPRCreate;
+                }
+                _ => unreachable!(),
+            };
+            self.save()?;
+            Ok(true)
+        } else {
+            let items = vec!["create a prerelease", "finish the release process"];
+
+            let selection = Select::new()
+                .with_prompt("Next step?")
+                .items(&items)
+                .interact()?;
+
+            match selection {
+                0 => {
+                    self.state = State::PreReleasePRCreate;
+                }
+                1 => {
+                    self.state = State::ReleaseFinalPRMerge;
+                }
+                _ => unreachable!(),
+            };
+            self.save()?;
+            Ok(true)
+        }
     }
 
     fn create_pre_release_pr(&mut self) -> Result<bool> {
@@ -503,7 +529,93 @@ impl Process {
                 &apollo_prep_release_header,
             ])
             .status()?;
+
+        self.state = State::PreReleasePRChoose;
+        self.final_pr_prepared = true;
+        self.save()?;
         Ok(false)
+    }
+
+    fn merge_final_release_pr(&mut self) -> Result<bool> {
+        let gh = which::which("gh")?;
+
+        // step 4
+        //    gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --squash --body "" -t "prep release: v${APOLLO_ROUTER_RELEASE_VERSION}" "prep-${APOLLO_ROUTER_RELEASE_VERSION}"
+
+        let _output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                &self.github_repository,
+                "pr",
+                "merge",
+                "--squash",
+                "--body",
+                "",
+                "t",
+                &format!("prep release: v{}", self.version),
+                &format!("prep-{}", self.version),
+            ])
+            .status()?;
+
+        self.state = State::ReleaseFinalPRMerge2;
+        self.save()?;
+
+        //FIXME: can we check the PR status with the gh command?
+        println!("Wait for the PR to merge");
+
+        Ok(false)
+    }
+
+    fn merge_final_release_pr2(&mut self) -> Result<bool> {
+        let git = which::which("git")?;
+
+        // step 5
+        let _output = std::process::Command::new(&git)
+            .args(["checkout", &self.version])
+            .status()?;
+        let _output = std::process::Command::new(&git)
+            .args(["pull", &self.git_origin, &self.version])
+            .status()?;
+
+        // step 6
+        // gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr ready "${APOLLO_ROUTER_RELEASE_VERSION}"
+        let gh = which::which("gh")?;
+        let _output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "pr",
+                "ready",
+                &self.version,
+            ])
+            .status()?;
+
+        // step 7
+        // gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --body "" -t "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
+        let _output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "pr",
+                "merge",
+                "--merge",
+                "--body",
+                "",
+                "-t",
+                &format!("release: v{}", self.version),
+                "--auto",
+                &self.version,
+            ])
+            .status()?;
+
+        self.state = State::WaitForMergeToMain;
+        self.save()?;
+
+        Ok(false)
+    }
+
+    fn tag_and_release(&mut self) -> Result<bool> {
+        todo!()
     }
 }
 
@@ -516,4 +628,7 @@ enum State {
     PreReleasePRGitAdd,
     ReleaseFinalPRCreate,
     ReleaseFinalPRGitAdd,
+    ReleaseFinalPRMerge,
+    ReleaseFinalPRMerge2,
+    WaitForMergeToMain,
 }
