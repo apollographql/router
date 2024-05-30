@@ -94,7 +94,7 @@ impl FilterMeterProvider {
             .delegate(delegate)
             .allow(
                 Regex::new(
-                    r"apollo\.(graphos\.cloud|router\.(operations?|config|schema|query))(\..*|$)",
+                    r"apollo\.(graphos\.cloud|router\.(operations?|config|schema|query|telemetry))(\..*|$)",
                 )
                 .expect("regex should have been valid"),
             )
