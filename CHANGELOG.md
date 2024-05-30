@@ -37,12 +37,6 @@ By [@clenfest](https://github.com/clenfest) in https://github.com/apollographql/
 
 ## 🐛 Fixes
 
-### Submit new metrics to Apollo ([PR #5270](https://github.com/apollographql/router/pull/5270))
-
-The router submits two new metrics to Apollo:
-- `apollo.router.lifecycle.api_schema` provides us feedback on the experimental Rust-based API schema generation.
-- `apollo.router.lifecycle.license` provides metrics on license expiration. We use this to improve the reliability of the license check mechanism.
-
 ### Fix custom attributes for spans and histogram when used with response_event ([PR #5221](https://github.com/apollographql/router/pull/5221))
 
 It will fix several issues found:
@@ -110,17 +104,18 @@ Conditions are now checked for aborted requests, and the instrument is only incr
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5215
 
-## 📃 Configuration
+## 🛠 Maintenance
 
-### Send query planner metrics to Apollo ([PR #5267](https://github.com/apollographql/router/pull/5267))
+### Send query planner and lifecycle metrics to Apollo ([PR #5267](https://github.com/apollographql/router/pull/5267), [PR #5270](https://github.com/apollographql/router/pull/5270))
 
-To allow us to measure how much of an improvement the new query planner implementation makes, we are now transmitting metrics that start with:
+To allow us to measure how much of an improvement the new query planner implementation makes, we are now transmitting to Apollo new metrics:
+- `apollo.router.query_planning.*`  will greatly help us to improve query planning in the Router.
+- `apollo.router.lifecycle.api_schema` provides us feedback on the experimental Rust-based API schema generation.
+- `apollo.router.lifecycle.license` provides metrics on license expiration. We use this to improve the reliability of the license check mechanism.
 
-`apollo.router.query_planning.*` to Apollo.
+These metrics do not leak any sensitive information.
 
-These metrics do not leak any sensitive information, but will greatly help us to improve query planning in the Router.
-
-By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5267
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5267, [@goto-bus-stop](https://github.com/goto-bus-stop)
 
 ## 🧪 Experimental
 
