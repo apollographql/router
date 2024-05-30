@@ -30,7 +30,6 @@ use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::apollo_studio_interop::SignatureNormalizationAlgorithm;
 use crate::apollo_studio_interop::UsageReportingComparisonResult;
 use crate::configuration::ApolloMetricsGenerationMode;
-use crate::configuration::ApolloSignatureNormalizationAlgorithm;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
@@ -602,17 +601,11 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let signature_normalization_mode = match self
+                    let signature_normalization_mode: SignatureNormalizationAlgorithm = self
                         .configuration
                         .experimental_apollo_signature_normalization_algorithm
-                    {
-                        ApolloSignatureNormalizationAlgorithm::Legacy => {
-                            SignatureNormalizationAlgorithm::Legacy
-                        }
-                        ApolloSignatureNormalizationAlgorithm::Enhanced => {
-                            SignatureNormalizationAlgorithm::Enhanced
-                        }
-                    };
+                        .clone()
+                        .into();
 
                     let generated_usage_reporting = generate_usage_reporting(
                         &signature_doc.executable,
