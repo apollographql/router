@@ -66,12 +66,12 @@ fn merge_and_remap_condition_resolution_ids(
     for condition_id in existing.values_mut() {
         *condition_id = *remapped_condition_ids
             .get(condition_id)
-            .unwrap_or(&condition_id);
+            .unwrap_or(condition_id);
     }
     for (selection_index, condition_id) in other {
         let condition_id = *remapped_condition_ids
             .get(condition_id)
-            .unwrap_or(&condition_id);
+            .unwrap_or(condition_id);
         existing.entry(*selection_index).or_insert(condition_id);
     }
 }
@@ -129,7 +129,7 @@ impl FederatedPathTree {
 
             // Marginally inefficient: we look up edge endpoints even if the edge already exists.
             // This is to make the ? error propagate.
-            let for_edge = merged.entry(edge.edge.clone()).or_insert(ByUniqueEdge {
+            let for_edge = merged.entry(edge.edge).or_insert(ByUniqueEdge {
                 target_node: if let Some(edge) = &edge.edge {
                     let (_source, target) = graph.edge_endpoints(*edge)?;
                     target
