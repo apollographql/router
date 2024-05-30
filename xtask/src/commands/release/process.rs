@@ -160,6 +160,7 @@ impl Process {
             State::ReleaseFinalPRMerge => self.merge_final_release_pr(),
             State::ReleaseFinalPRMerge2 => self.merge_final_release_pr2(),
             State::WaitForMergeToMain => self.tag_and_release(),
+            State::WaitForReleasePublished => self.update_release_notes(),
         }
     }
 
@@ -561,7 +562,7 @@ impl Process {
         self.save()?;
 
         //FIXME: can we check the PR status with the gh command?
-        println!("Wait for the PR to merge");
+        println!("Wait for the pre PR to merge into the release PR");
 
         Ok(false)
     }
@@ -615,7 +616,158 @@ impl Process {
     }
 
     fn tag_and_release(&mut self) -> Result<bool> {
-        todo!()
+        let git = which::which("git")?;
+
+        // step 9
+        // git checkout main && \
+        // git pull "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" && \
+        // git tag -a "v${APOLLO_ROUTER_RELEASE_VERSION}" -m "${APOLLO_ROUTER_RELEASE_VERSION}" && \
+        // git push "${APOLLO_ROUTER_RELEASE_GIT_ORIGIN}" "v${APOLLO_ROUTER_RELEASE_VERSION}"
+        let _output = std::process::Command::new(&git)
+            .args(["checkout", "main"])
+            .status()?;
+        let _output = std::process::Command::new(&git)
+            .args(["pull", &self.git_origin])
+            .status()?;
+        let _output = std::process::Command::new(&git)
+            .args([
+                "tag",
+                "-a",
+                &format!("v{}", self.version),
+                "-m",
+                &self.version,
+            ])
+            .status()?;
+        let _output = std::process::Command::new(&git)
+            .args(["push", &self.git_origin, &format!("v{}", self.version)])
+            .status()?;
+
+        //step 10: reconciliation PR
+        //gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr create --title "Reconcile \`dev\` after merge to \`main\` for v${APOLLO_ROUTER_RELEASE_VERSION}"
+        // -B dev -H main --body "Follow-up to the v${APOLLO_ROUTER_RELEASE_VERSION} being officially released, bringing version bumps and changelog updates into the \`dev\` branch."
+        let gh = which::which("gh")?;
+        let _output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "pr",
+                "create",
+                "--title",
+                &format!("Reconcile `dev` after merge to `main` for v{}", self.version),
+                "-B", "dev", "-H", "main", "--body",
+              &format!("Follow-up to the v{} being officially released, bringing version bumps and changelog updates into the `dev` branch.", self.version)
+            ])
+            .status()?;
+
+        // step 11: mark the PR as automerge
+        //  APOLLO_RECONCILE_PR_URL=$(gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr list --state open --base dev --head main --json url --jq '.[-1] | .url')
+        // test -n "${APOLLO_RECONCILE_PR_URL}" && \
+        // gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge "${APOLLO_RECONCILE_PR_URL}"
+        let output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "pr",
+                "list",
+                "--state",
+                "open",
+                "--base",
+                "dev",
+                "--head",
+                "main",
+                "--json",
+                "url",
+                "--jq",
+                ".[-1] | .url",
+            ])
+            .output()?;
+        let url = std::str::from_utf8(&output.stdout)?.str;
+        println!("reconciliation PR URL: {url}");
+        let _output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "pr",
+                "merge",
+                url.trim(),
+            ])
+            .status()?;
+
+        println!("🗣️ **Solicit approval from the Router team, wait for the reconciliation PR to pass CI and auto-merge into `dev`**");
+        println!("⚠️ **Wait for `publish_github_release` on CircleCI to finish on this job before continuing.** ⚠️");
+
+        self.state = State::WaitForReleasePublished;
+        self.save()?;
+
+        Ok(false)
+    }
+
+    fn update_release_notes(&self) -> Result<bool> {
+        // step 15
+        //FIXME: replace this step with an askama template
+        let perl = which::which("perl")?;
+        let output = std::process::Command::new(&perl)
+            .args([
+                "0777",
+                "-sne",
+                r#"print "$1\n" if m{
+                (?:\#\s               # Look for H1 Markdown (line starting with "\# ")
+                \[v?\Q$version\E\]    # ...followed by [$version] (optionally with a "v")
+                                      #    since some versions had that in the past.
+                \s.*?\n$)             # ... then "space" until the end of the line.
+                \s*                   # Ignore PRE-entry-whitespace
+                (.*?)                 # Capture the ACTUAL body of the release.  But do it
+                                      # in a non-greedy way, leading us to stop when we
+                                      # reach the next version boundary/heading.
+                \s*                   # Ignore POST-entry-whitespace
+                (?=^\#\s\[[^\]]+\]\s) # Once again, look for a version boundary.  This is
+                                      # the same bit at the start, just on one line.
+              }msx"#,
+                "--",
+                "-version",
+                &self.version,
+                "CHANGELOG.md",
+            ])
+            .output()?;
+
+        let mut f = std::fs::File::create("this_release.md")?;
+        f.write_all(&output.stdout)?;
+
+        //step 16
+        //perl -pi -e 's/\[@([^\]]+)\]\([^)]+\)/@\1/g' this_release.md
+        let _output = std::process::Command::new(&perl)
+            .args([
+                "-pi",
+                "-e",
+                r#"s/\[@([^\]]+)\]\([^)]+\)/@\1/g"#,
+                "this_release.md",
+            ])
+            .status()?;
+
+        // step 17
+        // gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
+        let gh = which::which("gh")?;
+        let _output = std::process::Command::new(&gh)
+            .args([
+                "--repo",
+                self.github_repository.as_str(),
+                "release",
+                "edit",
+                &format!("v{}", self.version),
+                "-F",
+                "./this_release.md",
+            ])
+            .status()?;
+
+        // step 18
+        println!(
+            "manually publish the crates:\ncargo publish -p apollo-federation@{}\ncargo publish -p apollo-router@{}", self.version, self.version
+        );
+
+        // the release process is now finished, remove the release file
+        let path = Path::new(STATE_FILE);
+        std::fs::remove_file(path)?;
+        Ok(false)
     }
 }
 
@@ -631,4 +783,5 @@ enum State {
     ReleaseFinalPRMerge,
     ReleaseFinalPRMerge2,
     WaitForMergeToMain,
+    WaitForReleasePublished,
 }
