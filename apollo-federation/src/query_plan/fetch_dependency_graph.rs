@@ -737,8 +737,8 @@ impl FetchDependencyGraph {
         node_id: NodeIndex,
         other_id: NodeIndex,
     ) -> Result<(), FederationError> {
-        let (fetch_node, other_node) = self.graph.index_twice_mut(node_id, other_id);
-        Arc::make_mut(fetch_node).copy_inputs(other_node)
+        let (node, other_node) = self.graph.index_twice_mut(node_id, other_id);
+        Arc::make_mut(node).copy_inputs(other_node)
     }
 
     /// Returns true if `needle` is either part of `haystack`, or is one of their ancestors
@@ -1593,15 +1593,15 @@ impl FetchDependencyGraph {
         parent_type: &CompositeTypeDefinitionPosition,
         path: &Arc<OpPath>,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
-        for element in path.0.iter().rev() {
+        let mut type_= parent_type.clone();
+        for element in path.0.iter() {
             match &**element {
                 OpPathElement::Field(field) => {
-                    let field_position = parent_type.field(field.data().name().clone())?;
+                    let field_position = type_.field(field.data().name().clone())?;
                     let field_definition = field_position.get(field.data().schema.schema())?;
                     let field_type = field_definition.ty.inner_named_type();
-                    let type_: Result<CompositeTypeDefinitionPosition, FederationError> =
-                        field.data().schema.get_type(field_type.clone())?.try_into();
-                    return type_.map_or_else(
+                    type_ =
+                        field.data().schema.get_type(field_type.clone())?.try_into().map_or_else(
                         |_| {
                             Err(FederationError::internal(format!(
                                 "Invalid call from {} starting at {}: {} is not composite",
@@ -1609,20 +1609,19 @@ impl FetchDependencyGraph {
                             )))
                         },
                         Ok,
-                    );
+                    )?;
                 }
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition_position) = &fragment.data().type_condition_position
                     {
-                        return Ok(type_condition_position.clone());
+                        type_ = type_condition_position.clone();
                     } else {
                         continue;
                     }
                 }
             }
         }
-        // if we didn't find type at op path, default to parent
-        Ok(parent_type.clone())
+        Ok(type_.clone())
     }
 }
 
@@ -3277,7 +3276,7 @@ fn handle_requires(
         if unmerged_node_ids.is_empty() {
             // We still need to add the stuffs we require though (but `node` already has a key in its inputs,
             // we don't need one).
-            let selection = inputs_for_require(
+            let inputs = inputs_for_require(
                 dependency_graph,
                 entity_type_position.clone(),
                 query_graph_edge_id,
@@ -3287,7 +3286,7 @@ fn handle_requires(
             .0;
             let fetch_node =
                 FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, fetch_node_id)?;
-            fetch_node.add_inputs(&selection, iter::empty())?;
+            fetch_node.add_inputs(&inputs, iter::empty())?;
             return Ok((fetch_node_id, fetch_node_path.clone()));
         }
 
@@ -3349,7 +3348,7 @@ fn handle_requires(
             entity_type_position.clone(),
             query_graph_edge_id,
             context,
-            fetch_node_id,
+            parent.parent_node_id,
             post_require_node_id,
         )?;
         created_nodes.extend(unmerged_node_ids);
