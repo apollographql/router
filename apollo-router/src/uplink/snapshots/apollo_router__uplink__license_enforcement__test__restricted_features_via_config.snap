@@ -45,6 +45,12 @@ Configuration yaml:
 * Advanced telemetry
   .telemetry..spans.subgraph
 
+* Advanced telemetry
+  .telemetry..instruments
+
+* Advanced telemetry
+  .telemetry..graphql
+
 * File uploads plugin
   .preview_file_uploads
 

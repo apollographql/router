@@ -89,7 +89,13 @@ where
         })
     }
 
-    pub(crate) async fn get(&self, key: &K) -> Option<V> {
+    /// `init_from_redis` is called with values newly deserialized from Redis cache
+    /// if an error is returned, the value is ignored and considered a cache miss.
+    pub(crate) async fn get(
+        &self,
+        key: &K,
+        mut init_from_redis: impl FnMut(&mut V) -> Result<(), String>,
+    ) -> Option<V> {
         let instant_memory = Instant::now();
         let res = self.inner.lock().await.get(key).cloned();
 
@@ -124,7 +130,18 @@ where
                 let instant_redis = Instant::now();
                 if let Some(redis) = self.redis.as_ref() {
                     let inner_key = RedisKey(key.clone());
-                    match redis.get::<K, V>(inner_key).await {
+                    let redis_value =
+                        redis
+                            .get::<K, V>(inner_key)
+                            .await
+                            .and_then(|mut v| match init_from_redis(&mut v.0) {
+                                Ok(()) => Some(v),
+                                Err(e) => {
+                                    tracing::error!("Invalid value from Redis cache: {e}");
+                                    None
+                                }
+                            });
+                    match redis_value {
                         Some(v) => {
                             self.inner.lock().await.put(key.clone(), v.0.clone());
 
