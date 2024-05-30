@@ -11,6 +11,7 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::source_aware::query_plan::QueryPlanner as SourceAwareQueryPlanner;
 use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
@@ -93,6 +94,11 @@ enum PlannerMode {
         // TODO: remove when those other uses are fully ported to Rust
         js_for_api_schema_and_introspection_and_operation_signature: Arc<Planner<QueryPlanResult>>,
     },
+    SourceAwareRust {
+        rust: Arc<SourceAwareQueryPlanner>,
+        // TODO: remove when those other uses are fully ported to Rust
+        js_for_api_schema_and_introspection_and_operation_signature: Arc<Planner<QueryPlanResult>>,
+    },
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -134,6 +140,15 @@ impl PlannerMode {
                 js: Self::js(&schema.raw_sdl, configuration, old_planner).await?,
                 rust: Self::rust(schema, configuration)?,
             },
+            QueryPlannerMode::NewNew => Self::SourceAwareRust {
+                rust: Self::source_aware_rust(schema, configuration)?,
+                js_for_api_schema_and_introspection_and_operation_signature: Self::js(
+                    &schema.raw_sdl,
+                    configuration,
+                    old_planner,
+                )
+                .await?,
+            },
         })
     }
 
@@ -153,7 +168,31 @@ impl PlannerMode {
                 },
             debug: Default::default(),
         };
+
         Ok(Arc::new(QueryPlanner::new(
+            schema.federation_supergraph(),
+            config,
+        )?))
+    }
+
+    fn source_aware_rust(
+        schema: &Schema,
+        configuration: &Configuration,
+    ) -> Result<Arc<SourceAwareQueryPlanner>, ServiceBuildError> {
+        let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+            reuse_query_fragments: configuration
+                .supergraph
+                .reuse_query_fragments
+                .unwrap_or(true),
+            subgraph_graphql_validation: false,
+            incremental_delivery:
+                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
+                    enable_defer: configuration.supergraph.defer_support,
+                },
+            debug: Default::default(),
+        };
+
+        Ok(Arc::new(SourceAwareQueryPlanner::new(
             schema.federation_supergraph(),
             config,
         )?))
@@ -186,6 +225,10 @@ impl PlannerMode {
                 js_for_api_schema_and_introspection_and_operation_signature,
                 ..
             } => js_for_api_schema_and_introspection_and_operation_signature,
+            PlannerMode::SourceAwareRust {
+                js_for_api_schema_and_introspection_and_operation_signature,
+                ..
+            } => js_for_api_schema_and_introspection_and_operation_signature,
         }
     }
 
@@ -204,6 +247,38 @@ impl PlannerMode {
                 .into_result()
                 .map_err(|err| QueryPlannerError::from(PlanErrors::from(err))),
             PlannerMode::Rust { rust, .. } => {
+                // TODO: avoid reparsing and revalidating
+                let document = ExecutableDocument::parse_and_validate(
+                    schema.api_schema(),
+                    &filtered_query,
+                    "query.graphql",
+                )
+                .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
+
+                let plan = operation
+                    .as_deref()
+                    .map(|n| Name::new(n).map_err(FederationError::from))
+                    .transpose()
+                    .and_then(|operation| rust.build_query_plan(&document, operation))
+                    .map_err(|e| QueryPlannerError::FederationError(e.to_string()))?;
+
+                // Dummy value overwritten below in `BrigeQueryPlanner::plan`
+                // `Configuration::validate` ensures that we only take this path
+                // when we also have `ApolloMetricsGenerationMode::New`
+                let usage_reporting = UsageReporting {
+                    stats_report_key: Default::default(),
+                    referenced_fields_by_type: Default::default(),
+                };
+
+                Ok(PlanSuccess {
+                    usage_reporting,
+                    data: QueryPlanResult {
+                        formatted_query_plan: Some(plan.to_string()),
+                        query_plan: (&plan).into(),
+                    },
+                })
+            }
+            PlannerMode::SourceAwareRust { rust, .. } => {
                 // TODO: avoid reparsing and revalidating
                 let document = ExecutableDocument::parse_and_validate(
                     schema.api_schema(),
@@ -331,6 +406,7 @@ impl PlannerMode {
                     .map(|(name, schema)| (name.to_string(), Arc::new(schema.schema().clone())))
                     .collect())
             }
+            PlannerMode::SourceAwareRust { .. } => return Ok(HashMap::new()), // TODO execution_metadata?
         };
         js.subgraphs()
             .await?
@@ -439,9 +515,10 @@ impl BridgeQueryPlanner {
                 PlannerMode::Js(planner) => planner.clone(),
                 PlannerMode::Both { js, .. } => js.clone(),
                 PlannerMode::Rust { .. } => {
-                    return Err(ServiceBuildError::ServiceError(
-                        "no support in rust yet".into(),
-                    ))
+                    return Err(ServiceBuildError::ServiceError("remove this code".into()))
+                }
+                PlannerMode::SourceAwareRust { .. } => {
+                    return Err(ServiceBuildError::ServiceError("remove this code".into()))
                 }
             };
             let connector_supergraph = source.supergraph();
