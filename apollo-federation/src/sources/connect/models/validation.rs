@@ -109,7 +109,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
         .directives
         .iter()
         .filter(|directive| directive.name == source_directive_name)
-        .map(|directive| validate_source(directive, &source_map))
+        .map(|directive| validate_source(directive, source_map))
         .collect();
 
     let mut errors = Vec::new();
