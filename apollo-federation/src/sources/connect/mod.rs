@@ -23,7 +23,7 @@ pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::validate;
-pub use models::GraphQLLocation;
+pub use models::Location;
 pub use models::ValidationError;
 pub use models::ValidationErrorCode;
 pub(crate) use spec::ConnectSpecDefinition;
