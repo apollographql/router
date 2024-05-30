@@ -525,7 +525,7 @@ impl Process {
                 "-B",
                 &self.version,
                 "--title",
-                &format!("\"prep release: v{}\"", self.version.as_str()),
+                &format!("prep release: v{}", self.version.as_str()),
                 "--body",
                 &apollo_prep_release_header,
             ])
