@@ -81,6 +81,7 @@ pub(crate) struct Config {
 
     /// OTLP protocol used for OTel traces.
     /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
+    #[schemars(skip)]
     pub(crate) experimental_otlp_tracing_protocol: Protocol,
 
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
