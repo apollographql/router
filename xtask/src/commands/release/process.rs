@@ -233,7 +233,7 @@ impl Process {
                 "-B",
                 "main",
                 "--title",
-                &format!("\"release: v{}\"", self.version.as_str()),
+                &format!("release: v{}", self.version.as_str()),
                 "--body",
                 pr_text,
             ])
