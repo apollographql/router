@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use indexmap::IndexMap;
@@ -44,14 +45,14 @@ impl FederatedPathTree {
         graph: Arc<FederatedQueryGraph>,
         node: NodeIndex,
         paths: PathIter,
+        remapped_condition_ids: &mut HashMap<ConditionResolutionId, ConditionResolutionId>,
     ) -> Result<Self, FederationError>
     where
         EdgeIter: Iterator<Item = &'a graph_path::Edge>,
         PathIter: Iterator<Item = (EdgeIter, Option<Arc<SelectionSet>>)>,
     {
-        let mut condition_resolutions_at_node = Default::default();
-        let mut source_entering_condition_resolutions_at_node = Default::default();
-        let mut childs = Default::default();
+        let mut condition_resolutions_at_node = IndexMap::new();
+        let mut source_entering_condition_resolutions_at_node = IndexMap::new();
 
         struct ByUniqueEdge<'a, EdgeIter>
         where
@@ -71,11 +72,43 @@ impl FederatedPathTree {
             sub_paths_and_selections: Vec<(EdgeIter, Option<Arc<SelectionSet>>)>,
         }
 
+        fn merge_condition_resolutions(
+            condition_resolutions: &mut IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
+            other_condition_resolutions: &IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
+            remapped_condition_ids: &mut HashMap<ConditionResolutionId, ConditionResolutionId>,
+        ) {
+            for (&condition_index, resolution) in other_condition_resolutions {
+                condition_resolutions
+                    .entry(condition_index)
+                    .and_modify(|existing_resolution| {
+                        if existing_resolution.cost > resolution.cost {
+                            remapped_condition_ids.insert(existing_resolution.id, resolution.id);
+                            existing_resolution.clone_from(resolution);
+                        } else {
+                            remapped_condition_ids.insert(resolution.id, existing_resolution.id);
+                        }
+                    })
+                    .or_insert_with(|| resolution.clone());
+            }
+        }
+
         let mut merged = IndexMap::new();
-        for (graph_path_iter, selection) in paths {
+        for (mut graph_path_iter, selection) in paths {
             let Some(edge) = graph_path_iter.next() else {
                 continue;
             };
+
+            merge_condition_resolutions(
+                &mut source_entering_condition_resolutions_at_node,
+                &edge.source_entering_condition_resolutions_at_head,
+                remapped_condition_ids,
+            );
+            merge_condition_resolutions(
+                &mut condition_resolutions_at_node,
+                &edge.condition_resolutions_at_head,
+                remapped_condition_ids,
+            );
+
             // Marginally inefficient: we look up edge endpoints even if the edge already exists.
             // This is to make the ? error propagate.
             let for_edge = merged.entry(edge.edge.clone()).or_insert(ByUniqueEdge {
@@ -89,24 +122,40 @@ impl FederatedPathTree {
                 by_unique_trigger: IndexMap::new(),
             });
 
-            for_edge
+            match for_edge
                 .by_unique_trigger
                 .entry(edge.operation_element.clone())
-                .and_modify(|existing| {
-                    existing.self_condition_resolutions_for_edge = merge_conditions(
-                        &existing.self_condition_resolutions_for_edge,
-                        self_condition_resolutions_for_edge,
-                    );
+            {
+                indexmap::map::Entry::Occupied(existing) => {
+                    let existing = existing.into_mut();
+                    for condition_id in existing.self_condition_resolutions_for_edge.values_mut() {
+                        *condition_id = *remapped_condition_ids
+                            .get(condition_id)
+                            .unwrap_or(&condition_id);
+                    }
+                    for (selection_index, condition_id) in &edge.self_condition_resolutions_for_edge
+                    {
+                        let condition_id = *remapped_condition_ids
+                            .get(condition_id)
+                            .unwrap_or(&condition_id);
+                        existing
+                            .self_condition_resolutions_for_edge
+                            .entry(*selection_index)
+                            .or_insert(condition_id);
+                    }
                     existing
                         .sub_paths_and_selections
-                        .push((graph_path_iter, selection))
-                    // Note that as we merge, we don't create a new child
-                })
-                .or_insert_with(|| PathTreeChildInputs {
-                    self_condition_resolutions_for_edge: self_condition_resolutions_for_edge
-                        .clone(),
-                    sub_paths_and_selections: vec![(graph_path_iter, selection)],
-                });
+                        .push((graph_path_iter, selection));
+                }
+                indexmap::map::Entry::Vacant(vacant) => {
+                    vacant.insert(PathTreeChildInputs {
+                        self_condition_resolutions_for_edge: edge
+                            .self_condition_resolutions_for_edge
+                            .clone(),
+                        sub_paths_and_selections: vec![(graph_path_iter, selection)],
+                    });
+                }
+            }
         }
 
         let mut childs = vec![];
@@ -117,11 +166,12 @@ impl FederatedPathTree {
                         operation_element,
                         edge,
                     },
-                    self_condition_resolutions_for_edge: child.conditions.clone(),
+                    self_condition_resolutions_for_edge: child.self_condition_resolutions_for_edge,
                     tree: Self::from_paths_inner(
                         graph.clone(),
                         by_unique_edge.target_node,
                         child.sub_paths_and_selections.into_iter(),
+                        remapped_condition_ids,
                     )?
                     .into(),
                 }))
@@ -149,6 +199,7 @@ impl FederatedPathTree {
             graph,
             node,
             paths.map(|(path, selection_set)| (path.edges(), selection_set)),
+            &mut Default::default(),
         )
     }
 

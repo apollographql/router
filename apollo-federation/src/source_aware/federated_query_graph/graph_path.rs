@@ -40,14 +40,14 @@ pub(crate) enum OperationPathElement {
     InlineFragment(InlineFragment),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub(crate) struct ConditionResolutionId(usize);
 
 #[derive(Debug, Clone)] // TODO(@goto-bus-stop): should this be cloneable?
 pub(crate) struct ConditionResolutionInfo {
-    id: ConditionResolutionId,
-    resolution: Arc<FederatedPathTree>,
-    cost: QueryPlanCost,
+    pub id: ConditionResolutionId,
+    pub resolution: Arc<FederatedPathTree>,
+    pub cost: QueryPlanCost,
 }
 
 #[derive(Debug, Clone)]
