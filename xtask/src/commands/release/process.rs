@@ -552,7 +552,7 @@ impl Process {
                 "--squash",
                 "--body",
                 "",
-                "t",
+                "-t",
                 &format!("prep release: v{}", self.version),
                 &format!("prep-{}", self.version),
             ])
