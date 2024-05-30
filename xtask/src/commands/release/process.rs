@@ -681,7 +681,7 @@ impl Process {
                 ".[-1] | .url",
             ])
             .output()?;
-        let url = std::str::from_utf8(&output.stdout)?.str;
+        let url = std::str::from_utf8(&output.stdout)?;
         println!("reconciliation PR URL: {url}");
         let _output = std::process::Command::new(&gh)
             .args([
