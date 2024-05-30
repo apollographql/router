@@ -398,6 +398,16 @@ impl QueryPlanner {
             return Ok(QueryPlan::default());
         }
 
+        trace!(
+            data = serde_json_bytes::json!({
+                "kind": "Operation",
+                "original": &operation.serialize().to_string(),
+                "normalized": &normalized_operation.to_string()
+            })
+            .to_string(),
+            "normalized operation"
+        );
+
         let Some(root) = self
             .federated_query_graph
             .root_kinds_to_nodes()?
