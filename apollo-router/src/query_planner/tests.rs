@@ -27,6 +27,7 @@ use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::BridgeQueryPlanner;
 use crate::request;
+use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
@@ -103,9 +104,11 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
     });
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
+    let schema_str = test_schema!();
+    let parsed_schema = Arc::new(Schema::parse_test(schema_str, &Default::default()).unwrap());
 
     let sf = Arc::new(FetchServiceFactory::new(
-        Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+        parsed_schema.clone(),
         Default::default(),
         Arc::new(SubgraphServiceFactory {
             services: Arc::new(HashMap::from([(
@@ -115,7 +118,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             plugins: Default::default(),
         }),
         None,
-        Default::default(),
+        Arc::new(ConnectorServiceFactory::empty(parsed_schema.clone())),
     ));
 
     let result = query_plan
@@ -123,7 +126,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &parsed_schema,
             &Default::default(),
             sender,
             None,
@@ -173,8 +176,10 @@ async fn fetch_includes_operation_name() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
+    let parsed_schema = Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap());
+
     let sf = Arc::new(FetchServiceFactory::new(
-        Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+        parsed_schema.clone(),
         Default::default(),
         Arc::new(SubgraphServiceFactory {
             services: Arc::new(HashMap::from([(
@@ -184,7 +189,7 @@ async fn fetch_includes_operation_name() {
             plugins: Default::default(),
         }),
         None,
-        Default::default(),
+        Arc::new(ConnectorServiceFactory::empty(parsed_schema.clone())),
     ));
 
     let _response = query_plan
@@ -192,7 +197,7 @@ async fn fetch_includes_operation_name() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &parsed_schema,
             &Default::default(),
             sender,
             None,
@@ -239,9 +244,9 @@ async fn fetch_makes_post_requests() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
-    let schema = Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap());
     let sf = Arc::new(FetchServiceFactory::new(
-        schema.clone(),
+        parsed_schema.clone(),
         Default::default(),
         Arc::new(SubgraphServiceFactory::new(
             vec![(
@@ -251,7 +256,7 @@ async fn fetch_makes_post_requests() {
             Default::default(),
         )),
         None,
-        Default::default(),
+        Arc::new(ConnectorServiceFactory::empty(parsed_schema.clone())),
     ));
 
     let _response = query_plan
@@ -259,7 +264,7 @@ async fn fetch_makes_post_requests() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &schema,
+            &parsed_schema,
             &Default::default(),
             sender,
             None,
@@ -397,10 +402,10 @@ async fn defer() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
-    let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
 
     let sf = Arc::new(FetchServiceFactory::new(
-        schema.clone(),
+        parsed_schema.clone(),
         Default::default(),
         Arc::new(SubgraphServiceFactory {
             services: Arc::new(HashMap::from([
@@ -416,7 +421,7 @@ async fn defer() {
             plugins: Default::default(),
         }),
         None,
-        Default::default(),
+        Arc::new(ConnectorServiceFactory::empty(parsed_schema.clone())),
     ));
 
     let response = query_plan
@@ -424,7 +429,7 @@ async fn defer() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &schema,
+            &parsed_schema,
             &Default::default(),
             sender,
             None,
@@ -471,7 +476,7 @@ async fn defer_if_condition() {
         BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()), None)
             .await
             .unwrap();
-    let schema = planner.schema();
+    let parsed_schema = planner.schema();
 
     let root: PlanNode =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -487,7 +492,7 @@ async fn defer_if_condition() {
             Query::parse(
                 query,
                 Some("Me"),
-                &schema,
+                &parsed_schema,
                 &Configuration::fake_builder().build().unwrap(),
             )
             .unwrap(),
@@ -515,7 +520,7 @@ async fn defer_if_condition() {
     let mut receiver_stream = ReceiverStream::new(receiver);
 
     let service_factory = Arc::new(FetchServiceFactory::new(
-        schema.clone(),
+        parsed_schema.clone(),
         Default::default(),
         Arc::new(SubgraphServiceFactory {
             services: Arc::new(HashMap::from([(
@@ -525,7 +530,7 @@ async fn defer_if_condition() {
             plugins: Default::default(),
         }),
         None,
-        Default::default(),
+        Arc::new(ConnectorServiceFactory::empty(parsed_schema.clone())),
     ));
 
     let defer_primary_response = query_plan
@@ -541,7 +546,7 @@ async fn defer_if_condition() {
                     )
                     .unwrap(),
             ),
-            &schema,
+            &parsed_schema,
             &Default::default(),
             sender,
             None,
@@ -565,7 +570,7 @@ async fn defer_if_condition() {
             &Context::new(),
             &service_factory,
             &Default::default(),
-            &schema,
+            &parsed_schema,
             &Default::default(),
             default_sender,
             None,
@@ -598,7 +603,7 @@ async fn defer_if_condition() {
                     )
                     .unwrap(),
             ),
-            &schema,
+            &parsed_schema,
             &Default::default(),
             sender,
             None,
@@ -701,8 +706,10 @@ async fn dependent_mutations() {
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
     mock_b_service.expect_call().never();
 
+    let parsed_schema =   Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+
     let sf = Arc::new(FetchServiceFactory::new(
-        Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+        parsed_schema.clone(),
         Default::default(),
         Arc::new(SubgraphServiceFactory {
             services: Arc::new(HashMap::from([
@@ -718,7 +725,7 @@ async fn dependent_mutations() {
             plugins: Default::default(),
         }),
         None,
-        Default::default(),
+        Arc::new(ConnectorServiceFactory::empty(parsed_schema.clone())),
     ));
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
@@ -727,7 +734,7 @@ async fn dependent_mutations() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+            &parsed_schema,
             &Default::default(),
             sender,
             None,

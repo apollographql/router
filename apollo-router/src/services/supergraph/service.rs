@@ -53,6 +53,7 @@ use crate::query_planner::InMemoryCachePlanner;
 use crate::query_planner::QueryPlanResult;
 use crate::router_factory::create_plugins;
 use crate::router_factory::create_subgraph_services;
+use crate::services::connector_service::ConnectorServiceFactory;
 use crate::services::execution::QueryPlan;
 use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::layers::allow_only_http_post_mutations::AllowOnlyHttpPostMutationsLayer;
@@ -559,8 +560,15 @@ async fn subscription_task(
                                         subgraph_services.into_iter().map(|(k, v)| (k, Arc::new(v) as Arc<dyn MakeSubgraphService>)).collect(),
                                         execution_service_factory.plugins.clone(),
                                     )),
-                                    subscription_plugin_conf,
-                                    Default::default()
+                                    subscription_plugin_conf.clone(),
+                                                // TODO: HTTP SERVICE + CONNECTORS
+                                    Arc::new(ConnectorServiceFactory::new(
+                                        execution_service_factory.schema.clone(),
+                                        execution_service_factory.subgraph_schemas.clone(),
+                                        Arc::new(()),
+                                        subscription_plugin_conf,
+                                        Default::default(),
+                                    )),
                                  ),
 
                     );
@@ -822,7 +830,7 @@ impl PluggableSupergraphServiceBuilder {
 
         let fetch_service_factory = Arc::new(FetchServiceFactory::new(
             schema.clone(),
-            subgraph_schemas,
+            subgraph_schemas.clone(),
             Arc::new(SubgraphServiceFactory::new(
                 self.subgraph_services
                     .into_iter()
@@ -830,8 +838,15 @@ impl PluggableSupergraphServiceBuilder {
                     .collect(),
                 self.plugins.clone(),
             )),
-            subscription_plugin_conf,
-            Default::default(),
+            subscription_plugin_conf.clone(),
+            // TODO: HTTP SERVICE + CONNECTORS
+            Arc::new(ConnectorServiceFactory::new(
+                schema.clone(),
+                subgraph_schemas,
+                Arc::new(()),
+                subscription_plugin_conf,
+                Default::default(),
+            )),
         ));
 
         Ok(SupergraphCreator {

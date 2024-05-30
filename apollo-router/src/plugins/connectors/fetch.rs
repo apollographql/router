@@ -1,6 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::Protocol;
+use crate::query_planner::fetch::RestFetchNode;
 use apollo_compiler::name;
 use apollo_federation::schema::ObjectFieldDefinitionPosition;
 use apollo_federation::schema::ObjectOrInterfaceFieldDefinitionPosition;
@@ -10,9 +13,6 @@ use apollo_federation::sources::connect::ConnectId;
 use apollo_federation::sources::connect::JSONSelection;
 use apollo_federation::sources::connect::SubSelection;
 use apollo_federation::sources::source;
-use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::Protocol;
-use crate::query_planner::fetch::RestFetchNode;
 
 impl From<FetchNode> for source::query_plan::FetchNode {
     fn from(value: FetchNode) -> source::query_plan::FetchNode {

@@ -7,15 +7,15 @@ use std::task::Poll;
 use apollo_compiler::validation::Valid;
 use apollo_federation::sources::connect;
 use apollo_federation::sources::connect::query_plan::FetchNode;
+use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::Connectors;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use apollo_federation::sources::source::SourceId;
-use apollo_federation::sources::connect::ApplyTo;
 use futures::future::BoxFuture;
+use hyper_rustls::ConfigBuilderExt;
 use tower::BoxError;
 use tower::ServiceExt;
-use hyper_rustls::ConfigBuilderExt;
 
 use super::connect::BoxService;
 use super::new_service::ServiceFactory;
@@ -67,12 +67,11 @@ impl tower::Service<ConnectRequest> for ConnectorService {
 
         let connectors = self.connectors.clone();
 
-        Box::pin(async move {
-            Ok(process_source_node(fetch_node, connectors, data, current_dir).await)
-        })
+        Box::pin(
+            async move { Ok(process_source_node(fetch_node, connectors, data, current_dir).await) },
+        )
     }
 }
-
 
 pub(crate) async fn process_source_node(
     source_node: FetchNode,
@@ -173,7 +172,6 @@ async fn process_responses(
     (serde_json_bytes::Value::Object(data), errors)
 }
 
-
 #[derive(Clone)]
 pub(crate) struct ConnectorServiceFactory {
     pub(crate) schema: Arc<Schema>,
@@ -199,6 +197,17 @@ impl ConnectorServiceFactory {
             connectors,
         }
     }
+
+    #[cfg(test)]
+    pub(crate) fn empty(schema: Arc<Schema>) -> Self {
+        Self {
+            http_service_factory: Arc::new(()),
+            subgraph_schemas: Default::default(),
+            subscription_config: Default::default(),
+            connectors: Default::default(),
+            schema
+        }
+    }
 }
 
 impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
@@ -215,7 +224,6 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
         .boxed()
     }
 }
-
 
 #[cfg(test)]
 mod soure_node_tests {
@@ -234,13 +242,13 @@ mod soure_node_tests {
     use crate::plugins::connectors::tests::mock_api;
     use crate::plugins::connectors::tests::mock_subgraph;
 
+    use apollo_compiler::name;
+    use apollo_federation::schema::ObjectFieldDefinitionPosition;
     use apollo_federation::sources::connect;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::JSONSelection;
     use apollo_federation::sources::connect::SubSelection;
     use apollo_federation::sources::source;
-    use apollo_federation::schema::ObjectFieldDefinitionPosition;
-    use apollo_compiler::name;
 
     #[tokio::test]
     async fn test_process_source_node() {
