@@ -22,6 +22,7 @@ use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
+use opentelemetry::metrics::MetricsError;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -1762,7 +1763,13 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
             opentelemetry::global::Error::Metric(err) => {
-                ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
+                if let MetricsError::Other(msg) = &err {
+                    if msg.contains("Warning") {
+                        ::tracing::warn!("OpenTelemetry metric warning occurred: {}", msg);
+                        return;
+                    }
+                }
+                ::tracing::error!("OpenTelemetry metric error occurred: {}", err);
             }
             opentelemetry::global::Error::Other(err) => {
                 ::tracing::error!("OpenTelemetry error occurred: {}", err)
