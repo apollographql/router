@@ -1301,9 +1301,11 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
-        let fragments = fragments
-            .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema));
-        operation.optimize(fragments, Default::default());
+        if let Some(fragments) = fragments
+            .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
+        {
+            operation.optimize(fragments)?;
+        }
         let operation_document = operation.try_into()?;
 
         let node = super::PlanNode::Fetch(Box::new(super::FetchNode {
