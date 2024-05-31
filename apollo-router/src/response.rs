@@ -245,14 +245,6 @@ impl IncrementalResponse {
 }
 
 pub(crate) trait ResponseVisitor {
-    fn visit_field(
-        &mut self,
-        request: &apollo_compiler::ExecutableDocument,
-        ty: &apollo_compiler::executable::NamedType,
-        field: &apollo_compiler::executable::Field,
-        value: &Value,
-    );
-
     fn visit(&mut self, request: &apollo_compiler::ExecutableDocument, response: &Response) {
         if response.path.is_some() {
             // TODO: In this case, we need to find the selection inside `request` corresponding to the path so we can start zipping.
@@ -280,12 +272,7 @@ pub(crate) trait ResponseVisitor {
             match selection {
                 apollo_compiler::executable::Selection::Field(inner_field) => {
                     if let Some(value) = fields.get(inner_field.name.as_str()) {
-                        self.visit_field(
-                            request,
-                            &inner_field.ty().inner_named_type(),
-                            inner_field.as_ref(),
-                            value,
-                        );
+                        self.visit_field(request, &selection_set.ty, inner_field.as_ref(), value);
                     } else {
                         tracing::warn!("The response did not include a field corresponding to query field {:?}", inner_field);
                     }
@@ -306,6 +293,14 @@ pub(crate) trait ResponseVisitor {
             }
         }
     }
+
+    fn visit_field(
+        &mut self,
+        request: &apollo_compiler::ExecutableDocument,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+    );
 }
 
 #[cfg(test)]
@@ -316,6 +311,8 @@ mod tests {
     use apollo_compiler::Schema;
     use insta::assert_yaml_snapshot;
     use router_bridge::planner::Location;
+    use serde::ser::SerializeMap;
+    use serde::Serializer;
     use serde_json::json;
     use serde_json_bytes::json as bjson;
 
@@ -614,17 +611,14 @@ mod tests {
         insta::with_settings!({sort_maps=>true}, { assert_yaml_snapshot!(visitor) })
     }
 
-    #[derive(Serialize)]
     struct FieldCounter {
-        field_counts: HashMap<String, usize>,
-        type_counts: HashMap<String, usize>,
+        counts: HashMap<String, usize>,
     }
 
     impl FieldCounter {
         fn new() -> Self {
             Self {
-                field_counts: HashMap::new(),
-                type_counts: HashMap::new(),
+                counts: HashMap::new(),
             }
         }
     }
@@ -633,33 +627,39 @@ mod tests {
         fn visit_field(
             &mut self,
             request: &ExecutableDocument,
-            ty: &apollo_compiler::executable::NamedType,
+            _ty: &apollo_compiler::executable::NamedType,
             field: &apollo_compiler::executable::Field,
             value: &Value,
         ) {
             match value {
+                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
+                    let count = self.counts.entry(field.name.to_string()).or_insert(0);
+                    *count += 1;
+                }
                 Value::Array(items) => {
                     for item in items {
-                        self.visit_field(request, field.ty().inner_named_type(), field, item);
+                        self.visit_field(request, _ty, field, item);
                     }
                 }
                 Value::Object(children) => {
-                    let field_count = self.field_counts.entry(field.name.to_string()).or_insert(0);
-                    *field_count += 1;
-
-                    let type_count = self.type_counts.entry(ty.to_string()).or_insert(0);
-                    *type_count += 1;
-
+                    let count = self.counts.entry(field.name.to_string()).or_insert(0);
+                    *count += 1;
                     self.visit_selections(request, &field.selection_set, children);
                 }
-                _ => {
-                    let field_count = self.field_counts.entry(field.name.to_string()).or_insert(0);
-                    *field_count += 1;
-
-                    let type_count = self.type_counts.entry(ty.to_string()).or_insert(0);
-                    *type_count += 1;
-                }
             }
+        }
+    }
+
+    impl Serialize for FieldCounter {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            let mut map = serializer.serialize_map(Some(self.counts.len()))?;
+            for (key, value) in &self.counts {
+                map.serialize_entry(key, value)?;
+            }
+            map.end()
         }
     }
 }

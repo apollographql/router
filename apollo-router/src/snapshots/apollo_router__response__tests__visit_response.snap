@@ -2,11 +2,6 @@
 source: apollo-router/src/response.rs
 expression: visitor
 ---
-field_counts:
-  name: 2
-  registrationFee: 2
-  ships: 2
-type_counts:
-  Float: 2
-  Ship: 2
-  String: 2
+name: 2
+registrationFee: 2
+ships: 2

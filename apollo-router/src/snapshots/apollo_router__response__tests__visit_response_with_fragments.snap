@@ -2,14 +2,8 @@
 source: apollo-router/src/response.rs
 expression: visitor
 ---
-field_counts:
-  licenseNumber: 4
-  name: 4
-  owner: 2
-  ships: 2
-  users: 2
-type_counts:
-  ID: 4
-  Ship: 2
-  String: 4
-  User: 4
+licenseNumber: 4
+name: 4
+owner: 2
+ships: 2
+users: 2
