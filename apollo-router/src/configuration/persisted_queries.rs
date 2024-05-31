@@ -33,7 +33,7 @@ impl PersistedQueries {
             enabled: enabled.unwrap_or_else(default_pq),
             safelist: safelist.unwrap_or_default(),
             log_unknown: log_unknown.unwrap_or_else(default_log_unknown),
-            local_manifest: local_manifest,
+            local_manifest,
         }
     }
 }
