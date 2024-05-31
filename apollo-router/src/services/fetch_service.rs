@@ -5,20 +5,20 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
-use apollo_federation::sources::connect::Connectors;
 // use apollo_federation::sources::connect::Connectors;
 use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
 
+use super::connector_service::ConnectorServiceFactory;
 use super::fetch::BoxService;
 use super::new_service::ServiceFactory;
+use super::ConnectRequest;
 use super::SubgraphRequest;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Value;
-use crate::plugins::connectors::process_source_node;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
@@ -32,11 +32,11 @@ use crate::spec::Schema;
 
 #[derive(Clone)]
 pub(crate) struct FetchService {
-    pub(crate) service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    pub(crate) _subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors: Connectors,
+    pub(crate) _subscription_config: Option<SubscriptionConfig>, // TODO: add subscription support to FetchService
+    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
 }
 
 impl tower::Service<FetchRequest> for FetchService {
@@ -158,7 +158,7 @@ impl tower::Service<FetchRequest> for FetchService {
             )
             .subgraph_name(subgraph_service_name)
             .operation_kind(operation_kind)
-            .context(context)
+            .context(context.clone())
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
@@ -166,12 +166,11 @@ impl tower::Service<FetchRequest> for FetchService {
         let schema = self.schema.clone();
         let aqs = aliased_operation.to_string(); // TODO
         let sns = service_name.clone();
-        let sf = self.service_factory.clone();
+        let subgraph_service_factory = self.subgraph_service_factory.clone();
         let current_dir = current_dir.clone();
         let deferred_fetches = deferred_fetches.clone();
-        let connectors = self.connectors.clone();
-        // TODO: dont' panic Oo
-        let service = sf
+        let connector_service_factory = self.connector_service_factory.clone();
+        let service = subgraph_service_factory
             .create(&sns)
             .expect("we already checked that the service exists during planning; qed");
 
@@ -180,8 +179,19 @@ impl tower::Service<FetchRequest> for FetchService {
                 connect_node,
             )) = fetch_node.source_node.as_deref()
             {
-                // TODO: Dispatch into the ConnectorService eventually
-                let _ = process_source_node(connect_node, connectors, data, paths.clone()).await;
+                // TODO: return eventually
+                let _ = connector_service_factory
+                    .create()
+                    .oneshot(
+                        ConnectRequest::builder()
+                            .context(context)
+                            .fetch_node(connect_node.clone())
+                            .supergraph_request(supergraph_request)
+                            .data(data)
+                            .current_dir(current_dir.clone())
+                            .build(),
+                    )
+                    .await;
             }
 
             Ok(FetchNode::subgraph_fetch(
@@ -209,7 +219,7 @@ pub(crate) struct FetchServiceFactory {
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors: Connectors,
+    pub(crate) connector_service_factory: Arc<ConnectorServiceFactory>,
 }
 
 impl FetchServiceFactory {
@@ -218,14 +228,14 @@ impl FetchServiceFactory {
         subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
         subgraph_service_factory: Arc<SubgraphServiceFactory>,
         subscription_config: Option<SubscriptionConfig>,
-        connectors: Connectors,
+        connector_service_factory: Arc<ConnectorServiceFactory>,
     ) -> Self {
         Self {
             subgraph_service_factory,
             subgraph_schemas,
             schema,
             subscription_config,
-            connectors,
+            connector_service_factory,
         }
     }
 
@@ -242,11 +252,11 @@ impl ServiceFactory<FetchRequest> for FetchServiceFactory {
 
     fn create(&self) -> Self::Service {
         FetchService {
-            service_factory: self.subgraph_service_factory.clone(),
+            subgraph_service_factory: self.subgraph_service_factory.clone(),
             schema: self.schema.clone(),
             subgraph_schemas: self.subgraph_schemas.clone(),
             _subscription_config: self.subscription_config.clone(),
-            connectors: self.connectors.clone(),
+            connector_service_factory: self.connector_service_factory.clone(),
         }
         .boxed()
     }
