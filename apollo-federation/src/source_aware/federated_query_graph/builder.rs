@@ -40,6 +40,7 @@ pub(crate) fn build_federated_query_graph(
     let builders: source::federated_query_graph::builder::FederatedQueryGraphBuilders =
         Default::default();
     builders.process_subgraph_schemas(subgraphs, &mut intra_source_builder)?;
+
     let mut graph = intra_source_builder.graph;
 
     let supergraph_query_type_pos = ObjectTypeDefinitionPosition {
@@ -92,6 +93,21 @@ pub(crate) struct IntraSourceQueryGraphBuilder {
         IndexMap<CompositeTypeDefinitionPosition, IndexSet<SelfConditionIndex>>,
     source_ids: IndexSet<SourceId>,
     source_kind: Option<SourceKind>,
+}
+
+#[cfg(test)]
+impl IntraSourceQueryGraphBuilder {
+    pub(crate) fn construct(
+        supergraph_schema: ValidFederationSchema,
+        api_schema: ValidFederationSchema,
+        is_for_query_planning: bool,
+    ) -> Self {
+        Self::new(supergraph_schema, api_schema, is_for_query_planning)
+    }
+
+    pub(crate) fn get_graph(&self) -> &FederatedQueryGraph {
+        &self.graph
+    }
 }
 
 impl IntraSourceQueryGraphBuilder {

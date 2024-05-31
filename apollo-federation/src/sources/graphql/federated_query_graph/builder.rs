@@ -27,8 +27,6 @@ use crate::sources::source::federated_query_graph::EnumNode;
 use crate::sources::source::federated_query_graph::ScalarNode;
 use crate::ValidFederationSubgraph;
 
-use super::{ConcreteFieldEdge, TypeConditionEdge};
-
 #[derive(Default)]
 pub(crate) struct FederatedQueryGraphBuilder;
 
@@ -48,15 +46,14 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
         graph
             .subgraphs_by_source
             .insert(src_id.clone(), subgraph.clone());
-        let mut existing_types: HashMap<OutputTypeDefinitionPosition, NodeIndex> = HashMap::new();
+        let mut existing_types = HashMap::new();
         let mut sub_builder = builder.add_source(src_id.into())?;
         for root_kind in SchemaRootDefinitionKind::iter() {
             let position = SchemaRootDefinitionPosition { root_kind };
             let Some(position) = position.try_get(schema.schema()) else {
                 continue;
             };
-            let ty: OutputTypeDefinitionPosition =
-                schema.get_type(position.name.clone())?.try_into()?;
+            let ty = schema.get_type(position.name.clone())?.try_into()?;
             if is_source_entering_type_ignored(&ty, schema)? {
                 continue;
             }
@@ -85,6 +82,8 @@ impl FederatedQueryGraphBuilderApi for FederatedQueryGraphBuilder {
     }
 }
 
+/// Processes types that are entry points to a particular subgraph (i.e. root type and object
+/// entities).
 fn process_type(
     output_type_definition_position: OutputTypeDefinitionPosition,
     subgraph_schema: &ValidFederationSchema,
@@ -220,4 +219,16 @@ fn is_source_entering_type_ignored(
     ty.field_positions(subgraph_schema.schema())?
         .map(|field| is_field_ignored(field.into(), subgraph_schema))
         .process_results(|mut results| results.all(|b| b))
+}
+
+#[cfg(test)]
+mod tests {
+    // TODO: Tests have not been written for this code. Schemas should be written to test for:
+    //  - the ability to handle basic types
+    //  - that no infinite loops are created
+    //  - correct handling of abstract types and enums
+    //  - checking that unreachable types are not in the query graph, i.e. if you have this schema
+    //    > Foo @key() { id: ID! }
+    //    > Bar { id: ID! } // Unreachable
+    //    > Query { foo: Foo }
 }
