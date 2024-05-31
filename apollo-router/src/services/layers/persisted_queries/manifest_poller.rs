@@ -670,7 +670,9 @@ mod tests {
     use url::Url;
 
     use super::*;
-    use crate::configuration::{Apq, PersistedQueries, PersistedQueriesSafelist};
+    use crate::configuration::Apq;
+    use crate::configuration::PersistedQueries;
+    use crate::configuration::PersistedQueriesSafelist;
     use crate::test_harness::mocks::persisted_queries::*;
     use crate::uplink::Endpoints;
 

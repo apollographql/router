@@ -80,7 +80,7 @@ persisted_queries:
 
 #### `local_manifest`
 
-Adding `local_manifest` to your `safelist` configuration allows you to use a local persisted query manifest in place of the hosted Uplink version. This is useful when you have an offline Enterprise license and are unable to use Uplink.
+Adding `local_manifest` to your `safelist` configuration allows you to use a local persisted query manifest in place of the hosted Uplink version. This is useful when you have an offline Enterprise license and are unable to use Uplink. This configuration option cause the router to not reload the manifest from the file system, so you will need to restart the router to apply changes.
 
 ```yaml title="router.yaml"
 persisted_queries:

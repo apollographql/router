@@ -39,7 +39,7 @@ impl PersistedQueries {
             log_unknown: log_unknown.unwrap_or_else(default_log_unknown),
             experimental_prewarm_query_plan_cache: experimental_prewarm_query_plan_cache
                 .unwrap_or_else(default_prewarm_query_plan_cache),
-            local_manifest: local_manifest,
+            local_manifest,
         }
     }
 }
