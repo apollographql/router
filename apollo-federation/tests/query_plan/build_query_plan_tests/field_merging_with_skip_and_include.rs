@@ -32,17 +32,17 @@ fn merging_skip_and_include_directives_with_fragment() {
         "#,
         @r###"
           QueryPlan {
-              Fetch(service: "SubgraphSkip") {
+            Fetch(service: "SubgraphSkip") {
               {
-                  hello @skip(if: $skipField) {
-                    goodbye
-                  }
-                  hello {
-                    world
-                  }
-                  extraFieldToPreventSkipIncludeNodes
+                hello @skip(if: $skipField) {
+                  goodbye
+                }
+                hello {
+                  world
+                }
+                extraFieldToPreventSkipIncludeNodes
               }
-              },
+            },
           }
         "###
     );
@@ -139,47 +139,48 @@ fn merging_skip_and_include_directives_multiple_applications_identical() {
 }
 
 #[test]
+#[should_panic(expected = "snapshot assertion")]
 fn merging_skip_and_include_directives_multiple_applications_differing_order() {
-    //     let planner = planner!(
-    //         SubgraphSkip: r#"
-    //           type Query {
-    //               hello: Hello!
-    //               extraFieldToPreventSkipIncludeNodes: String!
-    //           }
-    //
-    //           type Hello {
-    //               world: String!
-    //               goodbye: String!
-    //           }
-    //         "#,
-    //     );
-    //     assert_plan!(
-    //         &planner,
-    //         r#"
-    //           query Test($skipField: Boolean!, $includeField: Boolean!) {
-    //             hello @skip(if: $skipField) @include(if: $includeField) {
-    //               world
-    //             }
-    //             hello @include(if: $includeField) @skip(if: $skipField) {
-    //               goodbye
-    //             }
-    //             extraFieldToPreventSkipIncludeNodes
-    //           }
-    //         "#,
-    //         @r###"
-    //           QueryPlan {
-    //             Fetch(service: "SubgraphSkip") {
-    //               {
-    //                 hello @include(if: $includeField) @skip(if: $skipField) {
-    //                   world
-    //                   goodbye
-    //                 }
-    //                 extraFieldToPreventSkipIncludeNodes
-    //               }
-    //             },
-    //           }
-    //         "###
-    //     );
+    let planner = planner!(
+        SubgraphSkip: r#"
+          type Query {
+              hello: Hello!
+              extraFieldToPreventSkipIncludeNodes: String!
+          }
+    
+          type Hello {
+              world: String!
+              goodbye: String!
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query Test($skipField: Boolean!, $includeField: Boolean!) {
+            hello @skip(if: $skipField) @include(if: $includeField) {
+              world
+            }
+            hello @include(if: $includeField) @skip(if: $skipField) {
+              goodbye
+            }
+            extraFieldToPreventSkipIncludeNodes
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Fetch(service: "SubgraphSkip") {
+              {
+                hello @include(if: $includeField) @skip(if: $skipField) {
+                  world
+                  goodbye
+                }
+                extraFieldToPreventSkipIncludeNodes
+              }
+            },
+          }
+        "###
+    );
 }
 
 #[test]
