@@ -135,7 +135,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
     for (name, locations) in valid_source_names {
         if locations.len() > 1 {
             errors.push(Error {
-                message: format!("Every `@{source_directive_name}(name:)` must be unique. Found duplicate name {name}."),
+                message: format!("Every `@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)` must be unique. Found duplicate name {name}."),
                 code: ErrorCode::DuplicateSourceName,
                 locations,
             });
@@ -181,7 +181,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                     return Some(Error {
                         code: ErrorCode::SourceUrl,
                         message: format!(
-                            "The value \"{value}\" for `@{source_directive_name}(baseURL:)` is not a valid URL: {inner}.",
+                            "The value \"{value}\" for `@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)` is not a valid URL: {inner}.",
                             source_directive_name = directive.name
                         ),
                         locations: Location::from_node(arg.location(), sources)
@@ -196,7 +196,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                 return Some(Error {
                     code: ErrorCode::SourceScheme,
                     message: format!(
-                        "The value \"{value}\" for `@{source_directive_name}(baseURL:)` must be http or https, got {scheme}.",
+                        "The value \"{value}\" for `@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)` must be http or https, got {scheme}.",
                         source_directive_name = directive.name
                     ),
                     locations: Location::from_node(arg.value.location(), sources)
@@ -460,8 +460,8 @@ pub struct Error {
     pub locations: Vec<Range<Location>>,
 }
 
-/// A 0-indexed
-#[derive(Debug)]
+/// A 0-indexed line/column reference to SDL source
+#[derive(Clone, Copy, Debug)]
 pub struct Location {
     pub line: usize,
     pub column: usize,
