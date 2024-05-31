@@ -282,7 +282,7 @@ pub(crate) trait ResponseVisitor {
                     if let Some(value) = fields.get(inner_field.name.as_str()) {
                         self.visit_field(
                             request,
-                            inner_field.ty().inner_named_type(),
+                            &inner_field.ty().inner_named_type(),
                             inner_field.as_ref(),
                             value,
                         );
