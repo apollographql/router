@@ -22,10 +22,10 @@ pub(crate) struct FederatedPathTree {
     source_entering_condition_resolutions_at_node:
         IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
     condition_resolutions_at_node: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
-    childs: Vec<Arc<Child>>,
+    childs: Vec<Child>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)] // XXX(@goto-bus-stop): do we want to clone this?
 pub(crate) struct Child {
     key: ChildKey,
     self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
@@ -186,7 +186,7 @@ impl FederatedPathTree {
         let mut childs = vec![];
         for (edge, by_unique_edge) in merged {
             for (operation_element, child) in by_unique_edge.by_unique_trigger {
-                childs.push(Arc::new(Child {
+                childs.push(Child {
                     key: ChildKey {
                         operation_element,
                         edge,
@@ -199,7 +199,7 @@ impl FederatedPathTree {
                         remapped_condition_ids,
                     )?
                     .into(),
-                }))
+                })
             }
         }
 
@@ -271,16 +271,14 @@ impl FederatedPathTree {
                 .iter_mut()
                 .find(|self_child| self_child.key == other_child.key)
             {
-                *child = Arc::new(Child {
-                    key: child.key.clone(),
-                    // TODO(@goto-bus-stop): pick the lowest cost conditions
-                    self_condition_resolutions_for_edge: child
-                        .self_condition_resolutions_for_edge
-                        .clone(),
-                    tree: child
-                        .tree
-                        .merge_inner(&other_child.tree, remapped_condition_ids),
-                })
+                merge_and_remap_condition_resolution_ids(
+                    &mut child.self_condition_resolutions_for_edge,
+                    &other_child.self_condition_resolutions_for_edge,
+                    remapped_condition_ids,
+                );
+                child.tree = child
+                    .tree
+                    .merge_inner(&other_child.tree, remapped_condition_ids);
             }
         }
 
