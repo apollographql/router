@@ -234,7 +234,7 @@ impl Plugin for DemandControl {
         if !self.config.enabled {
             service
         } else {
-            let strategy = self.strategy_factory.create(false);
+            let strategy = self.strategy_factory.create();
             ServiceBuilder::new()
                 .checkpoint(move |req: execution::Request| {
                     req.context.extensions().lock().insert(strategy.clone());
@@ -553,7 +553,7 @@ mod test {
             .config(config)
             .build()
             .await;
-        let strategy = plugin.strategy_factory.create(false);
+        let strategy = plugin.strategy_factory.create();
 
         let ctx = context();
         ctx.extensions().lock().insert(strategy);
