@@ -346,8 +346,8 @@ fn write_selections(
     // Manually indent and write the newline
     // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
     state.indent_no_new_line();
-    state.write("\n")?;
     for sel in selections {
+        state.write("\n")?;
         state.write(sel.serialize().initial_indent_level(state.indent_level()))?;
     }
     state.dedent()?;
