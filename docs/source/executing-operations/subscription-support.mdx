@@ -99,7 +99,7 @@ subscription:
         path: /subscriptions # The absolute URL path to use for subgraph subscription endpoints (Default: /ws)
       subgraphs: # Overrides subscription settings for individual subgraphs
         reviews: # Overrides settings for the 'reviews' subgraph
-          path: /ws # Absolute path that overrides the '/subscriptions' path defined above
+          path: /ws # Absolute path that overrides the preceding '/subscriptions' path for 'all'
           protocol: graphql_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
           heartbeat_interval: 10s # Optional and 'disable' by default, also supports 'enable' (set 5s interval) and custom values for intervals, e.g. '100ms', '10s', '1m'.
 ```
@@ -110,7 +110,7 @@ This example enables subscriptions in **passthrough mode**, which uses long-live
 
 - Each `path` must be set as an absolute path. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the path configuration as `path: "/foo/bar/graphql/ws"`.
 - Subgraph path configurations override the path configuration for `all` subgraphs.
-- If your subgraph implementation (e.g. [DGS](https://netflix.github.io/dgs/)) can close idle connections, set `heartbest_interval` to keep the connection alive.
+- If your subgraph implementation (e.g. [DGS](https://netflix.github.io/dgs/)) can close idle connections, set `heartbeat_interval` to keep the connection alive.
 
 </Note>
 
