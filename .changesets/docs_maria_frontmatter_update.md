@@ -1,5 +1,5 @@
-### Update docs frontmatter for consistency and discoverability
+### Update docs frontmatter for consistency and discoverability ([PR #5164](https://github.com/apollographql/router/pull/5164))
 
-Makes title casing consistent. Updates page subtitles and meta descriptions for better discoverability.
+In router documentation, page titles are edited to have title casing, and page subtitles and meta descriptions are updated for better discoverability.
 
 By [@Meschreiber](https://github.com/@Meschreiber) in https://github.com/apollographql/router/pull/5164
