@@ -55,9 +55,10 @@ impl PrettyPrintable for JSONSelection {
 impl PrettyPrintable for SubSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
+        let indent = indent_chars(indentation);
 
         if !inline {
-            result.push_str(indent_chars(indentation).as_str());
+            result.push_str(indent.as_str());
         }
 
         result.push_str("{\n");
@@ -74,7 +75,7 @@ impl PrettyPrintable for SubSelection {
             result.push('\n');
         }
 
-        result.push_str(indent_chars(indentation).as_str());
+        result.push_str(indent.as_str());
         result.push('}');
 
         result
