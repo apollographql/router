@@ -701,6 +701,10 @@ impl Selection {
         inline_fragment: InlineFragment,
         sub_selections: SelectionSet,
     ) -> Self {
+        assert_eq!(
+            inline_fragment.data().casted_type(),
+            sub_selections.type_position
+        );
         let inline_fragment_selection = InlineFragmentSelection {
             inline_fragment,
             selection_set: sub_selections,
