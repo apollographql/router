@@ -4070,6 +4070,8 @@ impl InlineFragmentSelection {
                 Some(ref c) => self.inline_fragment.data().schema == *schema && c == parent_type,
             };
             if useless_fragment || parent_type.is_object_type() {
+                // Try to skip this fragment and normalize self.selection_set with `parent_type`,
+                // instead of its original type.
                 let normalized_selection_set =
                     self.selection_set
                         .normalize(parent_type, named_fragments, schema, option)?;
@@ -5214,6 +5216,18 @@ pub(crate) fn normalize_operation(
     let mut normalized_selection_set =
         SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)?;
     normalized_selection_set = normalized_selection_set.expand_all_fragments()?;
+    // We clear up the fragments since we've expanded all.
+    // Also note that expanding fragment usually generate unnecessary fragments/inefficient
+    // selections, so it basically always make sense to normalize afterwards. Besides, fragment
+    // reuse (done by `optimize`) rely on the fact that its input is normalized to work properly,
+    // so all the more reason to do it here.
+    // PORT_NOTE: This was done in `Operation.expandAllFragments`, but it's moved here.
+    normalized_selection_set = normalized_selection_set.normalize(
+        &normalized_selection_set.type_position,
+        &named_fragments,
+        schema,
+        NormalizeSelectionOption::NormalizeRecursively,
+    )?;
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
 
     let normalized_operation = Operation {
@@ -7547,5 +7561,68 @@ type T {
             .unwrap();
 
         insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d } } } }"#);
+    }
+
+    #[test]
+    fn test_expand_all_fragments1() {
+        let operation_with_named_fragment = r#"
+          type Query {
+            i1: I
+            i2: I
+          }
+
+          interface I {
+            a: Int
+            b: Int
+          }
+
+          type T implements I {
+            a: Int
+            b: Int
+          }
+
+          query {
+            i1 {
+              ... on T {
+                ...Frag
+              }
+            }
+            i2 {
+              ... on T {
+                ...Frag
+              }
+            }
+          }
+
+          fragment Frag on I {
+            b
+          }
+        "#;
+        let (schema, executable_document) =
+            parse_schema_and_operation(operation_with_named_fragment);
+        if let Ok(operation) = executable_document.get_operation(None) {
+            let mut normalized_operation = normalize_operation(
+                operation,
+                NamedFragments::new(&executable_document.fragments, &schema),
+                &schema,
+                &IndexSet::new(),
+            )
+            .unwrap();
+            normalized_operation.named_fragments = Default::default();
+            insta::assert_snapshot!(normalized_operation, @r###"
+            {
+              i1 {
+                ... on T {
+                  b
+                }
+              }
+              i2 {
+                ... on T {
+                  b
+                }
+              }
+            }
+            "###);
+        }
     }
 }
