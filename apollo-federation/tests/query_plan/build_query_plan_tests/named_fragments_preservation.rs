@@ -569,7 +569,9 @@ fn it_preserves_directives_when_fragment_is_reused() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot add selection of field \"I.b\" to selection set of parent type \"I\"")]
+#[should_panic(
+    expected = "Cannot add selection of field \"I.b\" to selection set of parent type \"I\""
+)]
 // TODO: investigate this failure
 fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
     // Slightly artificial example for simplicity, but this highlight the problem.
@@ -648,7 +650,9 @@ fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
 }
 
 #[test]
-#[should_panic(expected = "Cannot add selection of field \"Outer.v\" to selection set of parent type \"I\"")]
+#[should_panic(
+    expected = "Cannot add selection of field \"Outer.v\" to selection set of parent type \"I\""
+)]
 // TODO: investigate this failure - snapshot mismatch (complicated)
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_differs() {
     // This test is designed such that type `Outer` implements the interface `I` in `Subgraph1`
