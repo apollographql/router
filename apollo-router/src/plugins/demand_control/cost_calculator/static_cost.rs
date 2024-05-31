@@ -28,13 +28,19 @@ use crate::response::ResponseVisitor;
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
     subgraph_schemas: Arc<SubgraphSchemas>,
+    estimate_requires: bool,
 }
 
 impl StaticCostCalculator {
-    pub(crate) fn new(subgraph_schemas: Arc<SubgraphSchemas>, list_size: u32) -> Self {
+    pub(crate) fn new(
+        subgraph_schemas: Arc<SubgraphSchemas>,
+        list_size: u32,
+        estimate_requires: bool,
+    ) -> Self {
         Self {
             list_size,
             subgraph_schemas,
+            estimate_requires,
         }
     }
 
@@ -96,17 +102,18 @@ impl StaticCostCalculator {
             executable,
         )?;
 
-        // If the field is marked with `@requires`, the required selection may not be included
-        // in the query's selection. Adding that requirement's cost to the field ensures it's
-        // accounted for.
-        let requirements =
-            RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
-        let requirements_cost = match requirements {
-            Some(selection_set) => {
-                self.score_selection_set(&selection_set, parent_type, schema, executable)?
+        let mut requirements_cost = 0.0;
+        if self.estimate_requires {
+            // If the field is marked with `@requires`, the required selection may not be included
+            // in the query's selection. Adding that requirement's cost to the field ensures it's
+            // accounted for.
+            let requirements =
+                RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
+            if let Some(selection_set) = requirements {
+                requirements_cost =
+                    self.score_selection_set(&selection_set, parent_type, schema, executable)?;
             }
-            None => 0.0,
-        };
+        }
 
         let cost = instance_count * type_cost + requirements_cost;
         tracing::debug!(
@@ -401,7 +408,7 @@ mod tests {
     fn estimated_cost(schema_str: &str, query_str: &str) -> f64 {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
-        StaticCostCalculator::new(Default::default(), 100)
+        StaticCostCalculator::new(Default::default(), 100, true)
             .estimated(&query.executable, schema.supergraph_schema())
             .unwrap()
     }
@@ -416,7 +423,7 @@ mod tests {
             "query.graphql",
         )
         .unwrap();
-        StaticCostCalculator::new(Default::default(), 100)
+        StaticCostCalculator::new(Default::default(), 100, true)
             .estimated(&query, &schema)
             .unwrap()
     }
@@ -444,6 +451,7 @@ mod tests {
         let calculator = StaticCostCalculator {
             subgraph_schemas: planner.subgraph_schemas(),
             list_size: 100,
+            estimate_requires: false,
         };
 
         calculator.planned(&query_plan).unwrap()
@@ -453,7 +461,7 @@ mod tests {
         let (_schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         let response = Response::from_bytes("test", Bytes::from(response_bytes)).unwrap();
-        StaticCostCalculator::new(Default::default(), 100)
+        StaticCostCalculator::new(Default::default(), 100, false)
             .actual(&query.executable, &response)
             .unwrap()
     }
@@ -598,10 +606,10 @@ mod tests {
         let query = include_str!("./fixtures/federated_ships_deferred_query.graphql");
         let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
 
-        let conservative_estimate = StaticCostCalculator::new(Default::default(), 100)
+        let conservative_estimate = StaticCostCalculator::new(Default::default(), 100, true)
             .estimated(&query.executable, schema.supergraph_schema())
             .unwrap();
-        let narrow_estimate = StaticCostCalculator::new(Default::default(), 5)
+        let narrow_estimate = StaticCostCalculator::new(Default::default(), 5, true)
             .estimated(&query.executable, schema.supergraph_schema())
             .unwrap();
 

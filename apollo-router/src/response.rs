@@ -248,7 +248,7 @@ pub(crate) trait ResponseVisitor {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        ty: &apollo_compiler::executable::NamedType,
+        parent_ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
     );
