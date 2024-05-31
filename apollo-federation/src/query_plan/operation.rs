@@ -2877,10 +2877,18 @@ impl SelectionSet {
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
                 let element = OpPathElement::clone(ele);
-                let selection = Selection::from_element(
-                    element,
-                    selection_set.map(|set| SelectionSet::clone(set)),
-                )?;
+                let selection_set = selection_set.map(|selection_set| {
+                        selection_set.rebase_on(
+                            &element.sub_selection_type_position()?.ok_or_else(|| {
+                                FederationError::internal("unexpected: Element has a selection set with non-composite base type")
+                            })?,
+                            &NamedFragments::default(),
+                            &self.schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )
+                    })
+                    .transpose()?;
+                let selection = Selection::from_element(element, selection_set)?;
                 let schema = self.schema.clone();
                 let parent_type_position = self.type_position.clone();
                 // TODO move the rebasing to add_selection/merge_into
