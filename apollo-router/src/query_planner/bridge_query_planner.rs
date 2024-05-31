@@ -30,6 +30,7 @@ use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::apollo_studio_interop::SignatureNormalizationAlgorithm;
 use crate::apollo_studio_interop::UsageReportingComparisonResult;
 use crate::configuration::ApolloMetricsGenerationMode;
+use crate::configuration::ApolloSignatureNormalizationAlgorithm;
 use crate::configuration::QueryPlannerMode;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
