@@ -1,0 +1,8 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      router:
+        http.server.request.duration:
+          attributes:
+            error.type: true

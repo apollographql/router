@@ -1,0 +1,89 @@
+# Composed from subgraphs with hash: e0dfa4222558f28e0ecb3e26077458471e69267b
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type A1 implements Foo
+  @join__implements(graph: SUBGRAPH1, interface: "Foo")
+  @join__type(graph: SUBGRAPH1)
+{
+  foo: String
+  child: Foo
+  child2: Foo
+}
+
+type A2 implements Foo
+  @join__implements(graph: SUBGRAPH1, interface: "Foo")
+  @join__type(graph: SUBGRAPH1)
+{
+  foo: String
+  child: Foo
+  child2: Foo
+}
+
+type A3 implements Foo
+  @join__implements(graph: SUBGRAPH1, interface: "Foo")
+  @join__type(graph: SUBGRAPH1)
+{
+  foo: String
+  child: Foo
+  child2: Foo
+}
+
+union Anything
+  @join__type(graph: SUBGRAPH1)
+  @join__unionMember(graph: SUBGRAPH1, member: "A1")
+  @join__unionMember(graph: SUBGRAPH1, member: "A2")
+  @join__unionMember(graph: SUBGRAPH1, member: "A3")
+ = A1 | A2 | A3
+
+interface Foo
+  @join__type(graph: SUBGRAPH1)
+{
+  foo: String
+  child: Foo
+  child2: Foo
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH1)
+{
+  a: Anything
+}

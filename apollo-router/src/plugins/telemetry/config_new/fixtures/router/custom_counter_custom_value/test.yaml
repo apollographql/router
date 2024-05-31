@@ -1,0 +1,13 @@
+description: Custom counter that gets a value from a header
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          count_header: 10
+        body: |
+          hello
+    - router_response:
+        body: |
+          hello
+        status: 200

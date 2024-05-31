@@ -1,0 +1,25 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom histogram with value from custom header
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          custom.histogram:
+            description: histogram of requests
+            type: histogram
+            unit: unit
+            value:
+              request_header: count_header
+---
+- name: custom.histogram
+  description: histogram of requests
+  unit: unit
+  data:
+    datapoints:
+      - sum: 10
+        attributes: {}

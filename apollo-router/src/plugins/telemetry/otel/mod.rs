@@ -26,4 +26,7 @@ pub(crate) struct OtelData {
 
     /// Attributes gathered for the next event
     pub(crate) event_attributes: Option<OrderMap<Key, Value>>,
+
+    /// Forced status in case it's coming from the custom attributes
+    pub(crate) forced_status: Option<opentelemetry::trace::Status>,
 }

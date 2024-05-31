@@ -1411,9 +1411,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.11.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4ca5674d1f48a1788aae6124e87949474ab1560efb1a02a0f63a0ce9e845f0a"
+checksum = "ad9211604c79bf86afd55f798b3c105607f87bd08a9edbf71b22785b0d53f851"
 dependencies = [
  "anyhow",
  "auth-git2",
@@ -5776,9 +5776,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.24+v2.8.0-alpha.1"
+version = "0.5.25+v2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a4b92a40b68c797d2d624716d5671e80de578f00c5012af37f19c74b175566b"
+checksum = "9ecf6c55973979655b1aa34bbc0e62766f937c1f95c4eb3fa07d16f50cb4d63c"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -5900,6 +5900,7 @@ version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cb0a25bfbb2d4b4402179c2cf030387d9990857ce08a32592c6238db9fa8665"
 dependencies = [
+ "globset",
  "sha2",
  "walkdir",
 ]
@@ -6036,9 +6037,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.18"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0afe01b987fac84253ce8acd5c05af9941975e4dee5b4f2d826b6947be8ec2c7"
+checksum = "09c024468a378b7e36765cd36702b7a90cc3cba11654f6685c8f233408e89e92"
 dependencies = [
  "dyn-clone",
  "schemars_derive",
@@ -6049,9 +6050,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.18"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d253e72f060451e9e5615a1686f3cb4ff87c4e70504c79bdab8fb3b010cd4e97"
+checksum = "b1eee588578aff73f856ab961cd2f79e36bc45d7ded33a7562adba4667aecc0e"
 dependencies = [
  "proc-macro2 1.0.76",
  "quote 1.0.35",

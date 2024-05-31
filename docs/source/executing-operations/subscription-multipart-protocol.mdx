@@ -1,6 +1,7 @@
 ---
-title: Multipart HTTP protocol for GraphQL subscriptions
-description: For GraphQL clients communicating with the Apollo Router
+title: Multipart HTTP protocol for GraphQL Subscriptions
+subtitle: Enable clients to receive real-time updates via multipart HTTP protocol
+description: Enable real-time updates via multipart HTTP protocol for GraphQL subscriptions with the Apollo Router. Learn about execution, heartbeats, and error handling.
 ---
 
 To execute GraphQL subscription operations on the Apollo Router, client apps do _not_ communicate over WebSocket. Instead, they use **HTTP with multipart responses**. This multipart protocol is built on the same [Incremental Delivery over HTTP](https://github.com/graphql/graphql-over-http/blob/main/rfcs/IncrementalDelivery.md) spec that the Apollo Router uses to support [the `@defer` directive](./defer-support/).
