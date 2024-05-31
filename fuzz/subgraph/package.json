@@ -1,8 +1,5 @@
 {
   "name": "everything-subgraph",
-  "workspaces": [
-    "services/*"
-  ],
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js"
