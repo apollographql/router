@@ -63,7 +63,7 @@ static RESERVED_HEADERS: [HeaderName; 14] = [
 
 // temporary while we're refactoring the modules
 #[allow(clippy::module_inception)]
-pub(super) mod http_json_transport {
+pub(crate) mod http_json_transport {
     use apollo_federation::sources::connect::HttpJsonTransport;
     use url::Url;
 

@@ -11,6 +11,8 @@ use crate::http_ext;
 pub use crate::http_ext::TryIntoHeaderName;
 pub use crate::http_ext::TryIntoHeaderValue;
 pub use crate::query_planner::OperationKind;
+pub(crate) use crate::services::connect::Request as ConnectRequest;
+pub(crate) use crate::services::connect::Response as ConnectResponse;
 pub(crate) use crate::services::execution::Request as ExecutionRequest;
 pub(crate) use crate::services::execution::Response as ExecutionResponse;
 pub(crate) use crate::services::fetch::Request as FetchRequest;
@@ -25,6 +27,8 @@ pub(crate) use crate::services::supergraph::service::SupergraphCreator;
 pub(crate) use crate::services::supergraph::Request as SupergraphRequest;
 pub(crate) use crate::services::supergraph::Response as SupergraphResponse;
 
+pub(crate) mod connect;
+pub(crate) mod connector_service;
 pub mod execution;
 pub(crate) mod external;
 pub(crate) mod fetch;
