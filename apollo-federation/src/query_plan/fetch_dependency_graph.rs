@@ -3494,7 +3494,7 @@ fn inputs_for_require(
                     &input_type_name
                 )))
             },
-            |t| Ok(t),
+            Ok,
         )?;
     let mut full_selection_set = SelectionSet::for_composite_type(
         fetch_dependency_graph.supergraph_schema.clone(),
