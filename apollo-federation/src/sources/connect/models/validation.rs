@@ -181,8 +181,8 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                     return Some(Error {
                         code: ErrorCode::SourceUrl,
                         message: format!(
-                            "The value \"{value}\" for `@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)` is not a valid URL: {inner}.",
-                            source_directive_name = directive.name
+                            "The value \"{value}\" for {coordinate} is not a valid URL: {inner}.",
+                            coordinate = source_base_url_argument_coordinate(&directive.name),
                         ),
                         locations: Location::from_node(arg.location(), sources)
                             .into_iter()
@@ -196,8 +196,8 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                 return Some(Error {
                     code: ErrorCode::SourceScheme,
                     message: format!(
-                        "The value \"{value}\" for `@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)` must be http or https, got {scheme}.",
-                        source_directive_name = directive.name
+                        "The value \"{value}\" for {coordinate} must be http or https, got {scheme}.",
+                        coordinate = source_base_url_argument_coordinate(&directive.name),
                     ),
                     locations: Location::from_node(arg.value.location(), sources)
                         .into_iter()
@@ -261,24 +261,20 @@ fn validate_object_fields(
             // TODO: return errors when a field is not resolvable by some combination of `@connect`
             continue;
         };
-        let Some((source_name, source_name_value)) =
-            connect_directive.arguments.iter().find_map(|arg| {
-                if arg.name == CONNECT_SOURCE_ARGUMENT_NAME {
-                    arg.value.as_str().map(|value| (arg, value))
-                } else {
-                    None
-                }
-            })
+        let Some(source_name) = connect_directive
+            .arguments
+            .iter()
+            .find(|arg| arg.name == CONNECT_SOURCE_ARGUMENT_NAME)
         else {
             // TODO: handle direct http connects, not just named sources
             continue;
         };
 
-        if source_names.iter().all(|name| name != source_name_value) {
+        if source_names.iter().all(|name| name != &source_name.value) {
             // TODO: Pick a suggestion that's not just the first defined source
             let qualified_directive = connect_directive_coordinate(
                 connect_directive_name,
-                source_name_value,
+                &source_name.value,
                 &object.name,
                 &field.name,
             );
@@ -288,9 +284,8 @@ fn validate_object_fields(
                     )
             } else {
                 format!(
-                        "{qualified_directive} specifies a source, but none are defined. Try adding `@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\")` to the schema.",
-                        source_directive_name = source_directive_name,
-                        source_name_value = source_name_value,
+                        "{qualified_directive} specifies a source, but none are defined. Try adding {coordinate} to the schema.",
+                        coordinate = source_name_value_coordinate(source_directive_name, &source_name.value),
                     )
             };
             errors.push(Error {
@@ -307,11 +302,26 @@ fn validate_object_fields(
 
 fn connect_directive_coordinate(
     connect_directive_name: &Name,
-    source: &str,
+    source: &Node<Value>,
     object: &Name,
     field: &Name,
 ) -> String {
-    format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: \"{source}\")` on `{object}.{field}`")
+    format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object}.{field}`")
+}
+
+fn source_name_argument_coordinate(source_directive_name: &DirectiveName) -> String {
+    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)`")
+}
+
+fn source_name_value_coordinate(
+    source_directive_name: &DirectiveName,
+    value: &Node<Value>,
+) -> String {
+    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`")
+}
+
+fn source_base_url_argument_coordinate(source_directive_name: &DirectiveName) -> String {
+    format!("`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`")
 }
 
 /// The `name` argument of a `@source` directive.
@@ -341,11 +351,11 @@ enum SourceName {
     },
 }
 
-type DirectiveName = String;
+type DirectiveName = Name;
 
 impl SourceName {
     fn from_directive(directive: &Component<Directive>) -> Self {
-        let directive_name = directive.name.to_string();
+        let directive_name = directive.name.clone();
         let Some(arg) = directive
             .arguments
             .iter()
@@ -387,20 +397,20 @@ impl SourceName {
                 value,
                 directive_name,
             } => Err(Error {
-                message: format!("There are invalid characters in `@{directive_name}(name: {value})`. Only alphanumeric and underscores are allowed."),
+                message: format!("There are invalid characters in {coordinate}. Only alphanumeric and underscores are allowed.", coordinate = source_name_value_coordinate(&directive_name, &value)),
                 code: ErrorCode::InvalidSourceName,
                 locations: Location::from_node(value.location(), sources).into_iter().collect(),
             }),
             Self::Empty { directive_name, value } => {
                 Err(Error {
                     code: ErrorCode::EmptySourceName,
-                    message: format!("The value for `@{directive_name}(name:)` can't be empty."),
+                    message: format!("The value for {coordinate} can't be empty.", coordinate = source_name_argument_coordinate(&directive_name))   ,
                     locations: Location::from_node(value.location(), sources).into_iter().collect(),
                 })
             }
             Self::Missing { directive_name, ast_node } => Err(Error {
                 code: ErrorCode::GraphQLError,
-                message: format!("The `@{directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)` argument is required."),
+                message: format!("The {coordinate} argument is required.", coordinate = source_name_argument_coordinate(&directive_name)),
                 locations: Location::from_node(ast_node.location(), sources).into_iter().collect()
             }),
         }
@@ -428,13 +438,13 @@ impl Display for SourceName {
     }
 }
 
-impl PartialEq<str> for SourceName {
-    fn eq(&self, other: &str) -> bool {
+impl PartialEq<Node<Value>> for SourceName {
+    fn eq(&self, other: &Node<Value>) -> bool {
         match self {
-            Self::Valid { value, .. } | Self::Invalid { value, .. } => {
-                value.as_str().is_some_and(|str_val| str_val == other)
+            Self::Valid { value, .. } | Self::Invalid { value, .. } => value == other,
+            Self::Empty { .. } | Self::Missing { .. } => {
+                other.as_str().unwrap_or_default().is_empty()
             }
-            Self::Empty { .. } | Self::Missing { .. } => other.is_empty(),
         }
     }
 }
