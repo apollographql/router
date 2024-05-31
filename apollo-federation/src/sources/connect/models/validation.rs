@@ -135,7 +135,7 @@ pub fn validate(schema: Schema) -> Vec<Error> {
     for (name, locations) in valid_source_names {
         if locations.len() > 1 {
             errors.push(Error {
-                message: format!("Every @{source_directive_name} name must be unique. Found duplicate source name {name}."),
+                message: format!("Every `@{source_directive_name}(name:)` must be unique. Found duplicate name {name}."),
                 code: ErrorCode::DuplicateSourceName,
                 locations,
             });
@@ -181,7 +181,8 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                     return Some(Error {
                         code: ErrorCode::SourceUrl,
                         message: format!(
-                            "The \"baseURL\" argument for {name} was not a valid URL: {inner}."
+                            "The value \"{value}\" for `@{source_directive_name}(baseURL:)` is not a valid URL: {inner}.",
+                            source_directive_name = directive.name
                         ),
                         locations: Location::from_node(arg.location(), sources)
                             .into_iter()
@@ -195,7 +196,8 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                 return Some(Error {
                     code: ErrorCode::SourceScheme,
                     message: format!(
-                        "The \"baseURL\" argument for {name} must be http or https, got {scheme}."
+                        "The value \"{value}\" for `@{source_directive_name}(baseURL:)` must be http or https, got {scheme}.",
+                        source_directive_name = directive.name
                     ),
                     locations: Location::from_node(arg.value.location(), sources)
                         .into_iter()
@@ -241,7 +243,7 @@ fn validate_object_fields(
         return vec![Error {
             code: ErrorCode::SubscriptionInConnectors,
             message: format!(
-                "A subscription root type is not supported when using @{connect_directive_name}."
+                "A subscription root type is not supported when using `@{connect_directive_name}`."
             ),
             locations: Location::from_node(object.location(), source_map)
                 .into_iter()
@@ -274,7 +276,7 @@ fn validate_object_fields(
 
         if source_names.iter().all(|name| name != source_name_value) {
             // TODO: Pick a suggestion that's not just the first defined source
-            let qualified_directive = qualified_connect_directive(
+            let qualified_directive = connect_directive_coordinate(
                 connect_directive_name,
                 source_name_value,
                 &object.name,
@@ -286,7 +288,7 @@ fn validate_object_fields(
                     )
             } else {
                 format!(
-                        "{qualified_directive} specifies a source, but none are defined. Try adding @{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\") to the schema.",
+                        "{qualified_directive} specifies a source, but none are defined. Try adding `@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: \"{source_name_value}\")` to the schema.",
                         source_directive_name = source_directive_name,
                         source_name_value = source_name_value,
                     )
@@ -303,25 +305,13 @@ fn validate_object_fields(
     errors
 }
 
-/// A fully qualified description of a connect directive, including where it is applied.
-///
-/// # Example
-///
-/// ```rust
-/// let qualified_directive = qualified_connect_directive("connect", "v1", "Query", "resources");
-/// assert_eq!(qualified_directive, "Query{resources @connect(source: \"v1\")}");
-/// ```
-///
-/// # A note on format
-///
-/// The syntax was chosen to match GraphQL SDL syntax as closely as possible.
-fn qualified_connect_directive(
+fn connect_directive_coordinate(
     connect_directive_name: &Name,
     source: &str,
     object: &Name,
     field: &Name,
 ) -> String {
-    format!("{object}{{{field} @{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: \"{source}\")}}")
+    format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: \"{source}\")` on `{object}.{field}`")
 }
 
 /// The `name` argument of a `@source` directive.
@@ -397,20 +387,20 @@ impl SourceName {
                 value,
                 directive_name,
             } => Err(Error {
-                message: format!("There are invalid characters in @{directive_name}(name: {value}). Only alphanumeric and underscores are allowed."),
+                message: format!("There are invalid characters in `@{directive_name}(name: {value})`. Only alphanumeric and underscores are allowed."),
                 code: ErrorCode::InvalidSourceName,
                 locations: Location::from_node(value.location(), sources).into_iter().collect(),
             }),
             Self::Empty { directive_name, value } => {
                 Err(Error {
                     code: ErrorCode::EmptySourceName,
-                    message: format!("The name argument to @{directive_name} can't be empty."),
+                    message: format!("The value for `@{directive_name}(name:)` can't be empty."),
                     locations: Location::from_node(value.location(), sources).into_iter().collect(),
                 })
             }
             Self::Missing { directive_name, ast_node } => Err(Error {
                 code: ErrorCode::GraphQLError,
-                message: format!("The @{directive_name} directive requires a \"name\" argument."),
+                message: format!("The `@{directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)` argument is required."),
                 locations: Location::from_node(ast_node.location(), sources).into_iter().collect()
             }),
         }
@@ -427,9 +417,12 @@ impl Display for SourceName {
             | Self::Invalid {
                 value,
                 directive_name,
-            } => write!(f, "@{directive_name} {value}"),
+            } => write!(
+                f,
+                "`@{directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`"
+            ),
             Self::Empty { directive_name, .. } | Self::Missing { directive_name, .. } => {
-                write!(f, "unnamed @{directive_name}")
+                write!(f, "unnamed `@{directive_name}`")
             }
         }
     }
@@ -446,9 +439,23 @@ impl PartialEq<str> for SourceName {
     }
 }
 
+/// A problem was found when validating the connectors directives.
 #[derive(Debug)]
 pub struct Error {
+    /// A unique, per-error code to allow consuming tools to take specific actions. These codes
+    /// should not change once stabilized.
     pub code: ErrorCode,
+    /// A human-readable message describing the error. These messages are not stable, tools should
+    /// not rely on them remaining the same.
+    ///
+    /// # Formatting messages
+    /// 1. Messages should be complete sentences, starting with capitalization as appropriate and
+    /// ending with punctuation.
+    /// 2. When referring to elements of the schema, use
+    /// [schema coordinates](https://github.com/graphql/graphql-wg/blob/main/rfcs/SchemaCoordinates.md)
+    /// with any additional information added as required for clarity (e.g., the value of an arg).
+    /// 3. When referring to code elements (including schema coordinates), surround them with
+    /// backticks. This clarifies that `Type.field` is not ending a sentence with its period.
     pub message: String,
     pub locations: Vec<Range<Location>>,
 }
@@ -507,7 +514,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"The "baseURL" argument for @source "v1" was not a valid URL: relative URL without a base."###);
+        assert_snapshot!(errors[0].to_string(), @r###"The value "127.0.0.1" for `@source(baseURL:)` is not a valid URL: relative URL without a base."###);
     }
 
     #[test]
@@ -516,7 +523,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"The "baseURL" argument for @source "v1" must be http or https, got file."###);
+        assert_snapshot!(errors[0].to_string(), @r###"The value "file://data.json" for `@source(baseURL:)` must be http or https, got file."###);
     }
 
     #[test]
@@ -525,7 +532,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"There are invalid characters in @source(name: "u$ers"). Only alphanumeric and underscores are allowed."###);
+        assert_snapshot!(errors[0].to_string(), @r###"There are invalid characters in `@source(name: "u$ers")`. Only alphanumeric and underscores are allowed."###);
     }
 
     #[test]
@@ -534,7 +541,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @"The name argument to @source can't be empty.");
+        assert_snapshot!(errors[0].to_string(), @"The value for `@source(name:)` can't be empty.");
     }
 
     #[test]
@@ -543,7 +550,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"Every @source name must be unique. Found duplicate source name "v1"."###);
+        assert_snapshot!(errors[0].to_string(), @r###"Every `@source(name:)` must be unique. Found duplicate name "v1"."###);
     }
 
     #[test]
@@ -552,8 +559,8 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 2);
-        assert_snapshot!(errors[0].to_string(), @r###"The "baseURL" argument for @source "u$ers" must be http or https, got ftp."###);
-        assert_snapshot!(errors[1].to_string(), @r###"There are invalid characters in @source(name: "u$ers"). Only alphanumeric and underscores are allowed."###);
+        assert_snapshot!(errors[0].to_string(), @r###"The value "ftp://127.0.0.1" for `@source(baseURL:)` must be http or https, got ftp."###);
+        assert_snapshot!(errors[1].to_string(), @r###"There are invalid characters in `@source(name: "u$ers")`. Only alphanumeric and underscores are allowed."###);
     }
 
     #[test]
@@ -562,7 +569,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"The "baseURL" argument for @api "users" was not a valid URL: relative URL without a base."###);
+        assert_snapshot!(errors[0].to_string(), @r###"The value "blahblahblah" for `@api(baseURL:)` is not a valid URL: relative URL without a base."###);
     }
 
     #[test]
@@ -571,7 +578,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"@connect(name: "v1") on Query{resources} does not match any defined sources. Did you mean @source "v2"?"###);
+        assert_snapshot!(errors[0].to_string(), @r###"`@connect(source: "v1")` on `Query.resources` does not match any defined sources. Did you mean `@source(name: "v2")`?"###);
     }
 
     #[test]
@@ -580,7 +587,7 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @r###"@connect(name: "v1") on Query{resources} specifies a source, but none are defined. Try adding @source(name: "v1") to the schema."###);
+        assert_snapshot!(errors[0].to_string(), @r###"`@connect(source: "v1")` on `Query.resources` specifies a source, but none are defined. Try adding `@source(name: "v1")` to the schema."###);
     }
 
     #[test]
@@ -589,6 +596,6 @@ mod test_validate_source {
         let schema = Schema::parse(schema, "test.graphql").unwrap();
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].to_string(), @"A subscription root type is not supported when using @connect.");
+        assert_snapshot!(errors[0].to_string(), @"A subscription root type is not supported when using `@connect`.");
     }
 }
