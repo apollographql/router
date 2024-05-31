@@ -1176,7 +1176,7 @@ mod tests {
             assert_eq!(result.source_entering_edge, source_entering_edge);
             assert_eq!(result.field_response_name.as_str(), "_simple_path_test");
             assert_eq!(result.field_arguments, IndexMap::new());
-            assert_snapshot!(result.selection.unwrap().pretty_print().unwrap(), @r###"
+            assert_snapshot!(result.selection.unwrap().pretty_print(), @r###"
             {
               a
               b
@@ -1265,7 +1265,7 @@ mod tests {
             assert_eq!(result.source_entering_edge, source_entering_edge);
             assert_eq!(result.field_response_name.as_str(), "_nested_path_test");
             assert_eq!(result.field_arguments, IndexMap::new());
-            assert_snapshot!(result.selection.unwrap().pretty_print().unwrap(), @r###"
+            assert_snapshot!(result.selection.unwrap().pretty_print(), @r###"
             {
               a
               b {
@@ -1408,7 +1408,7 @@ mod tests {
                 "_merge_nested_path_test"
             );
             assert_eq!(result.field_arguments, IndexMap::new());
-            assert_snapshot!(result.selection.unwrap().pretty_print().unwrap(), @r###"
+            assert_snapshot!(result.selection.unwrap().pretty_print(), @r###"
             .foo.bar {
               qux: .qaax
               qax: .qaax {
