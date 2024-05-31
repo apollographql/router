@@ -794,7 +794,7 @@ impl FetchDependencyGraph {
         maybe_parent_id: NodeIndex,
     ) -> Result<bool, FederationError> {
         let maybe_parent = self.node_weight(maybe_parent_id)?;
-        if !maybe_parent.is_top_level() {
+        if maybe_parent.is_top_level() {
             return Ok(false);
         }
 
@@ -1478,7 +1478,7 @@ impl FetchDependencyGraph {
         if path.is_empty() {
             mutable_node
                 .selection_set
-                .add_selections(&merged.selection_set.selection_set)?;
+                .merge_selections(&merged.selection_set.selection_set)?;
         } else {
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
             // we clean things up a bit.
@@ -1593,23 +1593,27 @@ impl FetchDependencyGraph {
         parent_type: &CompositeTypeDefinitionPosition,
         path: &Arc<OpPath>,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
-        let mut type_= parent_type.clone();
+        let mut type_ = parent_type.clone();
         for element in path.0.iter() {
             match &**element {
                 OpPathElement::Field(field) => {
                     let field_position = type_.field(field.data().name().clone())?;
                     let field_definition = field_position.get(field.data().schema.schema())?;
                     let field_type = field_definition.ty.inner_named_type();
-                    type_ =
-                        field.data().schema.get_type(field_type.clone())?.try_into().map_or_else(
-                        |_| {
-                            Err(FederationError::internal(format!(
-                                "Invalid call from {} starting at {}: {} is not composite",
-                                path, parent_type, field_position
-                            )))
-                        },
-                        Ok,
-                    )?;
+                    type_ = field
+                        .data()
+                        .schema
+                        .get_type(field_type.clone())?
+                        .try_into()
+                        .map_or_else(
+                            |_| {
+                                Err(FederationError::internal(format!(
+                                    "Invalid call from {} starting at {}: {} is not composite",
+                                    path, parent_type, field_position
+                                )))
+                            },
+                            Ok,
+                        )?;
                 }
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition_position) = &fragment.data().type_condition_position
@@ -2122,7 +2126,12 @@ impl FetchSelectionSet {
         Ok(())
     }
 
-    fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
+    // JS PORT NOTE: Since we are doing selection set modifications in place we are actually merging
+    // the selections and not adding them to the updates.
+    fn merge_selections(
+        &mut self,
+        selection_set: &Arc<SelectionSet>,
+    ) -> Result<(), FederationError> {
         let rebased_selections = selection_set.rebase_on(
             &self.selection_set.type_position,
             &NamedFragments::default(),

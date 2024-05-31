@@ -694,22 +694,16 @@ pub(crate) enum Selection {
 
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
-        let selections_without_unnecessary_fragments =
-            sub_selections.map(|s| s.without_unnecessary_fragments());
-        Self::Field(Arc::new(
-            field.with_subselection(selections_without_unnecessary_fragments),
-        ))
+        Self::Field(Arc::new(field.with_subselection(sub_selections)))
     }
 
     pub(crate) fn from_inline_fragment(
         inline_fragment: InlineFragment,
         sub_selections: SelectionSet,
     ) -> Self {
-        let selections_without_unnecessary_fragments =
-            sub_selections.without_unnecessary_fragments();
         let inline_fragment_selection = InlineFragmentSelection {
             inline_fragment,
-            selection_set: selections_without_unnecessary_fragments,
+            selection_set: sub_selections,
         };
         Self::InlineFragment(Arc::new(inline_fragment_selection))
     }
@@ -2885,6 +2879,7 @@ impl SelectionSet {
                 )?;
                 let schema = self.schema.clone();
                 let parent_type_position = self.type_position.clone();
+                // TODO move the rebasing to add_selection/merge_into
                 if let Some(rebased_selection) = selection.rebase_on(
                     &parent_type_position,
                     &NamedFragments::default(),
@@ -2897,6 +2892,7 @@ impl SelectionSet {
             // If we don't have any path, we rebase and merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
+                    // TODO move the rebasing to add_selection/merge_into
                     let schema = self.schema.clone();
                     let parent_type = self.type_position.clone();
                     let selection_type = &sel.type_position;
@@ -3302,6 +3298,7 @@ impl SelectionSet {
         self.containment(other, Default::default()).is_contained()
     }
 
+    // TODO move this logic to SelectionSet add_selection/merge_into
     /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
     /// JS code was pooling the updates and only apply those when building the final selection set.
     /// See `makeSelectionSet` method for details.
@@ -4467,14 +4464,17 @@ impl InlineFragmentSelection {
         self.containment(other, Default::default()).is_contained()
     }
 
+    /// Returns true if this inline fragment selection is "unnecessary" and should be inlined.
+    ///
+    /// Fragment is unnecessary if following are true:
+    /// * it has no applied directives
+    /// * has no type condition OR type condition is same as passed in `maybe_parent`
     fn is_unnecessary(&self, maybe_parent: &CompositeTypeDefinitionPosition) -> bool {
-        self.inline_fragment.data().directives.is_empty()
-            && self
-                .inline_fragment
-                .data()
-                .type_condition_position
-                .clone()
-                .is_some_and(|t| t == *maybe_parent)
+        let inline_fragment = self.inline_fragment.data();
+        let inline_fragment_type_condition = inline_fragment.type_condition_position.clone();
+        inline_fragment.directives.is_empty()
+            && (inline_fragment_type_condition.is_none()
+                || inline_fragment_type_condition.is_some_and(|t| t == *maybe_parent))
     }
 }
 
