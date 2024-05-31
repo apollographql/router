@@ -338,6 +338,8 @@ impl InstrumentData {
             "$..instruments.supergraph",
             opt.instruments.subgraph,
             "$..instruments.subgraph",
+            opt.instruments.graphql,
+            "$..instruments.graphql",
             opt.instruments.default_attribute_requirement_level,
             "$..instruments.default_attribute_requirement_level",
             opt.spans,

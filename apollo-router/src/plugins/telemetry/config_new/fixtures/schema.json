@@ -1,0 +1,636 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "TestDefinition",
+  "type": "object",
+  "required": [
+    "description",
+    "events"
+  ],
+  "properties": {
+    "description": {
+      "type": "string"
+    },
+    "events": {
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/definitions/Event"
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "definitions": {
+    "Event": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "context"
+          ],
+          "properties": {
+            "context": {
+              "type": "object",
+              "required": [
+                "map"
+              ],
+              "properties": {
+                "map": {
+                  "type": "object",
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "router_request"
+          ],
+          "properties": {
+            "router_request": {
+              "type": "object",
+              "required": [
+                "body",
+                "method",
+                "uri"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "method": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "router_response"
+          ],
+          "properties": {
+            "router_response": {
+              "type": "object",
+              "required": [
+                "body",
+                "status"
+              ],
+              "properties": {
+                "body": {
+                  "type": "string"
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "integer",
+                  "format": "uint16",
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "router_error"
+          ],
+          "properties": {
+            "router_error": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "supergraph_request"
+          ],
+          "properties": {
+            "supergraph_request": {
+              "type": "object",
+              "required": [
+                "method",
+                "query",
+                "uri"
+              ],
+              "properties": {
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "method": {
+                  "type": "string"
+                },
+                "query": {
+                  "type": "string"
+                },
+                "uri": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "supergraph_response"
+          ],
+          "properties": {
+            "supergraph_response": {
+              "type": "object",
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "data": true,
+                "errors": {
+                  "default": [],
+                  "type": "array",
+                  "items": true
+                },
+                "extensions": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "label": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "status": {
+                  "type": "integer",
+                  "format": "uint16",
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "subgraph_request"
+          ],
+          "properties": {
+            "subgraph_request": {
+              "type": "object",
+              "required": [
+                "query",
+                "subgraph_name"
+              ],
+              "properties": {
+                "extensions": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "operation_kind": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/definitions/OperationKind"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                },
+                "operation_name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "query": {
+                  "type": "string"
+                },
+                "subgraph_name": {
+                  "type": "string"
+                },
+                "variables": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "supergraph_error"
+          ],
+          "properties": {
+            "supergraph_error": {
+              "type": "object",
+              "required": [
+                "error"
+              ],
+              "properties": {
+                "error": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "subgraph_response"
+          ],
+          "properties": {
+            "subgraph_response": {
+              "type": "object",
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "data": true,
+                "errors": {
+                  "default": [],
+                  "type": "array",
+                  "items": true
+                },
+                "extensions": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "headers": {
+                  "default": {},
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  }
+                },
+                "status": {
+                  "type": "integer",
+                  "format": "uint16",
+                  "minimum": 0.0
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Note that this MUST not be used without first using supergraph request event",
+          "type": "object",
+          "required": [
+            "graphql_response"
+          ],
+          "properties": {
+            "graphql_response": {
+              "type": "object",
+              "properties": {
+                "data": true,
+                "errors": {
+                  "default": [],
+                  "type": "array",
+                  "items": true
+                },
+                "extensions": {
+                  "default": {},
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true
+                },
+                "path": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "description": "Note that this MUST not be used without first using supergraph request event",
+          "type": "object",
+          "required": [
+            "response_field"
+          ],
+          "properties": {
+            "response_field": {
+              "type": "object",
+              "required": [
+                "typed_value"
+              ],
+              "properties": {
+                "typed_value": {
+                  "$ref": "#/definitions/TypedValueMirror"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "OperationKind": {
+      "description": "GraphQL operation type.",
+      "type": "string",
+      "enum": [
+        "query",
+        "mutation",
+        "subscription"
+      ]
+    },
+    "TypedValueMirror": {
+      "oneOf": [
+        {
+          "type": "string",
+          "enum": [
+            "null"
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "bool"
+          ],
+          "properties": {
+            "bool": {
+              "type": "object",
+              "required": [
+                "field_name",
+                "field_type",
+                "type_name",
+                "value"
+              ],
+              "properties": {
+                "field_name": {
+                  "type": "string"
+                },
+                "field_type": {
+                  "type": "string"
+                },
+                "type_name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "boolean"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "number"
+          ],
+          "properties": {
+            "number": {
+              "type": "object",
+              "required": [
+                "field_name",
+                "field_type",
+                "type_name",
+                "value"
+              ],
+              "properties": {
+                "field_name": {
+                  "type": "string"
+                },
+                "field_type": {
+                  "type": "string"
+                },
+                "type_name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "number"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "string"
+          ],
+          "properties": {
+            "string": {
+              "type": "object",
+              "required": [
+                "field_name",
+                "field_type",
+                "type_name",
+                "value"
+              ],
+              "properties": {
+                "field_name": {
+                  "type": "string"
+                },
+                "field_type": {
+                  "type": "string"
+                },
+                "type_name": {
+                  "type": "string"
+                },
+                "value": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "list"
+          ],
+          "properties": {
+            "list": {
+              "type": "object",
+              "required": [
+                "field_name",
+                "field_type",
+                "type_name",
+                "values"
+              ],
+              "properties": {
+                "field_name": {
+                  "type": "string"
+                },
+                "field_type": {
+                  "type": "string"
+                },
+                "type_name": {
+                  "type": "string"
+                },
+                "values": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/definitions/TypedValueMirror"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "object"
+          ],
+          "properties": {
+            "object": {
+              "type": "object",
+              "required": [
+                "field_name",
+                "field_type",
+                "type_name",
+                "values"
+              ],
+              "properties": {
+                "field_name": {
+                  "type": "string"
+                },
+                "field_type": {
+                  "type": "string"
+                },
+                "type_name": {
+                  "type": "string"
+                },
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/definitions/TypedValueMirror"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "root"
+          ],
+          "properties": {
+            "root": {
+              "type": "object",
+              "required": [
+                "values"
+              ],
+              "properties": {
+                "values": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "$ref": "#/definitions/TypedValueMirror"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  }
+}

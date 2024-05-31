@@ -1,0 +1,12 @@
+---
+source: apollo-router/src/uplink/license_enforcement.rs
+expression: report.to_string()
+---
+Schema features:
+* @context
+  https://specs.apollo.dev/context/v0.1
+
+* @join__field.contextArguments
+  https://specs.apollo.dev/join/v0.5
+
+The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.

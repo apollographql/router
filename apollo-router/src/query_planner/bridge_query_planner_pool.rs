@@ -197,8 +197,7 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
             f64_histogram!(
                 "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
-                start.elapsed().as_secs_f64(),
-                []
+                start.elapsed().as_secs_f64()
             );
 
             res

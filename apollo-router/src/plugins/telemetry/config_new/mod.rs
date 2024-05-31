@@ -2,12 +2,14 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
+use opentelemetry_api::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
 
 use super::otel::OpenTelemetrySpanExt;
 use super::otlp::TelemetryDataKind;
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::Context;
@@ -21,6 +23,7 @@ mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
 pub(crate) mod extendable;
+pub(crate) mod graphql;
 pub(crate) mod instruments;
 pub(crate) mod logging;
 pub(crate) mod selectors;
@@ -37,6 +40,9 @@ pub(crate) trait Selectors {
         Vec::with_capacity(0)
     }
     fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
+    fn on_response_field(&self, _typed_value: &TypedValue, _ctx: &Context) -> Vec<KeyValue> {
+        Vec::with_capacity(0)
+    }
 }
 
 pub(crate) trait Selector {
@@ -54,6 +60,17 @@ pub(crate) trait Selector {
         None
     }
     fn on_error(&self, error: &BoxError) -> Option<opentelemetry::Value>;
+    fn on_response_field(
+        &self,
+        _typed_value: &TypedValue,
+        _ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        None
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        None
+    }
 }
 
 pub(crate) trait DefaultForLevel {
@@ -186,6 +203,14 @@ impl From<opentelemetry::Value> for AttributeValue {
 
 #[cfg(test)]
 mod test {
+    use std::sync::OnceLock;
+
+    use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::ast::Type;
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::Node;
+    use apollo_compiler::NodeStr;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
@@ -202,6 +227,28 @@ mod test {
     use crate::plugins::telemetry::config_new::DatadogId;
     use crate::plugins::telemetry::config_new::ToOtelValue;
     use crate::plugins::telemetry::otel;
+
+    pub(crate) fn field() -> &'static Field {
+        static FIELD: OnceLock<Field> = OnceLock::new();
+        FIELD.get_or_init(|| {
+            Field::new(
+                NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                Node::new(FieldDefinition {
+                    description: None,
+                    name: NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                    arguments: vec![],
+                    ty: Type::Named(NamedType::new_unchecked(NodeStr::from_static(
+                        &"field_type",
+                    ))),
+                    directives: Default::default(),
+                }),
+            )
+        })
+    }
+    pub(crate) fn ty() -> &'static NamedType {
+        static TYPE: NamedType = NamedType::new_unchecked(NodeStr::from_static(&"type_name"));
+        &TYPE
+    }
 
     #[test]
     fn dd_convert() {
