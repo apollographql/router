@@ -74,7 +74,7 @@ type Query
   @join__type(graph: REVIEWS)
 {
   me: User @join__field(graph: ACCOUNTS)
-  recommendedProducts: [Product] @join__field(graph: ACCOUNTS)
+  """recommendedProducts: [Product] @join__field(graph: ACCOUNTS)"""
   topProducts(first: Int = 5): [Product] @join__field(graph: PRODUCTS)
 }
 
