@@ -207,7 +207,7 @@ impl PersistedQueryManifestPoller {
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
     pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(local_pq_list) = config.persisted_queries.safelist.local_safelist {
+        if let Some(local_pq_list) = config.persisted_queries.local_manifest {
             tracing::info!(
                 "Loading persisted query list from local file: {}",
                 local_pq_list.clone()
@@ -229,6 +229,13 @@ impl PersistedQueryManifestPoller {
                     .into()
                 })?;
 
+            if manifest_file.format != "apollo-persisted-query-manifest" {
+                return Err("chunk format is not 'apollo-persisted-query-manifest'".into());
+            }
+
+            if manifest_file.version != 1 {
+                return Err("persisted query manifest chunk version is not 1".into());
+            }
             for operation in manifest_file.operations {
                 manifest.insert(operation.id, operation.body);
             }
@@ -753,7 +760,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn uses_local_safelist() {
+    async fn uses_local_manifest() {
         let (_, body, _) = fake_manifest();
         let id = "5678".to_string();
 
@@ -763,11 +770,8 @@ mod tests {
                 .persisted_query(PersistedQueries::new(
                     Some(true),
                     Some(false),
-                    Some(PersistedQueriesSafelist::new(
-                        Some(true),
-                        Some(true),
-                        Some("tests/fixtures/persisted-queries-manifest.json".to_string()),
-                    )),
+                    Some(PersistedQueriesSafelist::default()),
+                    Some("tests/fixtures/persisted-queries-manifest.json".to_string()),
                 ))
                 .build()
                 .unwrap(),

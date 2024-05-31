@@ -78,6 +78,16 @@ persisted_queries:
   experimental_prewarm_query_plan_cache: true # default: false
 ```
 
+#### `local_manifest`
+
+Adding `local_manifest` to your `safelist` configuration allows you to use a local persisted query manifest in place of the hosted Uplink version. This is useful when you have an offline Enterprise license and are unable to use Uplink.
+
+```yaml title="router.yaml"
+persisted_queries:
+  enabled: true
+  local_manifest: ./persisted-query-manifest.json
+```
+
 #### `safelist`
 
 Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
@@ -111,27 +121,6 @@ persisted_queries:
   safelist:
     enabled: true
     require_id: true
-apq:
-  enabled: false
-```
-
-<Note>
-
-To enable safelisting, you _must_ turn off [automatic persisted queries](./in-memory-caching#caching-automatic-persisted-queries-apq) (APQs). APQs let clients [register arbitrary operations at runtime](/graphos/operations/persisted-queries/#differences-from-automatic-persisted-queries) while safelisting restricts operations to those that have been explicitly registered.
-
-</Note>
-
-
-#### `local_safelist`
-
-Adding `local_safelist` to your `safelist` configuration allows you to use a local persisted query manifest in place of the hosted Uplink version. This is useful when you have an offline Enterprise license and are unable to use Uplink.
-
-```yaml title="router.yaml"
-persisted_queries:
-  enabled: true
-  safelist:
-    enabled: true
-    local_safelist: ./persisted-query-manifest.json
 apq:
   enabled: false
 ```

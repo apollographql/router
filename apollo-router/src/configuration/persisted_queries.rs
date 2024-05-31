@@ -17,6 +17,9 @@ pub struct PersistedQueries {
 
     /// Experimental feature to prewarm the query plan cache with persisted queries
     pub experimental_prewarm_query_plan_cache: bool,
+
+    /// Enables using a local copy of the persisted query manifest to safelist operations
+    pub local_manifest: Option<String>,
 }
 
 #[cfg(test)]
@@ -28,6 +31,7 @@ impl PersistedQueries {
         log_unknown: Option<bool>,
         safelist: Option<PersistedQueriesSafelist>,
         experimental_prewarm_query_plan_cache: Option<bool>,
+        local_manifest: Option<String>,
     ) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_pq),
@@ -35,6 +39,7 @@ impl PersistedQueries {
             log_unknown: log_unknown.unwrap_or_else(default_log_unknown),
             experimental_prewarm_query_plan_cache: experimental_prewarm_query_plan_cache
                 .unwrap_or_else(default_prewarm_query_plan_cache),
+            local_manifest: local_manifest,
         }
     }
 }
@@ -48,24 +53,16 @@ pub struct PersistedQueriesSafelist {
 
     /// Enabling this field configures the router to reject any request that does not include the persisted query ID
     pub require_id: bool,
-
-    /// Enables using a local copy of the persisted query list to safelist operations
-    pub local_safelist: Option<String>,
 }
 
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl PersistedQueriesSafelist {
     #[builder]
-    pub(crate) fn new(
-        enabled: Option<bool>,
-        require_id: Option<bool>,
-        local_safelist: Option<String>,
-    ) -> Self {
+    pub(crate) fn new(enabled: Option<bool>, require_id: Option<bool>) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_safelist),
             require_id: require_id.unwrap_or_else(default_require_id),
-            local_safelist: local_safelist,
         }
     }
 }
@@ -77,6 +74,7 @@ impl Default for PersistedQueries {
             safelist: PersistedQueriesSafelist::default(),
             log_unknown: default_log_unknown(),
             experimental_prewarm_query_plan_cache: default_prewarm_query_plan_cache(),
+            local_manifest: None,
         }
     }
 }
@@ -86,7 +84,6 @@ impl Default for PersistedQueriesSafelist {
         Self {
             enabled: default_safelist(),
             require_id: default_require_id(),
-            local_safelist: None,
         }
     }
 }
