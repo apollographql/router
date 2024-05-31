@@ -245,6 +245,14 @@ impl IncrementalResponse {
 }
 
 pub(crate) trait ResponseVisitor {
+    fn visit_field(
+        &mut self,
+        request: &apollo_compiler::ExecutableDocument,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+    );
+
     fn visit(&mut self, request: &apollo_compiler::ExecutableDocument, response: &Response) {
         if response.path.is_some() {
             // TODO: In this case, we need to find the selection inside `request` corresponding to the path so we can start zipping.
@@ -293,14 +301,6 @@ pub(crate) trait ResponseVisitor {
             }
         }
     }
-
-    fn visit_field(
-        &mut self,
-        request: &apollo_compiler::ExecutableDocument,
-        ty: &apollo_compiler::executable::NamedType,
-        field: &apollo_compiler::executable::Field,
-        value: &Value,
-    );
 }
 
 #[cfg(test)]

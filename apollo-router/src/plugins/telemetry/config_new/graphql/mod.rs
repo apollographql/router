@@ -242,7 +242,7 @@ impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
         match value {
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, ty, field, item);
+                    self.visit_field(request, field.ty().inner_named_type(), field, item);
                 }
             }
             Value::Object(children) => {
