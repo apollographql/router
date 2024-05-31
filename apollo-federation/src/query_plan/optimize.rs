@@ -1172,11 +1172,7 @@ impl InlineFragmentSelection {
         // above, this recursion will "ignore" those as `FragmentSpreadSelection`'s `optimize()` is
         // a no-op).
         optimized = optimized.optimize(fragments, validator)?;
-        Ok(InlineFragmentSelection {
-            inline_fragment: self.inline_fragment.clone(),
-            selection_set: optimized,
-        }
-        .into())
+        Ok(InlineFragmentSelection::new(self.inline_fragment.clone(), optimized).into())
     }
 }
 

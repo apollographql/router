@@ -375,10 +375,10 @@ pub(crate) mod normalized_selection_map {
                     {
                         Cow::Borrowed(_) => Cow::Borrowed(selection),
                         Cow::Owned(selection_set) => Cow::Owned(Selection::InlineFragment(
-                            Arc::new(InlineFragmentSelection {
-                                inline_fragment: fragment.inline_fragment.clone(),
+                            Arc::new(InlineFragmentSelection::new(
+                                fragment.inline_fragment.clone(),
                                 selection_set,
-                            }),
+                            )),
                         )),
                     },
                     Selection::FragmentSpread(_) => {
@@ -697,21 +697,6 @@ impl Selection {
         Self::Field(Arc::new(field.with_subselection(sub_selections)))
     }
 
-    pub(crate) fn from_inline_fragment(
-        inline_fragment: InlineFragment,
-        sub_selections: SelectionSet,
-    ) -> Self {
-        debug_assert_eq!(
-            inline_fragment.data().casted_type(),
-            sub_selections.type_position
-        );
-        let inline_fragment_selection = InlineFragmentSelection {
-            inline_fragment,
-            selection_set: sub_selections,
-        };
-        Self::InlineFragment(Arc::new(inline_fragment_selection))
-    }
-
     pub(crate) fn from_element(
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
@@ -726,7 +711,7 @@ impl Selection {
                         "unexpected inline fragment without sub-selections",
                     ));
                 };
-                Ok(Self::from_inline_fragment(inline_fragment, sub_selections))
+                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
             }
         }
     }
@@ -1535,16 +1520,19 @@ impl FragmentSpreadSelection {
             return if expanded_selection_set.selections.is_empty() {
                 Ok(None)
             } else {
-                Ok(Some(Selection::from_inline_fragment(
-                    InlineFragment::new(InlineFragmentData {
-                        schema: schema.clone(),
-                        parent_type_position: parent_type.clone(),
-                        type_condition_position: None,
-                        directives: Default::default(),
-                        selection_id: SelectionId::new(),
-                    }),
-                    expanded_selection_set,
-                )))
+                Ok(Some(
+                    InlineFragmentSelection::new(
+                        InlineFragment::new(InlineFragmentData {
+                            schema: schema.clone(),
+                            parent_type_position: parent_type.clone(),
+                            type_condition_position: None,
+                            directives: Default::default(),
+                            selection_id: SelectionId::new(),
+                        }),
+                        expanded_selection_set,
+                    )
+                    .into(),
+                ))
             };
         }
 
@@ -2380,10 +2368,13 @@ impl SelectionSet {
                     }
                 }
                 Selection::InlineFragment(inline_selection) => {
-                    destination.push(Selection::from_inline_fragment(
-                        inline_selection.inline_fragment.clone(),
-                        inline_selection.selection_set.expand_all_fragments()?,
-                    ));
+                    destination.push(
+                        InlineFragmentSelection::new(
+                            inline_selection.inline_fragment.clone(),
+                            inline_selection.selection_set.expand_all_fragments()?,
+                        )
+                        .into(),
+                    );
                 }
             }
         }
@@ -4061,6 +4052,17 @@ impl<'a> FragmentSpreadSelectionValue<'a> {
 }
 
 impl InlineFragmentSelection {
+    pub(crate) fn new(inline_fragment: InlineFragment, selection_set: SelectionSet) -> Self {
+        debug_assert_eq!(
+            inline_fragment.data().casted_type(),
+            selection_set.type_position
+        );
+        Self {
+            inline_fragment,
+            selection_set,
+        }
+    }
+
     /// Copies inline fragment selection and assigns it a new unique selection ID.
     pub(crate) fn with_unique_id(&self) -> Self {
         let mut data = self.inline_fragment.data().clone();
@@ -4090,20 +4092,19 @@ impl InlineFragmentSelection {
             } else {
                 None
             };
-        Ok(InlineFragmentSelection {
-            inline_fragment: InlineFragment::new(InlineFragmentData {
-                schema: schema.clone(),
-                parent_type_position: parent_type_position.clone(),
-                type_condition_position,
-                directives: Arc::new(inline_fragment.directives.clone()),
-                selection_id: SelectionId::new(),
-            }),
-            selection_set: SelectionSet::from_selection_set(
-                &inline_fragment.selection_set,
-                fragments,
-                schema,
-            )?,
-        })
+        let new_selection_set =
+            SelectionSet::from_selection_set(&inline_fragment.selection_set, fragments, schema)?;
+        let new_inline_fragment = InlineFragment::new(InlineFragmentData {
+            schema: schema.clone(),
+            parent_type_position: parent_type_position.clone(),
+            type_condition_position,
+            directives: Arc::new(inline_fragment.directives.clone()),
+            selection_id: SelectionId::new(),
+        });
+        Ok(InlineFragmentSelection::new(
+            new_inline_fragment,
+            new_selection_set,
+        ))
     }
 
     pub(crate) fn from_fragment_spread_selection(
@@ -4111,18 +4112,20 @@ impl InlineFragmentSelection {
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let fragment_spread_data = fragment_spread_selection.spread.data();
-        Ok(InlineFragmentSelection {
-            inline_fragment: InlineFragment::new(InlineFragmentData {
+        // Note: We assume that fragment_spread_data.type_condition_position is the same as
+        //       fragment_spread_selection.selection_set.type_position.
+        Ok(InlineFragmentSelection::new(
+            InlineFragment::new(InlineFragmentData {
                 schema: fragment_spread_data.schema.clone(),
                 parent_type_position,
                 type_condition_position: Some(fragment_spread_data.type_condition_position.clone()),
                 directives: fragment_spread_data.directives.clone(),
                 selection_id: SelectionId::new(),
             }),
-            selection_set: fragment_spread_selection
+            fragment_spread_selection
                 .selection_set
                 .expand_all_fragments()?,
-        })
+        ))
     }
 
     /// Construct a new InlineFragmentSelection out of a selection set.
@@ -4237,16 +4240,18 @@ impl InlineFragmentSelection {
                         }),
                         None,
                     );
-                    // Return `... on <rebased condition> { __typename @include(if: false) }`
+
+                    // Return `... [on <rebased condition>] { __typename @include(if: false) }`
                     let rebased_casted_type = rebased_fragment.data().casted_type();
                     return Ok(Some(SelectionOrSet::Selection(
-                        Selection::from_inline_fragment(
+                        InlineFragmentSelection::new(
                             rebased_fragment,
                             SelectionSet::from_selection(
                                 rebased_casted_type,
                                 typename_field_selection,
                             ),
-                        ),
+                        )
+                        .into(),
                     )));
                 }
             }
@@ -4309,14 +4314,15 @@ impl InlineFragmentSelection {
                 let mut mutable_selections = self.selection_set.selections.clone();
                 let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
                 final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
-                let final_inline_fragment = Selection::from_inline_fragment(
+                let final_inline_fragment: Selection = InlineFragmentSelection::new(
                     self.inline_fragment.clone(),
                     SelectionSet {
                         schema: schema.clone(),
-                        type_position: parent_type.clone(),
+                        type_position: self.inline_fragment.data().casted_type(),
                         selections: Arc::new(final_fragment_selections.clone()),
                     },
-                );
+                )
+                .into();
 
                 let mut final_selection_map = SelectionMap::new();
                 final_selection_map.insert(final_inline_fragment);
@@ -4344,10 +4350,10 @@ impl InlineFragmentSelection {
             RebaseErrorHandlingOption::ThrowError,
         )? {
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
-                Arc::new(InlineFragmentSelection {
-                    inline_fragment: rebased,
-                    selection_set: normalized_selection_set,
-                }),
+                Arc::new(InlineFragmentSelection::new(
+                    rebased,
+                    normalized_selection_set,
+                )),
             ))))
         } else {
             unreachable!("We should always be able to either rebase the inline fragment OR throw an exception");
@@ -4376,17 +4382,14 @@ impl InlineFragmentSelection {
             return Ok(None);
         };
 
-        let rebased_casted_type = rebased_fragment
-            .data()
-            .type_condition_position
-            .clone()
-            .unwrap_or(rebased_fragment.data().parent_type_position.clone());
-        if &self.inline_fragment.data().schema == schema && rebased_casted_type == *parent_type {
+        let rebased_casted_type = rebased_fragment.data().casted_type();
+        if &self.inline_fragment.data().schema == schema
+            && self.inline_fragment.data().casted_type() == rebased_casted_type
+        {
             // we are within the same schema - selection set does not have to be rebased
-            Ok(Some(Selection::from_inline_fragment(
-                rebased_fragment,
-                self.selection_set.clone(),
-            )))
+            Ok(Some(
+                InlineFragmentSelection::new(rebased_fragment, self.selection_set.clone()).into(),
+            ))
         } else {
             let rebased_selection_set = self.selection_set.rebase_on(
                 &rebased_casted_type,
@@ -4398,10 +4401,9 @@ impl InlineFragmentSelection {
                 // empty selection set
                 Ok(None)
             } else {
-                Ok(Some(Selection::from_inline_fragment(
-                    rebased_fragment,
-                    rebased_selection_set,
-                )))
+                Ok(Some(
+                    InlineFragmentSelection::new(rebased_fragment, rebased_selection_set).into(),
+                ))
             }
         }
     }
