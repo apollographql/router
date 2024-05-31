@@ -386,8 +386,11 @@ impl YamlRouterFactory {
         async {
             let mut builder = PluggableSupergraphServiceBuilder::new(bridge_query_planner);
             builder = builder.with_configuration(configuration.clone());
+            let http_service_factory =
+                create_http_services(&plugins, &schema, &configuration).await?;
             let subgraph_services =
-                create_subgraph_services(&plugins, &schema, &configuration).await?;
+                create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
+            builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
                 builder = if let Some(connector) = connector_subgraphs.get(&name) {
                     builder.with_subgraph_service(name.as_str(), connector.clone())
@@ -407,8 +410,8 @@ impl YamlRouterFactory {
 }
 
 pub(crate) async fn create_subgraph_services(
+    http_service_factory: &IndexMap<String, HttpClientServiceFactory>,
     plugins: &Arc<Plugins>,
-    schema: &Schema,
     configuration: &Configuration,
 ) -> Result<
     IndexMap<
@@ -427,6 +430,41 @@ pub(crate) async fn create_subgraph_services(
     >,
     BoxError,
 > {
+    let shaping = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
+        .expect("traffic shaping should always be part of the plugin list");
+
+    let subscription_plugin_conf = plugins
+        .iter()
+        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
+        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
+        .map(|p| p.config.clone());
+
+    let mut subgraph_services = IndexMap::new();
+
+    for (name, http_service_factory) in http_service_factory.iter() {
+        let subgraph_service = shaping.subgraph_service_internal(
+            name.as_ref(),
+            SubgraphService::from_config(
+                name.clone(),
+                configuration,
+                subscription_plugin_conf.clone(),
+                http_service_factory.clone(),
+            )?,
+        );
+        subgraph_services.insert(name.clone(), subgraph_service);
+    }
+
+    Ok(subgraph_services)
+}
+
+pub(crate) async fn create_http_services(
+    plugins: &Arc<Plugins>,
+    schema: &Schema,
+    configuration: &Configuration,
+) -> Result<IndexMap<String, HttpClientServiceFactory>, BoxError> {
     let tls_root_store: RootCertStore = configuration
         .tls
         .subgraph
@@ -435,19 +473,13 @@ pub(crate) async fn create_subgraph_services(
         .transpose()?
         .unwrap_or_else(crate::services::http::HttpClientService::native_roots_store);
 
-    let subscription_plugin_conf = plugins
-        .iter()
-        .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
-        .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
-        .map(|p| p.config.clone());
-
     let shaping = plugins
         .iter()
         .find(|i| i.0.as_str() == APOLLO_TRAFFIC_SHAPING)
         .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<TrafficShaping>())
         .expect("traffic shaping should always be part of the plugin list");
 
-    let mut subgraph_services = IndexMap::new();
+    let mut http_services = IndexMap::new();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,
@@ -458,20 +490,9 @@ pub(crate) async fn create_subgraph_services(
 
         let http_service_factory =
             HttpClientServiceFactory::new(Arc::new(http_service), plugins.clone());
-
-        let subgraph_service = shaping.subgraph_service_internal(
-            name,
-            SubgraphService::from_config(
-                name,
-                configuration,
-                subscription_plugin_conf.clone(),
-                http_service_factory,
-            )?,
-        );
-        subgraph_services.insert(name.clone(), subgraph_service);
+        http_services.insert(name.clone(), http_service_factory);
     }
-
-    Ok(subgraph_services)
+    Ok(http_services)
 }
 
 impl TlsClient {
