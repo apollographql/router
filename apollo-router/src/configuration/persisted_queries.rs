@@ -48,16 +48,24 @@ pub struct PersistedQueriesSafelist {
 
     /// Enabling this field configures the router to reject any request that does not include the persisted query ID
     pub require_id: bool,
+
+    /// Enables using a local copy of the persisted query list to safelist operations
+    pub local_safelist: Option<String>,
 }
 
 #[cfg(test)]
 #[buildstructor::buildstructor]
 impl PersistedQueriesSafelist {
     #[builder]
-    pub(crate) fn new(enabled: Option<bool>, require_id: Option<bool>) -> Self {
+    pub(crate) fn new(
+        enabled: Option<bool>,
+        require_id: Option<bool>,
+        local_safelist: Option<String>,
+    ) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_safelist),
             require_id: require_id.unwrap_or_else(default_require_id),
+            local_safelist: local_safelist,
         }
     }
 }
@@ -78,6 +86,7 @@ impl Default for PersistedQueriesSafelist {
         Self {
             enabled: default_safelist(),
             require_id: default_require_id(),
+            local_safelist: None,
         }
     }
 }
