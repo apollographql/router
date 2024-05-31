@@ -4086,9 +4086,12 @@ impl InlineFragmentSelection {
         // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
         // (note that even if we're not recursive, we may still have some "lifting" to do)
         let normalized_selection_set = if NormalizeSelectionOption::NormalizeRecursively == option {
-            let normalized =
-                self.selection_set
-                    .normalize(parent_type, named_fragments, schema, option)?;
+            let normalized = self.selection_set.normalize(
+                self.casted_type(),
+                named_fragments,
+                schema,
+                option,
+            )?;
             // It could be that nothing was satisfiable.
             if normalized.is_empty() {
                 if self.inline_fragment.data().directives.is_empty() {
@@ -4125,12 +4128,13 @@ impl InlineFragmentSelection {
                         }),
                         None,
                     );
-
+                    // Return `... on <rebased condition> { __typename @include(if: false) }`
+                    let rebased_casted_type = rebased_fragment.data().casted_type();
                     return Ok(Some(SelectionOrSet::Selection(
                         Selection::from_inline_fragment(
                             rebased_fragment,
                             SelectionSet::from_selection(
-                                parent_type.clone(),
+                                rebased_casted_type,
                                 typename_field_selection,
                             ),
                         ),

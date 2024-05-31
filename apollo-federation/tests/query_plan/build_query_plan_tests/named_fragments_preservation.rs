@@ -996,8 +996,8 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
 }
 
 #[test]
-#[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
-// TODO: investigate this failure (Object type "Outer" has no field "v")
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relation_differs() {
     // This test is similar to the subtyping case (it tests the same problems), but test the case
     // of unions instead of interfaces.
