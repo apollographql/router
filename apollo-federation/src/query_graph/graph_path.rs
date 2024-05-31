@@ -1390,6 +1390,7 @@ where
     // composition, but we'll need to port that code when we port composition.
     // PORT_NOTE: In the JS codebase, this was named
     // `advancePathWithNonCollectingAndTypePreservingTransitions`.
+    #[instrument(skip_all, level = "trace")]
     fn advance_with_non_collecting_and_type_preserving_transitions(
         self: &Arc<Self>,
         context: &OpGraphPathContext,
@@ -2326,6 +2327,7 @@ impl OpGraphPath {
         skip_all,
         level = "trace",
         name = "GraphPath::advance_with_operation_element"
+        fields(label = operation_element.to_string())
     )]
     fn advance_with_operation_element(
         &self,

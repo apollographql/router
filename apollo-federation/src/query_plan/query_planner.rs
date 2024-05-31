@@ -504,10 +504,14 @@ impl QueryPlanner {
             None => None,
         };
 
-        Ok(QueryPlan {
+        let plan = QueryPlan {
             node: root_node,
             statistics: parameters.statistics,
-        })
+        };
+
+        trace!(data = &plan.to_json().to_string(), "query plan");
+
+        Ok(plan)
     }
 
     /// Get Query Planner's API Schema.
@@ -634,6 +638,10 @@ pub(crate) fn compute_root_fetch_groups(
         };
         let fetch_dependency_node =
             dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        trace!(
+            data = serde_json_bytes::json!(&dependency_graph.to_json()).to_string(),
+            "tree_with_root_node"
+        );
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,

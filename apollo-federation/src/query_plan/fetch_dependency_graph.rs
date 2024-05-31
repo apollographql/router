@@ -24,6 +24,7 @@ use petgraph::visit::EdgeRef;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
 use tracing::instrument;
+use tracing::trace;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -1915,6 +1916,10 @@ pub(crate) fn compute_nodes_for_tree(
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
+    trace!(
+        data = serde_json_bytes::json!(initial_tree.to_string()).to_string(),
+        "path_tree"
+    );
     let mut stack = vec![ComputeNodesStackItem {
         tree: initial_tree,
         node_id: initial_node_id,
@@ -2001,9 +2006,14 @@ pub(crate) fn compute_nodes_for_tree(
             }
         }
     }
+    trace!(
+        data = json!(dependency_graph.to_json()).to_string(),
+        "updated_dependency_graph"
+    );
     Ok(created_nodes)
 }
 
+#[instrument(skip_all, level = "trace")]
 fn compute_nodes_for_key_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
@@ -2159,6 +2169,7 @@ fn compute_nodes_for_key_resolution<'a>(
     })
 }
 
+#[instrument(skip_all, level = "trace")]
 fn compute_nodes_for_root_type_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'_>,
@@ -2252,6 +2263,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
     })
 }
 
+#[instrument(skip_all, level = "trace", fields(label = operation.to_string()))]
 fn compute_nodes_for_op_path_element<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
