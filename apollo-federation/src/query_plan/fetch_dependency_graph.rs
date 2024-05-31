@@ -3485,8 +3485,17 @@ fn inputs_for_require(
 
     let input_type: CompositeTypeDefinitionPosition = fetch_dependency_graph
         .supergraph_schema
-        .get_type(input_type_name)?
-        .try_into()?;
+        .get_type(input_type_name.clone())?
+        .try_into()
+        .map_or_else(
+            |_| {
+                Err(FederationError::internal(format!(
+                    "Type {} should exist in the supergraph and be a composite type",
+                    &input_type_name
+                )))
+            },
+            |t| Ok(t),
+        )?;
     let mut full_selection_set = SelectionSet::for_composite_type(
         fetch_dependency_graph.supergraph_schema.clone(),
         input_type.clone(),
