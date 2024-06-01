@@ -1484,7 +1484,7 @@ where
                 if let Some(prev_for_source) = prev_for_source {
                     if (prev_for_source.0.edges.len() < to_advance.edges.len() + 1)
                         || (prev_for_source.0.edges.len() == to_advance.edges.len() + 1
-                            && prev_for_source.1 <= 1)
+                            && prev_for_source.1 <= 1.0)
                     {
                         // We've already found another path that gets us to the same subgraph rather
                         // than the edge we're about to check. If that previous path is strictly
@@ -1643,7 +1643,7 @@ where
                                 let direct_key_edge_max_cost = last_subgraph_entering_edge_info
                                     .conditions_cost
                                     + if is_edge_to_previous_subgraph {
-                                        0
+                                        0.0
                                     } else {
                                         cost
                                     };
@@ -3731,7 +3731,7 @@ mod tests {
                 trigger,
                 Some(EdgeIndex::new(3)),
                 ConditionResolution::Satisfied {
-                    cost: 0,
+                    cost: 0.0,
                     path_tree: None,
                 },
                 None,
@@ -3756,7 +3756,7 @@ mod tests {
                 trigger,
                 Some(EdgeIndex::new(1)),
                 ConditionResolution::Satisfied {
-                    cost: 0,
+                    cost: 0.0,
                     path_tree: None,
                 },
                 None,

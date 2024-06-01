@@ -18,7 +18,7 @@ mod optimize;
 pub mod query_planner;
 pub(crate) mod query_planning_traversal;
 
-pub type QueryPlanCost = i64;
+pub type QueryPlanCost = f64;
 
 #[derive(Debug, Default)]
 pub struct QueryPlan {
