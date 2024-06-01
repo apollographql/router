@@ -701,6 +701,10 @@ impl Selection {
         inline_fragment: InlineFragment,
         sub_selections: SelectionSet,
     ) -> Self {
+        assert_eq!(
+            inline_fragment.data().casted_type(),
+            sub_selections.type_position
+        );
         let inline_fragment_selection = InlineFragmentSelection {
             inline_fragment,
             selection_set: sub_selections,
@@ -2873,10 +2877,18 @@ impl SelectionSet {
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
                 let element = OpPathElement::clone(ele);
-                let selection = Selection::from_element(
-                    element,
-                    selection_set.map(|set| SelectionSet::clone(set)),
-                )?;
+                let selection_set = selection_set.map(|selection_set| {
+                        selection_set.rebase_on(
+                            &element.sub_selection_type_position()?.ok_or_else(|| {
+                                FederationError::internal("unexpected: Element has a selection set with non-composite base type")
+                            })?,
+                            &NamedFragments::default(),
+                            &self.schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )
+                    })
+                    .transpose()?;
+                let selection = Selection::from_element(element, selection_set)?;
                 let schema = self.schema.clone();
                 let parent_type_position = self.type_position.clone();
                 // TODO move the rebasing to add_selection/merge_into
@@ -4166,6 +4178,8 @@ impl InlineFragmentSelection {
                 Some(ref c) => self.inline_fragment.data().schema == *schema && c == parent_type,
             };
             if useless_fragment || parent_type.is_object_type() {
+                // Try to skip this fragment and normalize self.selection_set with `parent_type`,
+                // instead of its original type.
                 let normalized_selection_set =
                     self.selection_set
                         .normalize(parent_type, named_fragments, schema, option)?;
@@ -4180,9 +4194,12 @@ impl InlineFragmentSelection {
         // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
         // (note that even if we're not recursive, we may still have some "lifting" to do)
         let normalized_selection_set = if NormalizeSelectionOption::NormalizeRecursively == option {
-            let normalized =
-                self.selection_set
-                    .normalize(parent_type, named_fragments, schema, option)?;
+            let normalized = self.selection_set.normalize(
+                self.casted_type(),
+                named_fragments,
+                schema,
+                option,
+            )?;
             // It could be that nothing was satisfiable.
             if normalized.is_empty() {
                 if self.inline_fragment.data().directives.is_empty() {
@@ -4219,12 +4236,13 @@ impl InlineFragmentSelection {
                         }),
                         None,
                     );
-
+                    // Return `... on <rebased condition> { __typename @include(if: false) }`
+                    let rebased_casted_type = rebased_fragment.data().casted_type();
                     return Ok(Some(SelectionOrSet::Selection(
                         Selection::from_inline_fragment(
                             rebased_fragment,
                             SelectionSet::from_selection(
-                                parent_type.clone(),
+                                rebased_casted_type,
                                 typename_field_selection,
                             ),
                         ),
@@ -5323,6 +5341,18 @@ pub(crate) fn normalize_operation(
     let mut normalized_selection_set =
         SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)?;
     normalized_selection_set = normalized_selection_set.expand_all_fragments()?;
+    // We clear up the fragments since we've expanded all.
+    // Also note that expanding fragment usually generate unnecessary fragments/inefficient
+    // selections, so it basically always make sense to normalize afterwards. Besides, fragment
+    // reuse (done by `optimize`) rely on the fact that its input is normalized to work properly,
+    // so all the more reason to do it here.
+    // PORT_NOTE: This was done in `Operation.expandAllFragments`, but it's moved here.
+    normalized_selection_set = normalized_selection_set.normalize(
+        &normalized_selection_set.type_position,
+        &named_fragments,
+        schema,
+        NormalizeSelectionOption::NormalizeRecursively,
+    )?;
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
 
     let normalized_operation = Operation {
@@ -7656,5 +7686,68 @@ type T {
             .unwrap();
 
         insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d } } } }"#);
+    }
+
+    #[test]
+    fn test_expand_all_fragments1() {
+        let operation_with_named_fragment = r#"
+          type Query {
+            i1: I
+            i2: I
+          }
+
+          interface I {
+            a: Int
+            b: Int
+          }
+
+          type T implements I {
+            a: Int
+            b: Int
+          }
+
+          query {
+            i1 {
+              ... on T {
+                ...Frag
+              }
+            }
+            i2 {
+              ... on T {
+                ...Frag
+              }
+            }
+          }
+
+          fragment Frag on I {
+            b
+          }
+        "#;
+        let (schema, executable_document) =
+            parse_schema_and_operation(operation_with_named_fragment);
+        if let Ok(operation) = executable_document.get_operation(None) {
+            let mut normalized_operation = normalize_operation(
+                operation,
+                NamedFragments::new(&executable_document.fragments, &schema),
+                &schema,
+                &IndexSet::new(),
+            )
+            .unwrap();
+            normalized_operation.named_fragments = Default::default();
+            insta::assert_snapshot!(normalized_operation, @r###"
+            {
+              i1 {
+                ... on T {
+                  b
+                }
+              }
+              i2 {
+                ... on T {
+                  b
+                }
+              }
+            }
+            "###);
+        }
     }
 }
