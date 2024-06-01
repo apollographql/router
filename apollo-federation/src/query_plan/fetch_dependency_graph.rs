@@ -24,6 +24,7 @@ use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
+use petgraph::visit::IntoNodeReferences;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -914,12 +915,29 @@ impl FetchDependencyGraph {
     }
 
     fn remove_node(&mut self, node_index: NodeIndex) {
+        self.on_modification();
         let edges_to_remove: Vec<EdgeIndex> =
             self.graph.edges(node_index).map(|edge| edge.id()).collect();
         for edge in edges_to_remove {
             self.graph.remove_edge(edge);
         }
+        // Note: Probably the `remove_edge` calls are unnecessary, as `remove_node` should remove
+        // edges as well.
         self.graph.remove_node(node_index);
+    }
+
+    /// Retain nodes that satisfy the given predicate and remove the rest.
+    fn retain_nodes(&mut self, predicate: impl Fn(&NodeIndex) -> bool) {
+        // PORT_NOTE: We let `petgraph` to handle the removal of the edges as well, while the JS
+        //            version has more code to do that itself.
+        let node_count_before = self.graph.node_count();
+        self.graph
+            .retain_nodes(|_, node_index| predicate(&node_index));
+        if self.graph.node_count() < node_count_before {
+            // PORT_NOTE: There are several different places that call `onModification` in JS. Here we
+            //            call it just once, but it should be ok, since the function is idempotent.
+            self.on_modification();
+        }
     }
 
     fn remove_child_edge(&mut self, node_index: NodeIndex, child_index: NodeIndex) {
@@ -955,6 +973,8 @@ impl FetchDependencyGraph {
         }
 
         for edge in redundant_edges {
+            // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
+            self.on_modification();
             self.graph.remove_edge(edge);
         }
     }
@@ -971,7 +991,39 @@ impl FetchDependencyGraph {
 
         self.reduce();
 
+        println!("reduce_and_optimize: reduced\n{self}");
+
+        self.remove_empty_nodes();
         // TODO Optimize: FED-55
+
+        println!("reduce_and_optimize: final\n{self}");
+    }
+
+    fn is_root_node(&self, node: &FetchDependencyGraphNode) -> bool {
+        self.root_nodes_by_subgraph
+            .contains_key(&node.subgraph_name)
+    }
+
+    fn remove_empty_nodes(&mut self) {
+        // Note: usually, empty groups are due to temporary groups created during the handling of
+        // @require and note needed. There is a special case with @defer however whereby everything
+        // in a query is deferred (not very useful in practice, but not disallowed by the spec),
+        // and in that case we will end up with an empty root group. In that case, we don't remove
+        // that group, but instead will recognize that case when processing groups later.
+
+        let is_removable = |node: &FetchDependencyGraphNode| {
+            node.selection_set.selection_set.selections.is_empty() && !self.is_root_node(node)
+        };
+        let to_remove: HashSet<NodeIndex> = self
+            .graph
+            .node_references()
+            .filter_map(|(node_index, node)| is_removable(node).then_some(node_index))
+            .collect();
+
+        if to_remove.is_empty() {
+            return; // unchanged
+        }
+        self.retain_nodes(|node_index| !to_remove.contains(node_index));
     }
 
     fn extract_children_and_deferred_dependencies(
