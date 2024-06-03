@@ -1,0 +1,13 @@
+description: Server request body size metrics
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+    - router_response:
+        headers:
+          "content-length": "35"
+        body: |
+          hello
+        status: 200

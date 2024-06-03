@@ -1,0 +1,48 @@
+telemetry:
+  instrumentation:
+    instruments:
+
+      supergraph:
+        acme.request.on_error:
+          value: unit
+          type: counter
+          unit: error
+          description: my description
+          condition:
+            not:
+              eq:
+                - 200
+                - response_status: code
+        acme.request.on_graphql_error:
+          value: event_unit
+          type: counter
+          unit: error
+          description: my description
+          condition:
+            eq:
+              - NOPE
+              - response_errors: "$.[0].extensions.code"
+          attributes:
+            response_errors:
+              response_errors: "$.*"
+        acme.request.on_graphql_data:
+          value:
+            response_data: "$.price"
+          type: counter
+          unit: "$"
+          description: my description
+          attributes:
+            response.data:
+              response_data: "$.*"
+        acme.query:
+          value: unit
+          type: counter
+          description: nb of queries
+          condition:
+            eq:
+              - query
+              - operation_kind: string
+          unit: query
+          attributes:
+            query:
+              query: string

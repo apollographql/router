@@ -1,0 +1,21 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: on_graphql_error attribute
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        router:
+          http.server.request.duration:
+            attributes:
+              on.graphql.error:
+                on_graphql_error: true
+---
+- name: http.server.request.duration
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes:
+          on.graphql.error: true
