@@ -1752,7 +1752,7 @@ mod tests {
         "#;
 
         let query = r#"
-        { 
+        {
           data {
             id
             value
@@ -1778,6 +1778,67 @@ mod tests {
         assert_ne!(
             hash(schema1, query).from_visitor,
             hash(schema3, query).from_visitor
+        );
+    }
+
+    #[test]
+    fn changing_interface_directives_changes_hash() {
+        let schema1: &str = r#"
+        directive @a(name: String) on INTERFACE
+
+        type Query {
+            data: I
+        }
+
+        interface I @a {
+            id: ID
+            value: String
+        }
+
+        type Foo implements I {
+          id: ID
+          value: String
+          foo: String
+        }
+        "#;
+
+        let schema2: &str = r#"
+        directive @a(name: String) on INTERFACE
+
+        type Query {
+            data: I
+        }
+
+        interface I  @a(name: "abc") {
+            id: ID
+            value: String
+        }
+
+        type Foo implements I {
+          id: ID
+          value: String
+          foo2: String
+        }
+
+        "#;
+
+        let query = r#"
+        {
+          data {
+            id
+            value
+          }
+        }
+        "#;
+
+        // changing a directive applied on the interface definition changes the hash
+        assert_ne!(
+            hash(schema1, query).from_hash_query,
+            hash(schema2, query).from_hash_query
+        );
+        assert_ne!(
+            hash(schema1, query).from_visitor,
+            hash(schema2, query).from_visitor
         );
     }
 
