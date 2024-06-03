@@ -102,6 +102,7 @@ traces_per_query:
                 estimated_execution_count: 2
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
+        extended_references: ~
         local_per_type_stat: {}
         limits_stats: ~
         operation_count: 0
@@ -131,3 +132,4 @@ operation_count_by_type:
     subtype: ""
     operation_count: 1
 traces_pre_aggregated: true
+extended_references_enabled: false

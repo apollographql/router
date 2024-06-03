@@ -74,6 +74,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
+            context_rewrites,
         } = &**value;
         Self::Fetch(super::fetch::FetchNode {
             service_name: subgraph_name.clone(),
@@ -86,6 +87,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             id: id.map(|id| id.to_string().into()),
             input_rewrites: option_vec(input_rewrites),
             output_rewrites: option_vec(output_rewrites),
+            context_rewrites: option_vec(context_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
         })
@@ -153,6 +155,7 @@ impl From<&'_ next::FetchNode> for subscription::SubscriptionNode {
             operation_kind,
             input_rewrites,
             output_rewrites,
+            context_rewrites: _,
         } = value;
         Self {
             service_name: subgraph_name.clone(),

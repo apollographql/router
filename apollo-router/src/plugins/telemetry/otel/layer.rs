@@ -29,10 +29,10 @@ use tracing_subscriber::Layer;
 use super::OtelData;
 use super::PreSampledTracer;
 
-const SPAN_NAME_FIELD: &str = "otel.name";
-const SPAN_KIND_FIELD: &str = "otel.kind";
-const SPAN_STATUS_CODE_FIELD: &str = "otel.status_code";
-const SPAN_STATUS_MESSAGE_FIELD: &str = "otel.status_message";
+pub(crate) const SPAN_NAME_FIELD: &str = "otel.name";
+pub(crate) const SPAN_KIND_FIELD: &str = "otel.kind";
+pub(crate) const SPAN_STATUS_CODE_FIELD: &str = "otel.status_code";
+pub(crate) const SPAN_STATUS_MESSAGE_FIELD: &str = "otel.status_message";
 
 const FIELD_EXCEPTION_MESSAGE: &str = "exception.message";
 const FIELD_EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
@@ -106,7 +106,7 @@ impl WithContext {
     }
 }
 
-fn str_to_span_kind(s: &str) -> Option<otel::SpanKind> {
+pub(crate) fn str_to_span_kind(s: &str) -> Option<otel::SpanKind> {
     match s {
         s if s.eq_ignore_ascii_case("server") => Some(otel::SpanKind::Server),
         s if s.eq_ignore_ascii_case("client") => Some(otel::SpanKind::Client),
@@ -117,7 +117,7 @@ fn str_to_span_kind(s: &str) -> Option<otel::SpanKind> {
     }
 }
 
-fn str_to_status(s: &str) -> otel::Status {
+pub(crate) fn str_to_status(s: &str) -> otel::Status {
     match s {
         s if s.eq_ignore_ascii_case("ok") => otel::Status::Ok,
         s if s.eq_ignore_ascii_case("error") => otel::Status::error(""),
@@ -331,7 +331,9 @@ impl<'a> field::Visit for SpanAttributeVisitor<'a> {
         match field.name() {
             SPAN_NAME_FIELD => self.span_builder.name = value.to_string().into(),
             SPAN_KIND_FIELD => self.span_builder.span_kind = str_to_span_kind(value),
-            SPAN_STATUS_CODE_FIELD => self.span_builder.status = str_to_status(value),
+            SPAN_STATUS_CODE_FIELD => {
+                self.span_builder.status = str_to_status(value);
+            }
             SPAN_STATUS_MESSAGE_FIELD => {
                 self.span_builder.status = otel::Status::error(value.to_string())
             }
@@ -706,6 +708,7 @@ where
             builder,
             parent_cx,
             event_attributes: None,
+            forced_status: None,
         });
     }
 
@@ -880,6 +883,7 @@ where
         if let Some(OtelData {
             mut builder,
             parent_cx,
+            forced_status,
             ..
         }) = extensions.remove::<OtelData>()
         {
@@ -895,6 +899,9 @@ where
                     attributes.insert(busy_ns, timings.busy.into());
                     attributes.insert(idle_ns, timings.idle.into());
                 }
+            }
+            if let Some(forced_status) = forced_status {
+                builder.status = forced_status;
             }
 
             // Assign end time, build and start span, drop span to export
@@ -985,6 +992,7 @@ mod tests {
                 builder,
                 parent_cx: parent_cx.clone(),
                 event_attributes: None,
+                forced_status: None,
             });
             noop::NoopSpan::new()
         }
