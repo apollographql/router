@@ -208,7 +208,7 @@ impl PersistedQueryManifestPoller {
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
     pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(local_pq_list) = config.persisted_queries.local_manifest {
+        if let Some(local_pq_list) = config.persisted_queries.experimental_local_manifest {
             tracing::info!(
                 "Loading persisted query list from local file: {}",
                 local_pq_list

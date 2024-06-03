@@ -8,7 +8,7 @@ An example configuration would look like:
 persisted_queries:
   enabled: true
   log_unknown: true
-  local_manifest: ./persisted-query-manifest.json
+  experimental_local_manifest: ./persisted-query-manifest.json
   safelist:
     enabled: true
     require_id: false
