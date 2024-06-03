@@ -3406,9 +3406,11 @@ fn compute_aliases_for_non_merging_fields(
     }
 
     for FieldInPath { mut path, field } in selections.iter().flat_map(rebased_fields_in_set) {
-        let field_name = field.field.data().name();
-        let response_name = field.field.data().response_name();
-        let field_type = &field.field.data().field_position.get(schema.schema())?.ty;
+        let field_schema = field.field.schema().schema();
+        let field_data = field.field.data();
+        let field_name = field_data.name();
+        let response_name = field_data.response_name();
+        let field_type = &field_data.field_position.get(field_schema)?.ty;
 
         match seen_response_names.get(&response_name) {
             Some(previous) => {
@@ -3916,7 +3918,7 @@ impl Field {
         }
 
         let field_from_parent = parent_type.field(self.data().name().clone())?;
-        return if field_from_parent.get(schema.schema()).is_ok()
+        return if field_from_parent.try_get(schema.schema()).is_some()
             && self.can_rebase_on(parent_type, schema)
         {
             let mut updated_field_data = self.data().clone();
