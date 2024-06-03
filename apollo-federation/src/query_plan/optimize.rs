@@ -115,7 +115,7 @@ impl Selection {
 impl SelectionSet {
     /// Performs set-subtraction (self - other) and returns the result (the difference between self
     /// and other).
-    fn minus(&self, other: &SelectionSet) -> Result<SelectionSet, FederationError> {
+    pub(crate) fn minus(&self, other: &SelectionSet) -> Result<SelectionSet, FederationError> {
         let iter = self
             .selections
             .iter()
