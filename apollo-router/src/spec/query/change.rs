@@ -98,8 +98,7 @@ impl<'a> QueryHashVisitor<'a> {
     ) -> Result<Vec<u8>, BoxError> {
         let mut visitor = QueryHashVisitor::new(schema, schema_str, executable)?;
         traverse::document(&mut visitor, executable, operation_name)?;
-        //FIXME: temporarily deactivate this to trigger test failures. This muist be reactivated before merging
-        //executable.to_string().hash(&mut visitor);
+        executable.to_string().hash(&mut visitor);
         Ok(visitor.finish())
     }
 
@@ -262,8 +261,6 @@ impl<'a> QueryHashVisitor<'a> {
                     for directive in &def.directives {
                         self.hash_directive(directive);
                     }
-
-                    //FIXME: value definition
                 }
             }
             ExtendedType::InputObject(o) => {
