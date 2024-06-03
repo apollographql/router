@@ -1,6 +1,6 @@
 ### Add support of response_context selector when it's in error ([PR #5288](https://github.com/apollographql/router/pull/5288))
 
-It gives the ability to configure custom instruments like this:
+Provides the ability to configure custom instruments. For example:
 
 ```yaml
 http.server.request.timeout:
