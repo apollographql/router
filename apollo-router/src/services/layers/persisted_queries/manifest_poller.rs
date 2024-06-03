@@ -10,6 +10,7 @@ use futures::prelude::*;
 use reqwest::Client;
 use serde::Deserialize;
 use serde::Serialize;
+use tokio::fs::read_to_string;
 use tokio::sync::mpsc;
 use tower::BoxError;
 
@@ -210,12 +211,15 @@ impl PersistedQueryManifestPoller {
         if let Some(local_pq_list) = config.persisted_queries.local_manifest {
             tracing::info!(
                 "Loading persisted query list from local file: {}",
-                local_pq_list.clone()
+                local_pq_list
             );
-            let local_manifest =
-                std::fs::read_to_string(local_pq_list.clone()).map_err(|e| -> BoxError {
-                    format!("could not read local persisted query list file: {}", e).into()
-                })?;
+
+            let local_manifest: String =
+                read_to_string(local_pq_list.clone())
+                    .await
+                    .map_err(|e| -> BoxError {
+                        format!("could not read local persisted query list file: {}", e).into()
+                    })?;
 
             let mut manifest = PersistedQueryManifest::new();
 
