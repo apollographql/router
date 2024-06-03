@@ -473,10 +473,10 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
-            Self::Extendable { attributes } => attributes.on_error(error),
+            Self::Extendable { attributes } => attributes.on_error(error, ctx),
         }
     }
 
@@ -594,8 +594,8 @@ where
         self.attributes.on_response_event(response, ctx)
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
-        self.attributes.on_error(error)
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+        self.attributes.on_error(error, ctx)
     }
 }
 
@@ -721,10 +721,10 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
-        let mut attrs = self.http_client_request_body_size.on_error(error);
-        attrs.extend(self.http_client_request_duration.on_error(error));
-        attrs.extend(self.http_client_response_body_size.on_error(error));
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+        let mut attrs = self.http_client_request_body_size.on_error(error, ctx);
+        attrs.extend(self.http_client_request_duration.on_error(error, ctx));
+        attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
 
         attrs
     }
@@ -1313,12 +1313,17 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
 
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(selectors.on_error(error).into_iter().collect::<Vec<_>>());
+            attrs.extend(
+                selectors
+                    .on_error(error, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
         }
 
         let increment = match inner.increment {
@@ -1714,12 +1719,12 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
         let mut attrs: Vec<KeyValue> = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_error(error).into_iter().collect())
+            .map(|s| s.on_error(error, ctx).into_iter().collect())
             .unwrap_or_default();
         attrs.append(&mut inner.attributes);
 

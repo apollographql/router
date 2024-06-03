@@ -7978,10 +7978,6 @@ expression: "&schema"
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
     },
-    "experimental_demand_control": {
-      "$ref": "#/definitions/DemandControlConfig",
-      "description": "#/definitions/DemandControlConfig"
-    },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",
       "description": "#/definitions/QueryPlannerMode"
@@ -8026,6 +8022,10 @@ expression: "&schema"
     "plugins": {
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
+    },
+    "preview_demand_control": {
+      "$ref": "#/definitions/DemandControlConfig",
+      "description": "#/definitions/DemandControlConfig"
     },
     "preview_entity_cache": {
       "$ref": "#/definitions/Config6",
