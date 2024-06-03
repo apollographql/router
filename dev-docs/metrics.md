@@ -183,8 +183,8 @@ If there is shown to be contention in future profiling we can revisit.
 ## Adding new metrics
 There are different types of metrics.
 
-* Static - Used by Router developers to monitor feature usage.
-* Dynamic - Defined by the user to monitor the health and performance of their system.
+* Static - Declared via macro, cannot be configured, low cardinality, and are transmitted to Apollo.
+* Dynamic - Configurable via yaml, not transmitted to Apollo.
 
 > New features should add BOTH static and dynamic metrics.
 
@@ -207,7 +207,7 @@ Metrics should be named in a way that is consistent with the rest of the metrics
 
 ### Static metrics
 When adding a new feature to the Router you must also add new static metrics to monitor the usage of that feature and users cannot turn them off.
-These metrics must be low cardinality and not leak any sensitive information. Users cannot change these metrics and they are primarily for us to see how our features are used so that we can inform future development.
+These metrics must be low cardinality and not leak any sensitive information. Users cannot change the attributes that are attached to these metrics.
 These metrics are transmitted to Apollo unless explicitly disabled.
 
 When adding new static metrics and attributes make sure to:
@@ -215,6 +215,23 @@ When adding new static metrics and attributes make sure to:
 * Look at the [OTel semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) 
 * Notify `#proj-router-analytics` channel in Slack.
 * Add the metrics to the spreadsheet linked in the `#proj-router-analytics` channel in Slack.
+
+To define a static metric us a macro:
+```rust
+u64_counter!("apollo.router.<feature>.<verb>", "description", 1, "attr" => "val");
+```
+| DO NOT USE `tracing` macros to define static metrics! They are slow, untestable and can lead to subtle bugs due to type mismatches!
+
+#### Non request/response metrics
+Static metrics should be used for things that happen outside of the request response cycle.
+
+For instance:
+* Router lifecycle events.
+* Global log error rates.
+* Cache connection failures.
+* Rust vs JS query planner performance.
+
+None of these metrics will leak information to apollo, and they are all low cardinality.
 
 #### Operation counts
 Each new feature MUST have an operation count metric that counts the number of requests that the feature has processed.
