@@ -233,12 +233,30 @@ The `next` message includes a `payload` field, which contains the subscription d
   //highlight-start
   "payload": {
     "data": {
-      "numberIncremented": 5
+      "getLivePriceUpdates": {
+        "__typename": "Stock",
+        "price": 5
+      }
     }
   }
   //highlight-end
 }
 ```
+
+> As this is a recent feature, if you are using a library that does not yet
+  support subscription callbacks (or you are rolling your own implementation),
+  you will need to make the payload look exactly how the response to a regular
+  query would.
+
+  * The root level key needs to be the name of the subscription operation.
+  * The initial subscription query will contain the exact fields that the router
+    expects to be included. Specifically, if there are requests for
+    `__typename`, those need to be respected, otherwise the subscription may
+    not behave as intended.
+
+  Both bullets above are things that are typically handled by server libraries
+  automatically, so they may not be obvious when implementing the protocol
+  manually.
 
 ### `complete`
 
