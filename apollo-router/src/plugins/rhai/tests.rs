@@ -169,7 +169,7 @@ fn new_rhai_test_engine() -> Engine {
 #[test]
 fn it_logs_messages() {
     let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(&tracing_test::internal::GLOBAL_BUF);
+    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
@@ -209,7 +209,7 @@ fn it_logs_messages() {
 #[test]
 fn it_prints_messages_to_log() {
     let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(&tracing_test::internal::GLOBAL_BUF);
+    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
