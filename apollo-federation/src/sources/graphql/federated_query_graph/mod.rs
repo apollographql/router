@@ -43,17 +43,17 @@ pub(crate) struct ConcreteNode {
     provides_directive: Option<ObjectOrInterfaceFieldDirectivePosition>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::From)]
 pub(crate) struct EnumNode {
     subgraph_type: EnumTypeDefinitionPosition,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::From)]
 pub(crate) struct ScalarNode {
     subgraph_type: ScalarTypeDefinitionPosition,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::From)]
 pub(crate) struct AbstractFieldEdge {
     subgraph_field: AbstractFieldDefinitionPosition,
 }
@@ -64,9 +64,15 @@ pub(crate) struct ConcreteFieldEdge {
     requires_condition: Option<SelfConditionIndex>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, derive_more::From)]
 pub(crate) struct TypeConditionEdge {
     subgraph_type: CompositeTypeDefinitionPosition,
+}
+
+impl TypeConditionEdge {
+    pub(crate) fn new(subgraph_type: CompositeTypeDefinitionPosition) -> Self {
+        Self { subgraph_type }
+    }
 }
 
 #[derive(Debug)]
