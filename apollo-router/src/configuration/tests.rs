@@ -1148,3 +1148,19 @@ fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
     assert!(conf.supergraph.generate_query_fragments);
     assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
 }
+
+#[test]
+fn it_requires_rust_apollo_metrics_generation_for_enhanced_signature_normalization() {
+    let error = Configuration::builder()
+        .experimental_apollo_signature_normalization_algorithm(
+            ApolloSignatureNormalizationAlgorithm::Enhanced,
+        )
+        .experimental_apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
+        .build()
+        .expect_err("Must have an error because we have conflicting config options");
+
+    assert_eq!(
+        error.to_string(),
+        String::from("`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`: either change to the legacy signature normalization mode, or change to new metrics generation")
+    );
+}

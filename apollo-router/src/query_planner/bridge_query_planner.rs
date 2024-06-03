@@ -602,17 +602,11 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let signature_normalization_mode = match self
+                    let signature_normalization_mode: SignatureNormalizationAlgorithm = self
                         .configuration
                         .experimental_apollo_signature_normalization_algorithm
-                    {
-                        ApolloSignatureNormalizationAlgorithm::Legacy => {
-                            SignatureNormalizationAlgorithm::Legacy
-                        }
-                        ApolloSignatureNormalizationAlgorithm::Enhanced => {
-                            SignatureNormalizationAlgorithm::Enhanced
-                        }
-                    };
+                        .clone()
+                        .into();
 
                     let generated_usage_reporting = generate_usage_reporting(
                         &signature_doc.executable,
