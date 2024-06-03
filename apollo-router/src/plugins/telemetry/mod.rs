@@ -488,7 +488,12 @@ impl Plugin for Telemetry {
                         } else if let Err(err) = &response {
                             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             span.set_span_dyn_attributes(
-                                config.instrumentation.spans.router.attributes.on_error(err),
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_error(err, &ctx),
                             );
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
@@ -607,7 +612,7 @@ impl Plugin for Telemetry {
                                 custom_graphql_instruments.on_response(resp);
                             },
                             Err(err) => {
-                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
+                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err, &ctx));
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
                                 custom_graphql_instruments.on_error(err, &ctx);
@@ -738,7 +743,11 @@ impl Plugin for Telemetry {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
 
                                 span.set_span_dyn_attributes(
-                                    conf.instrumentation.spans.subgraph.attributes.on_error(err),
+                                    conf.instrumentation
+                                        .spans
+                                        .subgraph
+                                        .attributes
+                                        .on_error(err, &context),
                                 );
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);

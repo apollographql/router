@@ -38,7 +38,7 @@ pub(crate) trait Selectors {
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
         Vec::with_capacity(0)
     }
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue>;
     fn on_response_field(
         &self,
         _ty: &apollo_compiler::executable::NamedType,
@@ -64,7 +64,7 @@ pub(crate) trait Selector {
     ) -> Option<opentelemetry::Value> {
         None
     }
-    fn on_error(&self, error: &BoxError) -> Option<opentelemetry::Value>;
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<opentelemetry::Value>;
     fn on_response_field(
         &self,
         _ty: &apollo_compiler::executable::NamedType,

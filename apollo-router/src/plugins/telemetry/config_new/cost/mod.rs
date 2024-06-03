@@ -59,7 +59,7 @@ impl Selectors for SupergraphCostAttributes {
         Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 
