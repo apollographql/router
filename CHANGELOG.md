@@ -35,7 +35,7 @@ Full details will be included in the documentation for demand control which will
 
 By [@bryncooke](https://github.com/bryncooke) in https://github.com/apollographql/router/pull/5317
 
-### Add support for studio trace id in selectors and document context entry ([Issue #3803](https://github.com/apollographql/router/issues/3803)), ([Issue #5172](https://github.com/apollographql/router/issues/5172))
+### Ability to include Apollo Studio trace ID on tracing spans ([Issue #3803](https://github.com/apollographql/router/issues/3803)), ([Issue #5172](https://github.com/apollographql/router/issues/5172))
 
 Add support for a new trace ID selector kind, the `apollo` trace ID, which represents the trace ID on [Apollo GraphOS Studio](https://studio.apollographql.com/). 
 
@@ -47,7 +47,7 @@ telemetry:
     spans:
       router:
         "studio.trace.id":
-            trace_id:: apollo
+            trace_id: apollo
 ```
 
 Also, router documentation has been updated with constants that are available in Rhai.
@@ -64,7 +64,7 @@ By [@clenfest](https://github.com/clenfest) in https://github.com/apollographql/
 
 ## 🐛 Fixes
 
-### Fix custom attributes for spans and histogram when used with response_event ([PR #5221](https://github.com/apollographql/router/pull/5221))
+### Fix custom attributes for spans and histogram when used with `response_event` ([PR #5221](https://github.com/apollographql/router/pull/5221))
 
 This release fixes multiple issues related to spans and selectors:
 
