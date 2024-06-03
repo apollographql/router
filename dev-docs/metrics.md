@@ -183,7 +183,7 @@ If there is shown to be contention in future profiling we can revisit.
 ## Adding new metrics
 There are different types of metrics.
 
-* Static - Used by us to monitor feature usage.
+* Static - Used by Router developers to monitor feature usage.
 * Dynamic - Defined by the user to monitor the health and performance of their system.
 
 > New features should add BOTH static and dynamic metrics.
