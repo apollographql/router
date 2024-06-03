@@ -267,9 +267,9 @@ where
                 introspection: self.introspection,
             };
 
-            if experimental_reuse_query_plans {
-                // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                if let Some(hash) = hash {
+            if let Some(hash) = hash {
+                if experimental_reuse_query_plans {
+                    // if the query hash did not change with the schema update, we can reuse the previously cached entry
                     if hash == doc.hash {
                         if let Some(entry) =
                             { previous_cache.lock().await.get(&caching_key).cloned() }
@@ -278,6 +278,10 @@ where
                             reused += 1;
                             continue;
                         }
+                    }
+                } else {
+                    if hash == doc.hash {
+                        reused += 1;
                     }
                 }
             }
@@ -341,6 +345,11 @@ where
         }
 
         tracing::debug!("warmed up the query planner cache with {count} queries planned and {reused} queries reused");
+
+        ::tracing::info!(
+            monotonic_counter.apollo.router.query.planning.warmup.reused = reused,
+            query_plan_reuse_active = experimental_reuse_query_plans
+        );
     }
 }
 
