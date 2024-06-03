@@ -937,6 +937,23 @@ impl Selection {
         self.with_updated_selection_set(Some(new_sub_selection))
     }
 
+    pub(crate) fn with_updated_directives(
+        &self,
+        directives: executable::DirectiveList,
+    ) -> Result<Self, FederationError> {
+        match self {
+            Selection::Field(field) => Ok(Selection::Field(Arc::new(
+                field.with_updated_directives(directives),
+            ))),
+            Selection::InlineFragment(inline_fragment) => Ok(Selection::InlineFragment(Arc::new(
+                inline_fragment.with_updated_directives(directives),
+            ))),
+            Selection::FragmentSpread(_) => {
+                Err(FederationError::internal("unexpected fragment spread"))
+            }
+        }
+    }
+
     pub(crate) fn containment(
         &self,
         other: &Selection,
@@ -1115,6 +1132,16 @@ mod normalized_field_selection {
             Self {
                 field: self.field.clone(),
                 selection_set,
+            }
+        }
+
+        pub(crate) fn with_updated_directives(
+            &self,
+            directives: executable::DirectiveList,
+        ) -> Self {
+            Self {
+                field: self.field.with_updated_directives(directives),
+                selection_set: self.selection_set.clone(),
             }
         }
 
@@ -1686,6 +1713,16 @@ mod normalized_inline_fragment_selection {
             Self {
                 inline_fragment: self.inline_fragment.clone(),
                 selection_set,
+            }
+        }
+
+        pub(crate) fn with_updated_directives(
+            &self,
+            directives: executable::DirectiveList,
+        ) -> Self {
+            Self {
+                inline_fragment: self.inline_fragment.with_updated_directives(directives),
+                selection_set: self.selection_set.clone(),
             }
         }
 
@@ -2833,23 +2870,44 @@ impl SelectionSet {
             Some((ele, &[])) => {
                 // PORT_NOTE: The JS code waited until the final selection was being constructed to
                 // turn the path and selection set into a selection. Because we are mutating things
-                // in-place, we eagerly construct the selection.
+                // in-place, we eagerly construct the selection that needs to be rebased on the target
+                // schema.
                 let element = OpPathElement::clone(ele);
                 let selection = Selection::from_element(
                     element,
                     selection_set.map(|set| SelectionSet::clone(set)),
                 )?;
-                self.add_selection(&ele.parent_type_position(), ele.schema(), selection)?
+                let schema = self.schema.clone();
+                let parent_type_position = self.type_position.clone();
+                // TODO move the rebasing to add_selection/merge_into
+                if let Some(rebased_selection) = selection.rebase_on(
+                    &parent_type_position,
+                    &NamedFragments::default(),
+                    &schema,
+                    RebaseErrorHandlingOption::ThrowError,
+                )? {
+                    self.add_selection(&ele.parent_type_position(), &schema, rebased_selection)?
+                }
             }
-            // If we don't have any path, we merge in the given subselections at the root.
+            // If we don't have any path, we rebase and merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
-                    let parent_type = &sel.type_position;
-                    let schema = sel.schema.clone();
-                    sel.selections
-                        .values()
-                        .cloned()
-                        .try_for_each(|sel| self.add_selection(parent_type, &schema, sel))?;
+                    // TODO move the rebasing to add_selection/merge_into
+                    let schema = self.schema.clone();
+                    let parent_type = self.type_position.clone();
+                    let selection_type = &sel.type_position;
+                    sel.selections.values().cloned().try_for_each(|s| {
+                        if let Some(rebased) = s.rebase_on(
+                            &parent_type,
+                            &NamedFragments::default(),
+                            &schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )? {
+                            self.add_selection(selection_type, &schema, rebased)
+                        } else {
+                            Ok(())
+                        }
+                    })?;
                 }
             }
         }
@@ -3239,6 +3297,42 @@ impl SelectionSet {
     pub(crate) fn contains(&self, other: &Self) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
+
+    // TODO move this logic to SelectionSet add_selection/merge_into
+    /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
+    /// JS code was pooling the updates and only apply those when building the final selection set.
+    /// See `makeSelectionSet` method for details.
+    ///
+    /// Manipulating selection sets may result in some inefficiencies. As a result we may end up with
+    /// some unnecessary top level inline fragment selections, i.e. fragments without any directives
+    /// and with the type condition same as the parent type that should be inlined.
+    ///
+    /// This method inlines those unnecessary top level fragments only. While the JS code was applying
+    /// this logic recursively, since we are manipulating selections sets in-place we only need to
+    /// apply this normalization at the top level.
+    fn without_unnecessary_fragments(&self) -> SelectionSet {
+        let parent_type = &self.type_position;
+        let mut final_selections = SelectionMap::new();
+        for selection in self.selections.values() {
+            match selection {
+                Selection::InlineFragment(inline_fragment) => {
+                    if inline_fragment.is_unnecessary(parent_type) {
+                        final_selections.extend_ref(&inline_fragment.selection_set.selections);
+                    } else {
+                        final_selections.insert(selection.clone());
+                    }
+                }
+                _ => {
+                    final_selections.insert(selection.clone());
+                }
+            }
+        }
+        SelectionSet {
+            schema: self.schema.clone(),
+            type_position: parent_type.clone(),
+            selections: Arc::new(final_selections),
+        }
+    }
 }
 
 impl IntoIterator for SelectionSet {
@@ -3250,7 +3344,7 @@ impl IntoIterator for SelectionSet {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct SelectionSetAtPath {
     path: Vec<FetchDataPathElement>,
     selections: Option<SelectionSet>,
@@ -4368,6 +4462,19 @@ impl InlineFragmentSelection {
     /// Returns true if this selection is a superset of the other selection.
     pub(crate) fn contains(&self, other: &Selection) -> bool {
         self.containment(other, Default::default()).is_contained()
+    }
+
+    /// Returns true if this inline fragment selection is "unnecessary" and should be inlined.
+    ///
+    /// Fragment is unnecessary if following are true:
+    /// * it has no applied directives
+    /// * has no type condition OR type condition is same as passed in `maybe_parent`
+    fn is_unnecessary(&self, maybe_parent: &CompositeTypeDefinitionPosition) -> bool {
+        let inline_fragment = self.inline_fragment.data();
+        let inline_fragment_type_condition = inline_fragment.type_condition_position.clone();
+        inline_fragment.directives.is_empty()
+            && (inline_fragment_type_condition.is_none()
+                || inline_fragment_type_condition.is_some_and(|t| t == *maybe_parent))
     }
 }
 
