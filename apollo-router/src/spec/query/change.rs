@@ -81,10 +81,10 @@ impl<'a> QueryHashVisitor<'a> {
     pub(crate) fn hash_schema(&mut self) -> Result<(), BoxError> {
         "^SCHEMA".hash(self);
         for directive_definition in self.schema.directive_definitions.values() {
-            self.hash_directive_definition(&directive_definition)?;
+            self.hash_directive_definition(directive_definition)?;
         }
         for directive in &self.schema.schema_definition.directives {
-            self.hash_directive(&directive);
+            self.hash_directive(directive);
         }
         "^SCHEMA-END".hash(self);
         Ok(())
@@ -114,7 +114,7 @@ impl<'a> QueryHashVisitor<'a> {
         "^DIRECTIVE_DEFINITION".hash(self);
         directive_definition.name.as_str().hash(self);
         for argument in &directive_definition.arguments {
-            self.hash_input_value_definition(&argument)?;
+            self.hash_input_value_definition(argument)?;
         }
         "^DIRECTIVE_DEFINITION-END".hash(self);
 
@@ -481,13 +481,13 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.hash_type(&variable.ty)?;
 
             if let Some(value) = variable.default_value.as_ref() {
-                self.hash_value(&value);
+                self.hash_value(value);
             } else {
                 "no default value".hash(self);
             }
 
             for directive in &variable.directives {
-                self.hash_directive(&directive);
+                self.hash_directive(directive);
             }
         }
         for directive in &node.directives {
@@ -532,7 +532,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         node.name.hash(self);
         self.hash_type_by_name(node.type_condition())?;
         for directive in &node.directives {
-            self.hash_directive(&directive);
+            self.hash_directive(directive);
         }
 
         traverse::fragment(self, node)?;
@@ -553,7 +553,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
         self.hash_type_by_name(type_condition)?;
 
         for directive in &node.directives {
-            self.hash_directive(&directive);
+            self.hash_directive(directive);
         }
 
         traverse::fragment_spread(self, node)?;
@@ -573,7 +573,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             self.hash_type_by_name(type_condition)?;
         }
         for directive in &node.directives {
-            self.hash_directive(&directive);
+            self.hash_directive(directive);
         }
 
         traverse::inline_fragment(self, parent_type, node)?;
