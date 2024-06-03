@@ -648,7 +648,7 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan:{}:{}:{}:{}:{}",
+            "plan:cache:{}:federation:{}:query_hash:{}:query:{}:metadata:{}",
             CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
         )
     }
