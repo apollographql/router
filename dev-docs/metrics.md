@@ -188,11 +188,11 @@ There are different types of metrics.
 
 > New features should add BOTH static and dynamic metrics.
 
-> Why are static metrics no longer recommended for users to use directly?
+> Why are static metrics less good for users to for debugging?
 > 
-> They can, but usually it'll be only a starting point for them. We can't predict the things that users will want to monitor, and if we tried we would blow up the cardinality of our metrics resulting in high costs for our users via their APMs.
+> They can be used, but usually it'll be only a starting point for them. We can't predict the things that users will want to monitor, and if we tried we would blow up the cardinality of our metrics resulting in high costs for our users via their APMs.
 > 
-> This *is* a departure from the previous way of doing things, but as dynamic metrics are not available we need to move away from statically defined metrics.
+> For instance, it we must not add operation name to the attributes of a static metric as this is potentially infinite cardinality, but as a dynamic metric this is fine as users can use conditions to reduce the amount of data they are looking at.
 
 ### Naming
 Metrics should be named in a way that is consistent with the rest of the metrics in the system.
