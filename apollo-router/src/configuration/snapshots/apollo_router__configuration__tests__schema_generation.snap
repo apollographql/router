@@ -4153,6 +4153,12 @@ expression: "&schema"
           "description": "Experimental feature to prewarm the query plan cache with persisted queries",
           "type": "boolean"
         },
+        "experimental_local_manifest": {
+          "default": null,
+          "description": "Enables using a local copy of the persisted query manifest to safelist operations",
+          "nullable": true,
+          "type": "string"
+        },
         "log_unknown": {
           "default": false,
           "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
