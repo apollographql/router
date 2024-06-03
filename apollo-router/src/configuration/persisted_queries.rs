@@ -16,7 +16,7 @@ pub struct PersistedQueries {
     pub safelist: PersistedQueriesSafelist,
 
     /// Enables using a local copy of the persisted query manifest to safelist operations
-    pub local_manifest: Option<String>,
+    pub experimental_local_manifest: Option<String>,
 }
 
 #[cfg(test)]
@@ -27,13 +27,13 @@ impl PersistedQueries {
         enabled: Option<bool>,
         log_unknown: Option<bool>,
         safelist: Option<PersistedQueriesSafelist>,
-        local_manifest: Option<String>,
+        experimental_local_manifest: Option<String>,
     ) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_pq),
             safelist: safelist.unwrap_or_default(),
             log_unknown: log_unknown.unwrap_or_else(default_log_unknown),
-            local_manifest,
+            experimental_local_manifest,
         }
     }
 }
@@ -67,7 +67,7 @@ impl Default for PersistedQueries {
             enabled: default_pq(),
             safelist: PersistedQueriesSafelist::default(),
             log_unknown: default_log_unknown(),
-            local_manifest: None,
+            experimental_local_manifest: None,
         }
     }
 }
