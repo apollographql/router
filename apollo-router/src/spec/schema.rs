@@ -18,9 +18,9 @@ use crate::configuration::ApiSchemaMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
-
 /// A GraphQL schema.
 pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
@@ -28,6 +28,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<ApiSchema>,
+    pub(crate) hash: Arc<QueryHash>,
 }
 
 /// TODO: remove and use apollo_federation::Supergraph unconditionally
@@ -128,8 +129,13 @@ impl Schema {
             Supergraph::ApolloCompiler(definitions)
         };
 
+        let mut hasher = Sha256::new();
+        hasher.update(sdl.as_bytes());
+        let hash = Arc::new(QueryHash(hasher.finalize().to_vec()));
+
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
+            hash,
             supergraph,
             subgraphs,
             implementers_map,
@@ -373,6 +379,7 @@ impl std::fmt::Debug for Schema {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let Self {
             raw_sdl,
+            hash: _,
             supergraph: _, // skip
             subgraphs,
             implementers_map,

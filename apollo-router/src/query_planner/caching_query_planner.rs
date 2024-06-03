@@ -76,6 +76,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
+    experimental_reuse_query_plans: bool,
     config_mode: ConfigMode,
     introspection: bool,
 }
@@ -139,6 +140,10 @@ where
             subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
+            experimental_reuse_query_plans: configuration
+                .supergraph
+                .query_planning
+                .experimental_reuse_query_plans,
             config_mode,
             introspection: configuration.supergraph.introspection,
         })
@@ -187,7 +192,6 @@ where
                             metadata,
                             plan_options,
                             config_mode: _,
-                            sdl: _,
                             introspection: _,
                         },
                         _,
@@ -259,18 +263,24 @@ where
             let caching_key = CachingQueryKey {
                 query: query.clone(),
                 operation: operation.clone(),
-                hash: doc.hash.clone(),
-                sdl: Arc::clone(&self.schema.raw_sdl),
+                hash: if experimental_reuse_query_plans {
+                    CachingQueryHash::Reuse(doc.hash.clone())
+                } else {
+                    CachingQueryHash::DoNotReuse {
+                        query_hash: doc.hash.clone(),
+                        schema_hash: self.schema.hash.clone(),
+                    }
+                },
                 metadata,
                 plan_options,
                 config_mode: self.config_mode.clone(),
                 introspection: self.introspection,
             };
 
-            if let Some(hash) = hash {
+            if let Some(warmup_hash) = hash {
                 if experimental_reuse_query_plans {
                     // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                    if hash == doc.hash {
+                    if warmup_hash.schema_aware_query_hash() == &*doc.hash {
                         if let Some(entry) =
                             { previous_cache.lock().await.get(&caching_key).cloned() }
                         {
@@ -280,7 +290,7 @@ where
                         }
                     }
                 } else {
-                    if hash == doc.hash {
+                    if warmup_hash.schema_aware_query_hash() == &*doc.hash {
                         reused += 1;
                     }
                 }
@@ -456,8 +466,14 @@ where
         let caching_key = CachingQueryKey {
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
-            hash: doc.hash.clone(),
-            sdl: Arc::clone(&self.schema.raw_sdl),
+            hash: if self.experimental_reuse_query_plans {
+                CachingQueryHash::Reuse(doc.hash.clone())
+            } else {
+                CachingQueryHash::DoNotReuse {
+                    query_hash: doc.hash.clone(),
+                    schema_hash: self.schema.hash.clone(),
+                }
+            },
             metadata,
             plan_options,
             config_mode: self.config_mode.clone(),
@@ -598,12 +614,11 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
     hex::encode(result)
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
-    pub(crate) sdl: Arc<String>,
     pub(crate) operation: Option<String>,
-    pub(crate) hash: Arc<QueryHash>,
+    pub(crate) hash: CachingQueryHash,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: ConfigMode,
@@ -628,7 +643,6 @@ impl std::fmt::Display for CachingQueryKey {
         );
         hasher
             .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
-        hasher.update(&serde_json::to_vec(&self.sdl).expect("serialization should not fail"));
         hasher.update([self.introspection as u8]);
         let metadata = hex::encode(hasher.finalize());
 
@@ -640,15 +654,41 @@ impl std::fmt::Display for CachingQueryKey {
     }
 }
 
-impl Hash for CachingQueryKey {
+// TODO: this is an intermediate type to hold the query hash while query plan reuse is still experimental
+// this will be replaced by the schema aware query hash once the option is removed
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum CachingQueryHash {
+    Reuse(Arc<QueryHash>),
+    DoNotReuse {
+        query_hash: Arc<QueryHash>,
+        schema_hash: Arc<QueryHash>,
+    },
+}
+
+impl CachingQueryHash {
+    fn schema_aware_query_hash(&self) -> &QueryHash {
+        match self {
+            CachingQueryHash::Reuse(hash) => &hash,
+            CachingQueryHash::DoNotReuse { query_hash, .. } => &query_hash,
+        }
+    }
+}
+
+impl Hash for CachingQueryHash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.sdl.hash(state);
-        self.hash.0.hash(state);
-        self.operation.hash(state);
-        self.metadata.hash(state);
-        self.plan_options.hash(state);
-        self.config_mode.hash(state);
-        self.introspection.hash(state);
+        match self {
+            CachingQueryHash::Reuse(hash) => hash.hash(state),
+            CachingQueryHash::DoNotReuse { schema_hash, .. } => schema_hash.hash(state),
+        }
+    }
+}
+
+impl std::fmt::Display for CachingQueryHash {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CachingQueryHash::Reuse(hash) => write!(f, "{}", hash),
+            CachingQueryHash::DoNotReuse { schema_hash, .. } => write!(f, "{}", schema_hash),
+        }
     }
 }
 
@@ -656,7 +696,7 @@ impl Hash for CachingQueryKey {
 pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) query: String,
     pub(crate) operation: Option<String>,
-    pub(crate) hash: Option<Arc<QueryHash>>,
+    pub(crate) hash: Option<CachingQueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
     pub(crate) config_mode: ConfigMode,
