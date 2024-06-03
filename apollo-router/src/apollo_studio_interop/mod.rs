@@ -29,16 +29,11 @@ use router_bridge::planner::UsageReporting;
 // We need to use this because of the import method that the fuzzer uses. The fuzzer can't have apollo-router as
 // a direct dependency because that means the build crashes, so we use a dev dependency and do a path hack. This
 // means that the fuzzer can't import from the Configuration namespace and has to import this instead.
+// Because of this, the enum is detected as dead code and we need the clippy hint here.
 #[allow(dead_code)]
 pub(crate) enum SignatureNormalizationAlgorithm {
     Legacy,
     Enhanced,
-}
-
-macro_rules! is_enhanced {
-    ($algorithm:expr) => {
-        matches!($algorithm, SignatureNormalizationAlgorithm::Enhanced)
-    }
 }
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
@@ -342,6 +337,13 @@ impl<'a> fmt::Display for SignatureFormatterWithAlgorithm<'a> {
     }
 }
 
+fn is_enhanced(normalization_algorithm: &SignatureNormalizationAlgorithm) -> bool {
+    matches!(
+        normalization_algorithm,
+        SignatureNormalizationAlgorithm::Enhanced
+    )
+}
+
 fn format_operation(
     operation: &Node<Operation>,
     normalization_algorithm: &SignatureNormalizationAlgorithm,
@@ -403,7 +405,7 @@ fn format_selection_set(
     }
 
     if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
-        if is_enhanced!(normalization_algorithm) {
+        if is_enhanced(normalization_algorithm) {
             // in enhanced mode we display aliases so we show non-aliased field sorted by name first, then aliased fields sorted by alias
             fields.sort_by(|&a, &b| {
                 match (a.alias.as_ref(), b.alias.as_ref()) {
@@ -423,7 +425,7 @@ fn format_selection_set(
         named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
 
         // in enhanced mode we sort inline fragments
-        if is_enhanced!(normalization_algorithm) {
+        if is_enhanced(normalization_algorithm) {
             inline_fragments.sort_by(|&a, &b| {
                 let a_name = a.type_condition.as_ref().map(|t| t.as_str()).unwrap_or("");
                 let b_name = b.type_condition.as_ref().map(|t| t.as_str()).unwrap_or("");
@@ -494,7 +496,7 @@ fn format_field(
     normalization_algorithm: &SignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
-    if is_enhanced!(normalization_algorithm) {
+    if is_enhanced(normalization_algorithm) {
         if let Some(alias) = &field.alias {
             write!(f, "{}:", alias)?;
         }
@@ -588,7 +590,7 @@ fn format_directives(
     let mut sorted_directives = directives.clone();
 
     // In enhanced mode, we always want to sort
-    if sorted || is_enhanced!(normalization_algorithm) {
+    if sorted || is_enhanced(normalization_algorithm) {
         sorted_directives.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
@@ -628,7 +630,7 @@ fn format_value(
         Value::String(_) => f.write_str("\"\""),
         Value::Float(_) | Value::Int(_) => f.write_str("0"),
         Value::Object(o) => {
-            if is_enhanced!(normalization_algorithm) {
+            if is_enhanced(normalization_algorithm) {
                 f.write_str("{")?;
                 for (index, (name, val)) in o.iter().enumerate() {
                     if index != 0 {
@@ -654,7 +656,7 @@ fn get_arg_separator(
     normalization_algorithm: &SignatureNormalizationAlgorithm,
 ) -> char {
     // In enhanced mode, we just always use a comma
-    if is_enhanced!(normalization_algorithm) {
+    if is_enhanced(normalization_algorithm) {
         return ',';
     }
 
