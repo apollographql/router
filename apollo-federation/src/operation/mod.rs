@@ -248,7 +248,7 @@ pub(crate) struct SelectionSet {
     pub(crate) selections: Arc<SelectionMap>,
 }
 
-pub(crate) mod normalized_selection_map {
+mod selection_map {
     use std::borrow::Cow;
     use std::iter::Map;
     use std::ops::Deref;
@@ -259,9 +259,9 @@ pub(crate) mod normalized_selection_map {
 
     use crate::error::FederationError;
     use crate::error::SingleFederationError::Internal;
-    use crate::operation::normalized_field_selection::FieldSelection;
-    use crate::operation::normalized_fragment_spread_selection::FragmentSpreadSelection;
-    use crate::operation::normalized_inline_fragment_selection::InlineFragmentSelection;
+    use crate::operation::field_selection::FieldSelection;
+    use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
+    use crate::operation::inline_fragment_selection::InlineFragmentSelection;
     use crate::operation::HasSelectionKey;
     use crate::operation::Selection;
     use crate::operation::SelectionKey;
@@ -600,11 +600,11 @@ pub(crate) mod normalized_selection_map {
     }
 }
 
-pub(crate) use normalized_selection_map::FieldSelectionValue;
-pub(crate) use normalized_selection_map::FragmentSpreadSelectionValue;
-pub(crate) use normalized_selection_map::InlineFragmentSelectionValue;
-pub(crate) use normalized_selection_map::SelectionMap;
-pub(crate) use normalized_selection_map::SelectionValue;
+pub(crate) use selection_map::FieldSelectionValue;
+pub(crate) use selection_map::FragmentSpreadSelectionValue;
+pub(crate) use selection_map::InlineFragmentSelectionValue;
+pub(crate) use selection_map::SelectionMap;
+pub(crate) use selection_map::SelectionValue;
 
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
 /// (field, inline fragment, or fragment spread) that is used to determine whether two selections
@@ -1075,7 +1075,7 @@ impl Fragment {
     }
 }
 
-mod normalized_field_selection {
+mod field_selection {
     use std::collections::HashSet;
     use std::sync::Arc;
 
@@ -1346,11 +1346,11 @@ mod normalized_field_selection {
     }
 }
 
-pub(crate) use normalized_field_selection::Field;
-pub(crate) use normalized_field_selection::FieldData;
-pub(crate) use normalized_field_selection::FieldSelection;
+pub(crate) use field_selection::Field;
+pub(crate) use field_selection::FieldData;
+pub(crate) use field_selection::FieldSelection;
 
-mod normalized_fragment_spread_selection {
+mod fragment_spread_selection {
     use std::sync::Arc;
 
     use apollo_compiler::executable;
@@ -1443,9 +1443,9 @@ mod normalized_fragment_spread_selection {
     }
 }
 
-pub(crate) use normalized_fragment_spread_selection::FragmentSpread;
-pub(crate) use normalized_fragment_spread_selection::FragmentSpreadData;
-pub(crate) use normalized_fragment_spread_selection::FragmentSpreadSelection;
+pub(crate) use fragment_spread_selection::FragmentSpread;
+pub(crate) use fragment_spread_selection::FragmentSpreadData;
+pub(crate) use fragment_spread_selection::FragmentSpreadSelection;
 
 impl FragmentSpreadSelection {
     pub(crate) fn rebase_on(
@@ -1668,14 +1668,14 @@ impl FragmentSpreadData {
     }
 }
 
-mod normalized_inline_fragment_selection {
+mod inline_fragment_selection {
     use std::collections::HashSet;
     use std::sync::Arc;
 
     use apollo_compiler::executable;
     use apollo_compiler::executable::Name;
 
-    use super::normalized_field_selection::collect_variables_from_directive;
+    use super::field_selection::collect_variables_from_directive;
     use crate::error::FederationError;
     use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -1888,9 +1888,9 @@ mod normalized_inline_fragment_selection {
     }
 }
 
-pub(crate) use normalized_inline_fragment_selection::InlineFragment;
-pub(crate) use normalized_inline_fragment_selection::InlineFragmentData;
-pub(crate) use normalized_inline_fragment_selection::InlineFragmentSelection;
+pub(crate) use inline_fragment_selection::InlineFragment;
+pub(crate) use inline_fragment_selection::InlineFragmentData;
+pub(crate) use inline_fragment_selection::InlineFragmentSelection;
 
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
@@ -2226,7 +2226,7 @@ impl SelectionSet {
         for other_selection in others {
             let other_key = other_selection.key();
             match target.entry(other_key.clone()) {
-                normalized_selection_map::Entry::Occupied(existing) => match existing.get() {
+                selection_map::Entry::Occupied(existing) => match existing.get() {
                     Selection::Field(self_field_selection) => {
                         let Selection::Field(other_field_selection) = other_selection else {
                             return Err(Internal {
@@ -2279,7 +2279,7 @@ impl SelectionSet {
                             .push(other_inline_fragment_selection);
                     }
                 },
-                normalized_selection_map::Entry::Vacant(vacant) => {
+                selection_map::Entry::Vacant(vacant) => {
                     vacant.insert(other_selection.clone())?;
                 }
             }
