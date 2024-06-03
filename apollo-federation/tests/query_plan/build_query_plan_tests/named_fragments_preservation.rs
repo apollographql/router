@@ -569,9 +569,7 @@ fn it_preserves_directives_when_fragment_is_reused() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"I.b\" to selection set of parent type \"I\""
-)]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
     // Slightly artificial example for simplicity, but this highlight the problem.
@@ -1000,8 +998,8 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
 }
 
 #[test]
-#[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
-// TODO: investigate this failure (Object type "Outer" has no field "v")
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relation_differs() {
     // This test is similar to the subtyping case (it tests the same problems), but test the case
     // of unions instead of interfaces.
