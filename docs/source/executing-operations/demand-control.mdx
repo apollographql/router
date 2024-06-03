@@ -1,6 +1,155 @@
 ---
 title: Demand Control
-subtitle: Set and enforce query cost limits 
+subtitle: Protect your router by setting operation cost limits and rejecting high cost operations 
 ---
 
+<EnterpriseFeature />
+
 <PreviewFeature />
+
+Learn how to configure your router with operation cost limits to reject high cost operations sent by malicious or demanding clients.
+
+## About demand control
+
+
+
+## Configuring demand control
+
+To enable demand control in the router, configure the `preview_demand_control` option in `router.yaml`:
+
+```yaml title="Example demand control configuration"
+preview_demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 10 
+      max: 1000 
+```
+
+Customize `preview_demand_control` with the following settings:
+
+| Option              | Valid values            | Default value | Description                                                                                          |
+| ------------------- | ----------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| enabled             | boolean                 | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                              |
+| mode                | `measure`, `enforce`    |               | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
+| strategy            | `static_estimated`      |               | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                 |
+| strategy.list_size  | integer                 |               | The assumed maximum size of a list for fields that return lists.                                      |
+| strategy.max        | integer                 |               | The maximum cost of an accepted operation. An operation with cost higher than `strategy.max` is rejected. |
+
+### Cost estimation
+
+The `static_estimated` cost estimation strategy assigns costs based on fixed costs for each operation's kind and its GraphQL elements.
+
+The cost of each operation's kind:
+
+|           | Mutation | Query | Subscription |
+| --------- | -------- | ----- | ------------ |
+| kind      | 10       | 0     | 0            |
+
+
+The cost of each GraphQL element of an operation, per operation kind:
+
+|           | Mutation | Query | Subscription |
+| --------- | -------- | ----- | ------------ |
+| Object    | 1        | 1     | 1            |
+| Interface | 1        | 1     | 1            |
+| Union     | 1        | 1     | 1            |
+| Scalar    | 0        | 0     | 0            |
+| Enum      | 0        | 0     | 0            |
+
+## Using demand control
+
+Follow these steps to configure and tune demand control for your router:
+
+1. Measure the cost of your existing operations.
+2. Improve the cost estimation model.
+3. Adjust your `preview_demand_control` configuration and enforce cost limits.
+
+### Measure cost of existing operations
+
+Measure the costs of the operations served by your router by enabling `preview_demand_control` and using telemetry to monitor the results.
+
+```yaml title="router.yaml for measuring operation costs"
+# Demand control enabled, but in measure mode.
+preview_demand_control:
+  enabled: true
+  # We start off in measure mode as we don't know what the cost of our operations are, and don't want to reject any requests yet.
+  mode: measure
+
+  strategy:
+    # Static estimated strategy has a fixed cost for elements and when set to enforce will reject
+    # requests that are estimated as too high before any execution takes place.
+    static_estimated:
+      # The assumed returned list size for operations. This should be set to the maximum number of items in graphql list 
+      list_size: 10
+      # The maximum cost of a single operation. 
+      max: 1000
+
+# Basic telemetry configuration for cost.
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+	   # Define a custom view as cost is very different to the latency oriented view that is the default for otel
+          - name: cost.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0
+                  - 10
+                  - 100
+                  - 1000
+                  - 10000
+                  - 100000
+                  - 1000000
+     
+      # In this example we are using prometheus, but you should configure to point to your own APM 
+      prometheus:
+        enabled: true
+     
+  # Some basic instrumentation
+  instrumentation:
+    instruments:
+      supergraph:
+        cost.actual: true        # The actual cost 
+        cost.estimated:          # The estimated cost
+          attributes:
+            cost.result: true    # Of the estimated costs which of these would have been rejected
+        cost.delta: true         # Actual - estimated
+
+```
+
+### Improve cost estimation model
+
+```yaml
+
+
+```
+
+### Enforce cost limits
+
+After determining the cost estimation model of your operations, update your demand control configuration with the new cost limits and start enforcing them.
+
+
+```yaml
+preview_demand_control:
+  enabled: true
+  mode: enforce               # Change measure->enforce 
+  strategy:
+    static_estimated:
+      list_size: 100 
+      max: 50000              # Updated max
+```
+
+### Next steps
+
+Continue to monitor the costs of operations and take action if the estimation model becomes inaccurate. For example, update the estimation model if the maximum number of list items changes. 
+
+You can set alerts in your APM for events that may require changing your demand control settings. Events to alert include:
+- Unexpected increase in the number of requests rejected by demand control.
+- Increased max list size of your data.
+- Increased delta metric.
+
+Also, moving towards paging APIs will help to remove situations where a list field can return an arbitrarily large number of elements. 

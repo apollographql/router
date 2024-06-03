@@ -103,7 +103,13 @@
           ]
         ]
       },
-      "Demand Control" : "/executing-operations/demand-control"
+      "Demand Control" : [
+        "/executing-operations/demand-control",
+        [
+          "enterprise",
+          "preview"
+        ]
+      ]
     },
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",
