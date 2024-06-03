@@ -10,6 +10,7 @@ The `plan.json` file contains a top level JSON object with an `actions` field, c
 
 ```json
 {
+    "enterprise": false,
     "actions": [
         {
             "type": "Start",
@@ -38,6 +39,8 @@ The `plan.json` file contains a top level JSON object with an `actions` field, c
 ```
 
 If any of those actions fails, the test will stop immediately.
+
+The `enterprise` field indicates that this test uses enterprise features. If the `TEST_APOLLO_KEY` and `TEST_APOLLO_GRAPH_REF` environment variables are present with valid values, the test will be executed. Otherwise, it will be skipped.
 
 ## Possible actions
 
