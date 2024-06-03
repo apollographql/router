@@ -8,10 +8,13 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Preview demand control ([PR #5317](https://github.com/apollographql/router/pull/5317))
+### Demand control preview ([PR #5317](https://github.com/apollographql/router/pull/5317))
 
-> Note that Demand Control is in preview. Configuration and performance may change in future releases.
-Demand control is a feature that allows you to control the cost of operations in the router, potentially rejecting requests that are too expensive that could bring down the Router or subgraph services.
+> ⚠️ This is a preview for an [Enterprise feature](https://www.apollographql.com/blog/platform/evaluating-apollo-router-understanding-free-and-open-vs-commercial-features/) of the Apollo Router. It requires an organization with a [GraphOS Enterprise plan](https://www.apollographql.com/pricing/).  If your organization doesn't currently have an Enterprise plan, you can test out this functionality with a [free Enterprise trial](https://studio.apollographql.com/signup?type=enterprise-trial).
+>
+> As a preview feature, it's subject to our [Preview launch stage](https://www.apollographql.com/docs/resources/product-launch-stages/#preview) expectations and configuration and performance may change in future releases.
+
+Demand control allows you to control the cost of operations in the router, potentially rejecting requests that are too expensive that could bring down the Router or subgraphs.
 
 ```yaml
 # Demand control enabled, but in measure mode.
