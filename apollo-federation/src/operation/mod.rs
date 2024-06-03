@@ -50,6 +50,8 @@ use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 
+mod optimize;
+
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
 // Global storage for the counter used to uniquely identify selections
@@ -255,13 +257,13 @@ pub(crate) mod normalized_selection_map {
 
     use crate::error::FederationError;
     use crate::error::SingleFederationError::Internal;
-    use crate::query_plan::operation::normalized_field_selection::FieldSelection;
-    use crate::query_plan::operation::normalized_fragment_spread_selection::FragmentSpreadSelection;
-    use crate::query_plan::operation::normalized_inline_fragment_selection::InlineFragmentSelection;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::Selection;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
+    use crate::operation::normalized_field_selection::FieldSelection;
+    use crate::operation::normalized_fragment_spread_selection::FragmentSpreadSelection;
+    use crate::operation::normalized_inline_fragment_selection::InlineFragmentSelection;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::Selection;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -1081,11 +1083,11 @@ mod normalized_field_selection {
     use apollo_compiler::Node;
 
     use crate::error::FederationError;
+    use crate::operation::directives_with_sorted_arguments;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_plan::operation::directives_with_sorted_arguments;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::position::FieldDefinitionPosition;
@@ -1352,12 +1354,12 @@ mod normalized_fragment_spread_selection {
     use apollo_compiler::executable;
     use apollo_compiler::executable::Name;
 
-    use crate::query_plan::operation::directives_with_sorted_arguments;
-    use crate::query_plan::operation::is_deferred_selection;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::SelectionId;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
+    use crate::operation::directives_with_sorted_arguments;
+    use crate::operation::is_deferred_selection;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::SelectionId;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
 
@@ -1675,13 +1677,13 @@ mod normalized_inline_fragment_selection {
     use crate::error::FederationError;
     use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
-    use crate::query_plan::operation::directives_with_sorted_arguments;
-    use crate::query_plan::operation::is_deferred_selection;
-    use crate::query_plan::operation::runtime_types_intersect;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::SelectionId;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
+    use crate::operation::directives_with_sorted_arguments;
+    use crate::operation::is_deferred_selection;
+    use crate::operation::runtime_types_intersect;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::SelectionId;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
@@ -6442,10 +6444,10 @@ scalar FieldSet
         use apollo_compiler::name;
         use indexmap::IndexSet;
 
-        use crate::query_plan::operation::normalize_operation;
-        use crate::query_plan::operation::tests::parse_schema_and_operation;
-        use crate::query_plan::operation::tests::parse_subgraph;
-        use crate::query_plan::operation::NamedFragments;
+        use crate::operation::normalize_operation;
+        use crate::operation::tests::parse_schema_and_operation;
+        use crate::operation::tests::parse_subgraph;
+        use crate::operation::NamedFragments;
         use crate::schema::position::InterfaceTypeDefinitionPosition;
 
         #[test]
