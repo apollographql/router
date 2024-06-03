@@ -250,6 +250,11 @@ fn validate_object_fields(
                 .collect(),
         }];
     }
+    let is_query = schema
+        .schema_definition
+        .query
+        .as_ref()
+        .is_some_and(|query| query.name == object.name);
     let fields = object.fields.values();
     let mut errors = Vec::new();
     for field in fields {
@@ -258,6 +263,19 @@ fn validate_object_fields(
             .iter()
             .find(|directive| directive.name == *connect_directive_name)
         else {
+            if is_query {
+                errors.push(Error {
+                    code: ErrorCode::QueryFieldMissingConnect,
+                    message: format!(
+                        "The field `{object}.{field}` has no `@{connect_directive_name}` directive.",
+                        object = object.name,
+                        field = field.name,
+                    ),
+                    locations: Location::from_node(field.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                });
+            }
             // TODO: return errors when a field is not resolvable by some combination of `@connect`
             continue;
         };
@@ -500,7 +518,7 @@ impl Display for Error {
 
 impl std::error::Error for Error {}
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ErrorCode {
     GraphQLError,
     DuplicateSourceName,
@@ -510,6 +528,7 @@ pub enum ErrorCode {
     SourceScheme,
     SourceNameMismatch,
     SubscriptionInConnectors,
+    QueryFieldMissingConnect,
 }
 
 #[cfg(test)]
@@ -607,5 +626,25 @@ mod test_validate_source {
         let errors = validate(schema);
         assert_eq!(errors.len(), 1);
         assert_snapshot!(errors[0].to_string(), @"A subscription root type is not supported when using `@connect`.");
+    }
+
+    #[test]
+    fn missing_connect_on_query_field() {
+        let schema = include_str!("test_data/missing_connect_on_query_field.graphql");
+        let schema = Schema::parse(schema, "test.graphql").unwrap();
+        let errors = validate(schema);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, ErrorCode::QueryFieldMissingConnect);
+        assert_snapshot!(errors[0], @r###"The field `Query.resources` has no `@connect` directive."###);
+    }
+
+    #[test]
+    fn renamed_connect_directive() {
+        let schema = include_str!("test_data/renamed_connect_directive.graphql");
+        let schema = Schema::parse(schema, "test.graphql").unwrap();
+        let errors = validate(schema);
+        assert_eq!(errors.len(), 1);
+        assert_eq!(errors[0].code, ErrorCode::QueryFieldMissingConnect);
+        assert_snapshot!(errors[0], @r###"The field `Query.resources` has no `@data` directive."###);
     }
 }
