@@ -701,7 +701,7 @@ impl Selection {
         inline_fragment: InlineFragment,
         sub_selections: SelectionSet,
     ) -> Self {
-        assert_eq!(
+        debug_assert_eq!(
             inline_fragment.data().casted_type(),
             sub_selections.type_position
         );
@@ -2834,6 +2834,8 @@ impl SelectionSet {
     /// Then the resulting built selection set will be: `{ a { b { c { d } } }`,
     /// and in particular the `... on C` fragment will be eliminated since it is unecesasry
     /// (since again, `c` is of type `C`).
+    // Notes on NamedFragments argument: `add_at_path` only deals with expanded operations, so
+    // the NamedFragments argument to `rebase_on` is not needed (passing the default value).
     pub(crate) fn add_at_path(
         &mut self,
         path: &[Arc<OpPathElement>],
@@ -2877,7 +2879,8 @@ impl SelectionSet {
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
                 let element = OpPathElement::clone(ele);
-                let selection_set = selection_set.map(|selection_set| {
+                let selection_set = selection_set
+                    .map(|selection_set| {
                         selection_set.rebase_on(
                             &element.sub_selection_type_position()?.ok_or_else(|| {
                                 FederationError::internal("unexpected: Element has a selection set with non-composite base type")
