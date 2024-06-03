@@ -50,7 +50,6 @@ telemetry:
             trace_id: apollo
 ```
 
-Also, router documentation has been updated with constants that are available in Rhai.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5189
 
@@ -144,6 +143,13 @@ These metrics don't leak any sensitive data.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5267, [@goto-bus-stop](https://github.com/goto-bus-stop)
 
+## 📚 Documentation
+
+### Add Rhai API constants reference
+
+The Rhai API  documentation now includes [a list of available constants](https://www.apollographql.com/docs/router/customizations/rhai-api/#available-constants) that are available in the Rhai runtime.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5189
 ## 🧪 Experimental
 
 ### GraphQL instruments ([PR #5215](https://github.com/apollographql/router/pull/5215), [PR #5257](https://github.com/apollographql/router/pull/5257))
