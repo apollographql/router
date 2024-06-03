@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 4b0a2b41b9cbccb8bde234dc0285c3372e220fa1
+# Composed from subgraphs with hash: f4e377fc3c287e29c8acbbdb5614ae18542b310d
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -20,17 +20,11 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type A
-  @join__type(graph: SUBGRAPH1)
-{
-  x: Int
-  y: Int
-}
-
 scalar join__FieldSet
 
 enum join__Graph {
   SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
 }
 
 scalar link__Import
@@ -49,13 +43,16 @@ enum link__Purpose {
 
 type Query
   @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
 {
-  t: T
+  t: T @join__field(graph: SUBGRAPH1)
 }
 
 type T
-  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH2, key: "id")
 {
-  a1: A
-  a2: A
+  id: ID!
+  a: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2, external: true)
+  b: Int @join__field(graph: SUBGRAPH2, requires: "a")
 }

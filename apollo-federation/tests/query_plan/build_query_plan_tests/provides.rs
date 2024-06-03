@@ -112,7 +112,7 @@ fn it_works_with_nested_provides() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")] // TODO: fix bug FED-230
+#[should_panic(expected = "An internal error has occurred, please report this bug to Apollo")] // TODO: fix bug FED-230
 fn it_works_on_interfaces() {
     let planner = planner!(
         Subgraph1: r#"
@@ -480,7 +480,7 @@ fn it_works_on_unions() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn it_allow_providing_fields_for_only_some_subtype() {
     let planner = planner!(

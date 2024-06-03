@@ -52,7 +52,33 @@ fn lookup_dir(
             );
 
             if path.join("plan.json").exists() {
-                tests.push(Trial::test(name, move || test(&path)));
+                let mut file = File::open(&path.join("plan.json")).map_err(|e| {
+                    format!(
+                        "could not open file at path '{:?}': {e}",
+                        &path.join("plan.json")
+                    )
+                })?;
+                let mut s = String::new();
+                file.read_to_string(&mut s).map_err(|e| {
+                    format!(
+                        "could not read file at path: '{:?}': {e}",
+                        &path.join("plan.json")
+                    )
+                })?;
+
+                let plan: Plan = match serde_json::from_str(&s) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        return Err(format!("could not deserialize test plan: {e}").into());
+                    }
+                };
+
+                if !plan.enterprise
+                    || (std::env::var("TEST_APOLLO_KEY").is_ok()
+                        && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok())
+                {
+                    tests.push(Trial::test(name, move || test(&path, plan)));
+                }
             } else {
                 lookup_dir(&path, &name, tests)?;
             }
@@ -62,21 +88,13 @@ fn lookup_dir(
     Ok(())
 }
 
-fn test(path: &PathBuf) -> Result<(), Failed> {
+fn test(path: &PathBuf, plan: Plan) -> Result<(), Failed> {
     //libtest_mimic does not support stdout capture
     let mut out = String::new();
     writeln!(&mut out, "test at path: {path:?}").unwrap();
     if let Ok(file) = open_file(&path.join("README.md"), &mut out) {
         writeln!(&mut out, "{file}\n\n============\n\n").unwrap();
     }
-
-    let plan: Plan = match serde_json::from_str(&open_file(&path.join("plan.json"), &mut out)?) {
-        Ok(data) => data,
-        Err(e) => {
-            writeln!(&mut out, "could not deserialize test plan: {e}").unwrap();
-            return Err(out.into());
-        }
-    };
 
     let rt = Runtime::new()?;
 
@@ -375,7 +393,7 @@ fn open_file(path: &Path, out: &mut String) -> Result<String, Failed> {
 
     let mut s = String::new();
     file.read_to_string(&mut s).map_err(|e| {
-        writeln!(out, "could not read file at path: '{path:?}': {e} ").unwrap();
+        writeln!(out, "could not read file at path: '{path:?}': {e}").unwrap();
         let f: Failed = out.into();
         f
     })?;
@@ -392,6 +410,8 @@ fn check_path(path: &Path, out: &mut String) -> Result<(), Failed> {
 
 #[derive(Deserialize)]
 struct Plan {
+    #[serde(default)]
+    enterprise: bool,
     actions: Vec<Action>,
 }
 
