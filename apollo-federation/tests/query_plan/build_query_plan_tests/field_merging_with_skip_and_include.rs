@@ -140,6 +140,7 @@ fn merging_skip_and_include_directives_multiple_applications_identical() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
+// TODO: https://apollographql.atlassian.net/browse/FED-242
 fn merging_skip_and_include_directives_multiple_applications_differing_order() {
     let planner = planner!(
         SubgraphSkip: r#"
