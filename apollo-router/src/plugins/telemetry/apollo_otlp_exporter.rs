@@ -26,7 +26,6 @@ use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
 use tower::BoxError;
 use url::Url;
-use uuid::Uuid;
 
 use super::apollo::ErrorsConfiguration;
 use super::config_new::attributes::SUBGRAPH_NAME;
@@ -37,7 +36,7 @@ use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
-use crate::plugins::telemetry::apollo::ROUTER_ID;
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_TRACING_PROTOCOL_OTLP;
@@ -125,10 +124,7 @@ impl ApolloOtlpExporter {
             batch_config: batch_config.clone(),
             apollo_key: apollo_key.to_string(),
             resource_template: Resource::new([
-                KeyValue::new(
-                    "apollo.router.id",
-                    ROUTER_ID.get_or_init(Uuid::new_v4).to_string(),
-                ),
+                KeyValue::new("apollo.router.id", router_id()),
                 KeyValue::new("apollo.graph.ref", apollo_graph_ref.to_string()),
                 KeyValue::new("apollo.schema.id", schema_id.to_string()),
                 KeyValue::new(

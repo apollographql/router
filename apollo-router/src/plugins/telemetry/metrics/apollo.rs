@@ -13,10 +13,9 @@ use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
 use url::Url;
-use uuid::Uuid;
 
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo::Config;
-use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::config::MetricsCommon;
@@ -131,10 +130,7 @@ impl Config {
             .apollo_meter_provider_builder
             .with_reader(reader)
             .with_resource(Resource::new([
-                KeyValue::new(
-                    "apollo.router.id",
-                    ROUTER_ID.get_or_init(Uuid::new_v4).to_string(),
-                ),
+                KeyValue::new("apollo.router.id", router_id()),
                 KeyValue::new("apollo.graph.ref", reference.to_string()),
                 KeyValue::new("apollo.schema.id", schema_id.to_string()),
                 KeyValue::new(

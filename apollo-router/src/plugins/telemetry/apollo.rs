@@ -39,7 +39,12 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
 pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
 
 // Random unique UUID for the Router. This doesn't actually identify the router, it just allows disambiguation between multiple routers with the same metadata.
-pub(crate) static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
+static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
+
+/// Returns the current unique UUID for this instance of the Router.
+pub(crate) fn router_id() -> String {
+    ROUTER_ID.get_or_init(Uuid::new_v4).to_string()
+}
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
