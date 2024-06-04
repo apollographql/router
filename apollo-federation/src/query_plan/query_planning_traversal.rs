@@ -512,7 +512,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn cost(
         &mut self,
         dependency_graph: &mut FetchDependencyGraph,
-    ) -> Result<i64, FederationError> {
+    ) -> Result<QueryPlanCost, FederationError> {
         let (main, deferred) = dependency_graph.process(self.cost_processor, self.root_kind)?;
         if deferred.is_empty() {
             Ok(main)

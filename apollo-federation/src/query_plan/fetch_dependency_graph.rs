@@ -1752,7 +1752,7 @@ impl FetchDependencyGraphNode {
 
     pub(crate) fn cost(&mut self) -> Result<QueryPlanCost, FederationError> {
         if self.cached_cost.is_none() {
-            self.cached_cost = Some(self.selection_set.selection_set.cost(1)?)
+            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0)?)
         }
         Ok(self.cached_cost.unwrap())
     }
@@ -2082,7 +2082,7 @@ impl SelectionSet {
         // and one that doesn't, and both will be almost identical,
         // except that the type-exploded field will be a different depth;
         // by favoring lesser depth in that case, we favor not type-exploding).
-        self.selections.values().try_fold(0, |sum, selection| {
+        self.selections.values().try_fold(0.0, |sum, selection| {
             let subselections = match selection {
                 Selection::Field(field) => field.selection_set.as_ref(),
                 Selection::InlineFragment(inline) => Some(&inline.selection_set),
@@ -2093,9 +2093,9 @@ impl SelectionSet {
                 }
             };
             let subselections_cost = if let Some(selection_set) = subselections {
-                selection_set.cost(depth + 1)?
+                selection_set.cost(depth + 1.0)?
             } else {
-                0
+                0.0
             };
             Ok(sum + depth + subselections_cost)
         })
