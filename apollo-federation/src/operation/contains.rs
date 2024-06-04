@@ -114,11 +114,7 @@ impl Containment {
 }
 
 impl Selection {
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
+    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
         match (self, other) {
             (Selection::Field(self_field), Selection::Field(other_field)) => {
                 self_field.containment(other_field, options)
@@ -136,17 +132,13 @@ impl Selection {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
+    pub fn contains(&self, other: &Selection) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }
 
 impl FieldSelection {
-    pub(crate) fn containment(
-        &self,
-        other: &FieldSelection,
-        options: ContainmentOptions,
-    ) -> Containment {
+    pub fn containment(&self, other: &FieldSelection, options: ContainmentOptions) -> Containment {
         let self_field = self.field.data();
         let other_field = other.field.data();
         if self_field.name() != other_field.name()
@@ -170,17 +162,13 @@ impl FieldSelection {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &FieldSelection) -> bool {
+    pub fn contains(&self, other: &FieldSelection) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }
 
 impl FragmentSpreadSelection {
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
+    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not
@@ -193,17 +181,13 @@ impl FragmentSpreadSelection {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
+    pub fn contains(&self, other: &Selection) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }
 
 impl InlineFragmentSelection {
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
+    pub fn containment(&self, other: &Selection, options: ContainmentOptions) -> Containment {
         match other {
             // Using keys here means that @defer fragments never compare equal.
             // This is a bit odd but it is consistent: the selection set data structure would not
@@ -219,13 +203,13 @@ impl InlineFragmentSelection {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
+    pub fn contains(&self, other: &Selection) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }
 
 impl SelectionSet {
-    pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
+    pub fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
         if other.selections.len() > self.selections.len() {
             // If `other` has more selections but we're ignoring missing __typename, then in the case where
             // `other` has a __typename but `self` does not, then we need the length of `other` to be at
@@ -275,7 +259,7 @@ impl SelectionSet {
     }
 
     /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Self) -> bool {
+    pub fn contains(&self, other: &Self) -> bool {
         self.containment(other, Default::default()).is_contained()
     }
 }
