@@ -8,7 +8,6 @@ use std::sync::Arc;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
@@ -183,7 +182,7 @@ impl PlannerMode {
 
     async fn plan(
         &self,
-        schema: &Schema,
+        doc: &ParsedDocument,
         filtered_query: String,
         operation: Option<String>,
         plan_options: PlanOptions,
@@ -196,19 +195,11 @@ impl PlannerMode {
                 .into_result()
                 .map_err(|err| QueryPlannerError::from(PlanErrors::from(err))),
             PlannerMode::Rust { rust, .. } => {
-                // TODO: avoid reparsing and revalidating
-                let document = ExecutableDocument::parse_and_validate(
-                    schema.api_schema(),
-                    &filtered_query,
-                    "query.graphql",
-                )
-                .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
-
                 let plan = operation
                     .as_deref()
                     .map(|n| Name::new(n).map_err(FederationError::from))
                     .transpose()
-                    .and_then(|operation| rust.build_query_plan(&document, operation))
+                    .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()))?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
@@ -228,20 +219,12 @@ impl PlannerMode {
                 })
             }
             PlannerMode::Both { js, rust } => {
-                // TODO: avoid reparsing and revalidating
-                let document = ExecutableDocument::parse_and_validate(
-                    schema.api_schema(),
-                    &filtered_query,
-                    "query.graphql",
-                )
-                .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
-
                 // TODO: once the Rust query planner does not use `todo!()` anymore,
                 // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
                 let rust_result = std::panic::catch_unwind(|| {
                     USING_CATCH_UNWIND.set(true);
                     let operation = operation.as_deref().map(Name::new).transpose()?;
-                    let result = rust.build_query_plan(&document, operation);
+                    let result = rust.build_query_plan(&doc.executable, operation);
                     USING_CATCH_UNWIND.set(false);
                     result
                 })
@@ -531,12 +514,7 @@ impl BridgeQueryPlanner {
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let mut plan_success = self
             .planner
-            .plan(
-                &self.schema,
-                filtered_query.clone(),
-                operation.clone(),
-                plan_options,
-            )
+            .plan(doc, filtered_query.clone(), operation.clone(), plan_options)
             .await?;
         plan_success
             .data
