@@ -480,7 +480,7 @@ impl InlineFragment {
                 );
                 let printable_parent_runtimes = print_possible_runtimes(parent_type, schema);
                 Err(FederationError::internal(
-                    format!("Cannot add fragment of condition \"{}\" (runtimes: [{}]) to parent type \"{}\" (runtimes: [{})",
+                    format!("Cannot add fragment of condition \"{}\" (runtimes: [{}]) to parent type \"{}\" (runtimes: [{}])",
                             printable_type_condition,
                             printable_runtimes,
                             parent_type,

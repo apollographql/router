@@ -66,6 +66,16 @@ pub struct QueryPlannerConfig {
     /// Defaults to true.
     pub reuse_query_fragments: bool,
 
+    /// NOTE: **not implemented yet**
+    ///
+    /// If enabled, the query planner will extract inline fragments into fragment
+    /// definitions before sending queries to subgraphs. This can significantly
+    /// reduce the size of the query sent to subgraphs, but may increase the time
+    /// it takes to plan the query.
+    ///
+    /// Defaults to false.
+    pub generate_query_fragments: bool,
+
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
     ///
@@ -90,6 +100,7 @@ impl Default for QueryPlannerConfig {
         Self {
             reuse_query_fragments: true,
             subgraph_graphql_validation: false,
+            generate_query_fragments: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
         }
