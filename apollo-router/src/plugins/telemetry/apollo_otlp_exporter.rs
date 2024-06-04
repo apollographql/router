@@ -19,7 +19,6 @@ use opentelemetry::InstrumentationLibrary;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_semantic_conventions::trace::GRAPHQL_OPERATION_TYPE;
 use parking_lot::Mutex;
 use sys_info::hostname;
 use tonic::codec::CompressionEncoding;
@@ -30,7 +29,6 @@ use url::Url;
 use uuid::Uuid;
 
 use super::apollo::ErrorsConfiguration;
-use super::apollo::OperationSubType;
 use super::config_new::attributes::SUBGRAPH_NAME;
 use super::otlp::Protocol;
 use super::tracing::apollo_telemetry::encode_ftv1_trace;
@@ -39,18 +37,15 @@ use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
-use super::tracing::apollo_telemetry::OPERATION_SUBTYPE;
 use crate::plugins::telemetry::apollo::ROUTER_ID;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_TRACING_PROTOCOL_OTLP;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
-use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
-use crate::services::OperationKind;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
 #[derive(Clone, Derivative)]
@@ -192,7 +187,6 @@ impl ApolloOtlpExporter {
                         }
                     }
                     SUBGRAPH_SPAN_NAME => export_spans.push(self.prepare_subgraph_span(span)),
-                    EXECUTION_SPAN_NAME => export_spans.push(self.prepare_execution_span(span)),
                     _ => export_spans.push(self.base_prepare_span(span)),
                 };
             } else {
@@ -232,23 +226,6 @@ impl ApolloOtlpExporter {
             resource: Cow::Owned(self.resource_template.to_owned()),
             instrumentation_lib: self.intrumentation_library.clone(),
         }
-    }
-
-    /// Adds the "apollo_private.operation.subtype" attribute for subscription requests.
-    fn prepare_execution_span(&self, mut span: LightSpanData) -> SpanData {
-        let op_type = span
-            .attributes
-            .get(&GRAPHQL_OPERATION_TYPE)
-            .and_then(extract_string)
-            .unwrap_or_default();
-        if op_type == OperationKind::Subscription.as_apollo_operation_type() {
-            // Currently, all "subscription" operations are of the "request" variety.
-            span.attributes.insert(KeyValue::new(
-                OPERATION_SUBTYPE,
-                OperationSubType::SubscriptionRequest.as_str(),
-            ));
-        }
-        self.base_prepare_span(span)
     }
 
     /// Parses and redacts errors from ftv1 traces.
