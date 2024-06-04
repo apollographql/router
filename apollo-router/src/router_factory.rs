@@ -258,6 +258,17 @@ impl YamlRouterFactory {
                         .experimental_reuse_query_plans,
                 )
                 .await;
+        } else {
+            supergraph_creator
+                .prewarm_query_planner(
+                    &query_analysis_layer,
+                    &persisted_query_layer,
+                    configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_reuse_query_plans,
+                )
+                .await;
         };
         RouterCreator::new(
             query_analysis_layer,

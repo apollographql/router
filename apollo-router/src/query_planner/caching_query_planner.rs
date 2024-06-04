@@ -152,7 +152,7 @@ where
         &mut self,
         query_analysis: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: InMemoryCachePlanner,
+        previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
     ) {
@@ -171,38 +171,41 @@ where
                 }),
         );
 
-        let mut cache_keys = {
-            let cache = previous_cache.lock().await;
+        let mut cache_keys = match previous_cache {
+            Some(ref previous_cache) => {
+                let cache = previous_cache.lock().await;
 
-            let count = count.unwrap_or(cache.len() / 3);
+                let count = count.unwrap_or(cache.len() / 3);
 
-            cache
-                .iter()
-                .map(
-                    |(
-                        CachingQueryKey {
-                            query,
-                            operation,
-                            hash,
-                            metadata,
-                            plan_options,
-                            config_mode: _,
-                            sdl: _,
-                            introspection: _,
+                cache
+                    .iter()
+                    .map(
+                        |(
+                            CachingQueryKey {
+                                query,
+                                operation,
+                                hash,
+                                metadata,
+                                plan_options,
+                                config_mode: _,
+                                sdl: _,
+                                introspection: _,
+                            },
+                            _,
+                        )| WarmUpCachingQueryKey {
+                            query: query.clone(),
+                            operation: operation.clone(),
+                            hash: Some(hash.clone()),
+                            metadata: metadata.clone(),
+                            plan_options: plan_options.clone(),
+                            config_mode: self.config_mode.clone(),
+                            introspection: self.introspection,
                         },
-                        _,
-                    )| WarmUpCachingQueryKey {
-                        query: query.clone(),
-                        operation: operation.clone(),
-                        hash: Some(hash.clone()),
-                        metadata: metadata.clone(),
-                        plan_options: plan_options.clone(),
-                        config_mode: self.config_mode.clone(),
-                        introspection: self.introspection,
-                    },
-                )
-                .take(count)
-                .collect::<Vec<_>>()
+                    )
+                    .take(count)
+                    .collect::<Vec<_>>()
+            }
+            None => Vec::new(),
         };
 
         cache_keys.shuffle(&mut thread_rng());
@@ -268,19 +271,22 @@ where
             };
 
             if experimental_reuse_query_plans {
-                // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                if let Some(hash) = hash {
-                    if hash == doc.hash {
-                        if let Some(entry) =
-                            { previous_cache.lock().await.get(&caching_key).cloned() }
-                        {
-                            self.cache.insert_in_memory(caching_key, entry).await;
-                            reused += 1;
-                            continue;
+                // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
+                if let Some(ref previous_cache) = previous_cache {
+                    // if the query hash did not change with the schema update, we can reuse the previously cached entry
+                    if let Some(hash) = hash {
+                        if hash == doc.hash {
+                            if let Some(entry) =
+                                { previous_cache.lock().await.get(&caching_key).cloned() }
+                            {
+                                self.cache.insert_in_memory(caching_key, entry).await;
+                                reused += 1;
+                                continue;
+                            }
                         }
                     }
                 }
-            }
+            };
 
             let entry = self
                 .cache
