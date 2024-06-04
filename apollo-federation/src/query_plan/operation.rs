@@ -2773,12 +2773,7 @@ impl SelectionSet {
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
     /// exist in the map, the existing selection and the given selection are merged, replacing the
     /// existing selection while keeping the same insertion index.
-    fn add_selection(
-        &mut self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-        selection: Selection,
-    ) -> Result<(), FederationError> {
+    fn add_selection(&mut self, selection: Selection) -> Result<(), FederationError> {
         let selections = Arc::make_mut(&mut self.selections);
 
         let key = selection.key();
@@ -2788,8 +2783,8 @@ impl SelectionSet {
                 // `existing_selection` and `selection` both have the same selection key,
                 // so the merged selection will also have the same selection key.
                 let selection = SelectionSet::make_selection(
-                    schema,
-                    parent_type,
+                    &self.schema,
+                    &self.type_position,
                     to_merge.iter(),
                     /*named_fragments*/ &Default::default(),
                 )?;
@@ -2883,33 +2878,28 @@ impl SelectionSet {
                     })
                     .transpose()?;
                 let selection = Selection::from_element(element, selection_set)?;
-                let schema = self.schema.clone();
-                let parent_type_position = self.type_position.clone();
                 // TODO move the rebasing to add_selection/merge_into
                 if let Some(rebased_selection) = selection.rebase_on(
-                    &parent_type_position,
+                    &self.type_position,
                     &NamedFragments::default(),
-                    &schema,
+                    &self.schema,
                     RebaseErrorHandlingOption::ThrowError,
                 )? {
-                    self.add_selection(&ele.parent_type_position(), &schema, rebased_selection)?
+                    self.add_selection(rebased_selection)?
                 }
             }
             // If we don't have any path, we rebase and merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
                     // TODO move the rebasing to add_selection/merge_into
-                    let schema = self.schema.clone();
-                    let parent_type = self.type_position.clone();
-                    let selection_type = &sel.type_position;
                     sel.selections.values().cloned().try_for_each(|s| {
                         if let Some(rebased) = s.rebase_on(
-                            &parent_type,
+                            &self.type_position,
                             &NamedFragments::default(),
-                            &schema,
+                            &self.schema,
                             RebaseErrorHandlingOption::ThrowError,
                         )? {
-                            self.add_selection(selection_type, &schema, rebased)
+                            self.add_selection(rebased)
                         } else {
                             Ok(())
                         }
@@ -3407,9 +3397,11 @@ fn compute_aliases_for_non_merging_fields(
     }
 
     for FieldInPath { mut path, field } in selections.iter().flat_map(rebased_fields_in_set) {
-        let field_name = field.field.data().name();
-        let response_name = field.field.data().response_name();
-        let field_type = &field.field.data().field_position.get(schema.schema())?.ty;
+        let field_schema = field.field.schema().schema();
+        let field_data = field.field.data();
+        let field_name = field_data.name();
+        let response_name = field_data.response_name();
+        let field_type = &field_data.field_position.get(field_schema)?.ty;
 
         match seen_response_names.get(&response_name) {
             Some(previous) => {
@@ -3917,7 +3909,7 @@ impl Field {
         }
 
         let field_from_parent = parent_type.field(self.data().name().clone())?;
-        return if field_from_parent.get(schema.schema()).is_ok()
+        return if field_from_parent.try_get(schema.schema()).is_some()
             && self.can_rebase_on(parent_type, schema)
         {
             let mut updated_field_data = self.data().clone();
