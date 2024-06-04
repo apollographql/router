@@ -6,7 +6,7 @@ use futures::Stream;
 use http_body::SizeHint;
 use hyper::body::HttpBody;
 
-pub struct RouterBody(pub(crate) super::Body);
+pub struct RouterBody(super::Body);
 
 impl RouterBody {
     pub fn empty() -> Self {
@@ -61,10 +61,10 @@ impl HttpBody for RouterBody {
     type Error = <hyper::body::Body as HttpBody>::Error;
 
     fn poll_data(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Result<Self::Data, Self::Error>>> {
-        let mut pinned = unsafe { self.map_unchecked_mut(|s| &mut s.0) };
+        let mut pinned = std::pin::pin!(&mut self.0);
         pinned.as_mut().poll_data(cx)
     }
 
