@@ -47,10 +47,10 @@ impl Stream for RouterBody {
     type Item = <hyper::body::Body as Stream>::Item;
 
     fn poll_next(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Option<Self::Item>> {
-        let mut pinned = unsafe { self.map_unchecked_mut(|s| &mut s.0) };
+        let mut pinned = std::pin::pin!(&mut self.0);
         pinned.as_mut().poll_next(cx)
     }
 }
@@ -69,10 +69,10 @@ impl HttpBody for RouterBody {
     }
 
     fn poll_trailers(
-        self: std::pin::Pin<&mut Self>,
+        mut self: std::pin::Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> std::task::Poll<Result<Option<http::HeaderMap>, Self::Error>> {
-        let mut pinned = unsafe { self.map_unchecked_mut(|s| &mut s.0) };
+        let mut pinned = std::pin::pin!(&mut self.0);
         pinned.as_mut().poll_trailers(cx)
     }
 
