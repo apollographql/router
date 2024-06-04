@@ -744,7 +744,7 @@ impl Selection {
         }
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -1331,7 +1331,7 @@ impl FragmentSpreadSelection {
         }
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -2675,7 +2675,9 @@ impl SelectionSet {
     /// Passing the option `recursive == false` makes the normalization only apply at the top-level, removing
     /// any unnecessary top-level inline fragments, possibly multiple layers of them, but we never recurse
     /// inside the sub-selection of an selection that is not removed by the normalization.
-    pub(crate) fn normalize(
+    // PORT_NOTE: this is now module-private, because it looks like it *can* be. If some place
+    // outside this module *does* need it, feel free to mark it pub(crate).
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -3227,7 +3229,7 @@ impl FieldSelection {
         }))
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -3498,7 +3500,7 @@ impl InlineFragmentSelection {
         }
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
