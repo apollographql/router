@@ -998,9 +998,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "Outer.v" to selection set of parent type "Outer""#
-)]
+#[should_panic(expected = r#"snapshot assertion"#)]
 // TODO: investigate this failure
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relation_differs() {
     // This test is similar to the subtyping case (it tests the same problems), but test the case

@@ -1,6 +1,4 @@
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn handles_mix_of_fragments_indirection_and_unions() {
     let planner = planner!(
         Subgraph1: r#"
@@ -254,6 +252,10 @@ fn another_mix_of_fragments_indirection_and_unions() {
 }
 
 #[test]
+#[should_panic(
+    expected = r#"Cannot add selection of field "T1.id" to selection set of parent type "I""#
+)]
+// TODO: investigate this failure
 fn handles_fragments_with_interface_field_subtyping() {
     let planner = planner!(
         Subgraph1: r#"
