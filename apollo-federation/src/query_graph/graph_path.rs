@@ -29,6 +29,15 @@ use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::link::graphql_definition::OperationConditional;
 use crate::link::graphql_definition::OperationConditionalKind;
+use crate::operation::Field;
+use crate::operation::FieldData;
+use crate::operation::HasSelectionKey;
+use crate::operation::InlineFragment;
+use crate::operation::InlineFragmentData;
+use crate::operation::RebaseErrorHandlingOption;
+use crate::operation::SelectionId;
+use crate::operation::SelectionKey;
+use crate::operation::SelectionSet;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
@@ -36,15 +45,6 @@ use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::HasSelectionKey;
-use crate::query_plan::operation::InlineFragment;
-use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::RebaseErrorHandlingOption;
-use crate::query_plan::operation::SelectionId;
-use crate::query_plan::operation::SelectionKey;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
 use crate::query_plan::QueryPlanCost;
@@ -485,7 +485,7 @@ pub(crate) struct OpGraphPathContext {
     /// A list of conditionals (e.g. `[{ kind: Include, value: true}, { kind: Skip, value: $foo }]`)
     /// in the reverse order in which they were applied (so the first element is the inner-most
     /// applied include/skip).
-    conditionals: Arc<Vec<Arc<OperationConditional>>>,
+    conditionals: Arc<Vec<OperationConditional>>,
 }
 
 impl OpGraphPathContext {
@@ -500,8 +500,7 @@ impl OpGraphPathContext {
 
         let new_conditionals = operation_element.extract_operation_conditionals()?;
         if !new_conditionals.is_empty() {
-            Arc::make_mut(&mut new_context.conditionals)
-                .extend(new_conditionals.into_iter().map(Arc::new));
+            Arc::make_mut(&mut new_context.conditionals).extend(new_conditionals);
         }
         Ok(new_context)
     }
@@ -511,7 +510,7 @@ impl OpGraphPathContext {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &OperationConditional> {
-        self.conditionals.iter().map(|x| x.as_ref())
+        self.conditionals.iter()
     }
 }
 
@@ -3682,13 +3681,13 @@ mod tests {
     use petgraph::stable_graph::EdgeIndex;
     use petgraph::stable_graph::NodeIndex;
 
+    use crate::operation::Field;
+    use crate::operation::FieldData;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::OpGraphPath;
     use crate::query_graph::graph_path::OpGraphPathTrigger;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_plan::operation::Field;
-    use crate::query_plan::operation::FieldData;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
