@@ -9,9 +9,9 @@ import RedisTLS from '../../shared/redis-tls.mdx'
 Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
 
 ## Environment variables
-Most environment varialbes are also documented with their [Command-line options](#command-line-options) counterpart. However there are some options that are only available to configure as environment variables.
+Most environment variables are also documented with their [Command-line options](#command-line-options) counterpart. However, there are some options that are only available to configure as environment variables.
 
-To set environment variables, make sure you include them when starting the router binary or they are setup with your infrastructure configuration
+To set environment variables, make sure you include them when starting the router binary or that they are setup with your infrastructure configuration:
 ```bash
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." MY_CUSTOM_VAR="..." ./router
 ```
@@ -60,7 +60,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." MY_CUSTOM_VAR="..." ./router
       
       </td>
       <td>
-      The starting size of query planner heap to use in MB. Setting `APOLLO_ROUTER_BRIDGE_EXPERIMENTAL_V8_INITIAL_HEAP_SIZE=4096` is ~4GB.
+      `EXPERIMENTAL`: The starting size of query planner heap to use in MB. Setting `APOLLO_ROUTER_BRIDGE_EXPERIMENTAL_V8_INITIAL_HEAP_SIZE=4096` is ~4GB.
 
       Apollo Router v1.x uses a JavaScript runtime internally to run the query planner. While this is mostly an internal implementation detail, large supergraphs tend to increase the amount of memory required in the Router. The query planner heap will dynamically expand as needed however, increasing the starting size of the memory allocated to the heap can improve the first planning times for large operations against a large supergraphs.
       </td>
