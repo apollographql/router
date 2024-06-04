@@ -1,6 +1,7 @@
 ---
 title: Demand Control
-subtitle: Protect your router by setting operation cost limits and rejecting high cost operations 
+subtitle: Configure your router with operation cost limits to reject high cost operations sent by malicious or demanding clients
+description: Protect your Apollo Router from malicious or demanding clients by configuring demand control to reject high cost operations.
 ---
 
 <EnterpriseFeature />
@@ -9,21 +10,87 @@ subtitle: Protect your router by setting operation cost limits and rejecting hig
 
 The Demand Control feature is in [preview](/resources/product-launch-stages/#product-launch-stages) for organizations with an Enterprise plan. Get in touch with your Apollo contact to request access.
 
-We welcome your feedback during the preview, especially feedback that addresses the following items:
+We welcome your feedback during the preview, especially feedback about the following:
 
 - Whether the available tools are sufficient to enable you to understand how users are querying your supergraph.
 - Whether the demand control workflow is easy to follow and implement.
-- Whether any necessary features are missing for you to use demand control in production.
+- Whether any features are missing that preclude you from using demand control in production.
 
 </PreviewFeature>
-
-Learn how to configure your router with operation cost limits to reject high cost operations sent by malicious or demanding clients.
 
 ## About demand control
 
 Applications with misconfigured or malicious clients can send complex operations through your router that can overload the infrastructure of your supergraph. When a client makes a request to the router, the router makes requests to your subgraphs to gather data for the final response. A client however may mistakenly or maliciously send a complex operation (query, mutation, or subscription) that is deeply nested or has many results. Too many complex operations might overload your subgraphs and degrade the responsiveness and latency of your supergraph.
 
 To prevent complex operations from degrading supergraph performance, the Apollo Router supports analysis and rejection of requests based on operation complexity. The router computes a complexity value, or _cost_, per operation. You can collect telemetry and metrics to determine the range of costs of operations served by router. You can then configure a maximum cost limit per operation, above which an operation is rejected.  
+
+## Calculating operation cost
+
+When your router receives a request, its query planner generates and sends a series of sub-requests to subgraphs. 
+
+To calculate the total cost of an operation, the router assigns a cost or weight for each sub-request, based on fixed costs for each sub-request's operation kind and the types of GraphQL elements of its fields.
+
+The cost of each operation kind:
+
+|           | Mutation | Query | Subscription |
+| --------- | -------- | ----- | ------------ |
+| kind      | 10       | 0     | 0            |
+
+
+The cost of each GraphQL element type, per operation kind:
+
+|           | Mutation | Query | Subscription |
+| --------- | -------- | ----- | ------------ |
+| Object    | 1        | 1     | 1            |
+| Interface | 1        | 1     | 1            |
+| Union     | 1        | 1     | 1            |
+| Scalar    | 0        | 0     | 0            |
+| Enum      | 0        | 0     | 0            |
+
+For example, assume the following query gets a response with six products and ten reviews:
+
+```graphql
+query ExampleQuery {
+  topProducts {
+    name
+    reviews {
+      author {
+        name
+      }
+    }
+  }
+}
+```
+
+Assuming each review having exactly one author, the total cost of the query is 26.
+
+<ExpansionPanel title="Example query's cost calculation">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0 cost) + 6 product objects (6) + 6 name scalars (0) + 10 review objects (10) + 10 author objects (10) + 10 name scalars (0) = 26 total cost
+```
+
+</ExpansionPanel>
+
+### Estimated and actual costs
+
+For an operation with list fields, the router must run the operation to get the actual number of items in its lists. Without actual list sizes, the cost of an operation can only be estimated before it's executed, where you assume the size of lists. 
+
+After an operation is executed, the actual cost per operation can be calculated with the actual list sizes.
+
+<Note>
+
+The difference between estimated and actual operation cost calculations is due only to the difference between assumed and actual sizes of list fields.
+
+</Note>
+
+### Measurement and enforcement modes
+
+When rolling out demand control, you first need to gather information about the queries that are already being executed against your graph so you can decide when to reject requests.
+
+The router's demand control supports a measurement mode that enables you to gather this information without impacting your running services. You can define telemetry instruments to monitor your operations and decide on their maximum cost threshold.  
+
+After gathering enough data, you can then configure your router with maximum cost and list size limits and set demand control to enforcement mode, where it rejects operations with costs exceeding the limit.
 
 ## Configuring demand control
 
@@ -46,31 +113,11 @@ Customize `preview_demand_control` with the following settings:
 | enabled             | boolean                 | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                              |
 | mode                | `measure`, `enforce`    |               | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
 | strategy            | `static_estimated`      |               | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                 |
-| strategy.list_size  | integer                 |               | The assumed maximum size of a list for fields that return lists.                                      |
-| strategy.max        | integer                 |               | The maximum cost of an accepted operation. An operation with cost higher than `strategy.max` is rejected. |
-
-### Cost estimation strategy
-
-The `static_estimated` cost estimation strategy assigns costs based on fixed costs for each operation's kind and its GraphQL elements.
-
-The cost of each operation's kind:
-
-|           | Mutation | Query | Subscription |
-| --------- | -------- | ----- | ------------ |
-| kind      | 10       | 0     | 0            |
+| static_estimated.list_size  | integer                 |               | The assumed maximum size of a list for fields that return lists.                                      |
+| static_estimated.max        | integer                 |               | The maximum cost of an accepted operation. An operation with cost higher than `strategy.max` is rejected. |
 
 
-The cost of each GraphQL element of an operation, per operation kind:
-
-|           | Mutation | Query | Subscription |
-| --------- | -------- | ----- | ------------ |
-| Object    | 1        | 1     | 1            |
-| Interface | 1        | 1     | 1            |
-| Union     | 1        | 1     | 1            |
-| Scalar    | 0        | 0     | 0            |
-| Enum      | 0        | 0     | 0            |
-
-### Cost telemetry
+### Telemetry for demand control
 
 You can define router telemetry to gather cost information and gain insights into the cost of operations sent to your router:
 
@@ -90,10 +137,10 @@ You can define router telemetry to gather cost information and gain insights int
 
 | Attribute      | Value | Default | Description                                                |
 | --------------- | ----- | ------- | ---------------------------------------------------------- |
-| cost.actual     |       |         | The actual cost of an operation, measured after execution.  |
-| cost.estimated  |       |         | The estimated cost of an operation before execution.        |
-| cost.delta      |       |         | The difference between the actual and estimated cost.       |
-| cost.result      |       |         | The return code of the cost calculation.      |
+| cost.actual     | boolean      |         | The actual cost of an operation, measured after execution.  | 
+| cost.estimated  | boolean       |         | The estimated cost of an operation before execution.        |
+| cost.delta      | boolean      |         | The difference between the actual and estimated cost.       |
+| cost.result      | boolean      |         | The return code of the cost calculation. `COST_OK` or an [error code](../errors/#demand-control)      |
 
 #### Examples
 
@@ -207,6 +254,31 @@ telemetry:
 
 ```
 
+<Tip>
+
+When analyzing the costs of operations, if your histograms are not granular enough or don't cover sufficient range, you can modify the views in your telemetry configuration:
+
+```yaml
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          - name: cost.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0          # Define the buckets here
+                  - 10
+                  - 100
+                  - 1000       # More granularity for costs in the 1000s
+                  - 2000
+                  - 3000
+                  - 4000
+```
+
+</Tip>
+
 2. Send some requests through your router and observe the `cost.*` metrics via your APM. 
 
 You should be able to configure your APM to look for `cost.*` histograms and get the proportion of requests that would be rejected via the `cost.result` attribute on the `cost.estimated` total. This will allow you to see histograms of cost.
@@ -249,14 +321,14 @@ cost_estimated_sum{cost_result="COST_OK",otel_scope_name="apollo/router"}
 cost_estimated_count{cost_result="COST_OK",otel_scope_name="apollo/router"} 20
 ```
 
-Although estimated costs won't necessarily match actual costs, you can use the metrics to ascertain: 
+Although estimated costs won't necessarily match actual costs, you can use the metrics to ascertain the following: 
 - Whether any operations have underestimated costs
 - What to assign `static_estimated.list_size` as the actual maximum list size
 - What to assign `static_estimated.max` as the maximum cost of an allowed operation
 
 In this example, just under half of the requests would be rejected with the current configuration. The cost of queries are also underestimated because `cost.delta` is non-zero.
 
-3. To figure out what operations are being rejected, configure telemetry with a custom instrument:
+3. To figure out what operations are being rejected, define a telemetry custom instrument that reports when an operation has been rejected because its cost exceeded the configured cost limit:
 
 ```yaml title="Example custom instrument to show rejected operations"
 telemetry:
@@ -293,17 +365,123 @@ This custom instrument may not be suitable for users where there are many operat
                  - 100
 ```
 
+4. You should now be able to configure your APM to see which operations are too costly. Visualizing the histogram can be useful, such as with top-N or heatmap tools. 
+
+For example, the following table has the estimated cost of operations:
+
+| Operation name      | Estimated cost |
+|---------------------|----------------|
+| ExtractAll          | 9020           |
+| GetAllProducts      | 1435           |
+| GetLatestProducts   | 120            |
+| GetRecentlyUpdated  | 99             |
+| FindProductByName   | 87             |
+
+The `ExtractAll` operation has a very large estimated cost, so it's a good candidate to be rejected.
+
+Also, the value of the `cost.delta` metric—the difference between the actual and estimated cost—shows whether the assumed list size used for cost estimation is too large or small. In this example, the positive `cost.delta` means that the actual list size is greater than the estimated list size. Therefore the `static_estimated.list_size` can be reduced to closer match the actual. 
+
 ### Improve cost estimation model
 
-```yaml
+You should iteratively improve your cost estimation model. Accurate cost estimation is critical to identifying and preventing queries that could harm your subgraphs.
 
+1. The previous step identified a noticeable difference between actual and estimated costs with the example operations. You can better understand the difference—and consequently tune the configured list size—by adding telemetry instruments for fields in your GraphQL schema.
+
+For example, you can generate a histogram for every field in your GraphQL schema: 
+
+```yaml title="Telemetry to generate histogram for every field in GraphQL schema"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        views:
+          - name: graphql.*
+            aggregation:
+              histogram:
+                buckets:
+                  - 0
+                  - 10
+                  - 100
+                  - 1000
+                  - 10000
+                  - 100000
+                  - 1000000
+  instrumentation:
+    instruments:
+      graphql:
+        list.length: true
 
 ```
 
-### 3. Enforce cost limits
+This configuration generates many metrics and may be too costly for your APM. To reduce the amount of metrics generated, you can set conditions on the instrument. 
 
-After determining the cost estimation model of your operations, update your demand control configuration with the new cost limits and start enforcing them.
+For this example, you can set a condition that restricts the instrument to an operation with a certain name. You can also show only histograms of list sizes of GraphQL fields:
 
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      graphql:
+        graphql.list.length.restricted: # custom instrument
+          unit: length
+          description: "histogram of list lengths"
+          type: histogram
+          value:
+            field_custom:
+              list_length: value
+          condition:
+            all:
+              - eq:
+                  - operation_name: string
+                  - "GetAllProducts"
+```
+
+The output from a Prometheus endpoint may look like the following:
+
+```text
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="0"} 0
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="10"} 9
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="100"} 20
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="1000"} 20
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="10000"} 20
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="100000"} 20
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="1000000"} 20
+graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="+Inf"} 20
+graphql_list_length_restricted_sum{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router"} 218
+graphql_list_length_restricted_count{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router"} 20
+```
+
+This output shows that the actual list sizes for the `allProducts` field. You should configure `static_estimated.list_size` to be the maximum of the range of actual costs, which is 100.
+
+```yaml
+preview_demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 100 # Updated list size
+      max: 1000
+```
+
+Although there are no more cost deltas reported, the estimated costs have increased. You still have to adjust the maximum cost.
+
+Looking at the top N operations, you can see that the estimated costs have been updated:
+
+| Operation name      | Estimated cost |
+|---------------------|----------------|
+| ExtractAll          | 390200         |
+| GetAllProducts      | 44350          |
+| GetLatestProducts   | 11200          |
+| GetRecentlyUpdated  | 4990           |
+| FindProductByName   | 1870           |
+
+All operations except `ExtractAll` are in a range of acceptable costs.
+
+### Enforce cost limits
+
+After determining the cost estimation model of your operations, you should update and enforce the new cost limits.
+
+From the previous step, you can set the maximum cost to a value that allows all operations except `ExceptAll`:
 
 ```yaml
 preview_demand_control:
@@ -312,7 +490,7 @@ preview_demand_control:
   strategy:
     static_estimated:
       list_size: 100 
-      max: 50000              # Updated max
+      max: 50000              # Updated max cost allows all operations except ExtractAll
 ```
 
 ### Next steps
