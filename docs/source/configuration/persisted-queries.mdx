@@ -87,9 +87,10 @@ Adding `experimental_local_manifest` to your `persisted-queries` configuration l
 ```yaml title="router.yaml"
 persisted_queries:
   enabled: true
-  experimental_local_manifest: ./persisted-query-manifest.json
+  experimental_local_manifest: ./path/to/persisted-query-manifest.json
 ```
 
+You can download a version of your manifest to use locally from [GraphOS Studio](https://studio.apollographql.com/?referrer=docs-content). Open the PQL page for a graph by clicking the **Go to persisted query lists** to the left of the graph's name. Then, click the ••• menu under the **Actions** column to download a PQL's manifest as a JSON file. Save this file locally and update your `experimental_local_manifest` configuration with the path the file.
 #### `safelist`
 
 Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.
