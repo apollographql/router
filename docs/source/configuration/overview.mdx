@@ -9,11 +9,11 @@ import RedisTLS from '../../shared/redis-tls.mdx'
 Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
 
 ## Environment variables
+Most environment varialbes are also documented with their [Command-line options](#command-line-options) counterpart. However there are some options that are only available to configure as environment variables.
 
-If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
-
+To set environment variables, make sure you include them when starting the router binary or they are setup with your infrastructure configuration
 ```bash
-APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
+APOLLO_KEY="..." APOLLO_GRAPH_REF="..." MY_CUSTOM_VAR="..." ./router
 ```
 
 <table class="field-table api-ref">
@@ -24,39 +24,51 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
     </tr>
   </thead>
 
-<tbody>
-<tr class="required">
-<td style="min-width: 150px;">
+  <tbody>
+    <tr class="required">
+      <td style="min-width: 150px;">
+      
+      ##### `APOLLO_GRAPH_REF`
+      
+      </td>
+      <td>
+      
+      The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
+      
+      **Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
+      
+      </td>
+    </tr>
+    <tr class="required">
+      <td style="min-width: 150px;">
+      
+      ##### `APOLLO_KEY`
+      
+      </td>
+      <td>
+      
+      The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
+      
+      **Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
+      
+      </td>
+    </tr>
+    <tr>
+      <td style="min-width: 150px;">
+      
+      ##### `APOLLO_ROUTER_BRIDGE_EXPERIMENTAL_V8_INITIAL_HEAP_SIZE`
+      
+      </td>
+      <td>
+      The starting size of query planner heap to use in MB. Setting `APOLLO_ROUTER_BRIDGE_EXPERIMENTAL_V8_INITIAL_HEAP_SIZE=4096` is ~4GB.
 
-##### `APOLLO_GRAPH_REF`
-
-</td>
-<td>
-
-The graph ref for the GraphOS graph and variant that the router fetches its supergraph schema from (e.g., `docs-example-graph@staging`).
-
-**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
-
-</td>
-</tr>
-<tr class="required">
-<td style="min-width: 150px;">
-
-##### `APOLLO_KEY`
-
-</td>
-<td>
-
-The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should use to authenticate with GraphOS when fetching its supergraph schema.
-
-**Required** when using [managed federation](/federation/managed-federation/overview/), except when using an [offline license](#--license) to run the router.
-
-</td>
-</tr>
-
-<tr>
-</tr>
-</tbody>
+      Apollo Router v1.x uses a JavaScript runtime internally to run the query planner. While this is mostly an internal implementation detail, large supergraphs tend to increase the amount of memory required in the Router. The query planner heap will dynamically expand as needed however, increasing the starting size of the memory allocated to the heap can improve the first planning times for large operations against a large supergraphs.
+      </td>
+    </tr>
+    
+    <tr>
+    </tr>
+  </tbody>
 </table>
 
 ## Command-line options
