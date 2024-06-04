@@ -119,7 +119,7 @@ impl ApolloOtlpExporter {
             )),
         };
 
-        return Ok(Self {
+        Ok(Self {
             endpoint: endpoint.clone(),
             batch_config: batch_config.clone(),
             apollo_key: apollo_key.to_string(),
@@ -151,7 +151,7 @@ impl ApolloOtlpExporter {
             otlp_exporter,
             errors_configuration: errors_configuration.clone(),
             include_span_names,
-        });
+        })
     }
 
     pub(crate) fn prepare_for_export(
