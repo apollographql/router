@@ -40,7 +40,6 @@ use crate::query_planner::OperationKind;
 use crate::register_plugin;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
-use crate::services::router::Body;
 use crate::services::subgraph;
 use crate::Endpoint;
 use crate::ListenAddr;
@@ -521,7 +520,7 @@ impl Service<router::Request> for CallbackService {
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::OK)
-                                        .body::<Body>("".into())
+                                        .body("".into())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -534,7 +533,7 @@ impl Service<router::Request> for CallbackService {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
                                             .header(HeaderName::from_static(CALLBACK_SUBSCRIPTION_HEADER_NAME), HeaderValue::from_static(CALLBACK_SUBSCRIPTION_HEADER_VALUE))
-                                            .body::<Body>("".into())
+                                            .body("".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -569,7 +568,7 @@ impl Service<router::Request> for CallbackService {
                                     Ok(router::Response {
                                         response: http::Response::builder()
                                             .status(StatusCode::NO_CONTENT)
-                                            .body::<Body>("".into())
+                                            .body("".into())
                                             .map_err(BoxError::from)?,
                                         context: req.context,
                                     })
@@ -664,7 +663,7 @@ impl Service<router::Request> for CallbackService {
                                 Ok(router::Response {
                                     response: http::Response::builder()
                                         .status(StatusCode::ACCEPTED)
-                                        .body::<Body>("".into())
+                                        .body("".into())
                                         .map_err(BoxError::from)?,
                                     context: req.context,
                                 })
@@ -674,7 +673,7 @@ impl Service<router::Request> for CallbackService {
                     _ => Ok(router::Response {
                         response: http::Response::builder()
                             .status(StatusCode::METHOD_NOT_ALLOWED)
-                            .body::<Body>("".into())
+                            .body("".into())
                             .map_err(BoxError::from)?,
                         context: req.context,
                     }),
@@ -707,7 +706,7 @@ fn ensure_id_consistency(
             Err(router::Response {
                 response: http::Response::builder()
                     .status(StatusCode::BAD_REQUEST)
-                    .body::<Body>("id from url path and id from body are different".into())
+                    .body("id from url path and id from body are different".into())
                     .expect("this body is valid"),
                 context: context.clone(),
             })
@@ -1055,7 +1054,7 @@ mod tests {
         let http_req = http::Request::post(format!(
             "http://localhost:4000/subscription/callback/{new_sub_id}"
         ))
-        .body(Body::from(
+        .body(crate::services::router::Body::from(
             serde_json::to_vec(&CallbackPayload::Subscription(SubscriptionPayload::Next {
                 id: new_sub_id.clone(),
                 payload: graphql::Response::builder()
