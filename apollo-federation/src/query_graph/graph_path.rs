@@ -38,12 +38,12 @@ use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
 use crate::query_plan::operation::Field;
 use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::FieldSelection;
+use crate::query_plan::operation::HasSelectionKey;
 use crate::query_plan::operation::InlineFragment;
 use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::InlineFragmentSelection;
-use crate::query_plan::operation::Selection;
+use crate::query_plan::operation::RebaseErrorHandlingOption;
 use crate::query_plan::operation::SelectionId;
+use crate::query_plan::operation::SelectionKey;
 use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
@@ -260,11 +260,18 @@ impl Display for OpGraphPathTrigger {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
+impl Deref for OpPath {
+    type Target = [Arc<OpPathElement>];
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
 impl std::fmt::Display for OpPath {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         for (i, element) in self.0.iter().enumerate() {
             if i > 0 {
-                write!(f, ", ")?;
+                write!(f, "::")?;
             }
             match element.deref() {
                 OpPathElement::Field(field) => write!(f, "{field}")?,
@@ -281,11 +288,27 @@ pub(crate) enum OpPathElement {
     InlineFragment(InlineFragment),
 }
 
+impl HasSelectionKey for OpPathElement {
+    fn key(&self) -> SelectionKey {
+        match self {
+            OpPathElement::Field(field) => field.key(),
+            OpPathElement::InlineFragment(fragment) => fragment.key(),
+        }
+    }
+}
+
 impl OpPathElement {
     pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
         match self {
             OpPathElement::Field(field) => &field.data().directives,
             OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.data().directives,
+        }
+    }
+
+    pub(crate) fn schema(&self) -> &ValidFederationSchema {
+        match self {
+            OpPathElement::Field(field) => field.schema(),
+            OpPathElement::InlineFragment(fragment) => fragment.schema(),
         }
     }
 
@@ -307,6 +330,15 @@ impl OpPathElement {
         match self {
             OpPathElement::Field(field) => field.data().field_position.parent(),
             OpPathElement::InlineFragment(inline) => inline.data().parent_type_position.clone(),
+        }
+    }
+
+    pub(crate) fn sub_selection_type_position(
+        &self,
+    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
+        match self {
+            OpPathElement::Field(field) => Ok(field.data().output_base_type()?.try_into().ok()),
+            OpPathElement::InlineFragment(inline) => Ok(Some(inline.data().casted_type())),
         }
     }
 
@@ -407,27 +439,22 @@ impl OpPathElement {
             }
         }
     }
-}
 
-pub(crate) fn selection_of_element(
-    element: OpPathElement,
-    sub_selection: Option<SelectionSet>,
-) -> Result<Selection, FederationError> {
-    // TODO: validate that the subSelection is ok for the element
-    Ok(match element {
-        OpPathElement::Field(field) => Selection::Field(Arc::new(FieldSelection {
-            field,
-            selection_set: sub_selection,
-        })),
-        OpPathElement::InlineFragment(inline_fragment) => {
-            Selection::InlineFragment(Arc::new(InlineFragmentSelection {
-                inline_fragment,
-                selection_set: sub_selection.ok_or_else(|| {
-                    FederationError::internal("Expected a selection set for an inline fragment")
-                })?,
-            }))
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        error_handling: RebaseErrorHandlingOption,
+    ) -> Result<Option<OpPathElement>, FederationError> {
+        match self {
+            OpPathElement::Field(field) => field
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
+            OpPathElement::InlineFragment(inline) => inline
+                .rebase_on(parent_type, schema, error_handling)
+                .map(|val| val.map(Into::into)),
         }
-    })
+    }
 }
 
 impl Display for OpPathElement {
@@ -776,10 +803,12 @@ impl std::fmt::Display for ClosedPath {
 
 /// A list of the options generated during query planning for a specific "closed branch", which is a
 /// full/closed path in a GraphQL operation (i.e. one that ends in a leaf field).
+#[derive(Debug)]
 pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
+#[derive(Debug)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
@@ -1151,6 +1180,7 @@ where
             return Ok(Box::new(
                 self.graph
                     .out_edges_with_federation_self_edges(self.tail)
+                    .into_iter()
                     .map(|edge_ref| edge_ref.id()),
             ));
         }
@@ -1176,6 +1206,7 @@ where
         Ok(Box::new(
             self.graph
                 .out_edges(self.tail)
+                .into_iter()
                 .map(|edge_ref| edge_ref.id()),
         ))
     }
@@ -1970,14 +2001,11 @@ impl OpGraphPath {
         else {
             return Ok(path);
         };
-        let typename_field = Field::new(FieldData {
-            schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
-            field_position: tail_type_pos.introspection_typename_field(),
-            alias: None,
-            arguments: Arc::new(vec![]),
-            directives: Arc::new(Default::default()),
-            sibling_typename: None,
-        });
+        let typename_field = Field::new_introspection_typename(
+            self.graph.schema_by_source(&tail_weight.source)?,
+            &tail_type_pos,
+            None,
+        );
         let Some(edge) = self.graph.edge_for_field(path.tail, &typename_field) else {
             return Err(FederationError::internal(
                 "Unexpectedly missing edge for __typename field",
@@ -2500,13 +2528,13 @@ impl OpGraphPath {
                                 &operation_field.data().field_position.parent()
                             else {
                                 return Err(FederationError::internal(
-                                    format!(
-                                        "{} requested on {}, but field's parent {} is not an object type",
-                                        operation_field.data().field_position,
-                                        tail_type_pos,
-                                        operation_field.data().field_position.type_name()
-                                    )
-                                ));
+                                        format!(
+                                            "{} requested on {}, but field's parent {} is not an object type",
+                                            operation_field.data().field_position,
+                                            tail_type_pos,
+                                            operation_field.data().field_position.type_name()
+                                        )
+                                    ));
                             };
                             if !self.runtime_types_of_tail.contains(field_parent_pos) {
                                 return Err(FederationError::internal(
@@ -3420,9 +3448,7 @@ impl ClosedBranch {
         }
 
         // Keep track of which options should be kept.
-        let mut keep_options = std::iter::repeat_with(|| true)
-            .take(self.0.len())
-            .collect::<Vec<_>>();
+        let mut keep_options = vec![true; self.0.len()];
         for option_index in 0..(self.0.len()) {
             if !keep_options[option_index] {
                 continue;
@@ -3473,6 +3499,10 @@ impl ClosedBranch {
 }
 
 impl OpPath {
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -3487,6 +3517,57 @@ impl OpPath {
         let mut new = self.0.clone();
         new.push(element);
         Self(new)
+    }
+
+    pub(crate) fn conditional_directives(&self) -> DirectiveList {
+        DirectiveList(
+            self.0
+                .iter()
+                .flat_map(|path_element| {
+                    path_element
+                        .directives()
+                        .iter()
+                        .filter(|d| d.name == "include" || d.name == "skip")
+                })
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// Filter any fragment element in the provided path whose type condition does not exist in the provided schema.
+    /// Not that if the fragment element should be filtered but it has applied directives, then we preserve those applications by
+    /// replacing with a fragment with no condition (but if there are no directive, we simply remove the fragment from the path).
+    // JS PORT NOTE: this method was called filterOperationPath in JS codebase
+    pub(crate) fn filter_on_schema(&self, schema: &ValidFederationSchema) -> OpPath {
+        let mut filtered: Vec<Arc<OpPathElement>> = vec![];
+        for element in &self.0 {
+            match element.as_ref() {
+                OpPathElement::InlineFragment(fragment) => {
+                    if let Some(type_condition) = &fragment.data().type_condition_position {
+                        if schema.get_type(type_condition.type_name().clone()).is_ok() {
+                            let updated_fragment = fragment.with_updated_type_condition(None);
+                            filtered
+                                .push(Arc::new(OpPathElement::InlineFragment(updated_fragment)));
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        filtered.push(element.clone());
+                    }
+                }
+                _ => {
+                    filtered.push(element.clone());
+                }
+            }
+        }
+        OpPath(filtered)
+    }
+
+    pub(crate) fn has_only_fragments(&self) -> bool {
+        // JS PORT NOTE: this was checking for FragmentElement which was used for both inline fragments and spreads
+        self.0
+            .iter()
+            .all(|p| matches!(p.as_ref(), OpPathElement::InlineFragment(_)))
     }
 }
 
@@ -3507,6 +3588,87 @@ impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
             })
             .collect()
     }
+}
+
+pub(crate) fn concat_paths_in_parents(
+    first: &Option<Arc<OpPath>>,
+    second: &Option<Arc<OpPath>>,
+) -> Option<Arc<OpPath>> {
+    if let (Some(first), Some(second)) = (first, second) {
+        Some(Arc::new(concat_op_paths(first.deref(), second.deref())))
+    } else {
+        None
+    }
+}
+
+pub(crate) fn concat_op_paths(head: &OpPath, tail: &OpPath) -> OpPath {
+    // While this is mainly a simple array concatenation, we optimize slightly by recognizing if the
+    // tail path starts by a fragment selection that is useless given the end of the head path
+    let Some(last_of_head) = head.last() else {
+        return tail.clone();
+    };
+    let mut result = head.clone();
+    if tail.is_empty() {
+        return result;
+    }
+    let conditionals = head.conditional_directives();
+    let tail_path = tail.0.clone();
+
+    // Note that in practice, we may be able to eliminate a few elements at the beginning of the path
+    // due do conditionals ('@skip' and '@include'). Indeed, a (tail) path crossing multiple conditions
+    // may start with: [ ... on X @include(if: $c1), ... on X @skip(if: $c2), (...)], but if `head`
+    // already ends on type `X` _and_ both the conditions on `$c1` and `$c2` are already found on `head`,
+    // then we can remove both fragments in `tail`.
+    let mut tail_iter = tail_path.iter();
+    for tail_node in &mut tail_iter {
+        if !is_useless_followup_element(last_of_head, tail_node, &conditionals)
+            .is_ok_and(|is_useless| is_useless)
+        {
+            result.0.push(tail_node.clone());
+            break;
+        }
+    }
+    result.0.extend(tail_iter.cloned());
+    result
+}
+
+fn is_useless_followup_element(
+    first: &OpPathElement,
+    followup: &OpPathElement,
+    conditionals: &DirectiveList,
+) -> Result<bool, FederationError> {
+    let type_of_first: Option<CompositeTypeDefinitionPosition> = match first {
+        OpPathElement::Field(field) => Some(field.data().output_base_type()?.try_into()?),
+        OpPathElement::InlineFragment(fragment) => fragment.data().type_condition_position.clone(),
+    };
+
+    let Some(type_of_first) = type_of_first else {
+        return Ok(false);
+    };
+
+    // The followup is useless if it's a fragment (with no directives we would want to preserve) whose type
+    // is already that of the first element (or a supertype).
+    return match followup {
+        OpPathElement::Field(_) => Ok(false),
+        OpPathElement::InlineFragment(fragment) => {
+            let Some(type_of_second) = fragment.data().type_condition_position.clone() else {
+                return Ok(false);
+            };
+
+            let are_useless_directives = fragment.data().directives.is_empty()
+                || fragment
+                    .data()
+                    .directives
+                    .iter()
+                    .any(|d| !conditionals.contains(d));
+            let is_same_type = type_of_first.type_name() == type_of_second.type_name();
+            let is_subtype = first
+                .schema()
+                .schema()
+                .is_subtype(type_of_first.type_name(), type_of_second.type_name());
+            Ok(are_useless_directives && (is_same_type || is_subtype))
+        }
+    };
 }
 
 #[cfg(test)]

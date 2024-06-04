@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "0.0.11"
+version = "1.48.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
@@ -15,7 +15,7 @@ time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
 ] }
 derive_more = "0.99.17"
-indexmap = "2.1.0"
+indexmap = "2.2.3"
 lazy_static = "1.4.0"
 multimap = "0.10.0"
 petgraph = "0.6.4"
@@ -26,7 +26,10 @@ thiserror = "1.0"
 url = "2"
 
 [dev-dependencies]
+hex.workspace = true
 insta.workspace = true
+sha1.workspace = true
+tempfile.workspace = true
 
 [[test]]
 name = "main"

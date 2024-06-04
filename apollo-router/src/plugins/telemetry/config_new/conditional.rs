@@ -18,11 +18,13 @@ use serde::Deserializer;
 use serde_json::Map;
 use serde_json::Value;
 
+use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::Context;
 
 /// The state of the conditional.
 #[derive(Debug, Default)]
@@ -148,12 +150,13 @@ where
     }
 }
 
-impl<Att, Request, Response> Selector for Conditional<Att>
+impl<Att, Request, Response, EventResponse> Selector for Conditional<Att>
 where
-    Att: Selector<Request = Request, Response = Response>,
+    Att: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Option<opentelemetry::Value> {
         match &self.condition {
@@ -196,6 +199,39 @@ where
         }
     }
 
+    fn on_response_event(
+        &self,
+        response: &Self::EventResponse,
+        ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
+                if condition.lock().evaluate_event_response(response, ctx) {
+                    *self.value.lock() = State::Returned;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            (State::Pending | State::Returned, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the response if the condition was evaluated to true.
+                if condition.lock().evaluate_event_response(response, ctx) {
+                    self.selector.on_response_event(response, ctx)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector.on_response_event(response, ctx)
+            }
+            _ => None,
+        }
+    }
+
     fn on_response(&self, response: &Self::Response) -> Option<opentelemetry::Value> {
         // We may have got the value from the request.
         let value = mem::take(&mut *self.value.lock());
@@ -221,6 +257,70 @@ where
             (State::Pending, None) => {
                 // We don't have a value already, and there is no condition.
                 self.selector.on_response(response)
+            }
+            _ => None,
+        }
+    }
+
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
+
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
+                if condition.lock().evaluate_error(error, ctx) {
+                    *self.value.lock() = State::Returned;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the error if the condition was evaluated to true.
+                if condition.lock().evaluate_error(error, ctx) {
+                    self.selector.on_error(error, ctx)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector.on_error(error, ctx)
+            }
+            _ => None,
+        }
+    }
+
+    fn on_response_field(
+        &self,
+        typed_value: &TypedValue,
+        ctx: &Context,
+    ) -> Option<opentelemetry_api::Value> {
+        // We may have got the value from the request.
+        let value = mem::take(&mut *self.value.lock());
+
+        match (value, &self.condition) {
+            (State::Value(value), Some(condition)) => {
+                // We have a value already, let's see if the condition was evaluated to true.
+                if condition.lock().evaluate_response_field(typed_value, ctx) {
+                    *self.value.lock() = State::Returned;
+                    Some(value)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, Some(condition)) => {
+                // We don't have a value already, let's try to get it from the error if the condition was evaluated to true.
+                if condition.lock().evaluate_response_field(typed_value, ctx) {
+                    self.selector.on_response_field(typed_value, ctx)
+                } else {
+                    None
+                }
+            }
+            (State::Pending, None) => {
+                // We don't have a value already, and there is no condition.
+                self.selector.on_response_field(typed_value, ctx)
             }
             _ => None,
         }

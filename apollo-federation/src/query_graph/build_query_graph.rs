@@ -1138,7 +1138,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = Arc::new(parse_field_set(
                     schema,
                     type_pos.type_name().clone(),
-                    application.fields.clone(),
+                    &application.fields,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1263,7 +1263,7 @@ impl FederatedQueryGraphBuilder {
                                 implementation_type_in_other_subgraph_pos
                                     .type_name()
                                     .clone(),
-                                application.fields.clone(),
+                                &application.fields,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1328,7 +1328,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = parse_field_set(
                     schema,
                     field_definition_position.parent().type_name().clone(),
-                    application.fields,
+                    &application.fields,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1339,10 +1339,10 @@ impl FederatedQueryGraphBuilder {
             // like this way in the JS codebase, so we'll mimic the behavior for now.
             //
             // TODO: This is an optimization to avoid unnecessary inter-conversion between
-            // the apollo-rs operation representation and the federation-next one. This wasn't a
+            // the apollo-rs operation representation and the apollo-federation one. This wasn't a
             // problem in the JS codebase, as it would use its own operation representation from
             // the start. Eventually when operation processing code is ready and we make the switch
-            // to using the federation-next representation everywhere, we can probably simplify
+            // to using the apollo-federation representation everywhere, we can probably simplify
             // this.
             let new_conditions = if all_conditions.len() == 1 {
                 all_conditions
@@ -1393,7 +1393,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = parse_field_set(
                     schema,
                     field_type_pos.type_name().clone(),
-                    application.fields,
+                    &application.fields,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1410,10 +1410,10 @@ impl FederatedQueryGraphBuilder {
             // merge the selection sets before into one.
             //
             // TODO: This is an optimization to avoid unnecessary inter-conversion between
-            // the apollo-rs operation representation and the federation-next one. This wasn't a
+            // the apollo-rs operation representation and the apollo-federation one. This wasn't a
             // problem in the JS codebase, as it would use its own operation representation from
             // the start. Eventually when operation processing code is ready and we make the switch
-            // to using the federation-next representation everywhere, we can probably simplify
+            // to using the apollo-federation representation everywhere, we can probably simplify
             // this.
             let new_conditions = if all_conditions.len() == 1 {
                 all_conditions
@@ -1825,7 +1825,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = Arc::new(parse_field_set(
                     schema,
                     type_in_supergraph_pos.type_name.clone(),
-                    NodeStr::from_static(&"__typename"),
+                    "__typename",
                 )?);
                 for implementation_type_in_supergraph_pos in self
                     .supergraph_schema
@@ -2009,6 +2009,7 @@ struct FederatedQueryGraphBuilderSubgraphData {
     interface_object_directive_definition_name: Name,
 }
 
+#[derive(Debug)]
 struct QueryGraphEdgeData {
     head: NodeIndex,
     tail: NodeIndex,

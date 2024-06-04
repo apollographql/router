@@ -1,7 +1,7 @@
 ---
 title: OpenTelemetry standard attributes
 subtitle: Attach standard attributes to router telemetry
-description: Attach OpenTelemetry standard attributes to Apollo Router telemetry
+description: Attach OpenTelemetry (OTel) standard attributes to Apollo Router telemetry.
 ---
 
 import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
@@ -37,7 +37,6 @@ Standard attributes of the `router` service:
 | `error.type`                   |        | Describes a class of error the operation ended with                                                                                           |
 | `http.request.body.size`       |        | The size of the request payload body in bytes                                                                                                 |
 | `http.request.method`          |        | HTTP request method                                                                                                                   |
-| `http.request.method.original` |        | Original HTTP method sent by the client in the request line                                                                                       |
 | `http.response.body.size`      |        | The size of the response payload body in bytes                                                                                                    |
 | `http.response.status_code`    |        | HTTP response status code                                                                                                                       |
 | `network.protocol.name`        |        | OSI application layer or non-OSI equivalent                                                                                                      |
@@ -45,8 +44,6 @@ Standard attributes of the `router` service:
 | `network.transport`            |        | OSI transport layer                                                                                                                        |
 | `network.type`                 |        | OSI network layer or non-OSI equivalent                                                                                                      |
 | `user_agent.original`          |        | Value of the HTTP User-Agent header sent by the client                                                                                        |
-| `client.address`               |        | Client address - domain name if available without reverse DNS lookup, otherwise IP address or Unix domain socket name                       |
-| `client.port`                  |        | The port of the original client behind all proxies, if known (e.g. from Forwarded or a similar header). Otherwise, the immediate client peer port |
 | `http.route`                   |        | The matched route (path template in the format used by the respective server framework)                                                          |
 | `network.local.address`        |        | Local socket address. Useful in case of a multi-IP host                                                                                        |
 | `network.local.port`           |        | Local socket port. Useful in case of a multi-port host                                                                                          |

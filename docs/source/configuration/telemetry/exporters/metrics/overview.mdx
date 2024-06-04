@@ -1,7 +1,7 @@
 ---
 title: Metrics exporters
 subtitle: Export Apollo Router metrics
-description: Collect and export metrics from the Apollo Router for Prometheus, OpenTelemetry Protocol (OTLP), Datadog, and New Relic
+description: Collect and export metrics from the Apollo Router for Prometheus, OpenTelemetry Protocol (OTLP), Datadog, and New Relic.
 ---
 
 The Apollo Router supports collection of metrics with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
@@ -75,7 +75,7 @@ If the service name isn't explicitly set, it defaults to `unknown_service:router
 
 ### `resource`
 
-A resource attribute is a set of key-value pairs that provide additional information to an exporter. Application performance monitors (APM) may interpret and display resource information. 
+A resource attribute is a set of key-value pairs that provide additional information to an exporter. It's an attribute of an [OpenTelemetry resource](https://opentelemetry.io/docs/specs/otel/resource/sdk/). Application performance monitors (APM) can interpret and display resource information. 
 
 In [`router.yaml`](../../../overview/#yaml-config-file), resource attributes are set in `telemetry.metrics.common.resource`. For example:
 
@@ -122,6 +122,12 @@ You can add custom attributes (OpenTelemetry) and labels (Prometheus) to the `ap
 * headers from the request or response
 * a value from a context
 * a value from the request or response body ([JSON path](https://goessner.net/articles/JsonPath/))
+
+<Note>
+
+Use [resource attributes](#resource) instead to provide information about telemetry resources, including hosts and environments.
+
+</Note>
 
 An example of configuring these attributes is shown below:
 

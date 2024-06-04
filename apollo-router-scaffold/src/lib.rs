@@ -29,22 +29,20 @@ mod test {
     use std::path::Path;
     use std::path::PathBuf;
     use std::path::MAIN_SEPARATOR;
-    use std::process::Command;
 
-    use anyhow::bail;
     use anyhow::Result;
     use cargo_scaffold::Opts;
     use cargo_scaffold::ScaffoldDescription;
+    use dircmp::Comparison;
     use inflector::Inflector;
-    use tempfile::TempDir;
-
-    #[test]
-    fn the_next_test_takes_a_while_to_pass_do_not_worry() {}
+    use similar::ChangeTag;
+    use similar::TextDiff;
 
     #[test]
     // this test takes a while, I hope the above test name
     // let users know they should not worry and wait a bit.
     // Hang in there!
+    // Note that we configure nextest to use all threads for this test as invoking rustc will use all available CPU and cause timing tests to fail.
     fn test_scaffold() {
         let manifest_dir = PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap());
         let repo_root = manifest_dir.parent().unwrap();
@@ -54,17 +52,13 @@ mod test {
             .prefix("router_scaffold")
             .tempdir()
             .unwrap();
-        std::fs::copy(
-            repo_root.join("rust-toolchain.toml"),
-            temp_dir.path().join("rust-toolchain.toml"),
-        )
-        .unwrap();
+        let temp_dir_path = temp_dir.path();
 
         let current_dir = env::current_dir().unwrap();
         // Scaffold the main project
         let opts = Opts::builder(PathBuf::from("templates").join("base"))
             .project_name("temp")
-            .target_dir(temp_dir.path())
+            .target_dir(temp_dir_path)
             .force(true);
         ScaffoldDescription::new(opts)
             .unwrap()
@@ -86,39 +80,59 @@ mod test {
                 ),
             )]))
             .unwrap();
-        std::fs::copy(
-            repo_root.join("Cargo.lock"),
-            temp_dir.path().join("Cargo.lock"),
-        )
-        .unwrap();
-        let main = temp_dir.path().join("src").join("main.rs");
-        std::fs::write(
-            &main,
-            format!(
-                "#![deny(warnings)]\n{}",
-                std::fs::read_to_string(&main).unwrap()
-            ),
-        )
-        .unwrap();
-        let _ = test_build_with_backup_folder(&temp_dir, &target_dir);
 
         // Scaffold one of each type of plugin
-        scaffold_plugin(&current_dir, &temp_dir, "basic").unwrap();
-        scaffold_plugin(&current_dir, &temp_dir, "auth").unwrap();
-        scaffold_plugin(&current_dir, &temp_dir, "tracing").unwrap();
+        scaffold_plugin(&current_dir, temp_dir_path, "basic").unwrap();
+        scaffold_plugin(&current_dir, temp_dir_path, "auth").unwrap();
+        scaffold_plugin(&current_dir, temp_dir_path, "tracing").unwrap();
         std::fs::write(
             temp_dir.path().join("src").join("plugins").join("mod.rs"),
             "mod auth;\nmod basic;\nmod tracing;\n",
         )
         .unwrap();
 
-        test_build_with_backup_folder(&temp_dir, &target_dir).unwrap()
+        #[cfg(target_os = "windows")]
+        let left = ".\\scaffold-test\\";
+        #[cfg(not(target_os = "windows"))]
+        let left = "./scaffold-test/";
+
+        let cmp = Comparison::default();
+        let diff = cmp
+            .compare(left, temp_dir_path.to_str().unwrap())
+            .expect("should compare");
+
+        let mut found = false;
+        if !diff.is_empty() {
+            println!("generated scaffolding project has changed:\n{:#?}", diff);
+            for file in diff.changed {
+                println!("file: {file:?}");
+                let file = PathBuf::from(file.to_str().unwrap().strip_prefix(left).unwrap());
+
+                // we do not check the Cargo.toml files because they have differences due to import paths and workspace usage
+                if file == PathBuf::from("Cargo.toml") || file == PathBuf::from("xtask/Cargo.toml")
+                {
+                    println!("skipping {}", file.to_str().unwrap());
+                    continue;
+                }
+                // we are not dealing with windows line endings
+                if file == PathBuf::from("src\\plugins\\mod.rs") {
+                    println!("skipping {}", file.to_str().unwrap());
+                    continue;
+                }
+
+                found = true;
+                diff_file(&PathBuf::from("./scaffold-test"), temp_dir_path, &file);
+            }
+            if found {
+                panic!();
+            }
+        }
     }
 
-    fn scaffold_plugin(current_dir: &Path, dir: &TempDir, plugin_type: &str) -> Result<()> {
+    fn scaffold_plugin(current_dir: &Path, dir_path: &Path, plugin_type: &str) -> Result<()> {
         let opts = Opts::builder(PathBuf::from("templates").join("plugin"))
             .project_name(plugin_type)
-            .target_dir(dir.path())
+            .target_dir(dir_path)
             .append(true);
         ScaffoldDescription::new(opts)?.scaffold_with_parameters(BTreeMap::from([
             (
@@ -158,37 +172,33 @@ mod test {
         Ok(())
     }
 
-    fn test_build_with_backup_folder(temp_dir: &TempDir, target_dir: &Path) -> Result<()> {
-        test_build(temp_dir, target_dir).map_err(|e| {
-            let mut output_dir = std::env::temp_dir();
-            output_dir.push("test_scaffold_output");
+    fn diff_file(left_folder: &Path, right_folder: &Path, file: &Path) {
+        println!("file changed: {}\n", file.to_str().unwrap());
+        let left = std::fs::read_to_string(left_folder.join(file)).unwrap();
+        let right = std::fs::read_to_string(right_folder.join(file)).unwrap();
 
-            // best effort to prepare the output directory
-            let _ = std::fs::remove_dir_all(&output_dir);
-            copy_dir::copy_dir(temp_dir, &output_dir)
-                .expect("couldn't copy test_scaffold_output directory");
-            anyhow::anyhow!(
-                "scaffold test failed: {e}\nYou can find the scaffolded project at '{}'",
-                output_dir.display()
-            )
-        })
-    }
+        let diff = TextDiff::from_lines(&left, &right);
 
-    fn test_build(dir: &TempDir, target_dir: &Path) -> Result<()> {
-        let output = Command::new("cargo")
-            .args(["test"])
-            .env("CARGO_TARGET_DIR", target_dir)
-            .current_dir(dir)
-            .output()?;
-        if !output.status.success() {
-            eprintln!("failed to build scaffolded project");
-            eprintln!("{}", String::from_utf8(output.stdout)?);
-            eprintln!("{}", String::from_utf8(output.stderr)?);
-            bail!(
-                "build failed with exit code {}",
-                output.status.code().unwrap_or_default()
+        for change in diff.iter_all_changes() {
+            let sign = match change.tag() {
+                ChangeTag::Delete => "-",
+                ChangeTag::Insert => "+",
+                ChangeTag::Equal => " ",
+            };
+            print!(
+                "{} {}|\t{}{}",
+                change
+                    .old_index()
+                    .map(|s| s.to_string())
+                    .unwrap_or("-".to_string()),
+                change
+                    .new_index()
+                    .map(|s| s.to_string())
+                    .unwrap_or("-".to_string()),
+                sign,
+                change
             );
         }
-        Ok(())
+        println!("\n\n");
     }
 }

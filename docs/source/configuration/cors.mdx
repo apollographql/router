@@ -1,7 +1,7 @@
 ---
 title: Configuring CORS in the Apollo Router
-sidebar_title: CORS
-description: Control browser access to your router
+subtitle: Control browser access to your router
+description: Manage browser access to your Apollo Router with CORS configuration options, including origin whitelisting, wildcard origins, and credential passing.
 ---
 
 <Note> 
@@ -13,7 +13,7 @@ description: Control browser access to your router
 
 </Note>
 
-By default, the Apollo Router enables _only_ Apollo Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](./overview/#yaml-config-file):
+By default, the Apollo Router enables _only_ GraphOS Studio to initiate browser connections to it. If your supergraph serves data to other browser-based applications, you need to do one of the following in the `cors` section of your router's [YAML config file](./overview/#yaml-config-file):
 
 * Add the origins of those web applications to the router's list of allowed `origins`.
     * Use this option if there is a known, finite list of web applications that consume your supergraph.
@@ -36,13 +36,13 @@ cors:
 
   # List of accepted origins
   # (Ignored if allow_any_origin is true)
-  # (Defaults to the Apollo Studio url: `https://studio.apollographql.com`)
+  # (Defaults to the GraphOS Studio url: `https://studio.apollographql.com`)
   #
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
   origins:
     - https://www.your-app.example.com
-    - https://studio.apollographql.com # Keep this so Apollo Studio can run queries against your router
+    - https://studio.apollographql.com # Keep this so GraphOS Studio can run queries against your router
   match_origins:
     - "^https://([a-z0-9]+[.])*api[.]example[.]com$" # any host that uses https and ends with .api.example.com
 ```
@@ -110,7 +110,7 @@ cors:
   # An origin is a combination of scheme, hostname and port.
   # It does not have any path section, so no trailing slash.
   origins:
-    - https://studio.apollographql.com # Keep this so Apollo Studio can still run queries against your router
+    - https://studio.apollographql.com # Keep this so GraphOS Studio can still run queries against your router
 
   # Set to true to add the `Access-Control-Allow-Credentials` header
   allow_credentials: false

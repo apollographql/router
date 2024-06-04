@@ -25,7 +25,7 @@ use crate::schema::ValidFederationSchema;
 // we need this secondary check to ensure that aliases are not used.
 fn check_absence_of_aliases(
     field_set: &Valid<FieldSet>,
-    code_str: &NodeStr,
+    code_str: &str,
 ) -> Result<(), FederationError> {
     let aliases = field_set.selection_set.fields().filter_map(|field| {
         field.alias.as_ref().map(|alias|
@@ -45,19 +45,19 @@ fn check_absence_of_aliases(
 pub(crate) fn parse_field_set(
     schema: &ValidFederationSchema,
     parent_type_name: NamedType,
-    value: NodeStr,
+    value: &str,
 ) -> Result<SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
     let field_set = FieldSet::parse_and_validate(
         schema.schema(),
         parent_type_name,
-        value.as_str(),
+        value,
         "field_set.graphql",
     )?;
 
     // Validate the field set has no aliases.
-    check_absence_of_aliases(&field_set, &value)?;
+    check_absence_of_aliases(&field_set, value)?;
 
     // field set should not contain any named fragments
     let named_fragments = NamedFragments::new(&IndexMap::new(), schema);
@@ -72,16 +72,12 @@ pub(crate) fn parse_field_set(
 pub(crate) fn parse_field_set_without_normalization(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
-    value: NodeStr,
+    value: &str,
 ) -> Result<executable::SelectionSet, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
-    let field_set = FieldSet::parse_and_validate(
-        schema,
-        parent_type_name,
-        value.as_str(),
-        "field_set.graphql",
-    )?;
+    let field_set =
+        FieldSet::parse_and_validate(schema, parent_type_name, value, "field_set.graphql")?;
     Ok(field_set.into_inner().selection_set)
 }
 
@@ -204,13 +200,9 @@ mod tests {
 
         let subgraph = Subgraph::parse_and_expand("S1", "http://S1", sdl).unwrap();
         let supergraph = Supergraph::compose([&subgraph].to_vec()).unwrap();
-        let err = super::parse_field_set(
-            &supergraph.schema,
-            Name::new("Query").unwrap(),
-            "r1: r".into(),
-        )
-        .map(|_| "Unexpected success") // ignore the Ok value
-        .expect_err("Expected alias error");
+        let err = super::parse_field_set(&supergraph.schema, Name::new("Query").unwrap(), "r1: r")
+            .map(|_| "Unexpected success") // ignore the Ok value
+            .expect_err("Expected alias error");
         assert_eq!(
             err.to_string(),
             r#"Cannot use alias "r1" in "r1: r": aliases are not currently supported in the used directive"#

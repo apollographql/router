@@ -12,7 +12,9 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
+use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
+use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -30,6 +32,7 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::utils::Timer;
+use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::query_planner::BridgeQueryPlannerPool;
 use crate::query_planner::QueryPlanResult;
@@ -49,6 +52,16 @@ use crate::Context;
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
+pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
+pub(crate) enum ConfigMode {
+    //FIXME: add the Rust planner structure once it is hashable and serializable,
+    // for now use the JS config as it expected to be identical to the Rust one
+    Rust(Arc<QueryPlannerConfig>),
+    Both(Arc<QueryPlannerConfig>),
+    Js(Arc<QueryPlannerConfig>),
+}
 
 /// A query planner wrapper that caches results.
 ///
@@ -60,8 +73,24 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     >,
     delegate: T,
     schema: Arc<Schema>,
+    subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
+    config_mode: ConfigMode,
+    introspection: bool,
+}
+
+fn init_query_plan_from_redis(
+    subgraph_schemas: &SubgraphSchemas,
+    cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
+) -> Result<(), String> {
+    if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
+        Arc::make_mut(plan)
+            .root
+            .init_parsed_operations(subgraph_schemas)
+            .map_err(|e| format!("Invalid subgraph operation: {e}"))?
+    }
+    Ok(())
 }
 
 impl<T: Clone + 'static> CachingQueryPlanner<T>
@@ -77,6 +106,7 @@ where
     pub(crate) async fn new(
         delegate: T,
         schema: Arc<Schema>,
+        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
         configuration: &Configuration,
         plugins: Plugins,
     ) -> Result<CachingQueryPlanner<T>, BoxError> {
@@ -90,12 +120,27 @@ where
 
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
+
+        let config_mode = match configuration.experimental_query_planner_mode {
+            crate::configuration::QueryPlannerMode::New => {
+                ConfigMode::Rust(Arc::new(configuration.js_query_planner_config()))
+            }
+            crate::configuration::QueryPlannerMode::Legacy => {
+                ConfigMode::Js(Arc::new(configuration.js_query_planner_config()))
+            }
+            crate::configuration::QueryPlannerMode::Both => {
+                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+            }
+        };
         Ok(Self {
             cache,
             delegate,
             schema,
+            subgraph_schemas,
             plugins: Arc::new(plugins),
             enable_authorization_directives,
+            config_mode,
+            introspection: configuration.supergraph.introspection,
         })
     }
 
@@ -141,7 +186,9 @@ where
                             hash,
                             metadata,
                             plan_options,
-                            ..
+                            config_mode: _,
+                            sdl: _,
+                            introspection: _,
                         },
                         _,
                     )| WarmUpCachingQueryKey {
@@ -150,6 +197,8 @@ where
                         hash: Some(hash.clone()),
                         metadata: metadata.clone(),
                         plan_options: plan_options.clone(),
+                        config_mode: self.config_mode.clone(),
+                        introspection: self.introspection,
                     },
                 )
                 .take(count)
@@ -181,6 +230,8 @@ where
                     hash: None,
                     metadata: CacheKeyMetadata::default(),
                     plan_options: PlanOptions::default(),
+                    config_mode: self.config_mode.clone(),
+                    introspection: self.introspection,
                 });
             }
         }
@@ -195,6 +246,8 @@ where
             hash,
             metadata,
             plan_options,
+            config_mode: _,
+            introspection: _,
         } in all_cache_keys
         {
             let context = Context::new();
@@ -210,6 +263,8 @@ where
                 sdl: Arc::clone(&self.schema.raw_sdl),
                 metadata,
                 plan_options,
+                config_mode: self.config_mode.clone(),
+                introspection: self.introspection,
             };
 
             if experimental_reuse_query_plans {
@@ -227,7 +282,12 @@ where
                 }
             }
 
-            let entry = self.cache.get(&caching_key).await;
+            let entry = self
+                .cache
+                .get(&caching_key, |v| {
+                    init_query_plan_from_redis(&self.subgraph_schemas, v)
+                })
+                .await;
             if entry.is_first() {
                 let doc = match query_analysis.parse_document(&query, operation.as_deref()) {
                     Ok(doc) => doc,
@@ -325,7 +385,7 @@ where
                     urp.cloned()
                 } {
                     let _ = response.context.insert(
-                        "apollo_operation_id",
+                        APOLLO_OPERATION_ID,
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
                     let _ = response.context.insert(
@@ -391,10 +451,17 @@ where
             sdl: Arc::clone(&self.schema.raw_sdl),
             metadata,
             plan_options,
+            config_mode: self.config_mode.clone(),
+            introspection: self.introspection,
         };
 
         let context = request.context.clone();
-        let entry = self.cache.get(&caching_key).await;
+        let entry = self
+            .cache
+            .get(&caching_key, |v| {
+                init_query_plan_from_redis(&self.subgraph_schemas, v)
+            })
+            .await;
         if entry.is_first() {
             let query_planner::CachingRequest {
                 mut query,
@@ -530,8 +597,13 @@ pub(crate) struct CachingQueryKey {
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
+    pub(crate) config_mode: ConfigMode,
+    pub(crate) introspection: bool,
 }
 
+// Update this key every time the cache key or the query plan format has to change.
+// When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
+const CACHE_KEY_VERSION: usize = 0;
 const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
@@ -545,23 +617,29 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
+        hasher
+            .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
         hasher.update(&serde_json::to_vec(&self.sdl).expect("serialization should not fail"));
+        hasher.update([self.introspection as u8]);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
             f,
-            "plan:{}:{}:{}:{}",
-            FEDERATION_VERSION, self.hash, operation, metadata,
+            "plan:{}:{}:{}:{}:{}",
+            CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
         )
     }
 }
 
 impl Hash for CachingQueryKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.sdl.hash(state);
         self.hash.0.hash(state);
         self.operation.hash(state);
         self.metadata.hash(state);
         self.plan_options.hash(state);
+        self.config_mode.hash(state);
+        self.introspection.hash(state);
     }
 }
 
@@ -572,6 +650,8 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<Arc<QueryHash>>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
+    pub(crate) config_mode: ConfigMode,
+    pub(crate) introspection: bool,
 }
 
 #[cfg(test)]
@@ -644,10 +724,15 @@ mod tests {
         let schema = include_str!("testdata/schema.graphql");
         let schema = Arc::new(Schema::parse_test(schema, &configuration).unwrap());
 
-        let mut planner =
-            CachingQueryPlanner::new(delegate, schema.clone(), &configuration, IndexMap::new())
-                .await
-                .unwrap();
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            schema.clone(),
+            Default::default(),
+            &configuration,
+            IndexMap::new(),
+        )
+        .await
+        .unwrap();
 
         let configuration = Configuration::default();
 
@@ -740,10 +825,15 @@ mod tests {
         )
         .unwrap();
 
-        let mut planner =
-            CachingQueryPlanner::new(delegate, Arc::new(schema), &configuration, IndexMap::new())
-                .await
-                .unwrap();
+        let mut planner = CachingQueryPlanner::new(
+            delegate,
+            Arc::new(schema),
+            Default::default(),
+            &configuration,
+            IndexMap::new(),
+        )
+        .await
+        .unwrap();
 
         let context = Context::new();
         context.extensions().lock().insert::<ParsedDocument>(doc);

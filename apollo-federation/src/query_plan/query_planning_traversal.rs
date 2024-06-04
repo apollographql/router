@@ -33,13 +33,13 @@ use crate::query_plan::generate::PlanBuilder;
 use crate::query_plan::operation::Operation;
 use crate::query_plan::operation::Selection;
 use crate::query_plan::operation::SelectionSet;
+use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 use crate::query_plan::QueryPlanCost;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 
@@ -106,11 +106,23 @@ pub(crate) struct QueryPlanningTraversal<'a> {
     resolver_cache: ConditionResolverCache,
 }
 
+#[derive(Debug)]
 struct OpenBranchAndSelections {
     /// The options for this open branch.
     open_branch: OpenBranch,
     /// A stack of the remaining selections to plan from the node this open branch ends on.
     selections: Vec<Selection>,
+}
+
+struct PlanInfo {
+    fetch_dependency_graph: FetchDependencyGraph,
+    path_tree: Arc<OpPathTree>,
+}
+
+impl std::fmt::Debug for PlanInfo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        std::fmt::Display::fmt(&self.path_tree, f)
+    }
 }
 
 pub(crate) struct BestQueryPlanInfo {
@@ -603,13 +615,16 @@ impl<'a> QueryPlanningTraversal<'a> {
             .collect();
 
         let (best, cost) = generate_all_plans_and_find_best(
-            (initial_dependency_graph, Arc::new(initial_tree)),
+            PlanInfo {
+                fetch_dependency_graph: initial_dependency_graph,
+                path_tree: Arc::new(initial_tree),
+            },
             other_trees,
             /*plan_builder*/ self,
         )?;
         self.best_plan = BestQueryPlanInfo {
-            fetch_dependency_graph: best.0,
-            path_tree: best.1,
+            fetch_dependency_graph: best.fetch_dependency_graph,
+            path_tree: best.path_tree,
             cost,
         }
         .into();
@@ -829,41 +844,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             QueryGraphNodeType::FederatedRootType(_)
         );
         if is_root_path_tree {
-            // The root of the pathTree is one of the "fake" root of the subgraphs graph,
-            // which belongs to no subgraph but points to each ones.
-            // So we "unpack" the first level of the tree to find out our top level groups
-            // (and initialize our stack).
-            // Note that we can safely ignore the triggers of that first level
-            // as it will all be free transition, and we know we cannot have conditions.
-            for child in &path_tree.childs {
-                let edge = child.edge.expect("The root edge should not be None");
-                let (_source_node, target_node) = path_tree.graph.edge_endpoints(edge)?;
-                let target_node = path_tree.graph.node_weight(target_node)?;
-                let subgraph_name = &target_node.source;
-                let root_type = match &target_node.type_ {
-                    QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(
-                        object,
-                    )) => object.clone().into(),
-                    ty => {
-                        return Err(FederationError::internal(format!(
-                            "expected an object type for the root of a subgraph, found {ty}"
-                        )))
-                    }
-                };
-                let fetch_dependency_node = dependency_graph.get_or_create_root_node(
-                    subgraph_name,
-                    self.root_kind,
-                    root_type,
-                )?;
-                compute_nodes_for_tree(
-                    dependency_graph,
-                    &child.tree,
-                    fetch_dependency_node,
-                    Default::default(),
-                    Default::default(),
-                    &Default::default(),
-                )?;
-            }
+            compute_root_fetch_groups(self.root_kind, dependency_graph, path_tree)?;
         } else {
             let query_graph_node = path_tree.graph.node_weight(path_tree.node)?;
             let subgraph_name = &query_graph_node.source;
@@ -948,35 +929,34 @@ impl<'a> QueryPlanningTraversal<'a> {
     }
 }
 
-impl PlanBuilder<(FetchDependencyGraph, Arc<OpPathTree>), Arc<OpPathTree>>
-    for QueryPlanningTraversal<'_>
-{
-    fn add_to_plan(
-        &mut self,
-        (plan_graph, plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
-        tree: Arc<OpPathTree>,
-    ) -> (FetchDependencyGraph, Arc<OpPathTree>) {
-        let mut updated_graph = plan_graph.clone();
+impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
+    fn add_to_plan(&mut self, plan_info: &PlanInfo, tree: Arc<OpPathTree>) -> PlanInfo {
+        let mut updated_graph = plan_info.fetch_dependency_graph.clone();
         let result = self.updated_dependency_graph(&mut updated_graph, &tree);
         if result.is_ok() {
-            let updated_tree = plan_tree.merge(&tree);
-            (updated_graph, updated_tree)
+            PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.merge(&tree),
+            }
         } else {
             // Failed to update. Return the original plan.
-            (updated_graph, plan_tree.clone())
+            PlanInfo {
+                fetch_dependency_graph: updated_graph,
+                path_tree: plan_info.path_tree.clone(),
+            }
         }
     }
 
     fn compute_plan_cost(
         &mut self,
-        (plan_graph, _): &mut (FetchDependencyGraph, Arc<OpPathTree>),
+        plan_info: &mut PlanInfo,
     ) -> Result<QueryPlanCost, FederationError> {
-        self.cost(plan_graph)
+        self.cost(&mut plan_info.fetch_dependency_graph)
     }
 
     fn on_plan_generated(
         &self,
-        (_, _plan_tree): &(FetchDependencyGraph, Arc<OpPathTree>),
+        _plan_info: &PlanInfo,
         _cost: QueryPlanCost,
         _prev_cost: Option<QueryPlanCost>,
     ) {

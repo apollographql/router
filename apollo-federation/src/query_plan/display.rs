@@ -57,17 +57,17 @@ impl SubscriptionNode {
 
         state.write("Primary: {")?;
         primary.write_indented(state)?;
-        state.write("}")?;
+        state.write("},")?;
 
         if let Some(rest) = rest {
             state.new_line()?;
             state.write("Rest: {")?;
             rest.write_indented(state)?;
-            state.write("}")?;
+            state.write("},")?;
         }
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -83,6 +83,7 @@ impl FetchNode {
             operation_kind: _,
             input_rewrites: _,
             output_rewrites: _,
+            context_rewrites: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
@@ -94,13 +95,14 @@ impl FetchNode {
         if let Some(v) = requires.as_ref() {
             if !v.is_empty() {
                 write_selections(state, v)?;
-                state.write(" => ")?;
+                state.write(" =>")?;
+                state.new_line()?;
             }
         }
         write_operation(state, operation_document)?;
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -111,7 +113,7 @@ impl SequenceNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -122,7 +124,7 @@ impl ParallelNode {
 
         write_indented_lines(state, nodes, |state, node| node.write_indented(state))?;
 
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -143,7 +145,7 @@ impl FlattenNode {
         node.write_indented(state)?;
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -163,16 +165,16 @@ impl ConditionNode {
                 state.indent()?;
                 if_clause.write_indented(state)?;
                 state.dedent()?;
-                state.write("}")?;
+                state.write("},")?;
 
                 state.write("Else {")?;
                 state.indent()?;
                 else_clause.write_indented(state)?;
                 state.dedent()?;
-                state.write("}")?;
+                state.write("},")?;
 
                 state.dedent()?;
-                state.write("}")
+                state.write("},")
             }
 
             (Some(if_clause), None) => {
@@ -182,7 +184,7 @@ impl ConditionNode {
                 if_clause.write_indented(state)?;
 
                 state.dedent()?;
-                state.write("}")
+                state.write("},")
             }
 
             (None, Some(else_clause)) => {
@@ -192,7 +194,7 @@ impl ConditionNode {
                 else_clause.write_indented(state)?;
 
                 state.dedent()?;
-                state.write("}")
+                state.write("},")
             }
 
             // Shouldn’t happen?
@@ -217,7 +219,7 @@ impl DeferNode {
         }
 
         state.dedent()?;
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -248,7 +250,7 @@ impl PrimaryDeferBlock {
 
             state.dedent()?;
         }
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -296,7 +298,7 @@ impl DeferredDeferBlock {
 
             state.dedent()?;
         }
-        state.write("}")
+        state.write("},")
     }
 }
 
@@ -320,7 +322,7 @@ fn write_operation(
         )?
     }
     for fragment in operation_document.fragments.values() {
-        state.new_line()?;
+        state.write("\n\n")?; // new line without indentation (since `fragment` adds indentation)
         state.write(
             fragment
                 .serialize()
@@ -340,17 +342,25 @@ fn write_selections(
         }
     }
     state.write("{")?;
-    write_indented_lines(state, selections, |state, sel| {
-        state.write(sel.serialize().initial_indent_level(state.indent_level()))
-    })?;
+
+    // Manually indent and write the newline
+    // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
+    state.indent_no_new_line();
+    state.write("\n")?;
+    for sel in selections {
+        state.write(sel.serialize().initial_indent_level(state.indent_level()))?;
+    }
+    state.dedent()?;
+
     state.write("}")
 }
 
+/// PORT_NOTE: Corresponds to `GroupPath.updatedResponsePath` in `buildPlan.ts`
 impl fmt::Display for FetchDataPathElement {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Key(name) => f.write_str(name),
-            Self::AnyIndex => f.write_str("*"),
+            Self::AnyIndex => f.write_str("@"),
             Self::TypenameEquals(name) => write!(f, "... on {name}"),
         }
     }

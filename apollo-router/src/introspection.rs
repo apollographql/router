@@ -50,7 +50,7 @@ impl Introspection {
 
     /// Execute an introspection and cache the response.
     pub(crate) async fn execute(&self, query: String) -> Result<Response, IntrospectionError> {
-        if let Some(response) = self.cache.get(&query).await {
+        if let Some(response) = self.cache.get(&query, |_| Ok(())).await {
             return Ok(response);
         }
 
