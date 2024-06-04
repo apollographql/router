@@ -44,8 +44,8 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::fetch::QueryHash;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
@@ -186,14 +186,26 @@ impl PlannerMode {
         filtered_query: String,
         operation: Option<String>,
         plan_options: PlanOptions,
+        // Initialization code that needs mutable access to the plan,
+        // before we potentially share it in Arc with a background thread
+        // for "both" mode.
+        init_query_plan_root_node: impl Fn(&mut PlanNode) -> Result<(), ValidationErrors>,
     ) -> Result<PlanSuccess<QueryPlanResult>, QueryPlannerError> {
         match self {
-            PlannerMode::Js(js) => js
-                .plan(filtered_query, operation, plan_options)
-                .await
-                .map_err(QueryPlannerError::RouterBridgeError)?
-                .into_result()
-                .map_err(|err| QueryPlannerError::from(PlanErrors::from(err))),
+            PlannerMode::Js(js) => {
+                let mut success = js
+                    .plan(filtered_query, operation, plan_options)
+                    .await
+                    .map_err(QueryPlannerError::RouterBridgeError)?
+                    .into_result()
+                    .map_err(PlanErrors::from)?;
+                if let Some(root_node) = &mut success.data.query_plan.node {
+                    // Arc freshly deserialized from Deno should be unique, so this doesn’t clone:
+                    let root_node = Arc::make_mut(root_node);
+                    init_query_plan_root_node(root_node)?;
+                }
+                Ok(success)
+            }
             PlannerMode::Rust { rust, .. } => {
                 let plan = operation
                     .as_deref()
@@ -210,11 +222,17 @@ impl PlannerMode {
                     referenced_fields_by_type: Default::default(),
                 };
 
+                let mut root_node = convert_root_query_plan_node(&plan);
+                if let Some(node) = &mut root_node {
+                    init_query_plan_root_node(node)?;
+                }
                 Ok(PlanSuccess {
                     usage_reporting,
                     data: QueryPlanResult {
-                        formatted_query_plan: Some(plan.to_string()),
-                        query_plan: (&plan).into(),
+                        formatted_query_plan: Some(Arc::new(plan.to_string())),
+                        query_plan: QueryPlan {
+                            node: root_node.map(Arc::new),
+                        },
                     },
                 })
             }
@@ -242,12 +260,20 @@ impl PlannerMode {
                     ))
                 });
 
-                let js_result = js
+                let mut js_result = js
                     .plan(filtered_query, operation, plan_options)
                     .await
                     .map_err(QueryPlannerError::RouterBridgeError)?
                     .into_result()
                     .map_err(PlanErrors::from);
+
+                if let Ok(success) = &mut js_result {
+                    if let Some(root_node) = &mut success.data.query_plan.node {
+                        // Arc freshly deserialized from Deno should be unique, so this doesn’t clone:
+                        let root_node = Arc::make_mut(root_node);
+                        init_query_plan_root_node(root_node)?;
+                    }
+                }
 
                 let is_matched;
                 match (&js_result, &rust_result) {
@@ -264,7 +290,9 @@ impl PlannerMode {
                     }
 
                     (Ok(js_plan), Ok(rust_plan)) => {
-                        is_matched = js_plan.data.query_plan == rust_plan.into();
+                        let js_root_node = js_plan.data.query_plan.node.as_deref();
+                        let rust_root_node = convert_root_query_plan_node(rust_plan);
+                        is_matched = js_root_node == rust_root_node.as_ref();
                         if is_matched {
                             tracing::debug!("JS and Rust query plans match! 🎉");
                         } else {
@@ -512,21 +540,23 @@ impl BridgeQueryPlanner {
         plan_options: PlanOptions,
         doc: &ParsedDocument,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let mut plan_success = self
+        let plan_success = self
             .planner
-            .plan(doc, filtered_query.clone(), operation.clone(), plan_options)
+            .plan(
+                doc,
+                filtered_query.clone(),
+                operation.clone(),
+                plan_options,
+                |root_node| {
+                    root_node.init_parsed_operations_and_hash_subqueries(
+                        &self.subgraph_schemas,
+                        &self.schema.raw_sdl,
+                    )?;
+                    root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
+                    Ok(())
+                },
+            )
             .await?;
-        plan_success
-            .data
-            .query_plan
-            .init_parsed_operations_and_hash_subqueries(
-                &self.subgraph_schemas,
-                &self.schema.raw_sdl,
-            )?;
-        plan_success
-            .data
-            .query_plan
-            .extract_authorization_metadata(self.schema.supergraph_schema(), &key);
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if matches!(
@@ -937,7 +967,7 @@ impl BridgeQueryPlanner {
 #[derive(Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueryPlanResult {
-    pub(super) formatted_query_plan: Option<String>,
+    pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
 }
 
@@ -946,33 +976,7 @@ pub(crate) struct QueryPlanResult {
 /// The root query plan container.
 pub(super) struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
-    pub(super) node: Option<PlanNode>,
-}
-
-impl QueryPlan {
-    fn init_parsed_operations_and_hash_subqueries(
-        &mut self,
-        subgraph_schemas: &SubgraphSchemas,
-        supergraph_schema_hash: &str,
-    ) -> Result<(), ValidationErrors> {
-        if let Some(node) = self.node.as_mut() {
-            node.init_parsed_operations_and_hash_subqueries(
-                subgraph_schemas,
-                supergraph_schema_hash,
-            )?;
-        }
-        Ok(())
-    }
-
-    fn extract_authorization_metadata(
-        &mut self,
-        schema: &Valid<apollo_compiler::Schema>,
-        key: &CacheKeyMetadata,
-    ) {
-        if let Some(node) = self.node.as_mut() {
-            node.extract_authorization_metadata(schema, key);
-        }
-    }
+    pub(super) node: Option<Arc<PlanNode>>,
 }
 
 fn standardize_schema(mut schema: apollo_compiler::Schema) -> apollo_compiler::Schema {
