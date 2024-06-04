@@ -1,11 +1,5 @@
 use std::sync::Arc;
 
-use crate::error::FederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
-use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
-use crate::schema::ValidFederationSchema;
-
 use super::runtime_types_intersect;
 use super::Field;
 use super::FieldSelection;
@@ -22,6 +16,11 @@ use super::Selection;
 use super::SelectionId;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
+use crate::error::FederationError;
+use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
+use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::ValidFederationSchema;
 
 // TODO(@goto-bus-stop): this is precomputed in the QueryPlanner constructor. Can we expose that
 // here? Or can we move it onto the FederationSchema instance?

@@ -266,11 +266,10 @@ impl SelectionSet {
 
 #[cfg(test)]
 mod tests {
-    use crate::operation::Operation;
-    use crate::schema::ValidFederationSchema;
-
     use super::Containment;
     use super::ContainmentOptions;
+    use crate::operation::Operation;
+    use crate::schema::ValidFederationSchema;
 
     fn containment_custom(left: &str, right: &str, ignore_missing_typename: bool) -> Containment {
         let schema = apollo_compiler::Schema::parse_and_validate(
