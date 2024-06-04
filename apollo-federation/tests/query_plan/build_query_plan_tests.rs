@@ -279,7 +279,7 @@ fn handles_non_intersecting_fragment_conditions() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (parallel fetch ordering difference)
 fn avoids_unnecessary_fetches() {
     // This test is a reduced example demonstrating a previous issue with the computation of query plans cost.
     // The general idea is that "Subgraph 3" has a declaration that is kind of useless (it declares entity A

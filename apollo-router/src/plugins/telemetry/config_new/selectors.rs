@@ -654,11 +654,20 @@ impl Selector for RouterSelector {
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             _ => None,
         }
     }
@@ -881,11 +890,20 @@ impl Selector for SupergraphSelector {
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::Error { .. } => Some(error.to_string().into()),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             _ => None,
         }
     }
@@ -1138,11 +1156,20 @@ impl Selector for SubgraphSelector {
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SubgraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             _ => None,
         }
     }
@@ -1174,6 +1201,7 @@ mod test {
     use opentelemetry::KeyValue;
     use opentelemetry_api::StringValue;
     use serde_json::json;
+    use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;
     use tracing_subscriber::layer::SubscriberExt;
@@ -1619,6 +1647,13 @@ mod test {
 
         assert_eq!(
             selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
                 .on_response(
                     &crate::services::RouterResponse::fake_builder()
                         .build()
@@ -1703,6 +1738,13 @@ mod test {
 
         assert_eq!(
             selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
                 .on_response(
                     &crate::services::SupergraphResponse::fake_builder()
                         .build()
@@ -1776,6 +1818,13 @@ mod test {
                         .build()
                         .unwrap()
                 )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
                 .unwrap(),
             "context_value".into()
         );
