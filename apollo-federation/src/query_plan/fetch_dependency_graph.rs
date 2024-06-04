@@ -28,6 +28,20 @@ use petgraph::visit::EdgeRef;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::Field;
+use crate::operation::FieldData;
+use crate::operation::InlineFragment;
+use crate::operation::InlineFragmentData;
+use crate::operation::InlineFragmentSelection;
+use crate::operation::NamedFragments;
+use crate::operation::Operation;
+use crate::operation::RebaseErrorHandlingOption;
+use crate::operation::RebasedFragments;
+use crate::operation::Selection;
+use crate::operation::SelectionId;
+use crate::operation::SelectionMap;
+use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::query_graph::graph_path::concat_op_paths;
@@ -45,20 +59,6 @@ use crate::query_plan::conditions::remove_conditions_from_selection_set;
 use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::InlineFragment;
-use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::InlineFragmentSelection;
-use crate::query_plan::operation::NamedFragments;
-use crate::query_plan::operation::Operation;
-use crate::query_plan::operation::RebaseErrorHandlingOption;
-use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionId;
-use crate::query_plan::operation::SelectionMap;
-use crate::query_plan::operation::SelectionSet;
-use crate::query_plan::operation::TYPENAME_FIELD;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchDataValueSetter;
@@ -1752,7 +1752,7 @@ impl FetchDependencyGraphNode {
 
     pub(crate) fn cost(&mut self) -> Result<QueryPlanCost, FederationError> {
         if self.cached_cost.is_none() {
-            self.cached_cost = Some(self.selection_set.selection_set.cost(1)?)
+            self.cached_cost = Some(self.selection_set.selection_set.cost(1.0)?)
         }
         Ok(self.cached_cost.unwrap())
     }
@@ -2082,7 +2082,7 @@ impl SelectionSet {
         // and one that doesn't, and both will be almost identical,
         // except that the type-exploded field will be a different depth;
         // by favoring lesser depth in that case, we favor not type-exploding).
-        self.selections.values().try_fold(0, |sum, selection| {
+        self.selections.values().try_fold(0.0, |sum, selection| {
             let subselections = match selection {
                 Selection::Field(field) => field.selection_set.as_ref(),
                 Selection::InlineFragment(inline) => Some(&inline.selection_set),
@@ -2093,9 +2093,9 @@ impl SelectionSet {
                 }
             };
             let subselections_cost = if let Some(selection_set) = subselections {
-                selection_set.cost(depth + 1)?
+                selection_set.cost(depth + 1.0)?
             } else {
-                0
+                0.0
             };
             Ok(sum + depth + subselections_cost)
         })
@@ -2568,7 +2568,7 @@ fn compute_nodes_for_key_resolution<'a>(
         // Conditions do not use named fragments
         &Default::default(),
         &dependency_graph.supergraph_schema,
-        super::operation::RebaseErrorHandlingOption::ThrowError,
+        crate::operation::RebaseErrorHandlingOption::ThrowError,
     )?;
 
     input_selections.merge_into(std::iter::once(&edge_conditions))?;

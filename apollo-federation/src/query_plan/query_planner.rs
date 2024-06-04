@@ -16,6 +16,11 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
+use crate::operation::normalize_operation;
+use crate::operation::NamedFragments;
+use crate::operation::NormalizedDefer;
+use crate::operation::RebasedFragments;
+use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
@@ -25,11 +30,6 @@ use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
-use crate::query_plan::operation::normalize_operation;
-use crate::query_plan::operation::NamedFragments;
-use crate::query_plan::operation::NormalizedDefer;
-use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -66,6 +66,16 @@ pub struct QueryPlannerConfig {
     /// Defaults to true.
     pub reuse_query_fragments: bool,
 
+    /// NOTE: **not implemented yet**
+    ///
+    /// If enabled, the query planner will extract inline fragments into fragment
+    /// definitions before sending queries to subgraphs. This can significantly
+    /// reduce the size of the query sent to subgraphs, but may increase the time
+    /// it takes to plan the query.
+    ///
+    /// Defaults to false.
+    pub generate_query_fragments: bool,
+
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
     ///
@@ -90,6 +100,7 @@ impl Default for QueryPlannerConfig {
         Self {
             reuse_query_fragments: true,
             subgraph_graphql_validation: false,
+            generate_query_fragments: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
         }
@@ -1148,7 +1159,8 @@ type User
               userById(id: 1) {
                 ...userFields
                 id
-              }      another_user: userById(id: 2) {
+              }
+              another_user: userById(id: 2) {
                 ...userFields
               }
             }
@@ -1206,10 +1218,12 @@ type User
               userById(id: 1) {
                 ...userFields
                 id
-              }      partial_optimize: userById(id: 2) {
+              }
+              partial_optimize: userById(id: 2) {
                 ...userFields
                 id
-              }      full_optimize: userById(id: 3) {
+              }
+              full_optimize: userById(id: 3) {
                 ...userFields
               }
             }
@@ -1264,7 +1278,8 @@ type User
             {
               userById(id: 1) {
                 ...F2
-              }      case2: userById(id: 2) {
+              }
+              case2: userById(id: 2) {
                 ...F2
               }
             }
