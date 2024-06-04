@@ -1,0 +1,7 @@
+description: Custom histogram where router response doesn't happen. This should still increment the metric on Drop.
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello

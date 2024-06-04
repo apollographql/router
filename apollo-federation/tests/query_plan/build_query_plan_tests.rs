@@ -32,6 +32,7 @@ fn some_name() {
 */
 
 mod fetch_operation_names;
+mod named_fragments_preservation;
 mod provides;
 mod requires;
 mod shareable_root_fields;
@@ -210,5 +211,211 @@ fn field_covariance_and_type_explosion() {
       },
     }
     "###
+    );
+}
+
+#[test]
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure - unexpected inline spread
+fn handles_non_intersecting_fragment_conditions() {
+    let planner = planner!(
+        Subgraph1: r#"
+            interface Fruit {
+              edible: Boolean!
+            }
+    
+            type Banana implements Fruit {
+              edible: Boolean!
+              inBunch: Boolean!
+            }
+    
+            type Apple implements Fruit {
+              edible: Boolean!
+              hasStem: Boolean!
+            }
+    
+            type Query {
+              fruit: Fruit!
+            }
+          "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+            fragment OrangeYouGladIDidntSayBanana on Fruit {
+              ... on Banana {
+                inBunch
+              }
+              ... on Apple {
+                hasStem
+              }
+            }
+    
+            query Fruitiness {
+              fruit {
+                ... on Apple {
+                  ...OrangeYouGladIDidntSayBanana
+                }
+              }
+            }
+          "#,
+          @r#"
+          QueryPlan {
+            Fetch(service: "Subgraph1") {
+              {
+                fruit {
+                  __typename
+                  ... on Apple {
+                    hasStem
+                  }
+                }
+              }
+            },
+          }
+          "#
+    );
+}
+
+#[test]
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure (parallel fetch ordering difference)
+fn avoids_unnecessary_fetches() {
+    // This test is a reduced example demonstrating a previous issue with the computation of query plans cost.
+    // The general idea is that "Subgraph 3" has a declaration that is kind of useless (it declares entity A
+    // that only provides it's own key, so there is never a good reason to use it), but the query planner
+    // doesn't know that and will "test" plans including fetch to that subgraphs in its exhaustive search
+    // of all options. In theory, the query plan costing mechanism should eliminate such plans in favor of
+    // plans not having this inefficient, but an issue in the plan cost computation led to such inefficient
+    // to have the same cost as the more efficient one and to be picked (just because it was the first computed).
+    // This test ensures this costing bug is fixed.
+
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+    
+          type T @key(fields: "idT") {
+            idT: ID!
+            a: A
+          }
+    
+          type A @key(fields: "idA2") {
+            idA2: ID!
+          }
+          "#,
+        Subgraph2: r#"
+          type T @key(fields: "idT") {
+            idT: ID!
+            u: U
+          }
+    
+          type U @key(fields: "idU") {
+            idU: ID!
+          }
+          "#,
+        Subgraph3: r#"
+          type A @key(fields: "idA1") {
+            idA1: ID!
+          }
+          "#,
+        Subgraph4: r#"
+          type A @key(fields: "idA1") @key(fields: "idA2") {
+            idA1: ID!
+            idA2: ID!
+          }
+          "#,
+        Subgraph5: r#"
+          type U @key(fields: "idU") {
+            idU: ID!
+            v: Int
+          }
+          "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            t {
+              u {
+                v
+              }
+              a {
+                idA1
+              }
+            }
+          }
+        "#,
+        @r#"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph1") {
+              {
+                t {
+                  __typename
+                  idT
+                  a {
+                    __typename
+                    idA2
+                  }
+                }
+              }
+            },
+            Parallel {
+              Sequence {
+                Flatten(path: "t") {
+                  Fetch(service: "Subgraph2") {
+                    {
+                      ... on T {
+                        __typename
+                        idT
+                      }
+                    } =>
+                    {
+                      ... on T {
+                        u {
+                          __typename
+                          idU
+                        }
+                      }
+                    }
+                  },
+                },
+                Flatten(path: "t.u") {
+                  Fetch(service: "Subgraph5") {
+                    {
+                      ... on U {
+                        __typename
+                        idU
+                      }
+                    } =>
+                    {
+                      ... on U {
+                        v
+                      }
+                    }
+                  },
+                },
+              },
+              Flatten(path: "t.a") {
+                Fetch(service: "Subgraph4") {
+                  {
+                    ... on A {
+                      __typename
+                      idA2
+                    }
+                  } =>
+                  {
+                    ... on A {
+                      idA1
+                    }
+                  }
+                },
+              },
+            },
+          },
+        }
+        "#
     );
 }
