@@ -17,7 +17,6 @@ use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::response;
-use crate::services::router::body::get_body_bytes;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
@@ -70,12 +69,15 @@ impl SupergraphStage {
         sdl: Arc<String>,
     ) -> supergraph::BoxService
     where
-        C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
-            + Clone
+        C: Service<
+                http::Request<RouterBody>,
+                Response = http::Response<RouterBody>,
+                Error = BoxError,
+            > + Clone
             + Send
             + Sync
             + 'static,
-        <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+        <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
     {
         let request_layer = (self.request != Default::default()).then_some({
             let request_config = self.request.clone();
@@ -185,12 +187,12 @@ async fn process_supergraph_request_stage<C>(
     request_config: SupergraphRequestConf,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
-    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
@@ -323,12 +325,12 @@ async fn process_supergraph_response_stage<C>(
     response_config: SupergraphResponseConf,
 ) -> Result<supergraph::Response, BoxError>
 where
-    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
+    C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
         + Clone
         + Send
         + Sync
         + 'static,
-    <C as tower::Service<http::Request<Body>>>::Future: Send + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
@@ -509,29 +511,29 @@ mod tests {
 
     use futures::future::BoxFuture;
     use http::StatusCode;
-    use hyper::Body;
     use serde_json::json;
     use tower::BoxError;
     use tower::ServiceExt;
 
     use super::super::*;
     use super::*;
-    use crate::plugin::test::MockHttpClientService;
+    use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockSupergraphService;
+    use crate::services::router::body::get_body_bytes;
     use crate::services::supergraph;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(
         callback: fn(
-            http::Request<Body>,
-        ) -> BoxFuture<'static, Result<http::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
+            http::Request<RouterBody>,
+        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+    ) -> MockInternalHttpClientService {
+        let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
+            let mut mock_http_client = MockInternalHttpClientService::new();
 
             mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
+                let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
                 mock_http_client
             });
@@ -544,16 +546,16 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
-            http::Request<Body>,
-        ) -> BoxFuture<'static, Result<http::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
+            http::Request<RouterBody>,
+        ) -> BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>,
+    ) -> MockInternalHttpClientService {
+        let mut mock_http_client = MockInternalHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
+            let mut mock_http_client = MockInternalHttpClientService::new();
             mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
+                let mut mock_http_client = MockInternalHttpClientService::new();
                 mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockHttpClientService::new();
+                    let mut mock_http_client = MockInternalHttpClientService::new();
                     mock_http_client.expect_call().returning(callback);
                     mock_http_client
                 });
@@ -619,10 +621,10 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(Body::from(
+                    .body(RouterBody::from(
                         r#"{
                                 "version": 1,
                                 "stage": "SupergraphRequest",
@@ -714,10 +716,10 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_supergraph_service = MockSupergraphService::new();
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<RouterBody>| {
             Box::pin(async {
                 Ok(http::Response::builder()
-                    .body(Body::from(
+                    .body(RouterBody::from(
                         r#"{
                                 "version": 1,
                                 "stage": "SupergraphRequest",
@@ -796,8 +798,8 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |mut res: http::Request<Body>| {
-            Box::pin(async {
+        let mock_http_client = mock_with_deferred_callback(move |mut res: http::Request<RouterBody>| {
+            Box::pin(async move {
                 let deserialized_response: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&get_body_bytes(&mut res).await.unwrap()).unwrap();
 
@@ -860,7 +862,7 @@ mod tests {
                   "sdl": "the sdl shouldn't change"
                 });
                 Ok(http::Response::builder()
-                    .body(Body::from(serde_json::to_string(&input).unwrap()))
+                    .body(RouterBody::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
         });
@@ -941,40 +943,43 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
-            Box::pin(async {
-                let mut deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
-                        .unwrap();
-                assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
-                assert_eq!(
-                    PipelineStep::SupergraphResponse.to_string(),
-                    deserialized_response.stage
-                );
-
-                // Copy the has_next from the body into the data for checking later
-                deserialized_response
-                    .body
-                    .as_mut()
-                    .unwrap()
-                    .as_object_mut()
-                    .unwrap()
-                    .get_mut("data")
-                    .unwrap()
-                    .as_object_mut()
-                    .unwrap()
-                    .insert(
-                        "has_next".to_string(),
-                        serde_json::Value::from(deserialized_response.has_next.unwrap_or_default()),
+        let mock_http_client =
+            mock_with_deferred_callback(move |res: http::Request<RouterBody>| {
+                Box::pin(async {
+                    let mut deserialized_response: Externalizable<serde_json::Value> =
+                        serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
+                            .unwrap();
+                    assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
+                    assert_eq!(
+                        PipelineStep::SupergraphResponse.to_string(),
+                        deserialized_response.stage
                     );
 
-                Ok(http::Response::builder()
-                    .body(Body::from(
-                        serde_json::to_string(&deserialized_response).unwrap_or_default(),
-                    ))
-                    .unwrap())
-            })
-        });
+                    // Copy the has_next from the body into the data for checking later
+                    deserialized_response
+                        .body
+                        .as_mut()
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .get_mut("data")
+                        .unwrap()
+                        .as_object_mut()
+                        .unwrap()
+                        .insert(
+                            "has_next".to_string(),
+                            serde_json::Value::from(
+                                deserialized_response.has_next.unwrap_or_default(),
+                            ),
+                        );
+
+                    Ok(http::Response::builder()
+                        .body(RouterBody::from(
+                            serde_json::to_string(&deserialized_response).unwrap_or_default(),
+                        ))
+                        .unwrap())
+                })
+            });
 
         let service = supergraph_stage.as_service(
             mock_http_client,

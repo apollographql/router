@@ -2,9 +2,10 @@
 use std::fmt::Debug;
 
 use bytes::Bytes;
-use futures::Stream;
+use futures::{future::BoxFuture, FutureExt, Stream};
 use http_body::SizeHint;
 use hyper::body::HttpBody;
+use tower::{BoxError, Service};
 
 pub struct RouterBody(super::Body);
 
@@ -87,4 +88,43 @@ impl HttpBody for RouterBody {
 
 pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
     hyper::body::to_bytes(body).await
+}
+
+// this is used to wrap a hyper::Client because its Service implementation will always return a hyper::Body,
+// it does not keep the body type used by the request
+#[derive(Clone)]
+pub(crate) struct RouterBodyConverter<C> {
+    pub(crate) inner: C,
+}
+
+impl<C> Service<http::Request<RouterBody>> for RouterBodyConverter<C>
+where
+    C: Service<http::Request<RouterBody>, Response = http::Response<super::Body>, Error = BoxError>
+        + Clone
+        + Send
+        + Sync
+        + 'static,
+    <C as tower::Service<http::Request<RouterBody>>>::Future: Send + Sync + 'static,
+{
+    type Response = http::Response<RouterBody>;
+
+    type Error = BoxError;
+
+    type Future = BoxFuture<'static, Result<http::Response<RouterBody>, BoxError>>;
+
+    fn poll_ready(
+        &mut self,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<RouterBody>) -> Self::Future {
+        Box::pin(self.inner.call(req).map(|res| {
+            res.map(|http_response| {
+                let (parts, body) = http_response.into_parts();
+                http::Response::from_parts(parts, RouterBody::from(body))
+            })
+        }))
+    }
 }

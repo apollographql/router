@@ -24,7 +24,7 @@ use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
 use crate::services::router::body::get_body_bytes;
-use crate::services::router::Body;
+use crate::services::router::body::RouterBody;
 use crate::Context;
 
 pub(crate) const DEFAULT_EXTERNALIZATION_TIMEOUT: Duration = Duration::from_secs(1);
@@ -268,7 +268,7 @@ where
 
     pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
     where
-        C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
+        C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
             + Clone
             + Send
             + Sync

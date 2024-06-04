@@ -68,7 +68,6 @@ use crate::protocols::websocket::convert_websocket_stream;
 use crate::protocols::websocket::GraphqlWebSocket;
 use crate::query_planner::OperationKind;
 use crate::services::layers::apq;
-use crate::services::router::body::get_body_bytes;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::Configuration;
@@ -1580,6 +1579,7 @@ mod tests {
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
+    use crate::services::router::body::get_body_bytes;
     use crate::Context;
 
     // starts a local server emulating a subgraph returning status code 400
