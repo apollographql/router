@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use apollo_compiler::ast::Name;
 use apollo_compiler::executable;
 use apollo_compiler::Node;
 
@@ -25,7 +26,7 @@ fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
         (Value::Float(left), Value::Float(right)) => left == right,
         (Value::Int(left), Value::Int(right)) => left == right,
         (Value::Boolean(left), Value::Boolean(right)) => left == right,
-        (Value::List(left), Value::List(right)) => left
+        (Value::List(left), Value::List(right)) if left.len() == right.len() => left
             .iter()
             .zip(right.iter())
             .all(|(left, right)| same_value(left, right)),
@@ -39,6 +40,98 @@ fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
         }
         _ => false,
     }
+}
+
+/// Sort an input value, which means specifically sorting their object values by keys (assuming no
+/// duplicates). This is used for hashing input values in a way consistent with [same_value()].
+fn sort_value(value: &executable::Value) -> executable::Value {
+    use apollo_compiler::executable::Value;
+    match value {
+        Value::List(elems) => Value::List(
+            elems
+                .iter()
+                .map(|value| Node::new(sort_value(value)))
+                .collect(),
+        ),
+        Value::Object(pairs) => {
+            let mut pairs = pairs
+                .iter()
+                .map(|(name, value)| (name.clone(), Node::new(sort_value(value))))
+                .collect::<Vec<_>>();
+            pairs.sort_by(|left, right| left.0.cmp(&right.0));
+            Value::Object(pairs)
+        }
+        _ => value.clone(),
+    }
+}
+
+/// Compare sorted input values, which means specifically establishing an order between the variants
+/// of input values, and comparing values for the same variants accordingly. This is used for
+/// hashing directives in a way consistent with [same_directives()].
+///
+/// Note that Floats and Ints are compared textually and not parsed numerically. This is fine for
+/// the purposes of hashing. For object comparison semantics, see [compare_sorted_object_pairs()].
+fn compare_sorted_value(left: &executable::Value, right: &executable::Value) -> std::cmp::Ordering {
+    use apollo_compiler::executable::Value;
+    fn discriminant(value: &Value) -> u8 {
+        match value {
+            Value::Null => 0,
+            Value::Enum(_) => 1,
+            Value::Variable(_) => 2,
+            Value::String(_) => 3,
+            Value::Float(_) => 4,
+            Value::Int(_) => 5,
+            Value::Boolean(_) => 6,
+            Value::List(_) => 7,
+            Value::Object(_) => 8,
+        }
+    }
+    match (left, right) {
+        (Value::Null, Value::Null) => std::cmp::Ordering::Equal,
+        (Value::Enum(left), Value::Enum(right)) => left.cmp(right),
+        (Value::Variable(left), Value::Variable(right)) => left.cmp(right),
+        (Value::String(left), Value::String(right)) => left.cmp(right),
+        (Value::Float(left), Value::Float(right)) => left.as_str().cmp(right.as_str()),
+        (Value::Int(left), Value::Int(right)) => left.as_str().cmp(right.as_str()),
+        (Value::Boolean(left), Value::Boolean(right)) => left.cmp(right),
+        (Value::List(left), Value::List(right)) => left.len().cmp(&right.len()).then_with(|| {
+            left.iter()
+                .zip(right)
+                .map(|(left, right)| compare_sorted_value(left, right))
+                .find(|o| o.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        }),
+        (Value::Object(left), Value::Object(right)) => compare_sorted_name_value_pairs(
+            left.iter().map(|pair| (&pair.0, &pair.1)),
+            right.iter().map(|pair| (&pair.0, &pair.1)),
+        ),
+        _ => discriminant(left).cmp(&discriminant(right)),
+    }
+}
+
+/// Compare the (name, value) pair iterators, which are assumed to be sorted by name and have sorted
+/// values. This is used for hashing objects/arguments in a way consistent with [same_directives()].
+///
+/// Note that pair iterators are compared by length, then lexicographically by name, then finally
+/// recursively by value. This is intended to compute an ordering quickly for hashing.
+fn compare_sorted_name_value_pairs<'doc>(
+    left: impl ExactSizeIterator<Item = (&'doc Name, &'doc Node<executable::Value>)>,
+    right: impl ExactSizeIterator<Item = (&'doc Name, &'doc Node<executable::Value>)>,
+) -> std::cmp::Ordering {
+    left.len().cmp(&right.len()).then_with(|| {
+        let mut pairs = vec![];
+        for ((left_name, left_value), (right_name, right_value)) in left.zip(right) {
+            match left_name.cmp(right_name) {
+                std::cmp::Ordering::Equal => pairs.push((left_value, right_value)),
+                o => return o,
+            }
+        }
+        pairs
+            .into_iter()
+            .map(|(left, right)| compare_sorted_value(left, right))
+            .find(|o| o.is_ne())
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 /// Returns true if two argument lists are equivalent.
@@ -64,7 +157,38 @@ fn same_arguments(
     })
 }
 
-/// Returns true if two directive lists are equivalent.
+/// Sort arguments, which means specifically sorting arguments by names and object values by keys
+/// (assuming no duplicates). This is used for hashing arguments in a way consistent with
+/// [same_arguments()].
+pub(super) fn sort_arguments(
+    arguments: &[Node<executable::Argument>],
+) -> Vec<Node<executable::Argument>> {
+    let mut arguments = arguments
+        .iter()
+        .map(|arg| {
+            Node::new(executable::Argument {
+                name: arg.name.clone(),
+                value: Node::new(sort_value(&arg.value)),
+            })
+        })
+        .collect::<Vec<_>>();
+    arguments.sort_by(|left, right| left.name.cmp(&right.name));
+    arguments
+}
+
+/// Compare sorted arguments; see [compare_sorted_name_value_pairs()] for semantics. This is used
+/// for hashing directives in a way consistent with [same_directives()].
+fn compare_sorted_arguments(
+    left: &[Node<executable::Argument>],
+    right: &[Node<executable::Argument>],
+) -> std::cmp::Ordering {
+    compare_sorted_name_value_pairs(
+        left.iter().map(|arg| (&arg.name, &arg.value)),
+        right.iter().map(|arg| (&arg.name, &arg.value)),
+    )
+}
+
+/// Returns true if two directive lists are equivalent, independent of order.
 fn same_directives(left: &executable::DirectiveList, right: &executable::DirectiveList) -> bool {
     if left.len() != right.len() {
         return false;
@@ -76,6 +200,32 @@ fn same_directives(left: &executable::DirectiveList, right: &executable::Directi
                 && same_arguments(&left_directive.arguments, &right_directive.arguments)
         })
     })
+}
+
+/// Sort directives, which means specifically sorting their arguments, sorting the directives by
+/// name, and then breaking directive-name ties by comparing sorted arguments. This is used for
+/// hashing arguments in a way consistent with [same_directives()].
+pub(super) fn sort_directives(directives: &executable::DirectiveList) -> executable::DirectiveList {
+    let mut directives = directives
+        .0
+        .iter()
+        .map(|directive| {
+            Node::new(executable::Directive {
+                name: directive.name.clone(),
+                arguments: sort_arguments(&directive.arguments),
+            })
+        })
+        .collect::<Vec<_>>();
+    directives.sort_by(|left, right| {
+        left.name
+            .cmp(&right.name)
+            .then_with(|| compare_sorted_arguments(&left.arguments, &right.arguments))
+    });
+    executable::DirectiveList(directives)
+}
+
+pub(super) fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
+    directives.has("defer")
 }
 
 /// Options for the `.containment()` family of selection functions.
