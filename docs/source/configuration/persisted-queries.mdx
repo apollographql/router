@@ -82,7 +82,7 @@ persisted_queries:
 
 <ExperimentalFeature />
 
-Adding `experimental_local_manifest` to your `safelist` configuration allows you to use a local persisted query manifest in place of the hosted Uplink version. This is useful when you have an offline Enterprise license and are unable to use Uplink. This configuration option cause the router to not reload the manifest from the file system, so you will need to restart the router to apply changes.
+Adding `experimental_local_manifest` to your `persisted-queries` configuration lets you use a local persisted query manifest instead of the hosted Uplink version. This is helpful when you're using an offline Enterprise license and can't use Uplink. With the  `experimental_local_manifest`, the router doesn't reload the manifest from the file system, so you need to restart the router to apply changes.
 
 ```yaml title="router.yaml"
 persisted_queries:
