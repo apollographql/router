@@ -1148,7 +1148,8 @@ type User
               userById(id: 1) {
                 ...userFields
                 id
-              }      another_user: userById(id: 2) {
+              }
+              another_user: userById(id: 2) {
                 ...userFields
               }
             }
@@ -1206,10 +1207,12 @@ type User
               userById(id: 1) {
                 ...userFields
                 id
-              }      partial_optimize: userById(id: 2) {
+              }
+              partial_optimize: userById(id: 2) {
                 ...userFields
                 id
-              }      full_optimize: userById(id: 3) {
+              }
+              full_optimize: userById(id: 3) {
                 ...userFields
               }
             }
@@ -1264,7 +1267,8 @@ type User
             {
               userById(id: 1) {
                 ...F2
-              }      case2: userById(id: 2) {
+              }
+              case2: userById(id: 2) {
                 ...F2
               }
             }
