@@ -397,7 +397,7 @@ impl ResponseVisitor for ResponseCostCalculator {
             Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
             Value::Array(items) => {
                 for item in items {
-                    self.visit_field(request, _ty, field, item);
+                    self.visit_field(request, field.ty().inner_named_type(), field, item);
                 }
             }
             Value::Object(children) => {

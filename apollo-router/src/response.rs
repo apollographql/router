@@ -248,10 +248,42 @@ pub(crate) trait ResponseVisitor {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
-        parent_ty: &apollo_compiler::executable::NamedType,
+        _ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &Value,
-    );
+    ) {
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, field.ty().inner_named_type(), field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.visit_selections(request, &field.selection_set, children);
+            }
+            _ => {}
+        }
+    }
+
+    fn visit_list_item(
+        &mut self,
+        request: &apollo_compiler::ExecutableDocument,
+        _ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+    ) {
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, _ty, field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.visit_selections(request, &field.selection_set, children);
+            }
+            _ => {}
+        }
+    }
 
     fn visit(&mut self, request: &apollo_compiler::ExecutableDocument, response: &Response) {
         if response.path.is_some() {
@@ -631,21 +663,18 @@ mod tests {
             field: &apollo_compiler::executable::Field,
             value: &Value,
         ) {
+            let count = self.counts.entry(field.name.to_string()).or_insert(0);
+            *count += 1;
             match value {
-                Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                    let count = self.counts.entry(field.name.to_string()).or_insert(0);
-                    *count += 1;
-                }
                 Value::Array(items) => {
                     for item in items {
-                        self.visit_field(request, _ty, field, item);
+                        self.visit_list_item(request, field.ty().inner_named_type(), field, item);
                     }
                 }
                 Value::Object(children) => {
-                    let count = self.counts.entry(field.name.to_string()).or_insert(0);
-                    *count += 1;
                     self.visit_selections(request, &field.selection_set, children);
                 }
+                _ => {}
             }
         }
     }
