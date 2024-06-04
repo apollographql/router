@@ -485,7 +485,7 @@ pub(crate) struct OpGraphPathContext {
     /// A list of conditionals (e.g. `[{ kind: Include, value: true}, { kind: Skip, value: $foo }]`)
     /// in the reverse order in which they were applied (so the first element is the inner-most
     /// applied include/skip).
-    conditionals: Arc<Vec<Arc<OperationConditional>>>,
+    conditionals: Arc<Vec<OperationConditional>>,
 }
 
 impl OpGraphPathContext {
@@ -500,8 +500,7 @@ impl OpGraphPathContext {
 
         let new_conditionals = operation_element.extract_operation_conditionals()?;
         if !new_conditionals.is_empty() {
-            Arc::make_mut(&mut new_context.conditionals)
-                .extend(new_conditionals.into_iter().map(Arc::new));
+            Arc::make_mut(&mut new_context.conditionals).extend(new_conditionals);
         }
         Ok(new_context)
     }
@@ -511,7 +510,7 @@ impl OpGraphPathContext {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &OperationConditional> {
-        self.conditionals.iter().map(|x| x.as_ref())
+        self.conditionals.iter()
     }
 }
 
