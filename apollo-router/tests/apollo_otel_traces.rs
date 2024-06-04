@@ -1,5 +1,5 @@
-//! Be aware that this test file contains some fairly flaky tests which embed a number of
-//! assumptions about how traces and stats are reported to Apollo Studio.
+//! Be aware that this test file contains some potentially flaky tests which embed a number of
+//! assumptions about how traces are reported to Apollo Studio.
 //!
 //! In particular:
 //!  - There are timings (sleeps) which work as things are implemented right now, but
@@ -8,12 +8,6 @@
 //!  - There is a global TEST lock which forces these tests to execute serially to stop router
 //!    global tracing effect from breaking the tests. DO NOT BE TEMPTED to remove this TEST lock to
 //!    try and speed things up (unless you have time and patience to re-work a lot of test code).
-//!
-//!  - There are assumptions about the different ways in which traces and metrics work. The main
-//!    limitation with these tests is that you are unlikely to get a single report containing all the
-//!    metrics that you need to make a test assertion. You might, but raciness in the way metrics are
-//!    generated in the router means you probably won't. That's why the test `test_batch_stats` has
-//!    its own stack of functions for testing and only tests that the total number of requests match.
 //!
 //! Summary: The dragons here are ancient and very evil. Do not attempt to take their treasure.
 //!
