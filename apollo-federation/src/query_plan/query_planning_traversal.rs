@@ -876,7 +876,6 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn resolve_condition_plan(
         &self,
         edge: EdgeIndex,
-        // PORT_NOTE: The following parameters are not currently used.
         context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
