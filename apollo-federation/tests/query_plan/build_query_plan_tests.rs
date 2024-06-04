@@ -33,6 +33,7 @@ fn some_name() {
 
 mod debug_max_evaluated_plans_configuration;
 mod fetch_operation_names;
+mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
 mod handles_fragments_with_directive_conditions;
 mod handles_operations_with_directives;
@@ -286,7 +287,7 @@ fn handles_non_intersecting_fragment_conditions() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (parallel fetch ordering difference)
 fn avoids_unnecessary_fetches() {
     // This test is a reduced example demonstrating a previous issue with the computation of query plans cost.
     // The general idea is that "Subgraph 3" has a declaration that is kind of useless (it declares entity A
