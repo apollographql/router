@@ -2,10 +2,13 @@
 use std::fmt::Debug;
 
 use bytes::Bytes;
-use futures::{future::BoxFuture, FutureExt, Stream};
+use futures::future::BoxFuture;
+use futures::FutureExt;
+use futures::Stream;
 use http_body::SizeHint;
 use hyper::body::HttpBody;
-use tower::{BoxError, Service};
+use tower::BoxError;
+use tower::Service;
 
 pub struct RouterBody(super::Body);
 

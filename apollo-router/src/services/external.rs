@@ -268,8 +268,11 @@ where
 
     pub(crate) async fn call<C>(self, mut client: C, uri: &str) -> Result<Self, BoxError>
     where
-        C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
-            + Clone
+        C: Service<
+                http::Request<RouterBody>,
+                Response = http::Response<RouterBody>,
+                Error = BoxError,
+            > + Clone
             + Send
             + Sync
             + 'static,
