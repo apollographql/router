@@ -1,0 +1,307 @@
+use apollo_federation::query_plan::FetchNode;
+use apollo_federation::query_plan::PlanNode;
+use apollo_federation::query_plan::QueryPlan;
+use apollo_federation::query_plan::TopLevelPlanNode;
+
+const SUBGRAPH_A: &str = r#"
+      directive @operation on MUTATION | QUERY | SUBSCRIPTION
+      directive @field on FIELD
+
+      type Foo @key(fields: "id") {
+        id: ID!
+        bar: String
+        t: T!
+      }
+
+      type T @key(fields: "id") {
+        id: ID!
+      }
+
+      type Query {
+        foo: Foo
+      }
+
+      type Mutation {
+        updateFoo(bar: String): Foo
+      }
+"#;
+
+const SUBGRAPH_B: &str = r#"
+      directive @operation on MUTATION | QUERY | SUBSCRIPTION
+      directive @field on FIELD
+
+      type Foo @key(fields: "id") {
+        id: ID!
+        baz: Int
+      }
+
+      type T @key(fields: "id") {
+        id: ID!
+        f1: String
+      }
+"#;
+
+#[test]
+#[should_panic(expected = r#"Directive "@field" has not been pre-inserted"#)]
+// TODO: investigate this failure
+fn test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries() {
+    let planner = planner!(
+        subgraphA: SUBGRAPH_A,
+        subgraphB: SUBGRAPH_B,
+    );
+    let plan = assert_plan!(
+      &planner,
+      r#"
+        query Operation @operation {
+          foo @field {
+            bar @field
+            baz @field
+            t @field {
+              f1 @field
+            }
+          }
+        }
+      "#,
+      @""
+    );
+    let a_fetch_nodes = find_fetch_nodes_for_subgraph("subgraphA", &plan);
+    assert_eq!(a_fetch_nodes.len(), 1);
+    // Note: The query is expected to carry the `@operation` directive.
+    insta::assert_snapshot!(a_fetch_nodes[0].operation_document, @r#"
+      query Operation__subgraphA__0 @operation {
+        foo @field {
+          __typename
+          id
+          bar @field
+          t @field {
+            __typename
+            id
+          }
+        }
+      }
+    "#);
+
+    let b_fetch_nodes = find_fetch_nodes_for_subgraph("subgraphB", &plan);
+    assert_eq!(b_fetch_nodes.len(), 2);
+    // Note: The query is expected to carry the `@operation` directive.
+    insta::assert_snapshot!(b_fetch_nodes[0].operation_document, @r#"
+      query Operation__subgraphB__1($representations: [_Any!]!) @operation {
+        _entities(representations: $representations) {
+          ... on Foo {
+            baz @field
+          }
+        }
+      }
+    "#);
+    // Note: The query is expected to carry the `@operation` directive.
+    insta::assert_snapshot!(b_fetch_nodes[1].operation_document, @r#"
+      query Operation__subgraphB__2($representations: [_Any!]!) @operation {
+        _entities(representations: $representations) {
+          ... on T {
+            f1 @field
+          }
+        }
+      }
+    "#);
+}
+
+#[test]
+#[should_panic(expected = r#"Directive "@field" has not been pre-inserted"#)]
+// TODO: investigate this failure
+fn test_if_directives_on_mutations_are_passed_down_to_subgraph_queries() {
+    let planner = planner!(
+        subgraphA: SUBGRAPH_A,
+        subgraphB: SUBGRAPH_B,
+    );
+    let plan = assert_plan!(
+      &planner,
+      r#"
+        mutation TestMutation @operation {
+          updateFoo(bar: "something") @field {
+            id @field
+            bar @field
+          }
+        }
+      "#,
+      @r#""#
+    );
+
+    let fetch_nodes = find_fetch_nodes_for_subgraph("subgraphA", &plan);
+    assert_eq!(fetch_nodes.len(), 1);
+    // Note: The query is expected to carry the `@operation` directive.
+    insta::assert_snapshot!(fetch_nodes[0].operation_document, @r#"
+      mutation TestMutation__subgraphA__0 @operation {
+        updateFoo(bar: "something") @field {
+          id @field
+          bar @field
+        }
+      }
+    "#);
+}
+
+#[test]
+#[should_panic(expected = r#"Directive "@noArgs" has not been pre-inserted"#)]
+// TODO: investigate this failure
+fn test_if_directives_with_arguments_applied_on_queries_are_ok() {
+    let planner = planner!(
+      Subgraph1: r#"
+        directive @noArgs on QUERY
+        directive @withArgs(arg1: String) on QUERY
+
+        type Query {
+          test: String!
+        }
+      "#,
+      Subgraph2: r#"
+        directive @noArgs on QUERY
+        directive @withArgs(arg1: String) on QUERY
+      "#,
+    );
+    let plan = assert_plan!(
+      &planner,
+      r#"
+        query @noArgs @withArgs(arg1: "hi") {
+          test
+        }
+        "#,
+      @r#""#
+    );
+
+    let fetch_nodes = find_fetch_nodes_for_subgraph("Subgraph1", &plan);
+    assert_eq!(fetch_nodes.len(), 1);
+    // Note: The query is expected to carry the `@noArgs` and `@withArgs` directive.
+    insta::assert_snapshot!(fetch_nodes[0].operation_document, @r#"
+      query @noArgs @withArgs(arg1: "hi") {
+        test
+      }
+    "#);
+}
+
+#[test]
+#[should_panic(expected = r#"Directive "@withArgs" has not been pre-inserted"#)]
+// TODO: investigate this failure
+fn subgraph_query_retains_the_query_variables_used_in_the_directives_applied_to_the_query() {
+    let planner = planner!(
+      Subgraph1: r#"
+        directive @withArgs(arg1: String) on QUERY
+
+        type Query {
+          test: String!
+        }
+      "#,
+      Subgraph2: r#"
+        directive @withArgs(arg1: String) on QUERY
+      "#,
+    );
+
+    let plan = assert_plan!(
+      &planner,
+      r#"
+        query testQuery($some_var: String!) @withArgs(arg1: $some_var) {
+            test
+          }
+        "#,
+      @r#""#
+    );
+
+    let fetch_nodes = find_fetch_nodes_for_subgraph("Subgraph1", &plan);
+    assert_eq!(fetch_nodes.len(), 1);
+    // Note: `($some_var: String!)` used to be missing.
+    insta::assert_snapshot!(fetch_nodes[0].operation_document, @r#"
+      query testQuery__Subgraph1__0($some_var: String!) @withArgs(arg1: $some_var) {
+        test
+      }
+    "#);
+}
+
+fn find_fetch_nodes_for_subgraph<'plan>(
+    subgraph_name: &str,
+    plan: &'plan QueryPlan,
+) -> Vec<&'plan FetchNode> {
+    let mut fetch_nodes = Vec::new();
+    if let Some(node) = &plan.node {
+        match node {
+            TopLevelPlanNode::Fetch(inner) => {
+                if inner.subgraph_name == subgraph_name {
+                    fetch_nodes.push(&**inner)
+                }
+            }
+            TopLevelPlanNode::Subscription(inner) => {
+                if inner.primary.subgraph_name == subgraph_name {
+                    fetch_nodes.push(&inner.primary);
+                }
+                visit_node(subgraph_name, &mut fetch_nodes, inner.rest.as_deref())
+            }
+            TopLevelPlanNode::Sequence(inner) => {
+                for item in &inner.nodes {
+                    visit_node(subgraph_name, &mut fetch_nodes, Some(item))
+                }
+            }
+            TopLevelPlanNode::Parallel(inner) => {
+                for item in &inner.nodes {
+                    visit_node(subgraph_name, &mut fetch_nodes, Some(item))
+                }
+            }
+            TopLevelPlanNode::Flatten(inner) => {
+                visit_node(subgraph_name, &mut fetch_nodes, Some(&inner.node))
+            }
+            TopLevelPlanNode::Defer(inner) => {
+                visit_node(
+                    subgraph_name,
+                    &mut fetch_nodes,
+                    inner.primary.node.as_deref(),
+                );
+                for deferred in &inner.deferred {
+                    visit_node(subgraph_name, &mut fetch_nodes, deferred.node.as_deref());
+                }
+            }
+            TopLevelPlanNode::Condition(inner) => {
+                visit_node(subgraph_name, &mut fetch_nodes, inner.if_clause.as_deref());
+                visit_node(
+                    subgraph_name,
+                    &mut fetch_nodes,
+                    inner.else_clause.as_deref(),
+                );
+            }
+        }
+        // visit_node(subgraph_name, &mut fetch_nodes, node)
+        fn visit_node<'plan>(
+            subgraph_name: &str,
+            fetch_nodes: &mut Vec<&'plan FetchNode>,
+            node: Option<&'plan PlanNode>,
+        ) {
+            let Some(node) = node else { return };
+            match node {
+                PlanNode::Fetch(inner) => {
+                    if inner.subgraph_name == subgraph_name {
+                        fetch_nodes.push(&**inner)
+                    }
+                }
+                PlanNode::Sequence(inner) => {
+                    for item in &inner.nodes {
+                        visit_node(subgraph_name, fetch_nodes, Some(item))
+                    }
+                }
+                PlanNode::Parallel(inner) => {
+                    for item in &inner.nodes {
+                        visit_node(subgraph_name, fetch_nodes, Some(item))
+                    }
+                }
+                PlanNode::Flatten(inner) => {
+                    visit_node(subgraph_name, fetch_nodes, Some(&inner.node))
+                }
+                PlanNode::Defer(inner) => {
+                    visit_node(subgraph_name, fetch_nodes, inner.primary.node.as_deref());
+                    for deferred in &inner.deferred {
+                        visit_node(subgraph_name, fetch_nodes, deferred.node.as_deref());
+                    }
+                }
+                PlanNode::Condition(inner) => {
+                    visit_node(subgraph_name, fetch_nodes, inner.if_clause.as_deref());
+                    visit_node(subgraph_name, fetch_nodes, inner.else_clause.as_deref());
+                }
+            }
+        }
+    }
+    fetch_nodes
+}
