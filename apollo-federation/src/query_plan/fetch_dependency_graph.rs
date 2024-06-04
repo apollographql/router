@@ -28,6 +28,20 @@ use petgraph::visit::EdgeRef;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::Field;
+use crate::operation::FieldData;
+use crate::operation::InlineFragment;
+use crate::operation::InlineFragmentData;
+use crate::operation::InlineFragmentSelection;
+use crate::operation::NamedFragments;
+use crate::operation::Operation;
+use crate::operation::RebaseErrorHandlingOption;
+use crate::operation::RebasedFragments;
+use crate::operation::Selection;
+use crate::operation::SelectionId;
+use crate::operation::SelectionMap;
+use crate::operation::SelectionSet;
+use crate::operation::TYPENAME_FIELD;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_ARGUMENTS_NAME;
 use crate::query_graph::extract_subgraphs_from_supergraph::FEDERATION_REPRESENTATIONS_VAR_NAME;
 use crate::query_graph::graph_path::concat_op_paths;
@@ -45,20 +59,6 @@ use crate::query_plan::conditions::remove_conditions_from_selection_set;
 use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::InlineFragment;
-use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::InlineFragmentSelection;
-use crate::query_plan::operation::NamedFragments;
-use crate::query_plan::operation::Operation;
-use crate::query_plan::operation::RebaseErrorHandlingOption;
-use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionId;
-use crate::query_plan::operation::SelectionMap;
-use crate::query_plan::operation::SelectionSet;
-use crate::query_plan::operation::TYPENAME_FIELD;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchDataValueSetter;
@@ -2568,7 +2568,7 @@ fn compute_nodes_for_key_resolution<'a>(
         // Conditions do not use named fragments
         &Default::default(),
         &dependency_graph.supergraph_schema,
-        super::operation::RebaseErrorHandlingOption::ThrowError,
+        crate::operation::RebaseErrorHandlingOption::ThrowError,
     )?;
 
     input_selections.merge_into(std::iter::once(&edge_conditions))?;
