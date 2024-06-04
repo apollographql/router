@@ -49,6 +49,7 @@ use crate::query_plan::operation::Field;
 use crate::query_plan::operation::FieldData;
 use crate::query_plan::operation::InlineFragment;
 use crate::query_plan::operation::InlineFragmentData;
+use crate::query_plan::operation::InlineFragmentSelection;
 use crate::query_plan::operation::NamedFragments;
 use crate::query_plan::operation::Operation;
 use crate::query_plan::operation::RebaseErrorHandlingOption;
@@ -2969,8 +2970,8 @@ fn wrap_input_selections(
                }
             */
             let parent_type_position = fragment.data().parent_type_position.clone();
-            let selection = Selection::from_inline_fragment(fragment, sub_selections);
-            SelectionSet::from_selection(parent_type_position, selection)
+            let selection = InlineFragmentSelection::new(fragment, sub_selections);
+            SelectionSet::from_selection(parent_type_position, selection.into())
         },
     )
 }
