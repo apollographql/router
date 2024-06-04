@@ -93,7 +93,7 @@ impl Selector for GraphQLSelector {
         None
     }
 
-    fn on_error(&self, _error: &BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Option<opentelemetry::Value> {
         None
     }
 

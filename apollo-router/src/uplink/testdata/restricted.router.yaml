@@ -81,7 +81,7 @@ preview_file_uploads:
       enabled: true
       mode: stream
 
-experimental_demand_control:
+preview_demand_control:
   enabled: true
   mode: measure
   strategy:
