@@ -3333,6 +3333,10 @@ impl SelectionSet {
             selections: Arc::new(final_selections),
         }
     }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Selection> {
+        self.selections.values()
+    }
 }
 
 impl IntoIterator for SelectionSet {
