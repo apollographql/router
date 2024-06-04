@@ -116,6 +116,7 @@ use crate::register_plugin;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
+use crate::services::router::body::get_body_bytes;
 use crate::services::subgraph;
 use crate::services::subgraph::Request;
 use crate::services::subgraph::Response;
@@ -1996,6 +1997,7 @@ mod tests {
     use crate::plugin::test::MockSupergraphService;
     use crate::plugin::DynPlugin;
     use crate::plugins::telemetry::handle_error_internal;
+    use crate::services::router::body::get_body_bytes;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::services::SubgraphRequest;
@@ -2047,7 +2049,7 @@ mod tests {
             .unwrap();
         let mut resp = web_endpoint.oneshot(http_req_prom).await.unwrap();
         assert_eq!(resp.status(), StatusCode::OK);
-        let body = hyper::body::to_bytes(resp.body_mut()).await.unwrap();
+        let body = get_body_bytes(res.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
             .to_string()
             .split('\n')

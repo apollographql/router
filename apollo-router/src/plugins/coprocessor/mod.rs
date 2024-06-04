@@ -43,6 +43,7 @@ use crate::services::external::PipelineStep;
 use crate::services::external::DEFAULT_EXTERNALIZATION_TIMEOUT;
 use crate::services::external::EXTERNALIZABLE_VERSION;
 use crate::services::router;
+use crate::services::router::body::get_body_bytes;
 use crate::services::router::Body;
 use crate::services::subgraph;
 use crate::services::trust_dns_connector::new_async_http_connector;
@@ -584,7 +585,7 @@ where
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
     let (parts, body) = request.router_request.into_parts();
-    let bytes = hyper::body::to_bytes(body).await?;
+    let bytes = get_body_bytes(body).await?;
 
     let headers_to_send = request_config
         .headers
@@ -895,7 +896,7 @@ where
 
     // Create our response stream which consists of the bytes from our first body chained with the
     // rest of the responses in our mapped stream.
-    let bytes = hyper::body::to_bytes(body).await.map_err(BoxError::from);
+    let bytes = get_body_bytes(body).await.map_err(BoxError::from);
     let final_stream = once(ready(bytes)).chain(mapped_stream).boxed();
 
     // Finally, return a response which has a Body that wraps our stream of response chunks.

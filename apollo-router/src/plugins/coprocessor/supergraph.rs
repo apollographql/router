@@ -17,6 +17,7 @@ use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::response;
+use crate::services::router::body::get_body_bytes;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
@@ -795,11 +796,10 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
+        let mock_http_client = mock_with_deferred_callback(move |mut res: http::Request<Body>| {
             Box::pin(async {
                 let deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
-                        .unwrap();
+                    serde_json::from_slice(&get_body_bytes(&mut res).await.unwrap()).unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                 assert_eq!(
@@ -944,7 +944,7 @@ mod tests {
         let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
             Box::pin(async {
                 let mut deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
                         .unwrap();
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                 assert_eq!(

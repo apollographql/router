@@ -523,6 +523,7 @@ mod tests {
     use crate::plugin::test::MockExecutionService;
     use crate::plugin::test::MockHttpClientService;
     use crate::services::execution;
+    use crate::services::router::body::get_body_bytes;
 
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(
@@ -805,7 +806,7 @@ mod tests {
         let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
             Box::pin(async {
                 let deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
                         .unwrap();
 
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
@@ -951,7 +952,7 @@ mod tests {
         let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
             Box::pin(async {
                 let mut deserialized_response: Externalizable<serde_json::Value> =
-                    serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
+                    serde_json::from_slice(&get_body_bytes(res.into_body()).await.unwrap())
                         .unwrap();
                 assert_eq!(EXTERNALIZABLE_VERSION, deserialized_response.version);
                 assert_eq!(

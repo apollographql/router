@@ -23,6 +23,7 @@ mod tests {
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
+    use crate::services::router::body::get_body_bytes;
     use crate::services::router::Body;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -106,7 +107,7 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
                 // Wrong version!
                 let input = json!(
@@ -123,7 +124,7 @@ mod tests {
                   },
                   "sdl": "the sdl shouldnt change"
                 });
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -165,7 +166,7 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
                 // Wrong stage!
                 let input = json!(
@@ -182,7 +183,7 @@ mod tests {
                     },
                     "sdl": "the sdl shouldnt change"
                 });
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -224,7 +225,7 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
                 // Wrong stage!
                 let input = json!(
@@ -240,7 +241,7 @@ mod tests {
                     },
                     "sdl": "the sdl shouldnt change"
                 });
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -282,9 +283,9 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_subgraph_service = MockSubgraphService::new();
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(
                         r#"{
                                 "version": 1,
@@ -381,9 +382,9 @@ mod tests {
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(
                         r#"{
                                 "version": 1,
@@ -473,9 +474,9 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_subgraph_service = MockSubgraphService::new();
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(
                         r#"{
                                 "version": 1,
@@ -541,9 +542,9 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_subgraph_service = MockSubgraphService::new();
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(
                         r#"{
                                 "version": 1,
@@ -614,9 +615,9 @@ mod tests {
                     .build())
             });
 
-        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
             Box::pin(async {
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(
                         r#"{
                                 "version": 1,
@@ -741,7 +742,7 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
@@ -798,7 +799,7 @@ mod tests {
                   },
                   "sdl": "the sdl shouldnt change"
                 });
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -864,7 +865,7 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
@@ -923,7 +924,7 @@ mod tests {
                   },
                   "sdl": "the sdl shouldnt change"
                 });
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -960,7 +961,7 @@ mod tests {
 
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
@@ -993,7 +994,7 @@ mod tests {
                     }
                 }
                 );
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -1048,7 +1049,7 @@ mod tests {
 
         let mock_router_service = MockRouterService::new();
 
-        let mock_http_client = mock_with_callback(move |req: http::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |req: hyper::Request<Body>| {
             Box::pin(async {
                 let deserialized_request: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(req.into_body()).await.unwrap())
@@ -1071,7 +1072,7 @@ mod tests {
                     "body": "this is a test error",
                 }
                 );
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -1133,7 +1134,7 @@ mod tests {
         })
         .await;
 
-        let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
+        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
             Box::pin(async {
                 let deserialized_response: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
@@ -1197,7 +1198,7 @@ mod tests {
                   },
                   "sdl": "the sdl shouldnt change"
                 });
-                Ok(http::Response::builder()
+                Ok(hyper::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -1233,9 +1234,7 @@ mod tests {
         assert_eq!(
             json!({ "data": { "test": 42_u32 } }),
             serde_json::from_slice::<serde_json::Value>(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap()
+                &get_body_bytes(res.response.into_body()).await.unwrap()
             )
             .unwrap()
         );
@@ -1311,8 +1310,8 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn mock_with_callback(
         callback: fn(
-            http::Request<Body>,
-        ) -> BoxFuture<'static, Result<http::Response<Body>, BoxError>>,
+            hyper::Request<Body>,
+        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
     ) -> MockHttpClientService {
         let mut mock_http_client = MockHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
@@ -1331,8 +1330,8 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
-            http::Request<Body>,
-        ) -> BoxFuture<'static, Result<http::Response<Body>, BoxError>>,
+            hyper::Request<Body>,
+        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
     ) -> MockHttpClientService {
         let mut mock_http_client = MockHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {

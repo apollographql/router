@@ -19,6 +19,7 @@ use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 
@@ -210,7 +211,7 @@ impl SigningParamsConfig {
         // We'll go with default signed headers
         let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
-        let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
+        let body_bytes = get_body_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
             parts.method.as_str(),
             parts.uri.to_string(),

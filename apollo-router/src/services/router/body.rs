@@ -84,3 +84,7 @@ impl HttpBody for RouterBody {
         HttpBody::size_hint(&self.0)
     }
 }
+
+pub(crate) async fn get_body_bytes<B: HttpBody>(body: B) -> Result<Bytes, B::Error> {
+    hyper::body::to_bytes(body).await
+}

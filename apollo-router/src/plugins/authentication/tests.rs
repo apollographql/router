@@ -34,6 +34,7 @@ use super::*;
 use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
 use crate::plugins::authentication::jwks::parse_jwks;
+use crate::services::router::body::get_body_bytes;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
@@ -1046,7 +1047,7 @@ async fn issuer_check() {
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
+                &get_body_bytes(res.response.into_body())
                     .await
                     .unwrap(),
             )
@@ -1086,7 +1087,7 @@ async fn issuer_check() {
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
+                &get_body_bytes(res.response.into_body())
                     .await
                     .unwrap(),
             )
@@ -1121,7 +1122,7 @@ async fn issuer_check() {
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
             let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
+                &get_body_bytes(res.response.into_body())
                     .await
                     .unwrap(),
             )

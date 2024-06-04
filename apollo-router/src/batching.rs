@@ -26,6 +26,7 @@ use crate::plugins::telemetry::otel::span_ext::OpenTelemetrySpanExt;
 use crate::query_planner::fetch::QueryHash;
 use crate::services::http::HttpClientServiceFactory;
 use crate::services::process_batches;
+use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
@@ -439,7 +440,7 @@ pub(crate) async fn assemble_batch(
     let (requests, gql_requests): (Vec<_>, Vec<_>) = request_pairs.into_iter().unzip();
 
     // Construct the actual byte body of the batched request
-    let bytes = hyper::body::to_bytes(serde_json::to_string(&gql_requests)?).await?;
+    let bytes = get_body_bytes(serde_json::to_string(&gql_requests)?).await?;
 
     // Retain the various contexts for later use
     let contexts = requests

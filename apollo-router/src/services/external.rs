@@ -23,6 +23,7 @@ use tower::Service;
 use crate::plugins::telemetry::otel::OpenTelemetrySpanExt;
 use crate::plugins::telemetry::reload::prepare_context;
 use crate::query_planner::QueryPlan;
+use crate::services::router::body::get_body_bytes;
 use crate::services::router::Body;
 use crate::Context;
 
@@ -290,7 +291,7 @@ where
         });
 
         let response = client.call(request).await?;
-        hyper::body::to_bytes(response.into_body())
+        get_body_bytes(response.into_body())
             .await
             .map_err(BoxError::from)
             .and_then(|bytes| serde_json::from_slice(&bytes).map_err(BoxError::from))
