@@ -303,7 +303,9 @@ impl ApolloOtlpExporter {
 
     pub(crate) fn export(&self, spans: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         let mut exporter = self.otlp_exporter.lock();
-        Box::pin(exporter.export(spans).and_then(|_| {
+        let fut = exporter.export(spans);
+        drop(exporter);
+        Box::pin(fut.and_then(|_| {
             // re-use the metric we already have in apollo_exporter but attach the protocol
             u64_counter!(
                 "apollo.router.telemetry.studio.reports",
