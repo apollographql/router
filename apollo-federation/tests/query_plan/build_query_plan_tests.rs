@@ -259,20 +259,27 @@ fn handles_non_intersecting_fragment_conditions() {
               }
             }
           "#,
-          @r#"
-          QueryPlan {
-            Fetch(service: "Subgraph1") {
-              {
-                fruit {
-                  __typename
-                  ... on Apple {
-                    hasStem
-                  }
+          @r###"
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          fruit {
+            ... on Apple {
+              ... on Fruit {
+                __typename
+                ... on Banana {
+                  inBunch
+                }
+                ... on Apple {
+                  hasStem
                 }
               }
-            },
+            }
           }
-          "#
+        }
+      },
+    }
+    "###
     );
 }
 
