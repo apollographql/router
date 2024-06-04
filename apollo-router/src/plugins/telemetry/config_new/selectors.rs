@@ -1454,7 +1454,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1476,7 +1476,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1501,7 +1501,7 @@ mod test {
                         .supergraph_request(Arc::new(
                             http::Request::builder()
                                 .header("header_key", "header_value")
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()

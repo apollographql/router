@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/response.rs
+source: apollo-router/src/graphql/visitor.rs
 expression: visitor
 ---
 licenseNumber: 4

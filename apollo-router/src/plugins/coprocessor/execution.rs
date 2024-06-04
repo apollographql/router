@@ -16,7 +16,6 @@ use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
-use crate::response;
 use crate::services::execution;
 
 /// What information is passed to a router request/response stage
@@ -342,7 +341,7 @@ where
 
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
-    let (first, rest): (Option<response::Response>, graphql::ResponseStream) =
+    let (first, rest): (Option<graphql::Response>, graphql::ResponseStream) =
         body.into_future().await;
 
     // If first is None, we return an error
@@ -395,7 +394,7 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body: crate::response::Response = match co_processor_output.body {
+    let new_body: graphql::Response = match co_processor_output.body {
         Some(value) => serde_json::from_value(value)?,
         None => first,
     };
@@ -465,11 +464,10 @@ where
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response: crate::response::Response =
-                    match co_processor_output.body {
-                        Some(value) => serde_json::from_value(value)?,
-                        None => deferred_response,
-                    };
+                let new_deferred_response: graphql::Response = match co_processor_output.body {
+                    Some(value) => serde_json::from_value(value)?,
+                    None => deferred_response,
+                };
 
                 if let Some(context) = co_processor_output.context {
                     for (key, value) in context.try_into_iter()? {
@@ -481,11 +479,11 @@ where
                 Ok(new_deferred_response)
             }
         })
-        .map(|res: Result<response::Response, BoxError>| match res {
+        .map(|res: Result<graphql::Response, BoxError>| match res {
             Ok(response) => response,
             Err(e) => {
                 tracing::error!("coprocessor error handling deferred execution response: {e}");
-                response::Response::builder()
+                graphql::Response::builder()
                     .error(
                         Error::builder()
                             .message("Internal error handling deferred response")

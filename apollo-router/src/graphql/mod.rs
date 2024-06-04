@@ -1,10 +1,17 @@
 //! Types related to GraphQL requests, responses, etc.
 
+mod request;
+mod response;
+mod visitor;
+
 use std::fmt;
 use std::pin::Pin;
 
 use futures::Stream;
 use heck::ToShoutySnakeCase;
+pub use request::Request;
+pub use response::IncrementalResponse;
+pub use response::Response;
 pub use router_bridge::planner::Location;
 use router_bridge::planner::PlanError;
 use router_bridge::planner::PlanErrorExtensions;
@@ -17,15 +24,13 @@ use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
+pub(crate) use visitor::ResponseVisitor;
 
 use crate::error::FetchError;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
 pub use crate::json_ext::Path as JsonPath;
 pub use crate::json_ext::PathElement as JsonPathElement;
-pub use crate::request::Request;
-pub use crate::response::IncrementalResponse;
-pub use crate::response::Response;
 
 /// An asynchronous [`Stream`] of GraphQL [`Response`]s.
 ///
