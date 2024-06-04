@@ -876,8 +876,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn resolve_condition_plan(
         &self,
         edge: EdgeIndex,
-        // PORT_NOTE: The following parameters are not currently used.
-        _context: &OpGraphPathContext,
+        context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
@@ -914,7 +913,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             self.has_defers,
             self.root_kind,
             self.cost_processor,
-            Default::default(),
+            context.clone(),
             excluded_destinations.clone(),
             excluded_conditions.add_item(edge_conditions),
         )?
