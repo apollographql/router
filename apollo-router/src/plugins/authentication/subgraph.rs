@@ -643,7 +643,7 @@ mod test {
     fn get_signed_request(
         request: &SubgraphRequest,
         service_name: String,
-    ) -> hyper::Request<RouterBody> {
+    ) -> http::Request<RouterBody> {
         let signing_params = {
             let ctx = request.context.extensions().lock();
             let sp = ctx.get::<Arc<SigningParamsConfig>>();

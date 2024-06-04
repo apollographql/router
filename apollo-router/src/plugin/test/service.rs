@@ -5,8 +5,8 @@
 use std::sync::Arc;
 
 use futures::Future;
-use hyper::Request as HyperRequest;
-use hyper::Response as HyperResponse;
+use http::Request as HyperRequest;
+use http::Response as HyperResponse;
 
 use crate::services::router::Body;
 use crate::services::ExecutionRequest;

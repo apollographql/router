@@ -330,7 +330,7 @@ async fn process_execution_response_stage<C>(
     response_config: ExecutionResponseConf,
 ) -> Result<execution::Response, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync
@@ -527,8 +527,8 @@ mod tests {
     #[allow(clippy::type_complexity)]
     pub(crate) fn mock_with_callback(
         callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
+            http::Request<Body>,
+        ) -> BoxFuture<'static, Result<http::Response<Body>, BoxError>>,
     ) -> MockHttpClientService {
         let mut mock_http_client = MockHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
@@ -548,8 +548,8 @@ mod tests {
     #[allow(clippy::type_complexity)]
     fn mock_with_deferred_callback(
         callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
+            http::Request<Body>,
+        ) -> BoxFuture<'static, Result<http::Response<Body>, BoxError>>,
     ) -> MockHttpClientService {
         let mut mock_http_client = MockHttpClientService::new();
         mock_http_client.expect_clone().returning(move || {
@@ -624,9 +624,9 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
+                Ok(http::Response::builder()
                     .body(Body::from(
                         r#"{
                                 "version": 1,
@@ -720,9 +720,9 @@ mod tests {
         // This will never be called because we will fail at the coprocessor.
         let mock_execution_service = MockExecutionService::new();
 
-        let mock_http_client = mock_with_callback(move |_: hyper::Request<Body>| {
+        let mock_http_client = mock_with_callback(move |_: http::Request<Body>| {
             Box::pin(async {
-                Ok(hyper::Response::builder()
+                Ok(http::Response::builder()
                     .body(Body::from(
                         r#"{
                                 "version": 1,
@@ -802,7 +802,7 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
+        let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
             Box::pin(async {
                 let deserialized_response: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
@@ -866,7 +866,7 @@ mod tests {
                   },
                   "sdl": "the sdl shouldn't change"
                 });
-                Ok(hyper::Response::builder()
+                Ok(http::Response::builder()
                     .body(Body::from(serde_json::to_string(&input).unwrap()))
                     .unwrap())
             })
@@ -948,7 +948,7 @@ mod tests {
                     .unwrap())
             });
 
-        let mock_http_client = mock_with_deferred_callback(move |res: hyper::Request<Body>| {
+        let mock_http_client = mock_with_deferred_callback(move |res: http::Request<Body>| {
             Box::pin(async {
                 let mut deserialized_response: Externalizable<serde_json::Value> =
                     serde_json::from_slice(&hyper::body::to_bytes(res.into_body()).await.unwrap())
@@ -975,7 +975,7 @@ mod tests {
                         serde_json::Value::from(deserialized_response.has_next.unwrap_or_default()),
                     );
 
-                Ok(hyper::Response::builder()
+                Ok(http::Response::builder()
                     .body(Body::from(
                         serde_json::to_string(&deserialized_response).unwrap_or_default(),
                     ))

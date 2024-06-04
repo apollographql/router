@@ -323,7 +323,7 @@ impl RouterStage {
         sdl: Arc<String>,
     ) -> router::BoxService
     where
-        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+        C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
             + Clone
             + Send
             + Sync
@@ -458,7 +458,7 @@ impl SubgraphStage {
         service_name: String,
     ) -> subgraph::BoxService
     where
-        C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+        C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
             + Clone
             + Send
             + Sync
@@ -573,7 +573,7 @@ async fn process_router_request_stage<C>(
     request_config: RouterRequestConf,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync
@@ -726,7 +726,7 @@ async fn process_router_response_stage<C>(
     response_config: RouterResponseConf,
 ) -> Result<router::Response, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync
@@ -914,7 +914,7 @@ async fn process_subgraph_request_stage<C>(
     request_config: SubgraphRequestConf,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync
@@ -1059,7 +1059,7 @@ async fn process_subgraph_response_stage<C>(
     response_config: SubgraphResponseConf,
 ) -> Result<subgraph::Response, BoxError>
 where
-    C: Service<hyper::Request<Body>, Response = hyper::Response<Body>, Error = BoxError>
+    C: Service<http::Request<Body>, Response = http::Response<Body>, Error = BoxError>
         + Clone
         + Send
         + Sync
