@@ -130,6 +130,9 @@ where
             crate::configuration::QueryPlannerMode::Both => {
                 ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
             }
+            crate::configuration::QueryPlannerMode::NewNew => {
+                ConfigMode::Rust(Arc::new(configuration.js_query_planner_config()))
+            }
         };
         Ok(Self {
             cache,

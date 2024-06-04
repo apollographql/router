@@ -19,7 +19,7 @@ use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::supergraph;
 
-pub(super) mod mock_api {
+pub(crate) mod mock_api {
     struct PathTemplate(String);
 
     impl wiremock::Match for PathTemplate {
@@ -52,7 +52,7 @@ pub(super) mod mock_api {
 
     use super::*;
 
-    pub(super) fn hello() -> Mock {
+    pub(crate) fn hello() -> Mock {
         Mock::given(method("GET"))
             .and(path("/v1/hello"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -62,7 +62,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn hello_id() -> Mock {
+    pub(crate) fn hello_id() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/hello/{id}"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -74,7 +74,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn hello_id_world() -> Mock {
+    pub(crate) fn hello_id_world() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/hello/{id}/world"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -87,7 +87,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn with_arguments() -> Mock {
+    pub(crate) fn with_arguments() -> Mock {
         Mock::given(method("GET"))
             .and(path("/v1/with-arguments"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -95,7 +95,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn mutation() -> Mock {
+    pub(crate) fn mutation() -> Mock {
         Mock::given(method("POST"))
             .and(path("/v1/mutation"))
             // don't assert body here because we can do that with matchers later
@@ -104,7 +104,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn entity() -> Mock {
+    pub(crate) fn entity() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/entity/{a}/{b}"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -114,7 +114,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn entity_e() -> Mock {
+    pub(crate) fn entity_e() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/entity/{a}/{b}/e"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -122,7 +122,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn entity_f() -> Mock {
+    pub(crate) fn entity_f() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/entity/{d}"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -130,7 +130,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn interface_object_id() -> Mock {
+    pub(crate) fn interface_object_id() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/interface-object/{id}"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -140,7 +140,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn interface_object_id_d() -> Mock {
+    pub(crate) fn interface_object_id_d() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/interface-object/{id}/d"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -148,7 +148,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn entity_interface_a() -> Mock {
+    pub(crate) fn entity_interface_a() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/entity-interface/a-1"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -160,7 +160,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn entity_interface_b() -> Mock {
+    pub(crate) fn entity_interface_b() -> Mock {
         Mock::given(method("GET"))
             .and(path_template("/v1/entity-interface/b-2"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -172,7 +172,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn interfaces() -> Mock {
+    pub(crate) fn interfaces() -> Mock {
         Mock::given(method("GET"))
             .and(path("/v1/interfaces"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -197,7 +197,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn unions() -> Mock {
+    pub(crate) fn unions() -> Mock {
         Mock::given(method("GET"))
             .and(path("/v1/unions"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -215,7 +215,7 @@ pub(super) mod mock_api {
             })))
     }
 
-    pub(super) fn shipping() -> Mock {
+    pub(crate) fn shipping() -> Mock {
         Mock::given(method("GET"))
             .and(path("/v1/shipping"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
@@ -247,7 +247,7 @@ pub(super) mod mock_api {
     }
 }
 
-pub(super) mod mock_subgraph {
+pub(crate) mod mock_subgraph {
     use super::*;
 
     pub(crate) fn start_join() -> Mock {
@@ -1437,7 +1437,7 @@ mod req_asserts {
     use wiremock::http::HeaderValues;
 
     #[derive(Clone)]
-    pub(super) struct Matcher {
+    pub(crate) struct Matcher {
         method: Option<String>,
         path: Option<String>,
         query: Option<String>,
@@ -1446,7 +1446,7 @@ mod req_asserts {
     }
 
     impl Matcher {
-        pub(super) fn new() -> Self {
+        pub(crate) fn new() -> Self {
             Self {
                 method: None,
                 path: None,
@@ -1456,33 +1456,33 @@ mod req_asserts {
             }
         }
 
-        pub(super) fn method(&mut self, method: &str) -> &mut Self {
+        pub(crate) fn method(&mut self, method: &str) -> &mut Self {
             self.method = Some(method.to_string());
             self
         }
 
-        pub(super) fn path(&mut self, path: &str) -> &mut Self {
+        pub(crate) fn path(&mut self, path: &str) -> &mut Self {
             self.path = Some(path.to_string());
             self
         }
 
-        pub(super) fn query(&mut self, query: &str) -> &mut Self {
+        pub(crate) fn query(&mut self, query: &str) -> &mut Self {
             self.query = Some(query.to_string());
             self
         }
 
-        pub(super) fn body(&mut self, body: serde_json::Value) -> &mut Self {
+        pub(crate) fn body(&mut self, body: serde_json::Value) -> &mut Self {
             self.body = Some(body);
             self
         }
 
-        pub(super) fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
+        pub(crate) fn header(&mut self, name: HeaderName, value: HeaderValue) -> &mut Self {
             let values = self.headers.entry(name).or_insert(Vec::new().into());
             values.append(&mut Vec::from([value]).into());
             self
         }
 
-        pub(super) fn build(&mut self) -> Self {
+        pub(crate) fn build(&mut self) -> Self {
             self.clone()
         }
 
@@ -1554,7 +1554,7 @@ mod req_asserts {
         }
     }
 
-    pub(super) fn matches(received: &[wiremock::Request], matchers: Vec<Matcher>) {
+    pub(crate) fn matches(received: &[wiremock::Request], matchers: Vec<Matcher>) {
         assert_eq!(
             received.len(),
             matchers.len(),
