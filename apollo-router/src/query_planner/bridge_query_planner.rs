@@ -4,10 +4,12 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::sync::Arc;
+use std::sync::OnceLock;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
@@ -29,6 +31,7 @@ use crate::apollo_studio_interop::generate_usage_reporting;
 use crate::apollo_studio_interop::UsageReportingComparisonResult;
 use crate::configuration::ApolloMetricsGenerationMode;
 use crate::configuration::QueryPlannerMode;
+use crate::error::format_bridge_errors;
 use crate::error::PlanErrors;
 use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
@@ -84,6 +87,13 @@ enum PlannerMode {
         // TODO: remove when those other uses are fully ported to Rust
         js_for_api_schema_and_introspection_and_operation_signature: Arc<Planner<QueryPlanResult>>,
     },
+}
+
+struct BothModeComparisonJob {
+    rust_planner: Arc<QueryPlanner>,
+    document: Arc<Valid<ExecutableDocument>>,
+    operation_name: Result<Option<Name>, apollo_compiler::ast::InvalidNameError>,
+    js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
 }
 
 fn federation_version_instrument(federation_version: Option<i64>) -> ObservableGauge<u64> {
@@ -237,29 +247,7 @@ impl PlannerMode {
                 })
             }
             PlannerMode::Both { js, rust } => {
-                // TODO: once the Rust query planner does not use `todo!()` anymore,
-                // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
-                let rust_result = std::panic::catch_unwind(|| {
-                    USING_CATCH_UNWIND.set(true);
-                    let operation = operation.as_deref().map(Name::new).transpose()?;
-                    let result = rust.build_query_plan(&doc.executable, operation);
-                    USING_CATCH_UNWIND.set(false);
-                    result
-                })
-                .unwrap_or_else(|panic| {
-                    USING_CATCH_UNWIND.set(false);
-                    Err(apollo_federation::error::FederationError::internal(
-                        format!(
-                            "query planner panicked: {}",
-                            panic
-                                .downcast_ref::<String>()
-                                .map(|s| s.as_str())
-                                .or_else(|| panic.downcast_ref::<&str>().copied())
-                                .unwrap_or_default()
-                        ),
-                    ))
-                });
-
+                let operation_name = operation.as_deref().map(Name::new).transpose();
                 let mut js_result = js
                     .plan(filtered_query, operation, plan_options)
                     .await
@@ -275,50 +263,47 @@ impl PlannerMode {
                     }
                 }
 
-                let is_matched;
-                match (&js_result, &rust_result) {
-                    (Err(js_error), Ok(_)) => {
-                        tracing::warn!("JS query planner error: {}", js_error);
-                        is_matched = false;
-                    }
-                    (Ok(_), Err(rust_error)) => {
-                        tracing::warn!("Rust query planner error: {}", rust_error);
-                        is_matched = false;
-                    }
-                    (Err(_), Err(_)) => {
-                        is_matched = true;
-                    }
-
-                    (Ok(js_plan), Ok(rust_plan)) => {
-                        let js_root_node = js_plan.data.query_plan.node.as_deref();
-                        let rust_root_node = convert_root_query_plan_node(rust_plan);
-                        is_matched = js_root_node == rust_root_node.as_ref();
-                        if is_matched {
-                            tracing::debug!("JS and Rust query plans match! 🎉");
-                        } else {
-                            tracing::warn!("JS v.s. Rust query plan mismatch");
-                            if let Some(formatted) = &js_plan.data.formatted_query_plan {
-                                tracing::debug!(
-                                    "Diff:\n{}",
-                                    render_diff(&diff::lines(formatted, &rust_plan.to_string()))
-                                );
-                            }
-                        }
-                    }
-                }
-
-                u64_counter!(
-                    "apollo.router.operations.query_planner.both",
-                    "Comparing JS v.s. Rust query plans",
-                    1,
-                    "generation.is_matched" = is_matched,
-                    "generation.js_error" = js_result.is_err(),
-                    "generation.rust_error" = rust_result.is_err()
-                );
+                Self::compare_both(BothModeComparisonJob {
+                    rust_planner: rust.clone(),
+                    document: doc.executable.clone(),
+                    operation_name,
+                    // Exclude usage reporting from the Result sent for comparison
+                    js_result: js_result
+                        .as_ref()
+                        .map(|success| success.data.clone())
+                        .map_err(|e| e.errors.clone()),
+                });
 
                 Ok(js_result?)
             }
         }
+    }
+
+    fn compare_both(job: BothModeComparisonJob) {
+        /// Jobs are dropped if this many are already queued
+        const QUEUE_SIZE: usize = 10;
+        const WORKER_THREAD_COUNT: usize = 1;
+
+        static QUEUE: OnceLock<crossbeam_channel::Sender<BothModeComparisonJob>> = OnceLock::new();
+        let queue = QUEUE.get_or_init(|| {
+            let (sender, receiver) =
+                crossbeam_channel::bounded::<BothModeComparisonJob>(QUEUE_SIZE);
+            for _ in 0..WORKER_THREAD_COUNT {
+                let job_receiver = receiver.clone();
+                std::thread::spawn(move || {
+                    for job in job_receiver {
+                        job.execute()
+                    }
+                });
+            }
+            sender
+        });
+        // We use a bounded queue: try_send returns an error when full. This is fine.
+        // We prefer dropping some comparison jobs and only gathering some of the data
+        // rather than consume too much resources.
+        //
+        // Either way we move on and let this thread continue proceed with the query plan from JS.
+        let _ = queue.try_send(job).is_err();
     }
 
     async fn subgraphs(
@@ -344,6 +329,80 @@ impl PlannerMode {
                 Ok((name, Arc::new(schema)))
             })
             .collect()
+    }
+}
+
+impl BothModeComparisonJob {
+    fn execute(self) {
+        // TODO: once the Rust query planner does not use `todo!()` anymore,
+        // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
+        let rust_result = std::panic::catch_unwind(|| {
+            USING_CATCH_UNWIND.set(true);
+            let result = self
+                .rust_planner
+                .build_query_plan(&self.document, self.operation_name?);
+            USING_CATCH_UNWIND.set(false);
+            result
+        })
+        .unwrap_or_else(|panic| {
+            USING_CATCH_UNWIND.set(false);
+            Err(apollo_federation::error::FederationError::internal(
+                format!(
+                    "query planner panicked: {}",
+                    panic
+                        .downcast_ref::<String>()
+                        .map(|s| s.as_str())
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or_default()
+                ),
+            ))
+        });
+
+        let is_matched;
+        match (&self.js_result, &rust_result) {
+            (Err(js_errors), Ok(_)) => {
+                tracing::warn!(
+                    "JS query planner error: {}",
+                    format_bridge_errors(js_errors)
+                );
+                is_matched = false;
+            }
+            (Ok(_), Err(rust_error)) => {
+                tracing::warn!("Rust query planner error: {}", rust_error);
+                is_matched = false;
+            }
+            (Err(_), Err(_)) => {
+                is_matched = true;
+            }
+
+            (Ok(js_plan), Ok(rust_plan)) => {
+                let js_root_node = js_plan.query_plan.node.as_deref();
+                let rust_root_node = convert_root_query_plan_node(rust_plan);
+                is_matched = js_root_node == rust_root_node.as_ref();
+                if is_matched {
+                    tracing::debug!("JS and Rust query plans match! 🎉");
+                } else {
+                    tracing::warn!("JS v.s. Rust query plan mismatch");
+                    if let Some(formatted) = &js_plan.formatted_query_plan {
+                        tracing::debug!(
+                            "Diff of formatted plans:\n{}",
+                            render_diff(&diff::lines(formatted, &rust_plan.to_string()))
+                        );
+                    }
+                    tracing::trace!("JS query plan Debug: {js_root_node:#?}");
+                    tracing::trace!("Rust query plan Debug: {rust_root_node:#?}");
+                }
+            }
+        }
+
+        u64_counter!(
+            "apollo.router.operations.query_planner.both",
+            "Comparing JS v.s. Rust query plans",
+            1,
+            "generation.is_matched" = is_matched,
+            "generation.js_error" = self.js_result.is_err(),
+            "generation.rust_error" = rust_result.is_err()
+        );
     }
 }
 
@@ -964,14 +1023,14 @@ impl BridgeQueryPlanner {
 }
 
 /// Data coming from the `plan` method on the router_bridge
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 /// The root query plan container.
 pub(super) struct QueryPlan {
