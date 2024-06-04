@@ -25,12 +25,13 @@ pub(crate) struct FederatedGraphPath {
 
 #[derive(Debug)]
 pub(crate) struct Edge {
-    operation_element: Option<Arc<OperationPathElement>>,
-    edge: Option<EdgeIndex>,
-    self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
-    source_entering_condition_resolutions_at_head:
+    pub operation_element: Option<Arc<OperationPathElement>>,
+    pub edge: Option<EdgeIndex>,
+    /// Conditions imposed by the edge (eg. @key on a source entering edge or @requires on a field edge)
+    pub self_condition_resolutions_for_edge: IndexMap<SelfConditionIndex, ConditionResolutionId>,
+    pub source_entering_condition_resolutions_at_head:
         IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
-    condition_resolutions_at_head: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
+    pub condition_resolutions_at_head: IndexMap<SelfConditionIndex, ConditionResolutionInfo>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
@@ -39,18 +40,24 @@ pub(crate) enum OperationPathElement {
     InlineFragment(InlineFragment),
 }
 
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash)]
 pub(crate) struct ConditionResolutionId(usize);
 
-#[derive(Debug)]
+#[derive(Debug, Clone)] // TODO(@goto-bus-stop): should this be cloneable?
 pub(crate) struct ConditionResolutionInfo {
-    id: ConditionResolutionId,
-    resolution: Arc<FederatedPathTree>,
-    cost: QueryPlanCost,
+    pub id: ConditionResolutionId,
+    pub resolution: Arc<FederatedPathTree>,
+    pub cost: QueryPlanCost,
 }
 
 #[derive(Debug, Clone)]
 pub(crate) struct SourceEnteringEdgeInfo {
     index: usize,
     conditions_cost: QueryPlanCost,
+}
+
+impl FederatedGraphPath {
+    pub fn edges(&self) -> impl Iterator<Item = &'_ Edge> {
+        self.edges.iter().map(|arc| &**arc)
+    }
 }
