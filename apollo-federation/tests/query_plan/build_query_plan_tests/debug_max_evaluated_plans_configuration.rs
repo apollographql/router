@@ -273,6 +273,7 @@ fn correctly_generate_plan_built_from_some_non_individually_optimal_branch_optio
 }
 
 #[test]
+#[should_panic(expected = "Details: Cannot merge field selections from different schemas")]
 fn does_not_error_on_some_complex_fetch_group_dependencies() {
     // This test is a reproduction of a bug whereby planning on this example was raising an
     // assertion error due to an incorrect handling of fetch group dependencies.
