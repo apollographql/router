@@ -46,6 +46,7 @@ mod named_fragments_preservation;
 mod provides;
 mod requires;
 mod shareable_root_fields;
+mod subscriptions;
 
 // TODO: port the rest of query-planner-js/src/__tests__/buildPlan.test.ts
 
@@ -233,17 +234,17 @@ fn handles_non_intersecting_fragment_conditions() {
             interface Fruit {
               edible: Boolean!
             }
-    
+
             type Banana implements Fruit {
               edible: Boolean!
               inBunch: Boolean!
             }
-    
+
             type Apple implements Fruit {
               edible: Boolean!
               hasStem: Boolean!
             }
-    
+
             type Query {
               fruit: Fruit!
             }
@@ -260,7 +261,7 @@ fn handles_non_intersecting_fragment_conditions() {
                 hasStem
               }
             }
-    
+
             query Fruitiness {
               fruit {
                 ... on Apple {
@@ -304,12 +305,12 @@ fn avoids_unnecessary_fetches() {
           type Query {
             t: T
           }
-    
+
           type T @key(fields: "idT") {
             idT: ID!
             a: A
           }
-    
+
           type A @key(fields: "idA2") {
             idA2: ID!
           }
@@ -319,7 +320,7 @@ fn avoids_unnecessary_fetches() {
             idT: ID!
             u: U
           }
-    
+
           type U @key(fields: "idU") {
             idU: ID!
           }
