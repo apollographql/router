@@ -31,8 +31,16 @@ fn some_name() {
 }
 */
 
+mod debug_max_evaluated_plans_configuration;
 mod fetch_operation_names;
 mod field_merging_with_skip_and_include;
+mod fragment_autogeneration;
+mod handles_fragments_with_directive_conditions;
+mod handles_operations_with_directives;
+mod interface_type_explosion;
+mod introspection_typename_handling;
+mod merged_abstract_types_handling;
+mod named_fragments;
 mod named_fragments_preservation;
 mod provides;
 mod requires;
@@ -418,5 +426,194 @@ fn avoids_unnecessary_fetches() {
           },
         }
         "#
+    );
+}
+
+#[test]
+#[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure: fetch nodes are queries instead of mutations?
+fn it_executes_mutation_operations_in_sequence() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            q1: Int
+          }
+  
+          type Mutation {
+            m1: Int
+          }
+        "#,
+        Subgraph2: r#"
+          type Mutation {
+            m2: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          mutation {
+            m2
+            m1
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "Subgraph2") {
+              {
+                m2
+              }
+            },
+            Fetch(service: "Subgraph1") {
+              {
+                m1
+              }
+            },
+          },
+        }
+      "###
+    );
+}
+
+/// @requires references external field indirectly {
+#[test]
+#[should_panic(
+    expected = r#"Cannot add selection of field "U.k2" to selection set of parent type "U""#
+)]
+// TODO: investigate this failure
+fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
+    // Field issue where we were seeing a FetchGroup created where the fields used by the key to jump subgraphs
+    // were not properly fetched. In the below test, this test will ensure that 'k2' is properly collected
+    // before it is used
+    let planner = planner!(
+        A: r#"
+          type Query {
+            u: U!
+          }
+  
+          type U @key(fields: "k1 { id }") {
+            k1: K
+          }
+  
+          type K @key(fields: "id") {
+            id: ID!
+          }
+        "#,
+        B: r#"
+          type U @key(fields: "k1 { id }") @key(fields: "k2") {
+            k1: K!
+            k2: ID!
+            v: V! @external
+            f: ID! @requires(fields: "v { v }")
+            f2: Int!
+          }
+  
+          type K @key(fields: "id") {
+            id: ID!
+          }
+  
+          type V @key(fields: "id") {
+            id: ID!
+            v: String! @external
+          }
+        "#,
+        C: r#"
+          type U @key(fields: "k1 { id }") @key(fields: "k2") {
+            k1: K!
+            k2: ID!
+            v: V!
+          }
+  
+          type K @key(fields: "id") {
+            id: ID!
+          }
+  
+          type V @key(fields: "id") {
+            id: ID!
+            v: String!
+          }
+        "#,
+    );
+
+    assert_plan!(
+        &planner,
+        r#"
+          {
+            u {
+              f
+            }
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "A") {
+              {
+                u {
+                  __typename
+                  k1 {
+                    id
+                  }
+                }
+              }
+            },
+            Flatten(path: "u") {
+              Fetch(service: "B") {
+                {
+                  ... on U {
+                    __typename
+                    k1 {
+                      id
+                    }
+                  }
+                } =>
+                {
+                  ... on U {
+                    k2
+                  }
+                }
+              },
+            },
+            Flatten(path: "u") {
+              Fetch(service: "C") {
+                {
+                  ... on U {
+                    __typename
+                    k2
+                  }
+                } =>
+                {
+                  ... on U {
+                    v {
+                      v
+                    }
+                  }
+                }
+              },
+            },
+            Flatten(path: "u") {
+              Fetch(service: "B") {
+                {
+                  ... on U {
+                    __typename
+                    v {
+                      v
+                    }
+                    k1 {
+                      id
+                    }
+                  }
+                } =>
+                {
+                  ... on U {
+                    f
+                  }
+                }
+              },
+            },
+          },
+        }
+      "###
     );
 }
