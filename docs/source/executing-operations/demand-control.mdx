@@ -117,7 +117,7 @@ Customize `preview_demand_control` with the following settings:
 | static_estimated.max        | integer                 |               | The maximum cost of an accepted operation. An operation with cost higher than `strategy.max` is rejected. |
 
 
-### Telemetry for demand control
+## Telemetry for demand control
 
 You can define router telemetry to gather cost information and gain insights into the cost of operations sent to your router:
 
@@ -125,7 +125,7 @@ You can define router telemetry to gather cost information and gain insights int
 - Attach cost information to spans.
 - Generate log messages whenever the cost delta between estimated and actual is greater than an arbitrary value.
 
-#### Instruments
+### Instruments
 
 | Instrument      | Value | Default | Description                                                |
 | --------------- | ----- | ------- | ---------------------------------------------------------- |
@@ -133,7 +133,9 @@ You can define router telemetry to gather cost information and gain insights int
 | cost.estimated  |       |         | The estimated cost of an operation before execution.        |
 | cost.delta      |       |         | The difference between the actual and estimated cost.       |
 
-#### Attributes
+### Attributes
+
+Attributes for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
 
 | Attribute      | Value | Default | Description                                                |
 | --------------- | ----- | ------- | ---------------------------------------------------------- |
@@ -141,6 +143,15 @@ You can define router telemetry to gather cost information and gain insights int
 | cost.estimated  | boolean       |         | The estimated cost of an operation before execution.        |
 | cost.delta      | boolean      |         | The difference between the actual and estimated cost.       |
 | cost.result      | boolean      |         | The return code of the cost calculation. `COST_OK` or an [error code](../errors/#demand-control)      |
+
+### Selectors
+
+Selectors for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
+
+| Key  | Value      | Default | Description                                        |
+| ---- | ---------- | ------- | -------------------------------------------------- |
+| cost | estimated, actual, delta, result |         | The estimated, actual, or delta cost values, or the result string |
+
 
 #### Examples
 
@@ -285,7 +296,7 @@ You should be able to configure your APM to look for `cost.*` histograms and get
 
 An example histogram of operation costs from a Prometheus endpoint:
 
-```text
+```text disableCopy=true showLineNumbers=false
 # TYPE cost_actual histogram
 cost_actual_bucket{otel_scope_name="apollo/router",le="0"} 0
 cost_actual_bucket{otel_scope_name="apollo/router",le="10"} 3
@@ -321,6 +332,15 @@ cost_estimated_sum{cost_result="COST_OK",otel_scope_name="apollo/router"}
 cost_estimated_count{cost_result="COST_OK",otel_scope_name="apollo/router"} 20
 ```
 
+A chart of the example histogram:
+
+<img class="screenshot" src="../images/demand-control-example-histogram.png" width="600" />
+
+
+You can also chart the percentage of operations that would be allowed or rejected with the current configuration:
+
+<img class="screenshot" src="../images/demand-control-example-cost-result.png" width="600" />
+
 Although estimated costs won't necessarily match actual costs, you can use the metrics to ascertain the following: 
 - Whether any operations have underestimated costs
 - What to assign `static_estimated.list_size` as the actual maximum list size
@@ -353,16 +373,23 @@ telemetry:
 
 This custom instrument may not be suitable for users where there are many operation names, such as a public internet-facing API. You can add conditions to reduce the number of returned operations. For example, use a condition that outputs results only when the cost delta is greater than a threshold:
 
-```yaml
-          ...
+```yaml title="Example condition for cost delta threshold"
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        # custom instrument
+        cost.rejected.operations:
           condition:
             all:        
               - eq: # Only show rejected operations
                  - cost: result
                  - "COST_ESTIMATED_TOO_EXPENSIVE"
-              - gt: 
+#highlight-start
+              - gt: # Only show cost delta > 100
                  - cost: delta
                  - 100
+#highlight-end            
 ```
 
 4. You should now be able to configure your APM to see which operations are too costly. Visualizing the histogram can be useful, such as with top-N or heatmap tools. 
@@ -417,7 +444,7 @@ This configuration generates many metrics and may be too costly for your APM. To
 
 For this example, you can set a condition that restricts the instrument to an operation with a certain name. You can also show only histograms of list sizes of GraphQL fields:
 
-```yaml
+```yaml title="Example instrument for list sizes of specific operation"
 telemetry:
   instrumentation:
     instruments:
@@ -438,7 +465,7 @@ telemetry:
 
 The output from a Prometheus endpoint may look like the following:
 
-```text
+```text disableCopy=true showLineNumbers=false
 graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="0"} 0
 graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="10"} 9
 graphql_list_length_restricted_bucket{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router",le="100"} 20
@@ -483,7 +510,7 @@ After determining the cost estimation model of your operations, you should updat
 
 From the previous step, you can set the maximum cost to a value that allows all operations except `ExceptAll`:
 
-```yaml
+```yaml title="Example enforcing max cost"
 preview_demand_control:
   enabled: true
   mode: enforce               # Change measure->enforce 
