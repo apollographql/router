@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -5030,6 +5031,20 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "Apollo Studio operation id",
+          "properties": {
+            "studio_operation_id": {
+              "description": "Apollo Studio operation id",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "studio_operation_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A value from context.",
           "properties": {
             "default": {
@@ -6880,13 +6895,6 @@ expression: "&schema"
           "description": "Datadog trace ID, a u64.",
           "enum": [
             "datadog"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Apollo Studio trace id",
-          "enum": [
-            "apollo"
           ],
           "type": "string"
         }
