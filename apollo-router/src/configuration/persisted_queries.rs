@@ -19,7 +19,7 @@ pub struct PersistedQueries {
     pub experimental_prewarm_query_plan_cache: bool,
 
     /// Enables using a local copy of the persisted query manifest to safelist operations
-    pub experimental_local_manifest: Option<String>,
+    pub experimental_local_manifests: Option<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -31,7 +31,7 @@ impl PersistedQueries {
         log_unknown: Option<bool>,
         safelist: Option<PersistedQueriesSafelist>,
         experimental_prewarm_query_plan_cache: Option<bool>,
-        experimental_local_manifest: Option<String>,
+        experimental_local_manifests: Option<Vec<String>>,
     ) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_pq),
@@ -39,7 +39,7 @@ impl PersistedQueries {
             log_unknown: log_unknown.unwrap_or_else(default_log_unknown),
             experimental_prewarm_query_plan_cache: experimental_prewarm_query_plan_cache
                 .unwrap_or_else(default_prewarm_query_plan_cache),
-            experimental_local_manifest,
+            experimental_local_manifests,
         }
     }
 }
@@ -74,7 +74,7 @@ impl Default for PersistedQueries {
             safelist: PersistedQueriesSafelist::default(),
             log_unknown: default_log_unknown(),
             experimental_prewarm_query_plan_cache: default_prewarm_query_plan_cache(),
-            experimental_local_manifest: None,
+            experimental_local_manifests: None,
         }
     }
 }

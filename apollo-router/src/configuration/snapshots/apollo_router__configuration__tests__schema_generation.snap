@@ -4153,11 +4153,14 @@ expression: "&schema"
           "description": "Experimental feature to prewarm the query plan cache with persisted queries",
           "type": "boolean"
         },
-        "experimental_local_manifest": {
+        "experimental_local_manifests": {
           "default": null,
           "description": "Enables using a local copy of the persisted query manifest to safelist operations",
+          "items": {
+            "type": "string"
+          },
           "nullable": true,
-          "type": "string"
+          "type": "array"
         },
         "log_unknown": {
           "default": false,
