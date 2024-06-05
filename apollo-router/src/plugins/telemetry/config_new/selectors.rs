@@ -837,7 +837,7 @@ impl Selector for SupergraphSelector {
                             .expect("already checked the array had a length of 1; qed");
                     }
                 }*/
-                let val = response_data.find(&data);
+                let val = response_data.find(data);
 
                 val.maybe_to_otel_value()
             } else {
@@ -1115,7 +1115,7 @@ impl Selector for SubgraphSelector {
                             .expect("already checked the array had a length of 1; qed");
                     }
                 }*/
-                let val = subgraph_response_data.find(&data);
+                let val = subgraph_response_data.find(data);
 
                 val.maybe_to_otel_value()
             } else {

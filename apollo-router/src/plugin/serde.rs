@@ -6,7 +6,6 @@ use std::str::FromStr;
 use access_json::JSONQuery;
 use http::header::HeaderName;
 use http::HeaderValue;
-use jsonpath_rust::JsonPathInst;
 use regex::Regex;
 use serde::de;
 use serde::de::Error;
