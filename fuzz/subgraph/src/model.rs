@@ -1,3 +1,5 @@
+#![allow(non_snake_case)]
+
 use std::sync::Once;
 
 use async_graphql::Context;
@@ -15,7 +17,7 @@ pub struct Query;
 #[Object]
 impl Query {
     async fn me(&self, _ctx: &Context<'_>) -> Option<User> {
-        users().get(0).cloned()
+        users().first().cloned()
     }
 
     async fn topProducts(
@@ -26,22 +28,22 @@ impl Query {
         let first = first.unwrap_or(4);
         let limit = std::cmp::min(first, 2);
         let p = products();
-        (&p[..limit]).to_owned()
+        (p[..limit]).to_owned()
     }
 
     #[graphql(entity)]
     async fn find_user_by_id(&self, id: String) -> Option<User> {
-        users().iter().find(|u| u.id.as_str() == &id).cloned()
+        users().iter().find(|u| u.id.as_str() == id).cloned()
     }
 
     #[graphql(entity)]
     async fn find_product_by_upc(&self, upc: String) -> Option<Product> {
-        products().iter().find(|p| p.upc.as_str() == &upc).cloned()
+        products().iter().find(|p| p.upc.as_str() == upc).cloned()
     }
 
     #[graphql(entity)]
     async fn find_review_by_id(&self, id: String) -> Option<&Review> {
-        reviews().iter().find(|r: &&Review| r.id.as_str() == &id)
+        reviews().iter().find(|r: &&Review| r.id.as_str() == id)
     }
 }
 
@@ -120,7 +122,7 @@ impl User {
     async fn reviews(&self) -> Vec<&Review> {
         reviews()
             .iter()
-            .filter(|r: &&Review| r.authorId.as_str() == &self.id)
+            .filter(|r: &&Review| r.authorId.as_str() == self.id)
             .collect()
     }
 }
@@ -206,7 +208,7 @@ impl Product {
     async fn reviews(&self) -> Vec<Review> {
         reviews()
             .iter()
-            .filter(|r: &&Review| r.productUpc.as_str() == &self.upc)
+            .filter(|r: &&Review| r.productUpc.as_str() == self.upc)
             .cloned()
             .collect()
     }
@@ -214,7 +216,7 @@ impl Product {
     async fn reviewsForAuthor(&self, authorID: String) -> Vec<Review> {
         reviews()
             .iter()
-            .filter(|r: &&Review| r.productUpc.as_str() == &self.upc && &r.authorId == &authorID)
+            .filter(|r: &&Review| r.productUpc.as_str() == self.upc && r.authorId == authorID)
             .cloned()
             .collect()
     }
@@ -290,13 +292,13 @@ impl Review {
     async fn author(&self) -> Option<&User> {
         users()
             .iter()
-            .find(|r: &&User| r.id.as_str() == &self.authorId)
+            .find(|r: &&User| r.id.as_str() == self.authorId)
     }
 
     async fn product(&self) -> Option<&Product> {
         products()
             .iter()
-            .find(|p| p.upc.as_str() == &self.productUpc)
+            .find(|p| p.upc.as_str() == self.productUpc)
     }
 }
 

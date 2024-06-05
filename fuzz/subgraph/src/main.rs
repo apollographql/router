@@ -1,18 +1,24 @@
 use std::time::Duration;
 
-use crate::model::{Mutation, Query};
+use actix_web::get;
+use actix_web::post;
+use actix_web::web;
 use actix_web::web::Data;
-use actix_web::{get, post, web, App, HttpResponse, HttpServer, Result};
+use actix_web::App;
+use actix_web::HttpResponse;
+use actix_web::HttpServer;
+use actix_web::Result;
 use async_graphql::http::playground_source;
 use async_graphql::http::GraphQLPlaygroundConfig;
-use async_graphql::{EmptySubscription, Schema};
+use async_graphql::EmptySubscription;
+use async_graphql::Schema;
 use async_graphql_actix_web::GraphQLRequest;
-use lazy_static::lazy_static;
+
+use crate::model::Mutation;
+use crate::model::Query;
 
 pub(crate) mod delay_for;
 pub(crate) mod ensure_keep_alive;
-use delay_for::*;
-use ensure_keep_alive::*;
 mod model;
 
 #[post("/")]
