@@ -1,6 +1,6 @@
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
+#[should_panic(expected = "snapshot assertion")]
+// TODO will be fixed with selection set updates in https://apollographql.atlassian.net/browse/FED-241
 fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
     let planner = planner!(
         Subgraph1: r#"
@@ -59,7 +59,7 @@ fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
                     }
                   },
                 },
-              }
+              },
             },
           }
         "###
@@ -67,8 +67,6 @@ fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
-// TODO: investigate this failure
 fn it_handles_an_at_requires_triggered_conditionally() {
     let planner = planner!(
         Subgraph1: r#"
@@ -128,7 +126,7 @@ fn it_handles_an_at_requires_triggered_conditionally() {
                       }
                     }
                   },
-                }
+                },
               },
             },
           }
@@ -137,7 +135,7 @@ fn it_handles_an_at_requires_triggered_conditionally() {
 }
 
 #[test]
-#[should_panic(expected = "not yet implemented")]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn it_handles_an_at_requires_where_multiple_conditional_are_involved() {
     let planner = planner!(

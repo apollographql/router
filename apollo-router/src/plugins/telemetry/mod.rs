@@ -22,6 +22,7 @@ use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
+use opentelemetry::metrics::MetricsError;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -487,7 +488,12 @@ impl Plugin for Telemetry {
                         } else if let Err(err) = &response {
                             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             span.set_span_dyn_attributes(
-                                config.instrumentation.spans.router.attributes.on_error(err),
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_error(err, &ctx),
                             );
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
@@ -606,7 +612,7 @@ impl Plugin for Telemetry {
                                 custom_graphql_instruments.on_response(resp);
                             },
                             Err(err) => {
-                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
+                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err, &ctx));
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
                                 custom_graphql_instruments.on_error(err, &ctx);
@@ -737,7 +743,11 @@ impl Plugin for Telemetry {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
 
                                 span.set_span_dyn_attributes(
-                                    conf.instrumentation.spans.subgraph.attributes.on_error(err),
+                                    conf.instrumentation
+                                        .spans
+                                        .subgraph
+                                        .attributes
+                                        .on_error(err, &context),
                                 );
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
@@ -1799,7 +1809,13 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
             opentelemetry::global::Error::Metric(err) => {
-                ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
+                if let MetricsError::Other(msg) = &err {
+                    if msg.contains("Warning") {
+                        ::tracing::warn!("OpenTelemetry metric warning occurred: {}", msg);
+                        return;
+                    }
+                }
+                ::tracing::error!("OpenTelemetry metric error occurred: {}", err);
             }
             opentelemetry::global::Error::Other(err) => {
                 ::tracing::error!("OpenTelemetry error occurred: {}", err)

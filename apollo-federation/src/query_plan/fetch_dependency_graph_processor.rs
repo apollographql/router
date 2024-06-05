@@ -6,12 +6,12 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 
 use crate::error::FederationError;
+use crate::operation::RebasedFragments;
+use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
-use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -31,7 +31,7 @@ use crate::query_plan::SequenceNode;
 /// (see `selectionCost` method),
 /// this can be though of as saying that resolving a single field is in general
 /// a tiny fraction of the actual cost of doing a subgraph fetch.
-const FETCH_COST: QueryPlanCost = 1000;
+const FETCH_COST: QueryPlanCost = 1000.0;
 
 /// Constant used during query plan cost computation
 /// as a multiplier to the cost of fetches made in sequences.
@@ -42,7 +42,7 @@ const FETCH_COST: QueryPlanCost = 1000;
 /// The goal is to heavily favor query plans with the least amount of sequences,
 /// since this affect overall latency directly.
 /// The exact number is a tad  arbitrary however.
-const PIPELINING_COST: QueryPlanCost = 100;
+const PIPELINING_COST: QueryPlanCost = 100.0;
 
 #[derive(Clone)]
 pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
@@ -237,7 +237,7 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
     values
         .into_iter()
         .enumerate()
-        .map(|(i, stage)| stage * 1.max(i as QueryPlanCost * PIPELINING_COST))
+        .map(|(i, stage)| stage * (1.0f64).max(i as QueryPlanCost * PIPELINING_COST))
         .sum()
 }
 

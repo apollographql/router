@@ -3,7 +3,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
@@ -243,65 +242,71 @@ where
         }
     }
 
-    pub(crate) fn evaluate_error(&self, error: &BoxError) -> bool {
+    pub(crate) fn evaluate_error(&self, error: &BoxError, ctx: &Context) -> bool {
         match self {
             Condition::Eq(eq) => {
-                let left = eq[0].on_error(error);
-                let right = eq[1].on_error(error);
+                let left = eq[0].on_error(error, ctx);
+                let right = eq[1].on_error(error, ctx);
                 left == right
             }
             Condition::Gt(gt) => {
-                let left_att = gt[0].on_error(error).map(AttributeValue::from);
-                let right_att = gt[1].on_error(error).map(AttributeValue::from);
+                let left_att = gt[0].on_error(error, ctx).map(AttributeValue::from);
+                let right_att = gt[1].on_error(error, ctx).map(AttributeValue::from);
                 left_att.zip(right_att).map_or(false, |(l, r)| l > r)
             }
             Condition::Lt(gt) => {
-                let left_att = gt[0].on_error(error).map(AttributeValue::from);
-                let right_att = gt[1].on_error(error).map(AttributeValue::from);
+                let left_att = gt[0].on_error(error, ctx).map(AttributeValue::from);
+                let right_att = gt[1].on_error(error, ctx).map(AttributeValue::from);
                 left_att.zip(right_att).map_or(false, |(l, r)| l < r)
             }
-            Condition::Exists(exist) => exist.on_error(error).is_some(),
-            Condition::All(all) => all.iter().all(|c| c.evaluate_error(error)),
-            Condition::Any(any) => any.iter().any(|c| c.evaluate_error(error)),
-            Condition::Not(not) => !not.evaluate_error(error),
+            Condition::Exists(exist) => exist.on_error(error, ctx).is_some(),
+            Condition::All(all) => all.iter().all(|c| c.evaluate_error(error, ctx)),
+            Condition::Any(any) => any.iter().any(|c| c.evaluate_error(error, ctx)),
+            Condition::Not(not) => !not.evaluate_error(error, ctx),
             Condition::True => true,
             Condition::False => false,
         }
     }
 
-    pub(crate) fn evaluate_response_field(&self, typed_value: &TypedValue, ctx: &Context) -> bool {
+    pub(crate) fn evaluate_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) -> bool {
         match self {
             Condition::Eq(eq) => {
-                let left = eq[0].on_response_field(typed_value, ctx);
-                let right = eq[1].on_response_field(typed_value, ctx);
+                let left = eq[0].on_response_field(ty, field, value, ctx);
+                let right = eq[1].on_response_field(ty, field, value, ctx);
                 left == right
             }
             Condition::Gt(gt) => {
                 let left_att = gt[0]
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
                 let right_att = gt[1]
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
                 left_att.zip(right_att).map_or(false, |(l, r)| l > r)
             }
             Condition::Lt(gt) => {
                 let left_att = gt[0]
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
                 let right_att = gt[1]
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .map(AttributeValue::from);
                 left_att.zip(right_att).map_or(false, |(l, r)| l < r)
             }
-            Condition::Exists(exist) => exist.on_response_field(typed_value, ctx).is_some(),
+            Condition::Exists(exist) => exist.on_response_field(ty, field, value, ctx).is_some(),
             Condition::All(all) => all
                 .iter()
-                .all(|c| c.evaluate_response_field(typed_value, ctx)),
+                .all(|c| c.evaluate_response_field(ty, field, value, ctx)),
             Condition::Any(any) => any
                 .iter()
-                .any(|c| c.evaluate_response_field(typed_value, ctx)),
-            Condition::Not(not) => !not.evaluate_response_field(typed_value, ctx),
+                .any(|c| c.evaluate_response_field(ty, field, value, ctx)),
+            Condition::Not(not) => !not.evaluate_response_field(ty, field, value, ctx),
             Condition::True => true,
             Condition::False => false,
         }
@@ -425,17 +430,25 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError) -> Option<Value> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
-            SelectorOrValue::Selector(selector) => selector.on_error(error),
+            SelectorOrValue::Selector(selector) => selector.on_error(error, ctx),
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) -> Option<Value> {
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) -> Option<Value> {
         match self {
             SelectorOrValue::Value(value) => Some(value.clone().into()),
-            SelectorOrValue::Selector(selector) => selector.on_response_field(typed_value, ctx),
+            SelectorOrValue::Selector(selector) => {
+                selector.on_response_field(ty, field, value, ctx)
+            }
         }
     }
 
@@ -450,12 +463,12 @@ where
 #[cfg(test)]
 mod test {
     use opentelemetry::Value;
+    use serde_json_bytes::json;
     use tower::BoxError;
     use TestSelector::Req;
     use TestSelector::Resp;
     use TestSelector::Static;
 
-    use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
     use crate::plugins::telemetry::config_new::test::field;
@@ -502,7 +515,11 @@ mod test {
             }
         }
 
-        fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+        fn on_error(
+            &self,
+            error: &tower::BoxError,
+            _ctx: &Context,
+        ) -> Option<opentelemetry::Value> {
             if error.to_string() != "<empty>" {
                 Some("error".into())
             } else {
@@ -510,8 +527,14 @@ mod test {
             }
         }
 
-        fn on_response_field(&self, typed_value: &TypedValue, _ctx: &Context) -> Option<Value> {
-            if let TypedValue::Number(_name, _ty, val) = typed_value {
+        fn on_response_field(
+            &self,
+            _ty: &apollo_compiler::executable::NamedType,
+            _field: &apollo_compiler::executable::Field,
+            value: &serde_json_bytes::Value,
+            _ctx: &Context,
+        ) -> Option<Value> {
+            if let serde_json_bytes::Value::Number(val) = value {
                 Some(Value::I64(val.as_i64().expect("mut be i64")))
             } else {
                 None
@@ -818,18 +841,17 @@ where {
             self.evaluate_event_response(&value, &Context::new())
         }
         fn error(&mut self, value: Option<&str>) -> bool {
-            self.evaluate_error(&BoxError::from(value.unwrap_or("<empty>")))
+            self.evaluate_error(
+                &BoxError::from(value.unwrap_or("<empty>")),
+                &Default::default(),
+            )
         }
         fn field(&mut self, value: Option<i64>) -> bool {
             match value {
-                None => self.evaluate_response_field(
-                    &TypedValue::Bool(ty(), field(), &false),
-                    &Context::new(),
-                ),
-                Some(value) => self.evaluate_response_field(
-                    &TypedValue::Number(ty(), field(), &serde_json::Number::from(value)),
-                    &Context::new(),
-                ),
+                None => self.evaluate_response_field(ty(), field(), &json!(false), &Context::new()),
+                Some(value) => {
+                    self.evaluate_response_field(ty(), field(), &json!(value), &Context::new())
+                }
             }
         }
     }
