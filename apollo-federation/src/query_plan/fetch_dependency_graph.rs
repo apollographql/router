@@ -1768,8 +1768,13 @@ impl FetchDependencyGraphNode {
         if self.selection_set.selection_set.selections.is_empty() {
             return Ok(None);
         }
-        let (selection, output_rewrites) =
-            self.finalize_selection(variable_definitions, handled_conditions, &fragments)?;
+        let (selection, output_rewrites) = self.finalize_selection(
+            variable_definitions,
+            handled_conditions,
+            fragments
+                .as_ref()
+                .map(|fragments| &fragments.original_fragments),
+        )?;
         let input_nodes = self
             .inputs
             .as_ref()
@@ -1837,7 +1842,7 @@ impl FetchDependencyGraphNode {
         &self,
         variable_definitions: &[Node<VariableDefinition>],
         handled_conditions: &Conditions,
-        fragments: &Option<&mut RebasedFragments>,
+        fragments: Option<&NamedFragments>,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
         // Finalizing the selection involves the following:
         // 1. removing any @include/@skip that are not necessary

@@ -2407,7 +2407,7 @@ impl SelectionSet {
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractType>,
-        fragments: &Option<&mut RebasedFragments>,
+        fragments: Option<&NamedFragments>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
@@ -3130,7 +3130,7 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenRespon
 pub(crate) fn subselection_type_if_abstract(
     selection: &Selection,
     schema: &ValidFederationSchema,
-    fragments: &Option<&mut RebasedFragments>,
+    fragments: Option<&NamedFragments>,
 ) -> Option<AbstractType> {
     match selection {
         Selection::Field(field) => {
@@ -3149,11 +3149,7 @@ pub(crate) fn subselection_type_if_abstract(
         }
         Selection::FragmentSpread(fragment_spread) => {
             let fragment = fragments
-                .as_ref()
-                .and_then(|r| {
-                    r.original_fragments
-                        .get(&fragment_spread.spread.data().fragment_name)
-                })
+                .and_then(|fragments| fragments.get(&fragment_spread.spread.data().fragment_name))
                 .ok_or(crate::error::SingleFederationError::InvalidGraphQL {
                     message: "missing fragment".to_string(),
                 })
@@ -4088,7 +4084,7 @@ impl NamedFragments {
         }
         let updated = self.map_to_expanded_selection_sets(|ss| {
             ss.add_typename_field_for_abstract_types(
-                /*parent_type_if_abstract*/ None, /*fragments*/ &None,
+                /*parent_type_if_abstract*/ None, /*fragments*/ None,
             )
         })?;
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
