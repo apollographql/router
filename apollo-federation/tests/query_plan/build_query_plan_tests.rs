@@ -209,6 +209,7 @@ fn field_covariance_and_type_explosion() {
       Fetch(service: "Subgraph1") {
         {
           dummy {
+            __typename
             field {
               __typename
               ... on Object {
@@ -226,8 +227,6 @@ fn field_covariance_and_type_explosion() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure - unexpected inline spread
 fn handles_non_intersecting_fragment_conditions() {
     let planner = planner!(
         Subgraph1: r#"
