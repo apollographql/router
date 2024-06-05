@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: 621fe405b7bc52f4f5f0102b2aaf8a374504eee3
+# Composed from subgraphs with hash: 43bf934e8826f0b4d17867095ea2025fb352287a
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -20,32 +20,40 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Apple implements Fruit
-  @join__implements(graph: SUBGRAPH1, interface: "Fruit")
-  @join__type(graph: SUBGRAPH1)
+type A implements I
+  @join__implements(graph: S1, interface: "I")
+  @join__type(graph: S1, key: "id")
 {
-  edible: Boolean!
-  hasStem: Boolean!
+  id: ID!
+  x: Int
+  z: Int
+  y: Int @join__field
 }
 
-type Banana implements Fruit
-  @join__implements(graph: SUBGRAPH1, interface: "Fruit")
-  @join__type(graph: SUBGRAPH1)
+type B implements I
+  @join__implements(graph: S1, interface: "I")
+  @join__type(graph: S1, key: "id")
 {
-  edible: Boolean!
-  inBunch: Boolean!
+  id: ID!
+  x: Int
+  w: Int
+  y: Int @join__field
 }
 
-interface Fruit
-  @join__type(graph: SUBGRAPH1)
+interface I
+  @join__type(graph: S1, key: "id")
+  @join__type(graph: S2, key: "id", isInterfaceObject: true)
 {
-  edible: Boolean!
+  id: ID!
+  x: Int @join__field(graph: S1)
+  y: Int @join__field(graph: S2)
 }
 
 scalar join__FieldSet
 
 enum join__Graph {
-  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  S1 @join__graph(name: "S1", url: "none")
+  S2 @join__graph(name: "S2", url: "none")
 }
 
 scalar link__Import
@@ -63,7 +71,9 @@ enum link__Purpose {
 }
 
 type Query
-  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: S1)
+  @join__type(graph: S2)
 {
-  fruit: Fruit!
+  iFromS1: I @join__field(graph: S1)
+  iFromS2: I @join__field(graph: S2)
 }
