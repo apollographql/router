@@ -236,27 +236,3 @@ impl<'de> serde::de::Visitor<'de> for JSONPathVisitor {
         serde_json_bytes::path::JsonPathInst::from_str(s).map_err(serde::de::Error::custom)
     }
 }
-
-pub(crate) fn deserialize_jsonpath2<'de, D>(deserializer: D) -> Result<JsonPathInst, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    deserializer.deserialize_str(JSONPathVisitor2)
-}
-
-struct JSONPathVisitor2;
-
-impl<'de> serde::de::Visitor<'de> for JSONPathVisitor2 {
-    type Value = JsonPathInst;
-
-    fn expecting(&self, formatter: &mut Formatter) -> std::fmt::Result {
-        write!(formatter, "a JSON path")
-    }
-
-    fn visit_str<E>(self, s: &str) -> Result<Self::Value, E>
-    where
-        E: serde::de::Error,
-    {
-        JsonPathInst::from_str(s).map_err(serde::de::Error::custom)
-    }
-}

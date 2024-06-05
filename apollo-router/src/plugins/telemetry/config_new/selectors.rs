@@ -837,7 +837,7 @@ impl Selector for SupergraphSelector {
                             .expect("already checked the array had a length of 1; qed");
                     }
                 }*/
-                let mut val = response_data.find(&data);
+                let val = response_data.find(&data);
 
                 val.maybe_to_otel_value()
             } else {
@@ -861,7 +861,7 @@ impl Selector for SupergraphSelector {
                     }
                 }*/
 
-                let mut val = response_errors.find(&data);
+                let val = response_errors.find(&data);
 
                 val.maybe_to_otel_value()
             }
@@ -1115,7 +1115,7 @@ impl Selector for SubgraphSelector {
                             .expect("already checked the array had a length of 1; qed");
                     }
                 }*/
-                let mut val = subgraph_response_data.find(&data);
+                let val = subgraph_response_data.find(&data);
 
                 val.maybe_to_otel_value()
             } else {
@@ -1139,7 +1139,7 @@ impl Selector for SubgraphSelector {
                             .expect("already checked the array had a length of 1; qed");
                     }
                 }*/
-                let mut val = subgraph_response_error.find(&data);
+                let val = subgraph_response_error.find(&data);
 
                 val.maybe_to_otel_value()
             }
@@ -1194,7 +1194,6 @@ mod test {
     use std::sync::Arc;
 
     use http::StatusCode;
-    use jsonpath_rust::JsonPathInst;
     use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
@@ -1206,6 +1205,7 @@ mod test {
     use opentelemetry::KeyValue;
     use opentelemetry_api::StringValue;
     use serde_json::json;
+    use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;

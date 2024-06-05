@@ -572,7 +572,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_json_bytes 0.2.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "serde_json_bytes 0.2.2 (git+https://github.com/apollographql/serde_json_bytes?branch=geal/jsonpath)",
  "tokio",
  "tower",
 ]

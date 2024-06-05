@@ -1853,7 +1853,6 @@ mod tests {
     use apollo_compiler::ast::Name;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::execution::JsonMap;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -1864,6 +1863,7 @@ mod tests {
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
     use serde_json::json;
+    use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
 
     use super::*;
@@ -1882,6 +1882,8 @@ mod tests {
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::Context;
+
+    type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
     #[derive(RustEmbed)]
     #[folder = "src/plugins/telemetry/config_new/fixtures"]
