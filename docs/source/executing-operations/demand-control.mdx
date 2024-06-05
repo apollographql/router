@@ -332,7 +332,7 @@ cost_estimated_sum{cost_result="COST_OK",otel_scope_name="apollo/router"}
 cost_estimated_count{cost_result="COST_OK",otel_scope_name="apollo/router"} 20
 ```
 
-A chart of the example histogram:
+An example chart of a histogram:
 
 <img class="screenshot" src="../images/demand-control-example-histogram.png" width="600" />
 
@@ -343,8 +343,8 @@ You can also chart the percentage of operations that would be allowed or rejecte
 
 Although estimated costs won't necessarily match actual costs, you can use the metrics to ascertain the following: 
 - Whether any operations have underestimated costs
-- What to assign `static_estimated.list_size` as the actual maximum list size
-- What to assign `static_estimated.max` as the maximum cost of an allowed operation
+- What to set `static_estimated.list_size` as the actual maximum list size
+- What to set `static_estimated.max` as the maximum cost of an allowed operation
 
 In this example, just under half of the requests would be rejected with the current configuration. The cost of queries are also underestimated because `cost.delta` is non-zero.
 
@@ -478,21 +478,32 @@ graphql_list_length_restricted_sum{graphql_field_name="allProducts",graphql_type
 graphql_list_length_restricted_count{graphql_field_name="allProducts",graphql_type_name="Query",otel_scope_name="apollo/router"} 20
 ```
 
-This output shows that the actual list sizes for the `allProducts` field. You should configure `static_estimated.list_size` to be the maximum of the range of actual costs, which is 100.
+You can configure your APM to chart the histogram:
 
-```yaml
+<img class="screenshot" src="../images/demand-control-example-list-lengths.svg" width="600" />
+
+The chart shows that the actual list sizes for the `allProducts` field are at most 100, so you should update your `static_estimated.list_size` to be 100:
+
+```yaml title="Update list_size to measured actual max list size"
 preview_demand_control:
   enabled: true
   mode: measure
   strategy:
     static_estimated:
-      list_size: 100 # Updated list size
+      list_size: 100 # Updated to measured actual max list size
       max: 1000
 ```
 
+Rerunning the router and remeasuring costs with the updated `static_estimated.list_size` should result in new histograms and percentages of rejected operations. For example:
+
+<img class="screenshot" src="../images/demand-control-example-updated-costs.png" width="600" />
+
+
+<img class="screenshot" src="../images/demand-control-example-updated-cost-result.png" width="600" />
+
 Although there are no more cost deltas reported, the estimated costs have increased. You still have to adjust the maximum cost.
 
-Looking at the top N operations, you can see that the estimated costs have been updated:
+Looking at the top N operations, you may see that the estimated costs have been updated. For example:
 
 | Operation name      | Estimated cost |
 |---------------------|----------------|
@@ -522,6 +533,8 @@ preview_demand_control:
 
 ### Next steps
 
+#### Continue monitoring 
+
 Continue to monitor the costs of operations and take action if the estimation model becomes inaccurate. For example, update the estimation model if the maximum number of list items changes. 
 
 You can set alerts in your APM for events that may require changing your demand control settings. Events to alert include:
@@ -529,4 +542,8 @@ You can set alerts in your APM for events that may require changing your demand 
 - Increased max list size of your data.
 - Increased delta metric.
 
-Also, moving towards paging APIs will help to remove situations where a list field can return an arbitrarily large number of elements. 
+<Tip>
+
+Using paging APIs can help avoid situations where a list field returns an arbitrarily large number of elements. 
+
+</Tip>
