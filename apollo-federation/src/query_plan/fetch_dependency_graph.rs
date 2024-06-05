@@ -999,6 +999,8 @@ impl FetchDependencyGraph {
         println!("reduce_and_optimize: after remove_empty_nodes\n{self}");
 
         self.remove_useless_nodes()?;
+
+        self.merge_child_fetches_for_same_subgraph_and_path()?;
         // TODO Optimize: FED-55
 
         println!("reduce_and_optimize: final\n{self}");
@@ -1295,6 +1297,82 @@ impl FetchDependencyGraph {
                     Ok(false)
                 }
             })
+    }
+
+    /// - Calls `on_modification` if necessary.
+    fn merge_child_fetches_for_same_subgraph_and_path(&mut self) -> Result<(), FederationError> {
+        let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
+        for node_index in root_nodes {
+            self.recursive_merge_child_fetches_for_same_subgraph_and_path(node_index)?;
+        }
+        Ok(()) // done
+    }
+
+    /// - Calls `on_modification` if necessary.
+    fn recursive_merge_child_fetches_for_same_subgraph_and_path(
+        &mut self,
+        node_index: NodeIndex,
+    ) -> Result<(), FederationError> {
+        // We're traversing the `self.graph` in DFS order and mutate it top-down.
+        // - Assuming the graph is a DAG and has no cycle.
+        let children_nodes: Vec<_> = self.children_of(node_index).collect();
+        if children_nodes.len() < 2 {
+            return Ok(());
+        }
+
+        // We iterate on all pairs of children and merge those siblings that can be merged
+        // together.
+        // We will have two indices `i` and `j` such that `i < j`. When we merge `i` and `j`,
+        // `i`-th node will be merged into `j`-th node and skip the rest of `j` iteration,
+        // since `i` is dead and we are no longer looking for another node to merge `i` into.
+        //
+        // PORT_NOTE: The JS version merges `j` into `i` instead of `i` into `j`, relying on
+        // the `merge_sibling_in` would shrink `children_nodes` dynamically. I found it easier
+        // to reason about it the other way around by incrementing `i` when it's merged into
+        // `j` without modifying `children_nodes`.
+        for (i, i_node_index) in children_nodes.iter().cloned().enumerate() {
+            for (_j, j_node_index) in children_nodes.iter().cloned().enumerate().skip(i + 1) {
+                if self.can_merge_sibling_in(j_node_index, i_node_index)? {
+                    // Merge node `i` into node `j`.
+                    // In theory, we can merge in any direction. But, we merge i into j,
+                    // so `j` can be visited again in the outer loop.
+                    self.merge_sibling_in(j_node_index, i_node_index)?;
+
+                    // We're working on a minimal graph (we've done a transitive reduction
+                    // beforehand) and we need to keep the graph minimal as post-reduce steps
+                    // (the `process` method) rely on it. But merging 2 groups _can_ break
+                    // minimality.
+                    // Say we have:
+                    //   0 ------
+                    //            \
+                    //             4
+                    //   1 -- 3 --/
+                    // and we merge groups 0 and 1 (and let's call the result "2"), then we now
+                    // have:
+                    //      ------
+                    //     /       \
+                    //   2 <-- 3 -- 4
+                    // which is not minimal.
+                    //
+                    // So to fix it, we just re-run our dfs removal from that merged edge
+                    // (which is probably a tad overkill in theory, but for the reasons
+                    // mentioned on `reduce`, this is most likely a non-issue in practice).
+                    //
+                    // Note that this DFS can only affect the descendants of `j` (its children
+                    // and recursively so), so it does not affect our current iteration.
+                    self.remove_redundant_edges(j_node_index);
+
+                    break; // skip the rest of `j`'s iteration
+                }
+            }
+        }
+
+        // Now we recurse to the sub-groups.
+        for c in children_nodes {
+            self.recursive_merge_child_fetches_for_same_subgraph_and_path(c)?;
+        }
+
+        Ok(())
     }
 
     fn extract_children_and_deferred_dependencies(
