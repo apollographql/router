@@ -21,6 +21,7 @@ pub mod error;
 mod indented_display;
 pub mod link;
 pub mod merge;
+pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;

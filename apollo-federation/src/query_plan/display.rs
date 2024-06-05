@@ -83,6 +83,7 @@ impl FetchNode {
             operation_kind: _,
             input_rewrites: _,
             output_rewrites: _,
+            context_rewrites: _,
         } = self;
         state.write(format_args!("Fetch(service: {subgraph_name:?}"))?;
         if let Some(id) = id {
@@ -321,7 +322,7 @@ fn write_operation(
         )?
     }
     for fragment in operation_document.fragments.values() {
-        state.new_line()?;
+        state.write("\n\n")?; // new line without indentation (since `fragment` adds indentation)
         state.write(
             fragment
                 .serialize()
@@ -345,8 +346,8 @@ fn write_selections(
     // Manually indent and write the newline
     // to prevent a duplicate indent from `.new_line()` and `.initial_indent_level()`.
     state.indent_no_new_line();
-    state.write("\n")?;
     for sel in selections {
+        state.write("\n")?;
         state.write(sel.serialize().initial_indent_level(state.indent_level()))?;
     }
     state.dedent()?;

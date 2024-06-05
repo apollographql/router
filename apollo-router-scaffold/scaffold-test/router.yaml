@@ -1,0 +1,5 @@
+# uncomment this section if you plan to use the Dockerfile
+# supergraph:
+#   listen: 0.0.0.0:4000
+plugins:
+  # Add plugin configuration here

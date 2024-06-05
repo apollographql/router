@@ -349,6 +349,21 @@ pub(crate) mod test_utils {
         pub(crate) attributes: BTreeMap<String, serde_json::Value>,
     }
 
+    impl Ord for SerdeMetricDataPoint {
+        fn cmp(&self, other: &Self) -> Ordering {
+            //Horribly inefficient, but it's just for testing
+            let self_string = serde_json::to_string(&self.attributes).expect("serde failed");
+            let other_string = serde_json::to_string(&other.attributes).expect("serde failed");
+            self_string.cmp(&other_string)
+        }
+    }
+
+    impl PartialOrd for SerdeMetricDataPoint {
+        fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+            Some(self.cmp(other))
+        }
+    }
+
     impl SerdeMetricData {
         fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
             metric_data: &mut SerdeMetricData,
@@ -374,12 +389,30 @@ pub(crate) mod test_utils {
 
     impl From<Metric> for SerdeMetric {
         fn from(value: Metric) -> Self {
-            SerdeMetric {
+            let mut serde_metric = SerdeMetric {
                 name: value.name.into_owned(),
                 description: value.description.into_owned(),
                 unit: value.unit.as_str().to_string(),
                 data: value.data.into(),
+            };
+            // Sort the datapoints so that we can compare them
+            serde_metric.data.datapoints.sort();
+
+            // Redact duration metrics;
+            if serde_metric.name.ends_with(".duration") {
+                serde_metric
+                    .data
+                    .datapoints
+                    .iter_mut()
+                    .for_each(|datapoint| {
+                        if let Some(sum) = &datapoint.sum {
+                            if sum.as_f64().unwrap_or_default() > 0.0 {
+                                datapoint.sum = Some(0.1.into());
+                            }
+                        }
+                    });
             }
+            serde_metric
         }
     }
 
