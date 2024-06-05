@@ -19,8 +19,8 @@ pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub use models::validate;
 pub use models::Location;
-pub use models::ValidationError;
-pub use models::ValidationErrorCode;
+pub use models::ValidationCode;
+pub use models::ValidationMessage;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 

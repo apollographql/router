@@ -3,9 +3,9 @@ mod validation;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 pub use validation::validate;
-pub use validation::Error as ValidationError;
-pub use validation::ErrorCode as ValidationErrorCode;
+pub use validation::Code as ValidationCode;
 pub use validation::Location;
+pub use validation::Message as ValidationMessage;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;
