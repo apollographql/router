@@ -1,6 +1,5 @@
-use apollo_federation::query_plan::query_planner::{
-    QueryPlanIncrementalDeliveryConfig, QueryPlannerConfig,
-};
+use apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig;
+use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 #[test]
 fn basic_subscription_query_plan() {
