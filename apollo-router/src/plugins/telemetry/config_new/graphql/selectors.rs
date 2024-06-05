@@ -115,23 +115,13 @@ impl Selector for GraphQLSelector {
             },
             GraphQLSelector::FieldName { .. } => match value {
                 Value::Null => None,
-                _ => match &field.name {
-                    Name(NodeStr::Heap(arc_str, _)) => {
-                        Some(opentelemetry_api::Value::String(arc_str.clone().into()))
-                    }
-                    Name(NodeStr::Static(s)) => Some(opentelemetry_api::Value::String((*s).into())),
-                },
+                _ => compiler_name_to_otel_value(&field.name),
             },
             GraphQLSelector::FieldType {
                 field_type: FieldType::Name,
             } => match value {
                 Value::Null => None,
-                _ => match field.definition.ty.inner_named_type() {
-                    Name(NodeStr::Heap(arc_str, _)) => {
-                        Some(opentelemetry_api::Value::String(arc_str.clone().into()))
-                    }
-                    Name(NodeStr::Static(s)) => Some(opentelemetry_api::Value::String((*s).into())),
-                },
+                _ => compiler_name_to_otel_value(field.definition.ty.inner_named_type()),
             },
             GraphQLSelector::FieldType {
                 field_type: FieldType::Type,
@@ -143,12 +133,7 @@ impl Selector for GraphQLSelector {
             },
             GraphQLSelector::TypeName { .. } => match value {
                 Value::Null => None,
-                _ => match ty {
-                    Name(NodeStr::Heap(arc_str, _)) => {
-                        Some(opentelemetry_api::Value::String(arc_str.clone().into()))
-                    }
-                    Name(NodeStr::Static(s)) => Some(opentelemetry_api::Value::String((*s).into())),
-                },
+                _ => compiler_name_to_otel_value(ty),
             },
             GraphQLSelector::StaticField { r#static } => Some(r#static.clone().into()),
             GraphQLSelector::OperationName {
@@ -168,6 +153,18 @@ impl Selector for GraphQLSelector {
                 .map(opentelemetry::Value::from)
             }
         }
+    }
+}
+
+/// Converts a name from apollo_compiler to an OTel value, avoiding reallocating
+/// strs to Strings. OTel can directly use Arc<str> and static strs, we just need
+/// to extract them from the name we're given.
+fn compiler_name_to_otel_value(name: &Name) -> Option<opentelemetry::Value> {
+    match name {
+        Name(NodeStr::Heap(arc_str, _)) => {
+            Some(opentelemetry_api::Value::String(arc_str.clone().into()))
+        }
+        Name(NodeStr::Static(s)) => Some(opentelemetry_api::Value::String((*s).into())),
     }
 }
 
