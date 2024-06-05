@@ -685,6 +685,10 @@ impl Containment {
     pub fn is_contained(self) -> bool {
         matches!(self, Containment::StrictlyContained | Containment::Equal)
     }
+
+    pub fn is_equal(self) -> bool {
+        matches!(self, Containment::Equal)
+    }
 }
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues

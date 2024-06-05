@@ -20,6 +20,7 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
@@ -29,6 +30,7 @@ use petgraph::visit::IntoNodeReferences;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::ContainmentOptions;
 use crate::operation::Field;
 use crate::operation::FieldData;
 use crate::operation::InlineFragment;
@@ -163,7 +165,7 @@ pub(crate) struct FetchSelectionSet {
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
 // used to update `isKnownUseful` in `FetchGroup`, and it's easier to handle this there than try
 // to pass in a callback in Rust.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FetchInputs {
     /// The selection sets to be used as input to `_entities`, separated per parent type.
     selection_sets_per_parent_type: IndexMap<CompositeTypeDefinitionPosition, Arc<SelectionSet>>,
@@ -1001,7 +1003,8 @@ impl FetchDependencyGraph {
         self.remove_useless_nodes()?;
 
         self.merge_child_fetches_for_same_subgraph_and_path()?;
-        // TODO Optimize: FED-55
+
+        self.merge_fetches_to_same_subgraph_and_same_inputs()?;
 
         println!("reduce_and_optimize: final\n{self}");
         Ok(())
@@ -1373,6 +1376,87 @@ impl FetchDependencyGraph {
         }
 
         Ok(())
+    }
+
+    fn merge_fetches_to_same_subgraph_and_same_inputs(&mut self) -> Result<(), FederationError> {
+        // Sometimes, the query will directly query some fields that are also requirements for some
+        // other queried fields, and because there is complex dependencies involved, we won't be
+        // able to easily realize that we're doing the same fetch to a subgraph twice in 2
+        // different places (once for the user query, once for the require). For an example of this
+        // happening, see the test called 'handles diamond-shaped dependencies' in
+        // `buildPlan.test.ts` Of course, doing so is always inefficient and so this method ensures
+        // we merge such fetches.
+        // In practice, this method merges any 2 fetches that are to the same subgraph and same
+        // mergeAt, and have the exact same inputs.
+
+        // To find which groups are to the same subgraph and mergeAt somewhat efficiently, we
+        // generate a simple string key from each group subgraph name and mergeAt. We do "sanitize"
+        // subgraph name, but have no worries for `mergeAt` since it contains either number of
+        // field names, and the later is restricted by graphQL so as to not be an issue.
+        let mut by_subgraphs = MultiMap::new();
+        for node_index in self.graph.node_indices() {
+            let node = self.node_weight(node_index)?;
+            // We exclude groups without inputs because that's what we look for. In practice, this
+            // mostly just exclude root groups, which we don't really want to bother with anyway.
+            let Some(key) = node.subgraph_and_merge_at_key() else {
+                continue;
+            };
+            by_subgraphs.insert(key, node_index);
+        }
+
+        for (_key, nodes) in by_subgraphs {
+            // In most cases `nodes` is going be a single element, so skip the trivial case.
+            if nodes.len() < 2 {
+                continue;
+            }
+
+            // Create disjoint sets of the nodes.
+            // buckets: an array where each entry is a "bucket" of groups that can all be merge together.
+            let mut buckets: Vec<(NodeIndex, Vec<NodeIndex>)> = Vec::new();
+            let has_equal_inputs = |a: NodeIndex, b: NodeIndex| {
+                let a_node = self.node_weight(a)?;
+                let b_node = self.node_weight(b)?;
+                if a_node.defer_ref != b_node.defer_ref {
+                    return Ok::<_, FederationError>(false);
+                }
+                match (&a_node.inputs, &b_node.inputs) {
+                    (Some(a), Some(b)) => Ok(a.equals(b)),
+                    (None, None) => Ok(true),
+                    _ => Ok(false),
+                }
+            };
+            'outer: for node in nodes {
+                // see if there is an existing bucket for this node
+                for (bucket_head, bucket) in &mut buckets {
+                    if has_equal_inputs(*bucket_head, node)? {
+                        bucket.push(node);
+                        continue 'outer;
+                    }
+                }
+                // No existing bucket found, create a new one.
+                buckets.push((node, vec![node]));
+            }
+
+            // Merge items in each bucket
+            for (_, bucket) in buckets {
+                let Some((head, rest)) = bucket.split_first() else {
+                    // There is only merging to be done if there is at least one more.
+                    continue;
+                };
+
+                // We pick the head for the group and merge all others into it. Note that which
+                // group we choose shouldn't matter since the merging preserves all the
+                // dependencies of each group (both parents and children).
+                for node in rest {
+                    self.merge_in_with_all_dependencies(*head, *node)?;
+                }
+            }
+        }
+        // We may have merged nodes and broke the graph minimality in doing so, so we re-reduce to
+        // make sure. Note that if we did no modification to the graph, calling `reduce` is cheap
+        // (the `is_reduced` variable will still be `true`).
+        self.reduce();
+        Ok(()) // done
     }
 
     fn extract_children_and_deferred_dependencies(
@@ -1903,6 +1987,29 @@ impl FetchDependencyGraph {
         Ok(())
     }
 
+    /// Merges `merged_id` into `node_id`, without knowing the dependencies between those two nodes.
+    /// - Both `node_id` and `merged_id` must be in the same subgraph and have the same `merge_at`.
+    // Note that it is up to the caller to know if such merging is desirable. In particular, if
+    // both group have completely different inputs, merging them, which also merges their
+    // dependencies, might not be judicious for the optimality of the query plan.
+    // Assumptions:
+    // - node_id's defer_ref == merged_id's defer_ref
+    // - node_id's subgraph_name == merged_id's subgraph_name
+    // - node_id's merge_at == merged_id's merge_at
+    fn merge_in_with_all_dependencies(
+        &mut self,
+        node_id: NodeIndex,
+        merged_id: NodeIndex,
+    ) -> Result<(), FederationError> {
+        self.copy_inputs(node_id, merged_id)?;
+        self.merge_in_internal(
+            node_id,
+            merged_id,
+            &OpPath::default(),
+            /*merge_parent_dependencies*/ true,
+        )
+    }
+
     fn relocate_children_on_merged_in(
         &mut self,
         node_id: NodeIndex,
@@ -2341,6 +2448,26 @@ impl FetchDependencyGraphNode {
 
         FetchDependencyNodeDisplay { node: self, index }
     }
+
+    // PORT_NOTE: In JS version, this value is memoized on the node struct.
+    fn subgraph_and_merge_at_key(&self) -> Option<String> {
+        // PORT_NOTE: In JS version, this hash value is defined as below.
+        // ```
+        // hasInputs ? `${toValidGraphQLName(subgraphName)}-${mergeAt?.join('::') ?? ''}` : undefined,
+        // ```
+        // TODO: We could use a numeric hash key in Rust, instead of a string key as done in JS.
+        self.inputs.as_ref()?;
+        let subgraph_name = &self.subgraph_name;
+        let merge_at_str = match self.merge_at {
+            Some(ref merge_at) => merge_at
+                .iter()
+                .map(|m| m.to_string())
+                .collect::<Vec<_>>()
+                .join("::"),
+            None => "".to_string(),
+        };
+        Some(format!("{subgraph_name}-{merge_at_str}"))
+    }
 }
 
 fn operation_for_entities_fetch(
@@ -2587,6 +2714,30 @@ impl FetchInputs {
                 return false;
             }
         }
+        true
+    }
+
+    fn equals(&self, other: &Self) -> bool {
+        if self.selection_sets_per_parent_type.len() != other.selection_sets_per_parent_type.len() {
+            return false;
+        }
+
+        // For all parent types in `self`, its selection set is equal to that of the `other`.
+        // Since they have the same # of parent types, the other way around should also hold.
+        for (parent_type, self_selections) in &self.selection_sets_per_parent_type {
+            let Some(other_selections) = other.selection_sets_per_parent_type.get(parent_type)
+            else {
+                return false;
+            };
+            if !self_selections
+                .containment(other_selections, ContainmentOptions::default())
+                .is_equal()
+            {
+                return false;
+            }
+            // so far so good
+        }
+        // all clear
         true
     }
 
