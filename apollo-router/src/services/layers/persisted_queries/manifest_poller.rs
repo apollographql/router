@@ -224,7 +224,11 @@ impl PersistedQueryManifestPoller {
                     read_to_string(local_pq_list.clone())
                         .await
                         .map_err(|e| -> BoxError {
-                            format!("could not read local persisted query list file {}: {}", local_pq_list, e).into()
+                            format!(
+                                "could not read local persisted query list file {}: {}",
+                                local_pq_list, e
+                            )
+                            .into()
                         })?;
 
                 let manifest_file: SignedUrlChunk =
@@ -244,7 +248,7 @@ impl PersistedQueryManifestPoller {
                 if manifest_file.version != 1 {
                     return Err("persisted query manifest chunk version is not 1".into());
                 }
-                
+
                 for operation in manifest_file.operations {
                     manifest.insert(operation.id, operation.body);
                 }
@@ -783,7 +787,9 @@ mod tests {
                     Some(true),
                     Some(false),
                     Some(PersistedQueriesSafelist::default()),
-                    Some(vec!("tests/fixtures/persisted-queries-manifest.json".to_string())),
+                    Some(vec![
+                        "tests/fixtures/persisted-queries-manifest.json".to_string()
+                    ]),
                 ))
                 .build()
                 .unwrap(),
