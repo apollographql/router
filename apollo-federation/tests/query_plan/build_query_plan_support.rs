@@ -253,7 +253,6 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
                 );
             }
         }
-        // visit_node(subgraph_name, &mut fetch_nodes, node)
         fn visit_node<'plan>(
             subgraph_name: &str,
             fetch_nodes: &mut Vec<&'plan FetchNode>,
