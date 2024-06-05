@@ -211,9 +211,9 @@ dependencies = [
 [[package]]
 name = "apollo-compiler"
 version = "1.0.0-beta.17"
-source = "git+https://github.com/tninesling/apollo-rs.git?branch=replace-triomphe-with-std-arc#7fe9a0f28abc56c6dfe6263ae89f4affd9c319ac"
+source = "git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8#65c4c92443dc19b85ef8a8c22dce397ab3ac24a8"
 dependencies = [
- "apollo-parser 0.7.7 (git+https://github.com/tninesling/apollo-rs.git?branch=replace-triomphe-with-std-arc)",
+ "apollo-parser 0.7.7 (git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8)",
  "ariadne",
  "indexmap 2.2.3",
  "rowan",
@@ -239,7 +239,7 @@ dependencies = [
 name = "apollo-federation"
 version = "1.48.0"
 dependencies = [
- "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?branch=replace-triomphe-with-std-arc)",
+ "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8)",
  "derive_more",
  "hex",
  "indexmap 2.2.3",
@@ -261,7 +261,7 @@ dependencies = [
 name = "apollo-federation-cli"
 version = "0.1.0"
 dependencies = [
- "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?branch=replace-triomphe-with-std-arc)",
+ "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8)",
  "apollo-federation",
  "clap",
 ]
@@ -280,7 +280,7 @@ dependencies = [
 [[package]]
 name = "apollo-parser"
 version = "0.7.7"
-source = "git+https://github.com/tninesling/apollo-rs.git?branch=replace-triomphe-with-std-arc#7fe9a0f28abc56c6dfe6263ae89f4affd9c319ac"
+source = "git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8#65c4c92443dc19b85ef8a8c22dce397ab3ac24a8"
 dependencies = [
  "memchr",
  "rowan",
@@ -293,7 +293,7 @@ version = "1.48.0"
 dependencies = [
  "access-json",
  "anyhow",
- "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?branch=replace-triomphe-with-std-arc)",
+ "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8)",
  "apollo-federation",
  "arc-swap",
  "askama",
@@ -5831,7 +5831,7 @@ name = "router-fuzz"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?branch=replace-triomphe-with-std-arc)",
+ "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8)",
  "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-router",
  "apollo-smith",

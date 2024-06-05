@@ -1,5 +1,7 @@
 use apollo_compiler::executable::Field;
+use apollo_compiler::executable::Name;
 use apollo_compiler::executable::NamedType;
+use apollo_compiler::NodeStr;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
@@ -113,13 +115,23 @@ impl Selector for GraphQLSelector {
             },
             GraphQLSelector::FieldName { .. } => match value {
                 Value::Null => None,
-                _ => Some(field.name.to_string().into()),
+                _ => match &field.name {
+                    Name(NodeStr::Heap(arc_str, _)) => {
+                        Some(opentelemetry_api::Value::String(arc_str.clone().into()))
+                    }
+                    Name(NodeStr::Static(s)) => Some(opentelemetry_api::Value::String((*s).into())),
+                },
             },
             GraphQLSelector::FieldType {
                 field_type: FieldType::Name,
             } => match value {
                 Value::Null => None,
-                _ => Some(field.definition.ty.inner_named_type().to_string().into()),
+                _ => match field.definition.ty.inner_named_type() {
+                    Name(NodeStr::Heap(arc_str, _)) => {
+                        Some(opentelemetry_api::Value::String(arc_str.clone().into()))
+                    }
+                    Name(NodeStr::Static(s)) => Some(opentelemetry_api::Value::String((*s).into())),
+                },
             },
             GraphQLSelector::FieldType {
                 field_type: FieldType::Type,
@@ -131,7 +143,12 @@ impl Selector for GraphQLSelector {
             },
             GraphQLSelector::TypeName { .. } => match value {
                 Value::Null => None,
-                _ => Some(ty.to_string().into()),
+                _ => match ty {
+                    Name(NodeStr::Heap(arc_str, _)) => {
+                        Some(opentelemetry_api::Value::String(arc_str.clone().into()))
+                    }
+                    Name(NodeStr::Static(s)) => Some(opentelemetry_api::Value::String((*s).into())),
+                },
             },
             GraphQLSelector::StaticField { r#static } => Some(r#static.clone().into()),
             GraphQLSelector::OperationName {
