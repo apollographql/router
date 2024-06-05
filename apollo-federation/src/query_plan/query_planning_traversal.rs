@@ -49,7 +49,7 @@ use crate::schema::ValidFederationSchema;
 // runtime (introducing the new field `head_must_be_root`).
 // NOTE: `head_must_be_root` can be deduced from the `head` node's type, so we might be able to
 //       remove it.
-pub(crate) struct QueryPlanningParameters {
+pub(crate) struct QueryPlanningParameters<'p> {
     /// The supergraph schema that generated the federated query graph.
     pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph used for query planning.
@@ -57,7 +57,7 @@ pub(crate) struct QueryPlanningParameters {
     /// The operation to be query planned.
     pub(crate) operation: Arc<Operation>,
     /// A processor for converting fetch dependency graphs to query plans.
-    pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor,
+    pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor<'p>,
     /// The query graph node at which query planning begins.
     pub(crate) head: NodeIndex,
     /// Whether the head must be a root node for query planning.
@@ -73,9 +73,9 @@ pub(crate) struct QueryPlanningParameters {
     pub(crate) statistics: QueryPlanningStatistics,
 }
 
-pub(crate) struct QueryPlanningTraversal<'a> {
+pub(crate) struct QueryPlanningTraversal<'a, 'p> {
     /// The parameters given to query planning.
-    parameters: &'a QueryPlanningParameters,
+    parameters: &'a QueryPlanningParameters<'p>,
     /// The root kind of the operation.
     root_kind: SchemaRootDefinitionKind,
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
@@ -151,13 +151,13 @@ impl BestQueryPlanInfo {
     }
 }
 
-impl<'a> QueryPlanningTraversal<'a> {
+impl<'a, 'p> QueryPlanningTraversal<'a, 'p> {
     pub fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
         // The ownership of `QueryPlanningParameters` is awkward and should probably be
         // refactored.
-        parameters: &'a QueryPlanningParameters,
+        parameters: &'a QueryPlanningParameters<'p>,
         selection_set: SelectionSet,
         has_defers: bool,
         root_kind: SchemaRootDefinitionKind,
@@ -179,7 +179,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     // Many arguments is okay for a private constructor function.
     #[allow(clippy::too_many_arguments)]
     fn new_inner(
-        parameters: &'a QueryPlanningParameters,
+        parameters: &'a QueryPlanningParameters<'p>,
         selection_set: SelectionSet,
         starting_id_generation: u64,
         has_defers: bool,
@@ -928,7 +928,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     }
 }
 
-impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
+impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_, '_> {
     fn add_to_plan(&mut self, plan_info: &PlanInfo, tree: Arc<OpPathTree>) -> PlanInfo {
         let mut updated_graph = plan_info.fetch_dependency_graph.clone();
         let result = self.updated_dependency_graph(&mut updated_graph, &tree);
@@ -985,7 +985,7 @@ impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
 //            The same would be infeasible to implement in Rust due to the cyclic references.
 //            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
-impl<'a> ConditionResolver for QueryPlanningTraversal<'a> {
+impl<'a, 'p> ConditionResolver for QueryPlanningTraversal<'a, 'p> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
     fn resolve(
         &mut self,

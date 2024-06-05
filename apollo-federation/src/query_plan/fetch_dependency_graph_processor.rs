@@ -6,12 +6,12 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 
 use crate::error::FederationError;
-use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::QueryGraph;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph::DeferredInfo;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraphNode;
+use crate::query_plan::query_planner::RebasedFragments;
 use crate::query_plan::ConditionNode;
 use crate::query_plan::DeferNode;
 use crate::query_plan::DeferredDeferBlock;
@@ -45,9 +45,9 @@ const FETCH_COST: QueryPlanCost = 1000.0;
 const PIPELINING_COST: QueryPlanCost = 100.0;
 
 #[derive(Clone)]
-pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
+pub(crate) struct FetchDependencyGraphToQueryPlanProcessor<'f> {
     variable_definitions: Vec<Node<VariableDefinition>>,
-    fragments: Option<RebasedFragments>,
+    fragments: Option<&'f RebasedFragments>,
     operation_name: Option<Name>,
     assigned_defer_labels: Option<HashSet<NodeStr>>,
     counter: u32,
@@ -241,10 +241,10 @@ fn sequence_cost(values: impl IntoIterator<Item = QueryPlanCost>) -> QueryPlanCo
         .sum()
 }
 
-impl FetchDependencyGraphToQueryPlanProcessor {
+impl<'f> FetchDependencyGraphToQueryPlanProcessor<'f> {
     pub(crate) fn new(
         variable_definitions: Vec<Node<VariableDefinition>>,
-        fragments: Option<RebasedFragments>,
+        fragments: Option<&'f RebasedFragments>,
         operation_name: Option<Name>,
         assigned_defer_labels: Option<HashSet<NodeStr>>,
     ) -> Self {
@@ -258,8 +258,8 @@ impl FetchDependencyGraphToQueryPlanProcessor {
     }
 }
 
-impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
-    for FetchDependencyGraphToQueryPlanProcessor
+impl<'f> FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
+    for FetchDependencyGraphToQueryPlanProcessor<'f>
 {
     fn on_node(
         &mut self,
@@ -277,7 +277,7 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             query_graph,
             handled_conditions,
             &self.variable_definitions,
-            self.fragments.as_mut(),
+            self.fragments,
             op_name,
         )
     }

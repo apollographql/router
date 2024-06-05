@@ -1,3 +1,5 @@
+use std::cell::RefCell;
+use std::collections::HashMap;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -19,7 +21,6 @@ use crate::link::spec::Identity;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
 use crate::operation::NormalizedDefer;
-use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
@@ -180,6 +181,45 @@ impl QueryPlannerConfig {
     fn assert_valid(&self) {
         if self.incremental_delivery.enable_defer {
             assert!(!self.debug.bypass_planner_for_single_subgraph, "Cannot use the `debug.bypass_planner_for_single_subgraph` query planner option when @defer support is enabled");
+        }
+    }
+}
+
+/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
+// XXX(@goto-bus-stop): this probably doesn't require `pub(crate)`. It should be internal to the
+// `query_plan` module.
+pub(crate) struct RebasedFragments {
+    pub(super) original_fragments: NamedFragments,
+    // JS PORT NOTE: In JS implementation values were optional, in Rust we use an empty structure
+    // instead of a `None`.
+    /// Map key: subgraph name
+    rebased_fragments: RefCell<HashMap<NodeStr, NamedFragments>>,
+}
+
+impl RebasedFragments {
+    fn new(fragments: NamedFragments) -> Self {
+        Self {
+            original_fragments: fragments,
+            rebased_fragments: Default::default(),
+        }
+    }
+
+    pub(super) fn for_subgraph(
+        &self,
+        subgraph_name: impl Into<NodeStr>,
+        subgraph_schema: &ValidFederationSchema,
+    ) -> Result<NamedFragments, FederationError> {
+        // Should never fail as this structure is used in single-threaded `build_query_plan()` calls.
+        let mut cache = self
+            .rebased_fragments
+            .try_borrow_mut()
+            .map_err(|_| FederationError::internal("Conflicting borrow inside RebasedFragments"))?;
+        match cache.entry(subgraph_name.into()) {
+            std::collections::hash_map::Entry::Vacant(vacant) => {
+                let rebased = vacant.insert(self.original_fragments.rebase_on(subgraph_schema)?);
+                Ok(rebased.clone())
+            }
+            std::collections::hash_map::Entry::Occupied(occupied) => Ok(occupied.get().clone()),
         }
     }
 }
@@ -429,7 +469,7 @@ impl QueryPlanner {
         };
         let processor = FetchDependencyGraphToQueryPlanProcessor::new(
             operation.variables.clone(),
-            rebased_fragments,
+            rebased_fragments.as_ref(),
             operation.name.clone(),
             assigned_defer_labels,
         );

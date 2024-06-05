@@ -36,7 +36,6 @@ use crate::operation::InlineFragmentSelection;
 use crate::operation::NamedFragments;
 use crate::operation::Operation;
 use crate::operation::RebaseErrorHandlingOption;
-use crate::operation::RebasedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
 use crate::operation::SelectionMap;
@@ -59,6 +58,7 @@ use crate::query_plan::conditions::remove_conditions_from_selection_set;
 use crate::query_plan::conditions::remove_unneeded_top_level_fragment_directives;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
+use crate::query_plan::query_planner::RebasedFragments;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
 use crate::query_plan::FetchDataValueSetter;
@@ -1762,7 +1762,7 @@ impl FetchDependencyGraphNode {
         query_graph: &QueryGraph,
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
-        fragments: Option<&mut RebasedFragments>,
+        fragments: Option<&RebasedFragments>,
         operation_name: Option<NodeStr>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
         if self.selection_set.selection_set.selections.is_empty() {
@@ -1806,8 +1806,9 @@ impl FetchDependencyGraphNode {
         };
         if let Some(fragments) = fragments
             .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
+            .transpose()?
         {
-            operation.optimize(fragments)?;
+            operation.optimize(&fragments)?;
         }
         let operation_document = operation.try_into()?;
 
