@@ -44,24 +44,21 @@ fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
 
 /// Sort an input value, which means specifically sorting their object values by keys (assuming no
 /// duplicates). This is used for hashing input values in a way consistent with [same_value()].
-fn sort_value(value: &executable::Value) -> executable::Value {
+fn sort_value(value: &mut executable::Value) {
     use apollo_compiler::executable::Value;
     match value {
-        Value::List(elems) => Value::List(
+        Value::List(elems) => {
             elems
-                .iter()
-                .map(|value| Node::new(sort_value(value)))
-                .collect(),
-        ),
-        Value::Object(pairs) => {
-            let mut pairs = pairs
-                .iter()
-                .map(|(name, value)| (name.clone(), Node::new(sort_value(value))))
-                .collect::<Vec<_>>();
-            pairs.sort_by(|left, right| left.0.cmp(&right.0));
-            Value::Object(pairs)
+                .iter_mut()
+                .for_each(|value| sort_value(value.make_mut()));
         }
-        _ => value.clone(),
+        Value::Object(pairs) => {
+            pairs
+                .iter_mut()
+                .for_each(|(_, value)| sort_value(value.make_mut()));
+            pairs.sort_by(|left, right| left.0.cmp(&right.0));
+        }
+        _ => {}
     }
 }
 
@@ -160,20 +157,11 @@ fn same_arguments(
 /// Sort arguments, which means specifically sorting arguments by names and object values by keys
 /// (assuming no duplicates). This is used for hashing arguments in a way consistent with
 /// [same_arguments()].
-pub(super) fn sort_arguments(
-    arguments: &[Node<executable::Argument>],
-) -> Vec<Node<executable::Argument>> {
-    let mut arguments = arguments
-        .iter()
-        .map(|arg| {
-            Node::new(executable::Argument {
-                name: arg.name.clone(),
-                value: Node::new(sort_value(&arg.value)),
-            })
-        })
-        .collect::<Vec<_>>();
-    arguments.sort_by(|left, right| left.name.cmp(&right.name));
+pub(super) fn sort_arguments(arguments: &mut [Node<executable::Argument>]) {
     arguments
+        .iter_mut()
+        .for_each(|arg| sort_value(arg.make_mut().value.make_mut()));
+    arguments.sort_by(|left, right| left.name.cmp(&right.name));
 }
 
 /// Compare sorted arguments; see [compare_sorted_name_value_pairs()] for semantics. This is used
@@ -205,23 +193,15 @@ fn same_directives(left: &executable::DirectiveList, right: &executable::Directi
 /// Sort directives, which means specifically sorting their arguments, sorting the directives by
 /// name, and then breaking directive-name ties by comparing sorted arguments. This is used for
 /// hashing arguments in a way consistent with [same_directives()].
-pub(super) fn sort_directives(directives: &executable::DirectiveList) -> executable::DirectiveList {
-    let mut directives = directives
-        .0
-        .iter()
-        .map(|directive| {
-            Node::new(executable::Directive {
-                name: directive.name.clone(),
-                arguments: sort_arguments(&directive.arguments),
-            })
-        })
-        .collect::<Vec<_>>();
+pub(super) fn sort_directives(directives: &mut executable::DirectiveList) {
+    directives
+        .iter_mut()
+        .for_each(|directive| sort_arguments(&mut directive.make_mut().arguments));
     directives.sort_by(|left, right| {
         left.name
             .cmp(&right.name)
             .then_with(|| compare_sorted_arguments(&left.arguments, &right.arguments))
     });
-    executable::DirectiveList(directives)
 }
 
 pub(super) fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {

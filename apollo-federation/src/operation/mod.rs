@@ -1040,9 +1040,11 @@ mod field_selection {
 
     impl Field {
         pub(crate) fn new(data: FieldData) -> Self {
+            let mut arguments = data.arguments.as_ref().clone();
+            sort_arguments(&mut arguments);
             Self {
                 key: data.key(),
-                sorted_arguments: Arc::new(sort_arguments(&data.arguments)),
+                sorted_arguments: Arc::new(arguments),
                 data,
             }
         }
@@ -1203,9 +1205,11 @@ mod field_selection {
 
     impl HasSelectionKey for FieldData {
         fn key(&self) -> SelectionKey {
+            let mut directives = self.directives.as_ref().clone();
+            sort_directives(&mut directives);
             SelectionKey::Field {
                 response_name: self.response_name(),
-                directives: Arc::new(sort_directives(&self.directives)),
+                directives: Arc::new(directives),
             }
         }
     }
@@ -1307,9 +1311,11 @@ mod fragment_spread_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::FragmentSpread {
                     fragment_name: self.fragment_name.clone(),
-                    directives: Arc::new(sort_directives(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
@@ -1605,12 +1611,14 @@ mod inline_fragment_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::InlineFragment {
                     type_condition: self
                         .type_condition_position
                         .as_ref()
                         .map(|pos| pos.type_name().clone()),
-                    directives: Arc::new(sort_directives(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
