@@ -364,11 +364,11 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
                 FetchDataPathElement::TypenameEquals(typename) => {
                     assert_eq!(typename, &NodeStr::new("A"))
                 }
-                _ => assert!(false, "Expected FetchDataPathElement::TypenameEquals path"),
+                _ => unreachable!("Expected FetchDataPathElement::TypenameEquals path"),
             }
             assert_eq!(v.set_value_to, "I");
         }
-        _ => assert!(false, "Expected FetchDataRewrite::ValueSetter rewrite"),
+        _ => unreachable!("Expected FetchDataRewrite::ValueSetter rewrite"),
     }
 }
 
