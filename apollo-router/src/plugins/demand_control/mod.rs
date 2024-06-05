@@ -137,8 +137,6 @@ pub(crate) enum DemandControlError {
     },
     /// Query could not be parsed: {0}
     QueryParseFailure(String),
-    /// The response body could not be properly matched with its query's structure: {0}
-    ResponseTypingFailure(String),
     /// {0}
     SubgraphOperationNotInitialized(crate::query_planner::fetch::SubgraphOperationNotInitialized),
 }
@@ -176,10 +174,6 @@ impl IntoGraphQLErrors for DemandControlError {
                 .extension_code(self.code())
                 .message(self.to_string())
                 .build()]),
-            DemandControlError::ResponseTypingFailure(_) => Ok(vec![graphql::Error::builder()
-                .extension_code(self.code())
-                .message(self.to_string())
-                .build()]),
             DemandControlError::SubgraphOperationNotInitialized(e) => Ok(e.into_graphql_errors()),
         }
     }
@@ -191,7 +185,6 @@ impl DemandControlError {
             DemandControlError::EstimatedCostTooExpensive { .. } => "COST_ESTIMATED_TOO_EXPENSIVE",
             DemandControlError::ActualCostTooExpensive { .. } => "COST_ACTUAL_TOO_EXPENSIVE",
             DemandControlError::QueryParseFailure(_) => "COST_QUERY_PARSE_FAILURE",
-            DemandControlError::ResponseTypingFailure(_) => "COST_RESPONSE_TYPING_FAILURE",
             DemandControlError::SubgraphOperationNotInitialized(e) => e.code(),
         }
     }
@@ -388,7 +381,7 @@ impl Plugin for DemandControl {
     }
 }
 
-register_plugin!("apollo", "experimental_demand_control", DemandControl);
+register_plugin!("apollo", "preview_demand_control", DemandControl);
 
 #[cfg(test)]
 mod test {

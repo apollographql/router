@@ -15,6 +15,7 @@ use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -22,7 +23,6 @@ use super::attributes::HttpServerAttributes;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -473,10 +473,10 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
-            Self::Extendable { attributes } => attributes.on_error(error),
+            Self::Extendable { attributes } => attributes.on_error(error, ctx),
         }
     }
 
@@ -594,8 +594,8 @@ where
         self.attributes.on_response_event(response, ctx)
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
-        self.attributes.on_error(error)
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+        self.attributes.on_error(error, ctx)
     }
 }
 
@@ -662,7 +662,14 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
-    fn on_response_field(&self, _typed_value: &TypedValue, _ctx: &Context) {}
+    fn on_response_field(
+        &self,
+        _type: &apollo_compiler::executable::NamedType,
+        _field: &apollo_compiler::executable::Field,
+        _value: &Value,
+        _ctx: &Context,
+    ) {
+    }
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
@@ -691,8 +698,14 @@ where
         self.attributes.on_response_event(response, ctx);
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
-        self.attributes.on_response_field(typed_value, ctx);
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
+        self.attributes.on_response_field(ty, field, value, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -721,10 +734,10 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
-        let mut attrs = self.http_client_request_body_size.on_error(error);
-        attrs.extend(self.http_client_request_duration.on_error(error));
-        attrs.extend(self.http_client_response_body_size.on_error(error));
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+        let mut attrs = self.http_client_request_body_size.on_error(error, ctx);
+        attrs.extend(self.http_client_request_duration.on_error(error, ctx));
+        attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
 
         attrs
     }
@@ -914,12 +927,18 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
         for counter in &self.counters {
-            counter.on_response_field(typed_value, ctx);
+            counter.on_response_field(ty, field, value, ctx);
         }
         for histogram in &self.histograms {
-            histogram.on_response_field(typed_value, ctx);
+            histogram.on_response_field(ty, field, value, ctx);
         }
     }
 }
@@ -1313,12 +1332,17 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
 
         let mut attrs = inner.attributes.clone();
         if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(selectors.on_error(error).into_iter().collect::<Vec<_>>());
+            attrs.extend(
+                selectors
+                    .on_error(error, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
         }
 
         let increment = match inner.increment {
@@ -1339,9 +1363,18 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
             return;
         }
 
@@ -1350,7 +1383,7 @@ where
         if let Some(selectors) = inner.selectors.as_ref() {
             attrs.extend(
                 selectors
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .into_iter()
                     .collect::<Vec<_>>(),
             );
@@ -1359,7 +1392,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(typed_value, ctx))
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::FieldCustom(None) => {
@@ -1714,12 +1747,12 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
         let mut attrs: Vec<KeyValue> = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_error(error).into_iter().collect())
+            .map(|s| s.on_error(error, ctx).into_iter().collect())
             .unwrap_or_default();
         attrs.append(&mut inner.attributes);
 
@@ -1738,9 +1771,18 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
             return;
         }
 
@@ -1749,7 +1791,7 @@ where
         if let Some(selectors) = inner.selectors.as_ref() {
             attrs.extend(
                 selectors
-                    .on_response_field(typed_value, ctx)
+                    .on_response_field(ty, field, value, ctx)
                     .into_iter()
                     .collect::<Vec<_>>(),
             );
@@ -1758,7 +1800,7 @@ where
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(typed_value, ctx))
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
                 Increment::FieldCustom(None) => {
@@ -2016,6 +2058,108 @@ mod tests {
         },
     }
 
+    impl TypedValueMirror {
+        fn field(&self) -> Option<apollo_compiler::executable::Field> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Number {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::String {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::List {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Object {
+                    field_name,
+                    field_type,
+                    ..
+                } => Some(Self::create_field(field_type.clone(), field_name.clone())),
+            }
+        }
+
+        fn ty(&self) -> Option<NamedType> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool { type_name, .. }
+                | TypedValueMirror::Number { type_name, .. }
+                | TypedValueMirror::String { type_name, .. }
+                | TypedValueMirror::List { type_name, .. }
+                | TypedValueMirror::Object { type_name, .. } => {
+                    Some(Self::create_type_name(type_name.clone()))
+                }
+            }
+        }
+
+        fn value(&self) -> Option<Value> {
+            match self {
+                TypedValueMirror::Null => Some(Value::Null),
+                TypedValueMirror::Bool { value, .. } => Some(serde_json_bytes::json!(*value)),
+                TypedValueMirror::Number { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::String { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::List { values, .. } => {
+                    let values = values.iter().filter_map(|v| v.value()).collect();
+                    Some(Value::Array(values))
+                }
+                TypedValueMirror::Object { values, .. } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+                TypedValueMirror::Root { values } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+            }
+        }
+
+        fn create_field(
+            field_type: String,
+            field_name: String,
+        ) -> apollo_compiler::executable::Field {
+            apollo_compiler::executable::Field {
+                definition: apollo_compiler::schema::FieldDefinition {
+                    description: None,
+                    name: NamedType::new(field_name.clone()).expect("valid field name"),
+                    arguments: vec![],
+                    ty: apollo_compiler::schema::Type::Named(
+                        NamedType::new(field_type.clone()).expect("valid type name"),
+                    ),
+                    directives: Default::default(),
+                }
+                .into(),
+                alias: None,
+                name: NamedType::new(field_name.clone()).expect("valid field name"),
+                arguments: vec![],
+                directives: Default::default(),
+                selection_set: SelectionSet::new(
+                    NamedType::new(field_name).expect("valid field name"),
+                ),
+            }
+        }
+
+        fn create_type_name(type_name: String) -> Name {
+            NamedType::new(type_name).expect("valid type name")
+        }
+    }
+
     #[derive(Deserialize, JsonSchema)]
     #[serde(deny_unknown_fields, rename_all = "snake_case")]
     struct TestDefinition {
@@ -2229,9 +2373,12 @@ mod tests {
                                         .on_response_event(&response, &context);
                                 }
                                 Event::ResponseField { typed_value } => {
-                                    let typed_value_data: TypedValueData = typed_value.into();
-                                    let typed_value = TypedValue::from(&typed_value_data);
-                                    graphql_instruments.on_response_field(&typed_value, &context);
+                                    graphql_instruments.on_response_field(
+                                        &typed_value.ty().expect("type should exist"),
+                                        &typed_value.field().expect("field should exist"),
+                                        &typed_value.value().expect("value should exist"),
+                                        &context,
+                                    );
                                 }
                                 Event::Context { map } => {
                                     for (key, value) in map {
@@ -2323,171 +2470,6 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(schema.unwrap().as_bytes())
             .expect("write schema");
-    }
-
-    enum TypedValueData {
-        Null,
-        Bool {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: bool,
-        },
-        Number {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: serde_json::Number,
-        },
-        String {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: String,
-        },
-        List {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            values: Vec<TypedValueData>,
-        },
-        Object {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            values: HashMap<String, TypedValueData>,
-        },
-        Root {
-            values: HashMap<String, TypedValueData>,
-        },
-    }
-
-    impl From<TypedValueMirror> for TypedValueData {
-        fn from(value: TypedValueMirror) -> Self {
-            match value {
-                TypedValueMirror::Null => TypedValueData::Null,
-                TypedValueMirror::Bool {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::Bool {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::Number {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::Number {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::String {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::String {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::List {
-                    type_name,
-                    field_type,
-                    field_name,
-                    values,
-                } => TypedValueData::List {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    values: values.into_iter().map(|v| v.into()).collect(),
-                },
-                TypedValueMirror::Object {
-                    type_name,
-                    field_type,
-                    field_name,
-                    values,
-                } => TypedValueData::Object {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
-                },
-                TypedValueMirror::Root { values } => TypedValueData::Root {
-                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
-                },
-            }
-        }
-    }
-
-    impl TypedValueData {
-        fn field(field_type: String, field_name: String) -> apollo_compiler::executable::Field {
-            apollo_compiler::executable::Field {
-                definition: apollo_compiler::schema::FieldDefinition {
-                    description: None,
-                    name: NamedType::new(field_name.clone()).expect("valid field name"),
-                    arguments: vec![],
-                    ty: apollo_compiler::schema::Type::Named(
-                        NamedType::new(field_type.clone()).expect("valid type name"),
-                    ),
-                    directives: Default::default(),
-                }
-                .into(),
-                alias: None,
-                name: NamedType::new(field_name.clone()).expect("valid field name"),
-                arguments: vec![],
-                directives: Default::default(),
-                selection_set: SelectionSet::new(
-                    NamedType::new(field_name).expect("valid field name"),
-                ),
-            }
-        }
-
-        fn type_name(type_name: String) -> Name {
-            NamedType::new(type_name).expect("valid type name")
-        }
-    }
-
-    impl<'a> From<&'a TypedValueData> for TypedValue<'a> {
-        fn from(value: &'a TypedValueData) -> Self {
-            match value {
-                TypedValueData::Null => TypedValue::Null,
-                TypedValueData::Bool {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::Bool(type_name, field_definition, value),
-                TypedValueData::Number {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::Number(type_name, field_definition, value),
-                TypedValueData::String {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::String(type_name, field_definition, value),
-                TypedValueData::List {
-                    type_name,
-                    field_definition,
-                    values,
-                } => TypedValue::List(
-                    type_name,
-                    field_definition,
-                    values.iter().map(|v| v.into()).collect(),
-                ),
-                TypedValueData::Object {
-                    type_name,
-                    field_definition,
-                    values,
-                } => TypedValue::Object(
-                    type_name,
-                    field_definition,
-                    values.iter().map(|(k, v)| (k.clone(), v.into())).collect(),
-                ),
-                TypedValueData::Root { values } => {
-                    TypedValue::Root(values.iter().map(|(k, v)| (k.clone(), v.into())).collect())
-                }
-            }
-        }
     }
 
     #[tokio::test]

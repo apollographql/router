@@ -17,9 +17,9 @@ use petgraph::Direction;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::InlineFragment;
-use crate::query_plan::operation::SelectionSet;
+use crate::operation::Field;
+use crate::operation::InlineFragment;
+use crate::operation::SelectionSet;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
