@@ -42,46 +42,42 @@ fn basic_subscription_query_plan() {
         }
         "#,
         @r###"
-        QueryPlan {
-            Subscription {
-            Primary: {
-                Fetch(service: "subgraphA") {
+      QueryPlan {
+        Subscription {
+          Primary: {Fetch(service: "SubgraphA") {
+                  subscription MySubscription__SubgraphA__0 {
+              onNewUser {
+                __typename
+                id
+                name
+              }
+            }
+          },},
+          Rest: {Sequence {
+            Flatten(path: "onNewUser") {
+              Fetch(service: "SubgraphB") {
                 {
-                    onNewUser {
+                  ... on User {
                     __typename
                     id
-                    name
-                    }
+                  }
+                } =>
+                {
+                  ... on User {
+                    address
+                  }
                 }
-                }
+              },
             },
-            Rest: {
-                Sequence {
-                Flatten(path: "onNewUser") {
-                    Fetch(service: "subgraphB") {
-                    {
-                        ... on User {
-                        __typename
-                        id
-                        }
-                    } =>
-                    {
-                        ... on User {
-                        address
-                        }
-                    }
-                    },
-                },
-                }
-            }
-            },
-        }
+          },},
+        },
+      }
       "###
     );
 }
 
 #[test]
-fn basic_subscription_query_plan_single_subgraph() {
+fn basic_subscription_with_single_subgraph() {
     let planner = planner!(
     SubgraphA: r#"
         type Query {
@@ -120,25 +116,25 @@ fn basic_subscription_query_plan_single_subgraph() {
         @r###"
       QueryPlan {
         Subscription {
-          Primary: {
-            Fetch(service: "subgraphA") {
-              {
-                onNewUser {
-                  id
-                  name
-                }
+          Primary: {Fetch(service: "SubgraphA") {
+                  subscription MySubscription__SubgraphA__0 {
+              onNewUser {
+                id
+                name
               }
             }
-          },
-          }
+          },},
         },
+      }
       "###
     );
 }
 
 #[test]
-#[should_panic(expected = "@defer is not supported on subscriptions")]
-fn trying_to_use_defer_with_a_description_results_in_an_error() {
+// TODO: This panic should say something along the line os "@defer is not supported on subscriptions" but
+// defer is currently `todo!`. Change this error message once defer is implemented.
+#[should_panic(expected = "not yet implemented: @defer not implemented")]
+fn trying_to_use_defer_with_a_subcription_results_in_an_error() {
     let config = QueryPlannerConfig {
         incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
         ..Default::default()
