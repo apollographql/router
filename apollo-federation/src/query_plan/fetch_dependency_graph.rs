@@ -995,10 +995,8 @@ impl FetchDependencyGraph {
         }
 
         self.reduce();
-        println!("reduce_and_optimize: after reduce\n{self}");
 
         self.remove_empty_nodes();
-        println!("reduce_and_optimize: after remove_empty_nodes\n{self}");
 
         self.remove_useless_nodes()?;
 
@@ -1006,7 +1004,6 @@ impl FetchDependencyGraph {
 
         self.merge_fetches_to_same_subgraph_and_same_inputs()?;
 
-        println!("reduce_and_optimize: final\n{self}");
         Ok(())
     }
 
