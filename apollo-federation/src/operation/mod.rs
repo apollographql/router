@@ -2407,7 +2407,6 @@ impl SelectionSet {
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractType>,
-        fragments: &Option<&mut RebasedFragments>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
@@ -2421,10 +2420,9 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
-                let type_if_abstract =
-                    subselection_type_if_abstract(selection, &self.schema, fragments);
-                let updated_selection_set = selection_set
-                    .add_typename_field_for_abstract_types(type_if_abstract, fragments)?;
+                let type_if_abstract = subselection_type_if_abstract(selection)?;
+                let updated_selection_set =
+                    selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
 
                 if updated_selection_set == *selection_set {
                     selection.clone()
@@ -3129,54 +3127,16 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenRespon
 
 pub(crate) fn subselection_type_if_abstract(
     selection: &Selection,
-    schema: &ValidFederationSchema,
-    fragments: &Option<&mut RebasedFragments>,
-) -> Option<AbstractType> {
-    match selection {
-        Selection::Field(field) => {
-            match schema
-                .get_type(field.field.data().field_position.type_name().clone())
-                .ok()?
-            {
-                crate::schema::position::TypeDefinitionPosition::Interface(i) => {
-                    Some(AbstractType::Interface(i))
-                }
-                crate::schema::position::TypeDefinitionPosition::Union(u) => {
-                    Some(AbstractType::Union(u))
-                }
-                _ => None,
-            }
+) -> Result<Option<AbstractType>, FederationError> {
+    let Some(sub_selection_type) = selection.element()?.sub_selection_type_position()? else {
+        return Ok(None);
+    };
+    match sub_selection_type {
+        CompositeTypeDefinitionPosition::Interface(interface_type) => {
+            Ok(Some(interface_type.into()))
         }
-        Selection::FragmentSpread(fragment_spread) => {
-            let fragment = fragments
-                .as_ref()
-                .and_then(|r| {
-                    r.original_fragments
-                        .get(&fragment_spread.spread.data().fragment_name)
-                })
-                .ok_or(crate::error::SingleFederationError::InvalidGraphQL {
-                    message: "missing fragment".to_string(),
-                })
-                //FIXME: return error
-                .ok()?;
-            match fragment.type_condition_position.clone() {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
-            }
-        }
-        Selection::InlineFragment(inline_fragment) => {
-            match inline_fragment
-                .inline_fragment
-                .data()
-                .type_condition_position
-                .clone()?
-            {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
-            }
-        }
+        CompositeTypeDefinitionPosition::Union(union_type) => Ok(Some(union_type.into())),
+        CompositeTypeDefinitionPosition::Object(_) => Ok(None),
     }
 }
 
@@ -4087,9 +4047,7 @@ impl NamedFragments {
             return Ok(self.clone());
         }
         let updated = self.map_to_expanded_selection_sets(|ss| {
-            ss.add_typename_field_for_abstract_types(
-                /*parent_type_if_abstract*/ None, /*fragments*/ &None,
-            )
+            ss.add_typename_field_for_abstract_types(/*parent_type_if_abstract*/ None)
         })?;
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
         // check the `updated` has the same set of fragments. To avoid performance hit, only the
