@@ -32,6 +32,14 @@ impl ExtensionsMutex {
             guard: self.extensions.lock(),
         }
     }
+
+    /// Locks the extensions for interaction.
+    ///
+    /// The lock will be dropped once the closure completes.
+    pub fn with_lock<'a, T, F: FnOnce(ExtensionsGuard<'a>) -> T>(&'a self, func: F) -> T {
+        let locked = self.lock();
+        func(locked)
+    }
 }
 
 pub struct ExtensionsGuard<'a> {

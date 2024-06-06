@@ -441,7 +441,9 @@ impl RouterService {
                 // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
                 // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
                 // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
-                let batch_query_opt = context.extensions().lock().remove::<BatchQuery>();
+                let batch_query_opt = context
+                    .extensions()
+                    .with_lock(|mut lock| lock.remove::<BatchQuery>());
                 if let Some(batch_query) = batch_query_opt {
                     // Only proceed with signalling cancelled if the batch_query is not finished
                     if !batch_query.finished() {
