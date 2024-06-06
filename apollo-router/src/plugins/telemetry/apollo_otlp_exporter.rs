@@ -159,12 +159,11 @@ impl ApolloOtlpExporter {
         trace_spans: Vec<LightSpanData>,
     ) -> Option<Vec<SpanData>> {
         let mut export_spans: Vec<SpanData> = Vec::new();
-        let mut send_trace: bool = true;
+        let mut send_trace: bool = false;
 
         trace_spans.into_iter().for_each(|span| {
-            if send_trace
-                && (span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
-                    || self.include_span_names.contains(span.name.as_ref()))
+            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
+                || self.include_span_names.contains(span.name.as_ref())
             {
                 tracing::debug!("apollo otlp: preparing span '{}'", span.name);
                 match span.name.as_ref() {
@@ -174,12 +173,11 @@ impl ApolloOtlpExporter {
                             .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
                             .is_some()
                         {
-                            export_spans.push(self.prepare_subgraph_span(span));
-                        } else {
+                            export_spans.push(self.base_prepare_span(span));
                             // Mirrors the existing implementation in apollo_telemetry
                             // which filters out traces that are missing the signature attribute.
-                            // In practice, this results in exclu   ding introspection queries.
-                            send_trace = false;
+                            // In practice, this results in excluding introspection queries.
+                            send_trace = true
                         }
                     }
                     SUBGRAPH_SPAN_NAME => export_spans.push(self.prepare_subgraph_span(span)),
