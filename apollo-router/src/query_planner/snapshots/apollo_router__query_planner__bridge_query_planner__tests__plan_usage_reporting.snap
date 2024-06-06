@@ -7,8 +7,8 @@ expression: plan.usage_reporting
   "referencedFieldsByType": {
     "Name": {
       "fieldNames": [
-        "first",
-        "last"
+        "last",
+        "first"
       ],
       "isInterface": false
     },
