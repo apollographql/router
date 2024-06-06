@@ -115,7 +115,7 @@ Customize `preview_demand_control` with the following settings:
 | mode                | `measure`, `enforce`    |               | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
 | strategy            | `static_estimated`      |               | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                 |
 | static_estimated.list_size  | integer                 |               | The assumed maximum size of a list for fields that return lists.                                      |
-| static_estimated.max        | integer                 |               | The maximum cost of an accepted operation. An operation with cost higher than `strategy.max` is rejected. |
+| static_estimated.max        | integer                 |               | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected. |
 
 
 ## Telemetry for demand control
