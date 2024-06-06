@@ -53,6 +53,9 @@ use crate::Context;
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
 
+const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
+    "cannot access headers on a deferred response";
+
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
 pub(super) trait OptionDance<T> {
@@ -487,6 +490,12 @@ mod router_context {
         obj.with_mut(|response| response.context = context);
         Ok(())
     }
+    #[rhai_fn(get = "status_code", pure)]
+    pub(crate) fn router_first_response_status_code_get(
+        obj: &mut SharedMut<router::FirstResponse>,
+    ) -> status_code::StatusCode {
+        obj.with_mut(|response| response.response.status())
+    }
 
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn supergraph_first_response_context_get(
@@ -508,6 +517,12 @@ mod router_context {
         obj.with_mut(|response| response.context = context);
         Ok(())
     }
+    #[rhai_fn(get = "status_code", pure)]
+    pub(crate) fn supergraph_first_response_status_code_get(
+        obj: &mut SharedMut<supergraph::FirstResponse>,
+    ) -> status_code::StatusCode {
+        obj.with_mut(|response| response.response.status())
+    }
 
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn execution_first_response_context_get(
@@ -528,6 +543,12 @@ mod router_context {
     ) -> Result<(), Box<EvalAltResult>> {
         obj.with_mut(|response| response.context = context);
         Ok(())
+    }
+    #[rhai_fn(get = "status_code", pure)]
+    pub(crate) fn execution_first_response_status_code_get(
+        obj: &mut SharedMut<execution::FirstResponse>,
+    ) -> status_code::StatusCode {
+        obj.with_mut(|response| response.response.status())
     }
 
     // Add context getter/setters for deferred responses
@@ -700,6 +721,13 @@ mod router_plugin {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
+    #[rhai_fn(get = "status_code", pure, return_raw)]
+    pub(crate) fn get_status_code_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
+    }
+
     #[rhai_fn(name = "is_primary", pure)]
     pub(crate) fn router_deferred_response_is_primary(
         _obj: &mut SharedMut<router::DeferredResponse>,
@@ -728,6 +756,13 @@ mod router_plugin {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
     }
 
+    #[rhai_fn(get = "status_code", pure, return_raw)]
+    pub(crate) fn get_status_code_supergraph_deferred_response(
+        _obj: &mut SharedMut<supergraph::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
+    }
+
     #[rhai_fn(name = "is_primary", pure)]
     pub(crate) fn supergraph_deferred_response_is_primary(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
@@ -754,6 +789,13 @@ mod router_plugin {
         _obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(get = "status_code", pure, return_raw)]
+    pub(crate) fn get_status_code_execution_deferred_response(
+        _obj: &mut SharedMut<execution::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -1460,14 +1502,6 @@ macro_rules! register_rhai_router_interface {
                     Ok(obj.with_mut(|request| request.router_request.uri().clone()))
                 }
             );
-
-            $engine.register_get(
-                "status_code",
-                |obj: &mut SharedMut<$base::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.response.status()))
-                }
-            );
-
             $engine.register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {
