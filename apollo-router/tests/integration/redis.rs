@@ -959,29 +959,30 @@ async fn query_planner_redis_update_reuse_query_fragments() {
 }
 
 async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key: &str) {
-    if graph_os_enabled() {
-        // This test shows that the redis key changes when the query planner config changes.
-        // The test starts a router with a specific config, executes a query, and checks the redis cache key.
-        // Then it updates the config, executes the query again, and checks the redis cache key.
-        let mut router = IntegrationTest::builder()
-            .config(include_str!(
-                "fixtures/query_planner_redis_config_update.router.yaml"
-            ))
-            .build()
-            .await;
-
-        router.start().await;
-        router.assert_started().await;
-        router.clear_redis_cache().await;
-
-        let starting_key = "plan:0:v2.8.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c";
-        router.execute_default_query().await;
-        router.assert_redis_cache_contains(starting_key, None).await;
-        router.update_config(updated_config).await;
-        router.assert_reloaded().await;
-        router.execute_default_query().await;
-        router
-            .assert_redis_cache_contains(new_cache_key, Some(starting_key))
-            .await;
+    if !graph_os_enabled() {
+        return;
     }
+    // This test shows that the redis key changes when the query planner config changes.
+    // The test starts a router with a specific config, executes a query, and checks the redis cache key.
+    // Then it updates the config, executes the query again, and checks the redis cache key.
+    let mut router = IntegrationTest::builder()
+        .config(include_str!(
+            "fixtures/query_planner_redis_config_update.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    router.clear_redis_cache().await;
+
+    let starting_key = "plan:0:v2.8.0:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c";
+    router.execute_default_query().await;
+    router.assert_redis_cache_contains(starting_key, None).await;
+    router.update_config(updated_config).await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router
+        .assert_redis_cache_contains(new_cache_key, Some(starting_key))
+        .await;
 }
