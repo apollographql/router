@@ -9,7 +9,7 @@ pub mod query_plan;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, derive_more::From)]
 pub struct GraphqlId {
-    pub subgraph_name: NodeStr,
+    subgraph_name: NodeStr,
 }
 
 impl Display for GraphqlId {

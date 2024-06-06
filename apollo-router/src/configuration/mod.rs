@@ -249,8 +249,6 @@ pub(crate) enum QueryPlannerMode {
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
     Both,
-    /// Source-aware query planner for connectors - TODO this is not really a name we'll expose to customers
-    NewNew,
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {
