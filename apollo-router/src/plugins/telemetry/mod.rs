@@ -75,6 +75,7 @@ pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
@@ -456,6 +457,17 @@ impl Plugin for Telemetry {
                                     );
                                 }
                             }
+
+                            /* todo
+                            if let Some(mystats) = response
+                                .context
+                                .extensions()
+                                .lock()
+                                .get::<ExtendedReferenceStats>()
+                            {
+                                println!("ExtendedReferenceStats: {:?}", mystats);
+                            }
+                            */
 
                             if response
                                 .context
@@ -1243,6 +1255,8 @@ impl Telemetry {
         let operation_kind: OperationKind =
             ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
 
+        // here?
+
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {
@@ -1370,6 +1384,7 @@ impl Telemetry {
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
     ) {
+        //here? 
         let metrics = if let Some(usage_reporting) = {
             let lock = context.extensions().lock();
             let urp = lock.get::<Arc<UsageReporting>>();

@@ -130,6 +130,15 @@ impl Query {
         let data = std::mem::take(&mut response.data);
 
         let original_operation = self.operation(operation_name);
+
+        /*
+        println!("\nin format_response");
+        println!("operation_name: ${:?}", operation_name);
+        println!("variables: ${:?}", variables);
+        println!("response: ${:?}", response);
+        println!("original_operation: ${:?}", original_operation);
+        */
+
         match data {
             Some(Value::Object(mut input)) => {
                 if self.is_deferred(defer_conditions) {
@@ -524,6 +533,7 @@ impl Query {
                     Some(ExtendedType::Enum(enum_type)) => {
                         return match input.as_str() {
                             Some(s) => {
+                                // here for enum? or duplicate this logic
                                 if enum_type.values.contains_key(s) {
                                     *output = input.clone();
                                     Ok(())

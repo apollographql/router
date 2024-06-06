@@ -18,6 +18,8 @@ use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
@@ -26,22 +28,24 @@ use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 
 /// The stats for an input object field.
+#[derive(Debug)]
 pub(crate) struct InputObjectFieldStats {
     /// True if the input object field was referenced.
-    pub(crate) _referenced: bool,
+    pub(crate) referenced: bool,
     /// True if the input object field was referenced but the value was null.
-    pub(crate) _null_reference: bool,
+    pub(crate) null_reference: bool,
     /// True if the input object field was missing or undefined.
-    pub(crate) _undefined_reference: bool,
+    pub(crate) undefined_reference: bool,
 }
 
 /// The result of the generate_extended_references function which contains input object field and
 /// enum value stats.
+#[derive(Debug)]
 pub(crate) struct ExtendedReferenceStats {
     /// A map of parent type to a map of field name to stats
-    pub(crate) _referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
+    pub(crate) referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     /// A map of enum name to a set of enum values that were referenced
-    pub(crate) _referenced_enums: HashMap<String, HashSet<String>>,
+    pub(crate) referenced_enums: HashMap<String, HashSet<String>>,
 }
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
@@ -119,7 +123,7 @@ pub(crate) fn generate_usage_reporting(
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
 ) -> ComparableUsageReporting {
-    let mut generator = UsageReportingGenerator {
+    let mut generator = UsageGenerator {
         signature_doc,
         references_doc,
         operation_name,
@@ -127,25 +131,52 @@ pub(crate) fn generate_usage_reporting(
         fragments_map: HashMap::new(),
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
+        enums_by_name: HashMap::new(),
         fragment_spread_set: HashSet::new(),
     };
 
-    generator.generate()
+    generator.generate_usage_reporting()
 }
 
 #[allow(dead_code)]
 pub(crate) fn generate_extended_references(
-    _doc: Arc<Valid<ExecutableDocument>>,
-    _operation_name: Option<String>,
-    _schema: &Valid<Schema>,
+    doc: Arc<Valid<ExecutableDocument>>,
+    operation_name: Option<String>,
+    schema: &Valid<Schema>,
 ) -> ExtendedReferenceStats {
+    /*
     ExtendedReferenceStats {
-        _referenced_input_fields: HashMap::new(),
-        _referenced_enums: HashMap::new(),
+        referenced_input_fields: HashMap::from([
+            ("Test1".into(), HashMap::from([
+                ("Test2".into(), InputObjectFieldStats { referenced: true, null_reference: false, undefined_reference: false })
+            ])),
+        ]),
+        referenced_enums: HashMap::from([
+            ("TestEnum".into(), HashSet::from(["TestVal".into()])),
+        ]),
+    }
+    */
+    let mut generator = UsageGenerator {
+        signature_doc: &doc,
+        references_doc: &doc,
+        operation_name: &operation_name,
+        schema,
+        fragments_map: HashMap::new(),
+        fields_by_type: HashMap::new(),
+        fields_by_interface: HashMap::new(),
+        enums_by_name: HashMap::new(),
+        fragment_spread_set: HashSet::new(),
+    };
+
+    let referenced_enums = generator.generate_referenced_enums();
+
+    ExtendedReferenceStats {
+        referenced_input_fields: HashMap::new(),
+        referenced_enums,
     }
 }
 
-struct UsageReportingGenerator<'a> {
+struct UsageGenerator<'a> {
     signature_doc: &'a ExecutableDocument,
     references_doc: &'a ExecutableDocument,
     operation_name: &'a Option<String>,
@@ -153,11 +184,12 @@ struct UsageReportingGenerator<'a> {
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,
+    enums_by_name: HashMap<String, HashSet<String>>,
     fragment_spread_set: HashSet<Name>,
 }
 
-impl UsageReportingGenerator<'_> {
-    fn generate(&mut self) -> ComparableUsageReporting {
+impl UsageGenerator<'_> {
+    fn generate_usage_reporting(&mut self) -> ComparableUsageReporting {
         ComparableUsageReporting {
             result: UsageReporting {
                 stats_report_key: self.generate_stats_report_key(),
@@ -231,7 +263,7 @@ impl UsageReportingGenerator<'_> {
     }
 
     fn generate_apollo_reporting_refs(&mut self) -> HashMap<String, ReferencedFieldsForType> {
-        self.fragments_map.clear();
+        self.fragment_spread_set.clear();
         self.fields_by_type.clear();
         self.fields_by_interface.clear();
 
@@ -308,6 +340,145 @@ impl UsageReportingGenerator<'_> {
                             let fragment_type = fragment.selection_set.ty.to_string();
                             self.extract_fields(&fragment_type, &fragment.selection_set);
                         }
+                    }
+                }
+            }
+        }
+    }
+
+    fn generate_referenced_enums(&mut self) -> HashMap<String, HashSet<String>> {
+        self.fragment_spread_set.clear();
+        self.enums_by_name.clear();
+
+        if let Ok(operation) = self
+            .references_doc
+            .get_operation(self.operation_name.as_deref())
+        {
+            self.extract_enums_from_selection_set(&operation.selection_set);
+        }
+
+        self.enums_by_name.clone()
+    }
+
+    fn add_enum(&mut self, enum_name: String, enum_value: String) {
+        self.enums_by_name
+            .entry(enum_name)
+            .or_default()
+            .insert(enum_value.to_string());
+    }
+
+    fn extract_enums_from_node_list(&mut self, type_name: String, node_list: &Vec<Node<Value>>) {
+        for node in node_list {
+            match node.as_ref() {
+                Value::Enum(enum_value) => {
+                    self.add_enum(type_name.clone(), enum_value.to_string());
+                },
+                Value::List(_var_name) => {
+                    // todo?
+                },
+                Value::Variable(_var_name) => {
+                    // todo?
+                },
+                Value::Object(_obj_value) => {
+                    // todo?
+                },
+                _ => (),
+            }
+        }
+    }
+
+    fn extract_enums_from_selection_set(&mut self, selection_set: &SelectionSet) {
+        for selection in &selection_set.selections {
+            match selection {
+                Selection::Field(field) => {
+                    for arg in &field.arguments {
+                        if let Some(arg_def) = field.definition.argument_by_name(arg.name.as_str())
+                        {
+                            let type_name = arg_def.ty.inner_named_type(); // type name is the enum name for enum values
+                            // todo do we need to do ty.inner_named_type() anywhere else?
+                            match arg.value.as_ref() {
+                                Value::Enum(enum_value) => {
+                                    self.add_enum(type_name.to_string(), enum_value.to_string());
+                                },
+                                Value::List(list_values) => {
+                                    self.extract_enums_from_node_list(type_name.to_string(), list_values);
+                                },
+                                Value::Object(obj_value) => {
+                                    if let Some(ExtendedType::InputObject(input_object_type)) = self.schema.types.get(type_name) {
+                                        self.extract_enums_from_input_object(input_object_type, obj_value);
+                                    }
+                                    //println!("maybe_input_object_type {:?}", maybe_input_object_type);
+                                    //let maybe_enum_type = self.schema.types.get("SomeEnum");
+                                    //println!("maybe_enum_type {:?}", maybe_enum_type);
+                                },
+                                Value::Variable(var_name) => {
+                                    println!("Found var {}", var_name);
+                                    // todo: for variables we need the request payload to be able to tell what the enum value is
+                                },
+                                _ => (),
+                            }
+                        }
+                    }
+                }
+                Selection::InlineFragment(fragment) => {
+                    self.extract_enums_from_selection_set(&fragment.selection_set);
+                }
+                Selection::FragmentSpread(fragment) => {
+                    if !self.fragment_spread_set.contains(&fragment.fragment_name) {
+                        self.fragment_spread_set
+                            .insert(fragment.fragment_name.clone());
+
+                        if let Some(fragment) =
+                            self.references_doc.fragments.get(&fragment.fragment_name)
+                        {
+                            self.extract_enums_from_selection_set(&fragment.selection_set);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    fn extract_enums_from_input_object(&mut self, input_object_type: &Node<InputObjectType>, obj_value: &[(Name, Node<Value>)]) {
+        for (field_name, field_val) in obj_value.iter() {
+            // For each field, look up the type in the schema
+            if let Some(field_type) = input_object_type.fields.get(field_name) {
+                let field_type_name = field_type.ty.inner_named_type();
+                if let Some(field_type_def) = self.schema.types.get(field_type_name) {
+                    match field_type_def {
+                        // For enum child types we just extract the values
+                        // todo refactor
+                        ExtendedType::Enum(_enum_type) => {
+                            match field_val.as_ref() {
+                                Value::Enum(enum_value) => {
+                                    // Single enum value
+                                    self.add_enum(field_type_name.to_string(), enum_value.to_string());
+                                },
+                                Value::List(list_values) => {
+                                    // List of enums
+                                    for list_val in list_values {
+                                        if let Value::Enum(enum_value) = list_val.as_ref() {
+                                            self.add_enum(field_type_name.to_string(), enum_value.to_string());
+                                        }
+                                        // todo need to handle nested object and list here?
+                                    }
+                                },
+                                Value::Variable(_var_name) => {
+                                    // todo
+                                },
+                                _ => (),
+                            }
+                        },
+                        ExtendedType::Object(_object_type) => {
+                            // todo
+                        },
+                        ExtendedType::Interface(_enum_type) => {
+                            // todo?
+                        },
+                        ExtendedType::Union(_enum_type) => {
+                            // todo?
+                        },
+                        _ => (),
                     }
                 }
             }
