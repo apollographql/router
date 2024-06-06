@@ -2,7 +2,7 @@
 #[should_panic(
     expected = r#"Cannot add selection of field "S.y" to selection set of parent type "S""#
 )]
-// TODO: investigate this failure
+// TODO: investigate this failure (appears to be visiting wrong subgraph)
 // Note that Rover composition warns:
 // ```text
 // HINT: [INCONSISTENT_OBJECT_VALUE_TYPE_FIELD]: Field "S.y" of non-entity object type "S"
