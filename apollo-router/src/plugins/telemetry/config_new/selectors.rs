@@ -827,18 +827,7 @@ impl Selector for SupergraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.data {
-                /*let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(response_data.clone())).find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }*/
                 let val = response_data.find(data);
-
                 val.maybe_to_otel_value()
             } else {
                 None
@@ -851,16 +840,6 @@ impl Selector for SupergraphSelector {
             } => {
                 let errors = response.errors.clone();
                 let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
-                /*let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(response_errors.clone())).find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }*/
-
                 let val = response_errors.find(&data);
 
                 val.maybe_to_otel_value()
@@ -1103,18 +1082,6 @@ impl Selector for SubgraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.response.body().data {
-                /*let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_data.clone()))
-                        .find();
-
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }*/
                 let val = subgraph_response_data.find(data);
 
                 val.maybe_to_otel_value()
@@ -1129,16 +1096,7 @@ impl Selector for SubgraphSelector {
             } => {
                 let errors = response.response.body().errors.clone();
                 let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
-                /*let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_error.clone()))
-                        .find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }*/
+
                 let val = subgraph_response_error.find(&data);
 
                 val.maybe_to_otel_value()
