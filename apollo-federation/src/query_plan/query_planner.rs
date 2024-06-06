@@ -927,6 +927,7 @@ type User
             Fetch(service: "reviews") {
               {
                 bestRatedProducts {
+                  __typename
                   ... on Book {
                     __typename
                     id
