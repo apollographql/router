@@ -37,6 +37,7 @@ mod field_merging_with_skip_and_include;
 mod fragment_autogeneration;
 mod handles_fragments_with_directive_conditions;
 mod handles_operations_with_directives;
+mod interface_object;
 mod interface_type_explosion;
 mod introspection_typename_handling;
 mod merged_abstract_types_handling;
@@ -45,6 +46,7 @@ mod named_fragments_preservation;
 mod provides;
 mod requires;
 mod shareable_root_fields;
+mod subscriptions;
 
 // TODO: port the rest of query-planner-js/src/__tests__/buildPlan.test.ts
 
@@ -207,6 +209,7 @@ fn field_covariance_and_type_explosion() {
       Fetch(service: "Subgraph1") {
         {
           dummy {
+            __typename
             field {
               __typename
               ... on Object {
@@ -224,25 +227,23 @@ fn field_covariance_and_type_explosion() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure - unexpected inline spread
 fn handles_non_intersecting_fragment_conditions() {
     let planner = planner!(
         Subgraph1: r#"
             interface Fruit {
               edible: Boolean!
             }
-    
+
             type Banana implements Fruit {
               edible: Boolean!
               inBunch: Boolean!
             }
-    
+
             type Apple implements Fruit {
               edible: Boolean!
               hasStem: Boolean!
             }
-    
+
             type Query {
               fruit: Fruit!
             }
@@ -259,7 +260,7 @@ fn handles_non_intersecting_fragment_conditions() {
                 hasStem
               }
             }
-    
+
             query Fruitiness {
               fruit {
                 ... on Apple {
@@ -303,12 +304,12 @@ fn avoids_unnecessary_fetches() {
           type Query {
             t: T
           }
-    
+
           type T @key(fields: "idT") {
             idT: ID!
             a: A
           }
-    
+
           type A @key(fields: "idA2") {
             idA2: ID!
           }
@@ -318,7 +319,7 @@ fn avoids_unnecessary_fetches() {
             idT: ID!
             u: U
           }
-    
+
           type U @key(fields: "idU") {
             idU: ID!
           }
