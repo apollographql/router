@@ -1720,7 +1720,7 @@ mod tests {
         server.await.unwrap();
     }
 
-    // starts a local server emulating a subgraph returning response with missing content_type
+    // starts a local server emulating a subgraph returning response with invalid content_type
     async fn emulate_subgraph_invalid_content_type(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
@@ -2676,7 +2676,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json"
+            "HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 
