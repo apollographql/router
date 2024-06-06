@@ -34,6 +34,8 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use url::Url;
 
+use crate::plugins::authentication::AUTHENTICATION_SPAN_NAME;
+use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
 use crate::plugins::rhai::RHAI_SPAN_NAME;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
@@ -164,7 +166,7 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     SUBSCRIPTION_EVENT_SPAN_NAME,
 ];
 
-const OTLP_INCLUDE_SPANS: [&str; 20] = [
+const OTLP_INCLUDE_SPANS: [&str; 22] = [
     PARALLEL_SPAN_NAME,
     SEQUENCE_SPAN_NAME,
     FETCH_SPAN_NAME,
@@ -185,6 +187,8 @@ const OTLP_INCLUDE_SPANS: [&str; 20] = [
     HTTP_REQUEST_SPAN_NAME,
     SUBGRAPH_REQUEST_SPAN_NAME,
     RHAI_SPAN_NAME,
+    EXTERNAL_SPAN_NAME,
+    AUTHENTICATION_SPAN_NAME,
     // Dropping subscription events for now since they are not working with protobuf anyway.
     // SUBSCRIPTION_EVENT_SPAN_NAME
 ];
