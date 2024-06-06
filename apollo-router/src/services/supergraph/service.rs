@@ -909,7 +909,7 @@ impl SupergraphCreator {
         &mut self,
         query_parser: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: InMemoryCachePlanner,
+        previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
     ) {
@@ -917,25 +917,8 @@ impl SupergraphCreator {
             .warm_up(
                 query_parser,
                 persisted_query_layer,
-                Some(previous_cache),
+                previous_cache,
                 count,
-                experimental_reuse_query_plans,
-            )
-            .await
-    }
-
-    pub(crate) async fn prewarm_query_planner(
-        &mut self,
-        query_parser: &QueryAnalysisLayer,
-        persisted_query_layer: &PersistedQueryLayer,
-        experimental_reuse_query_plans: bool,
-    ) {
-        self.query_planner_service
-            .warm_up(
-                query_parser,
-                persisted_query_layer,
-                None,
-                None,
                 experimental_reuse_query_plans,
             )
             .await
