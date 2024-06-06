@@ -2249,16 +2249,7 @@ impl SelectionSet {
                 .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
-        let element = first.element()?.rebase_on(
-            parent_type,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
-        let Some(element) = element else {
-            return Err(FederationError::internal(
-                "Unable to rebase selection updates",
-            ));
-        };
+        let element = first.element()?.rebase_on_or_error(parent_type, schema)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
@@ -2516,14 +2507,15 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
-                let Some(sub_selection_type) = ele.sub_selection_type_position()? else {
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
+                let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
                         Selection::from_element(
-                            OpPathElement::clone(ele),
+                            element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
@@ -2548,7 +2540,7 @@ impl SelectionSet {
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
-                let element = OpPathElement::clone(ele);
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
                 let selection_set = selection_set
                     .map(|selection_set| {
                         selection_set.rebase_on(

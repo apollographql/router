@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use indexmap::IndexMap;
 use indexmap::IndexSet;
@@ -39,7 +40,7 @@ pub(super) fn rearrange_query_plan(
 
     let root = rearrange_plan_node(root, &mut IndexMap::new(), &variable_ranges)?;
     Ok(QueryPlan {
-        root,
+        root: Arc::new(root),
         usage_reporting: query_plan.usage_reporting.clone(),
         formatted_query_plan: query_plan.formatted_query_plan.clone(),
         query: query_plan.query.clone(),
