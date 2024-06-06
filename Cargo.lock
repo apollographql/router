@@ -5514,9 +5514,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.3"
+version = "1.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b62dbe01f0b06f9d8dc7d49e05a0785f153b00b2c227856282f671e0318c9b15"
+checksum = "c117dbdfde9c8308975b6a18d71f3f385c89461f7b3fb054288ecf2a2058ba4c"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -6227,11 +6227,12 @@ dependencies = [
 [[package]]
 name = "serde_json_bytes"
 version = "0.2.2"
-source = "git+https://github.com/apollographql/serde_json_bytes?branch=geal/jsonpath#926d714b79b5cd37bf55d8d5c7d9099ee52b1c2d"
+source = "git+https://github.com/apollographql/serde_json_bytes?branch=geal/jsonpath#81528df2708f861be710cdeffdf3284f117805f2"
 dependencies = [
  "bytes",
  "indexmap 2.2.3",
  "jsonpath-rust",
+ "regex",
  "serde",
  "serde_json",
 ]
