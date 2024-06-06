@@ -379,6 +379,10 @@ impl LicenseEnforcementReport {
                 .name("Advanced telemetry")
                 .build(),
             ConfigurationRestriction::builder()
+                .path("$.telemetry..graphql")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
                 .path("$.preview_file_uploads")
                 .name("File uploads plugin")
                 .build(),
@@ -387,7 +391,7 @@ impl LicenseEnforcementReport {
                 .name("Batching support")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.experimental_demand_control")
+                .path("$.preview_demand_control")
                 .name("Demand control plugin")
                 .build(),
         ]

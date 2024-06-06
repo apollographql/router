@@ -7,7 +7,7 @@ use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
-use crate::query_plan::operation::SelectionSet;
+use crate::operation::SelectionSet;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
 use crate::source_aware::federated_query_graph::graph_path::OperationPathElement;

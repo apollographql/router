@@ -213,8 +213,16 @@ where
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
-        self.attributes.on_error(error)
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_error(error, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_error(error, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
     }
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
@@ -222,6 +230,23 @@ where
         let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
             value
                 .on_response_event(response, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
+    }
+
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_response_field(ty, field, value, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, v)| {
+            v.on_response_field(ty, field, value, ctx)
                 .map(|v| KeyValue::new(key.clone(), v))
         });
         attrs.extend(custom_attributes);

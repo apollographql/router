@@ -2,6 +2,7 @@ use access_json::JSONQuery;
 use derivative::Derivative;
 use jsonpath_rust::JsonPathFinder;
 use jsonpath_rust::JsonPathInst;
+use opentelemetry_api::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::ByteString;
@@ -20,6 +21,7 @@ use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::ToOtelValue;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
@@ -123,6 +125,11 @@ pub(crate) enum RouterSelector {
         /// The format of the trace ID.
         trace_id: TraceIdFormat,
     },
+    /// Apollo Studio operation id
+    StudioOperationId {
+        /// Apollo Studio operation id
+        studio_operation_id: bool,
+    },
     /// A value from context.
     ResponseContext {
         /// The response context key.
@@ -156,10 +163,11 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
     },
     OnGraphQLError {
         /// Boolean set to true if the response body contains graphql error
@@ -306,10 +314,15 @@ pub(crate) enum SupergraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
+    },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        on_graphql_error: bool,
     },
     Error {
         #[allow(dead_code)]
@@ -317,7 +330,6 @@ pub(crate) enum SupergraphSelector {
         error: ErrorRepr,
     },
     /// Cost attributes
-    #[allow(dead_code)]
     Cost {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,
@@ -518,10 +530,11 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
     },
     Error {
         #[allow(dead_code)]
@@ -617,14 +630,42 @@ impl Selector for RouterSelector {
                     None
                 }
             }
+            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::StudioOperationId {
+                studio_operation_id,
+            } if *studio_operation_id => response
+                .context
+                .get::<_, String>(APOLLO_OPERATION_ID)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
+            RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            _ => None,
+        }
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -750,6 +791,16 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
+            }
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
@@ -814,13 +865,43 @@ impl Selector for SupergraphSelector {
                         CostValue::Result => cost_result.result.into(),
                     })
             }
+            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
+            }
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             SupergraphSelector::Error { .. } => Some(error.to_string().into()),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            _ => None,
+        }
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -1058,15 +1139,35 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SubgraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            _ => None,
+        }
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -1090,6 +1191,7 @@ mod test {
     use opentelemetry::KeyValue;
     use opentelemetry_api::StringValue;
     use serde_json::json;
+    use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;
     use tracing_subscriber::layer::SubscriberExt;
@@ -1108,6 +1210,7 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
+    use crate::query_planner::APOLLO_OPERATION_ID;
 
     #[test]
     fn router_static() {
@@ -1122,6 +1225,25 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn router_static_field() {
+        let selector = RouterSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1261,6 +1383,25 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn supergraph_static_field() {
+        let selector = SupergraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1321,6 +1462,29 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn subgraph_static_field() {
+        let selector = SubgraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .supergraph_request(Arc::new(
+                            http::Request::builder()
+                                .body(crate::request::Request::builder().build())
+                                .unwrap()
+                        ))
+                        .build()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1473,6 +1637,13 @@ mod test {
 
         assert_eq!(
             selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
                 .on_response(
                     &crate::services::RouterResponse::fake_builder()
                         .build()
@@ -1557,6 +1728,13 @@ mod test {
 
         assert_eq!(
             selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
                 .on_response(
                     &crate::services::SupergraphResponse::fake_builder()
                         .build()
@@ -1630,6 +1808,13 @@ mod test {
                         .build()
                         .unwrap()
                 )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
                 .unwrap(),
             "context_value".into()
         );
@@ -1817,6 +2002,27 @@ mod test {
                 opentelemetry::Value::String("42".into())
             );
         });
+    }
+
+    #[test]
+    fn test_router_studio_trace_id() {
+        let selector = RouterSelector::StudioOperationId {
+            studio_operation_id: true,
+        };
+        let ctx = crate::Context::new();
+        let _ = ctx.insert(APOLLO_OPERATION_ID, "42".to_string()).unwrap();
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .context(ctx)
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap(),
+            opentelemetry::Value::String("42".into())
+        );
     }
 
     #[test]

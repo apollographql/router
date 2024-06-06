@@ -11,7 +11,7 @@ use crate::sources::source;
 
 mod query_planner;
 
-pub type QueryPlanCost = i64;
+pub type QueryPlanCost = f64;
 
 #[derive(Debug, Default)]
 pub struct QueryPlan {

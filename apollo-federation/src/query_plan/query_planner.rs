@@ -16,6 +16,11 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
+use crate::operation::normalize_operation;
+use crate::operation::NamedFragments;
+use crate::operation::NormalizedDefer;
+use crate::operation::RebasedFragments;
+use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
@@ -25,11 +30,6 @@ use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
-use crate::query_plan::operation::normalize_operation;
-use crate::query_plan::operation::NamedFragments;
-use crate::query_plan::operation::NormalizedDefer;
-use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -66,6 +66,16 @@ pub struct QueryPlannerConfig {
     /// Defaults to true.
     pub reuse_query_fragments: bool,
 
+    /// NOTE: **not implemented yet**
+    ///
+    /// If enabled, the query planner will extract inline fragments into fragment
+    /// definitions before sending queries to subgraphs. This can significantly
+    /// reduce the size of the query sent to subgraphs, but may increase the time
+    /// it takes to plan the query.
+    ///
+    /// Defaults to false.
+    pub generate_query_fragments: bool,
+
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
     ///
@@ -90,6 +100,7 @@ impl Default for QueryPlannerConfig {
         Self {
             reuse_query_fragments: true,
             subgraph_graphql_validation: false,
+            generate_query_fragments: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
         }
@@ -357,19 +368,9 @@ impl QueryPlanner {
         }
 
         let reuse_query_fragments = self.config.reuse_query_fragments;
-        let mut named_fragments = NamedFragments::new(&document.fragments, &self.api_schema);
-        if reuse_query_fragments {
-            // For all subgraph fetches we query `__typename` on every abstract types (see
-            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
-            // fragments, we should make sure those fragments also query `__typename` for every
-            // abstract type.
-            named_fragments =
-                named_fragments.add_typename_field_for_abstract_types_in_named_fragments()?;
-        }
-
         let normalized_operation = normalize_operation(
             operation,
-            named_fragments,
+            NamedFragments::new(&document.fragments, &self.api_schema),
             &self.api_schema,
             &self.interface_types_with_interface_objects,
         )?;
@@ -413,9 +414,22 @@ impl QueryPlanner {
             );
         };
 
+        let rebased_fragments = if reuse_query_fragments {
+            // For all subgraph fetches we query `__typename` on every abstract types (see
+            // `FetchDependencyGraphNode::to_plan_node`) so if we want to have a chance to reuse
+            // fragments, we should make sure those fragments also query `__typename` for every
+            // abstract type.
+            Some(RebasedFragments::new(
+                normalized_operation
+                    .named_fragments
+                    .add_typename_field_for_abstract_types_in_named_fragments()?,
+            ))
+        } else {
+            None
+        };
         let processor = FetchDependencyGraphToQueryPlanProcessor::new(
             operation.variables.clone(),
-            Some(RebasedFragments::new(&normalized_operation.named_fragments)),
+            rebased_fragments,
             operation.name.clone(),
             assigned_defer_labels,
         );
@@ -913,6 +927,7 @@ type User
             Fetch(service: "reviews") {
               {
                 bestRatedProducts {
+                  __typename
                   ... on Book {
                     __typename
                     id
@@ -1104,6 +1119,176 @@ type User
                   y
                 }
               }
+            }
+          },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_optimize_basic() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    id
+                    ...userFields
+                },
+                another_user: userById(id: 2) {
+                  name
+                  email
+              }
+            }
+            fragment userFields on User {
+                name
+                email
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+              userById(id: 1) {
+                ...userFields
+                id
+              }
+              another_user: userById(id: 2) {
+                ...userFields
+              }
+            }
+
+            fragment userFields on User {
+              name
+              email
+            }
+          },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_optimize_inline_fragment() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    id
+                    ...userFields
+                },
+                partial_optimize: userById(id: 2) {
+                    ... on User {
+                        id
+                        name
+                        email
+                    }
+                },
+                full_optimize: userById(id: 3) {
+                    ... on User {
+                        name
+                        email
+                    }
+                }
+            }
+            fragment userFields on User {
+                name
+                email
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+              userById(id: 1) {
+                ...userFields
+                id
+              }
+              partial_optimize: userById(id: 2) {
+                ...userFields
+                id
+              }
+              full_optimize: userById(id: 3) {
+                ...userFields
+              }
+            }
+
+            fragment userFields on User {
+              name
+              email
+            }
+          },
+        }
+        "###);
+    }
+
+    #[test]
+    fn test_optimize_fragment_definition() {
+        let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
+        let api_schema = supergraph.to_api_schema(Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            api_schema.schema(),
+            r#"
+            {
+                userById(id: 1) {
+                    ...F1
+                    ...F2
+                },
+                case2: userById(id: 2) {
+                    id
+                    name
+                    email
+                },
+            }
+            fragment F1 on User {
+                name
+                email
+            }
+            fragment F2 on User {
+                id
+                name
+                email
+            }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        // Make sure `fragment F2` contains `...F1`.
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "accounts") {
+            {
+              userById(id: 1) {
+                ...F2
+              }
+              case2: userById(id: 2) {
+                ...F2
+              }
+            }
+
+            fragment F2 on User {
+              name
+              email
+              id
             }
           },
         }

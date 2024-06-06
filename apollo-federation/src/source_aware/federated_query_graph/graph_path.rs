@@ -5,8 +5,8 @@ use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::InlineFragment;
+use crate::operation::Field;
+use crate::operation::InlineFragment;
 use crate::source_aware::federated_query_graph::path_tree::FederatedPathTree;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::federated_query_graph::SelfConditionIndex;

@@ -7,7 +7,7 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 
-use crate::query_plan::operation::SelectionSet;
+use crate::operation::SelectionSet;
 use crate::source_aware::federated_query_graph::graph_path::ConditionResolutionId;
 use crate::source_aware::federated_query_graph::FederatedQueryGraph;
 use crate::source_aware::query_plan::FetchDataPathElement;

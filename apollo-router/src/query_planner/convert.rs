@@ -3,21 +3,18 @@ use std::sync::Arc;
 use apollo_compiler::executable;
 use apollo_federation::query_plan as next;
 
-use crate::query_planner::bridge_query_planner as bridge;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::plan;
 use crate::query_planner::rewrites;
 use crate::query_planner::selection;
 use crate::query_planner::subscription;
 
-impl From<&'_ next::QueryPlan> for bridge::QueryPlan {
-    fn from(value: &'_ next::QueryPlan) -> Self {
-        let next::QueryPlan {
-            node,
-            statistics: _,
-        } = value;
-        Self { node: option(node) }
-    }
+pub(crate) fn convert_root_query_plan_node(js: &next::QueryPlan) -> Option<plan::PlanNode> {
+    let next::QueryPlan {
+        node,
+        statistics: _,
+    } = js;
+    option(node)
 }
 
 impl From<&'_ next::TopLevelPlanNode> for plan::PlanNode {

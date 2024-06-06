@@ -408,10 +408,11 @@ fn extract_subgraphs_from_fed_2_supergraph(
         remove_inactive_requires_and_provides_from_subgraph(&mut subgraph.schema)?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
-            DirectiveDefinitionPosition {
+            let pos = DirectiveDefinitionPosition {
                 directive_name: definition.name.clone(),
-            }
-            .insert(&mut subgraph.schema, definition.clone())?;
+            };
+            pos.pre_insert(&mut subgraph.schema)?;
+            pos.insert(&mut subgraph.schema, definition.clone())?;
         }
     }
 

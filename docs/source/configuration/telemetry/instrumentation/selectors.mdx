@@ -30,18 +30,19 @@ Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its
 
 The router service is the initial entrypoint for all requests. It is HTTP centric and deals with opaque bytes.
 
-| Selector           | Defaultable | Values                      | Description                          |
-|--------------------|-------------|-----------------------------|--------------------------------------|
-| `trace_id`         | Yes         | `open_telemetry`\|`datadog` | The trace ID                         |
-| `request_header`   | Yes         |                             | The name of the request header       |
-| `response_header`  | Yes         |                             | The name of a response header        |
-| `response_status`  | Yes         | `code`\|`reason`            | The response status                  |
-| `response_context` | Yes         |                             | The name of a response context key   |
-| `baggage`          | Yes         |                             | The name of a baggage item           |
-| `env`              | Yes         |                             | The name of an environment variable  |
-| `on_graphql_error` | No          | `true`|`false`              | Boolean set to true if the response payload contains a graphql error  |
-| `static`           | No          |                             | A static string value                |
-| `error`            | No          | `reason`                    | a string value containing error reason when it's a critical error                |
+| Selector           | Defaultable | Values                                    | Description                          |
+|--------------------|-------------|-------------------------------------------|--------------------------------------|
+| `trace_id`         | Yes         | `open_telemetry`\|`datadog`              | The trace ID                         |
+| `studio_operation_id` | Yes      | `true`|`false`                            | The Apollo Studio operation id       |
+| `request_header`   | Yes         |                                           | The name of the request header       |
+| `response_header`  | Yes         |                                           | The name of a response header        |
+| `response_status`  | Yes         | `code`\|`reason`                          | The response status                  |
+| `response_context` | Yes         |                                           | The name of a response context key   |
+| `baggage`          | Yes         |                                           | The name of a baggage item           |
+| `env`              | Yes         |                                           | The name of an environment variable  |
+| `on_graphql_error` | No          | `true`|`false`                            | Boolean set to true if the response payload contains a graphql error  |
+| `static`           | No          |                                           | A static string value                |
+| `error`            | No          | `reason`                                  | a string value containing error reason when it's a critical error                |
 
 #### Supergraph
 
@@ -59,6 +60,7 @@ The supergraph service is executed after query parsing but before query executio
 | `response_errors`  | Yes         |                                     | Json Path into the supergraph response body errors (it might impact performances) |
 | `request_context`  | Yes         |                                     | The name of a request context key    |
 | `response_context` | Yes         |                                     | The name of a response context key   |
+| `on_graphql_error` | No          | `true`|`false`                      | Boolean set to true if the response payload contains a graphql error  |
 | `baggage`          | Yes         |                                     | The name of a baggage item           |
 | `env`              | Yes         |                                     | The name of an environment variable  |
 | `static`           | No          |                                     | A static string value                |

@@ -425,11 +425,11 @@ async fn subscription_task(
     let sender = sub_params.client_sender;
 
     // Get the rest of the query_plan to execute for subscription events
-    let query_plan = match &query_plan.root {
+    let query_plan = match &*query_plan.root {
         crate::query_planner::PlanNode::Subscription { rest, .. } => rest.clone().map(|r| {
             Arc::new(QueryPlan {
                 usage_reporting: query_plan.usage_reporting.clone(),
-                root: *r,
+                root: Arc::new(*r),
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
             })

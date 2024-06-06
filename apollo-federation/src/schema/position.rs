@@ -970,6 +970,17 @@ impl FieldDefinitionPosition {
             FieldDefinitionPosition::Union(field) => field.get(schema),
         }
     }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        match self {
+            FieldDefinitionPosition::Object(field) => field.try_get(schema),
+            FieldDefinitionPosition::Interface(field) => field.try_get(schema),
+            FieldDefinitionPosition::Union(field) => field.try_get(schema),
+        }
+    }
 }
 
 impl From<AbstractFieldDefinitionPosition> for FieldDefinitionPosition {

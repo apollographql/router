@@ -44,6 +44,8 @@ telemetry:
               eq:
                 - request_header: "head"
                 - "test"
+          studio.operation.id:
+            studio_operation_id: true
       supergraph:
         attributes:
           graphql.operation.name: true

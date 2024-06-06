@@ -6,7 +6,7 @@ use petgraph::graph::NodeIndex;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::query_plan::operation::SelectionSet;
+use crate::operation::SelectionSet;
 use crate::schema::position::AbstractFieldDefinitionPosition;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;

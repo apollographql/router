@@ -354,7 +354,7 @@ async fn defer() {
                         })),
                     }))),
                 }],
-            },
+            }.into(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -478,7 +478,7 @@ async fn defer_if_condition() {
             .unwrap();
     let parsed_schema = planner.schema();
 
-    let root: PlanNode =
+    let root: Arc<PlanNode> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
 
     let query_plan = QueryPlan {
@@ -753,56 +753,56 @@ async fn alias_renaming() {
     {
       query: Query
     }
-    
+
     directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-    
+
     directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-    
+
     directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    
+
     directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-    
+
     directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    
+
     directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    
+
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    
+
     interface I
       @join__type(graph: S1)
       @join__type(graph: S2)
     {
       id: String!
     }
-    
+
     scalar join__FieldSet
-    
+
     enum join__Graph {
       S1 @join__graph(name: "S1", url: "http://localhost/s1")
       S2 @join__graph(name: "S2", url: "http://localhost/s2")
     }
-    
+
     scalar link__Import
-    
+
     enum link__Purpose {
       """
       `SECURITY` features provide metadata necessary to securely resolve fields.
       """
       SECURITY
-    
+
       """
       `EXECUTION` features provide metadata necessary for operation execution.
       """
       EXECUTION
     }
-    
+
     type Query
       @join__type(graph: S1)
       @join__type(graph: S2)
     {
       testQuery(id: String!): I @join__field(graph: S1)
     }
-    
+
     type T1 implements I
       @join__implements(graph: S1, interface: "I")
       @join__implements(graph: S2, interface: "I")
@@ -812,7 +812,7 @@ async fn alias_renaming() {
       id: String!
       foo: Test @join__field(graph: S2)
     }
-    
+
     type T2 implements I
       @join__implements(graph: S1, interface: "I")
       @join__implements(graph: S2, interface: "I")
@@ -822,7 +822,7 @@ async fn alias_renaming() {
       id: String!
       bar: Test @join__field(graph: S2)
     }
-    
+
     type Test
       @join__type(graph: S2)
     {
@@ -947,56 +947,56 @@ async fn missing_fields_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   type Details
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     enabled: Boolean
   }
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1090,49 +1090,49 @@ async fn missing_typename_and_fragments_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1141,7 +1141,7 @@ async fn missing_typename_and_fragments_in_requires() {
     thing: Thing
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { ... on Thing { text } }")
   }
-  
+
   type Thing
   @join__type(graph: SUB1, key: "id")
   @join__type(graph: SUB2, key: "id") {
@@ -1226,58 +1226,58 @@ async fn missing_typename_and_fragments_in_requires2() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
   {
     id: ID
-    thing: PossibleThing @join__field(graph: SUB1) @join__field(graph: SUB2, external: true) 
+    thing: PossibleThing @join__field(graph: SUB1) @join__field(graph: SUB2, external: true)
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { ... on Thing1 { __typename text1 } ... on Thing2 { __typename text2 } }")
   }
-  
+
   union PossibleThing @join__type(graph: SUB1) @join__type(graph: SUB2)
   @join__unionMember(graph: SUB1, member: "Thing1") @join__unionMember(graph: SUB1, member: "Thing2")
   @join__unionMember(graph: SUB2, member: "Thing1") @join__unionMember(graph: SUB2, member: "Thing2")
@@ -1374,49 +1374,49 @@ async fn null_in_requires() {
   {
     query: Query
   }
-  
+
   directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-  
+
   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-  
+
   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-  
+
   directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-  
+
   directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-  
+
   directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-  
+
   directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-  
+
   scalar join__FieldSet
-  
+
   enum join__Graph {
     SUB1 @join__graph(name: "sub1", url: "http://localhost:4002/test")
     SUB2 @join__graph(name: "sub2", url: "http://localhost:4002/test2")
   }
-  
+
   scalar link__Import
-  
+
   enum link__Purpose {
     """
     `SECURITY` features provide metadata necessary to securely resolve fields.
     """
     SECURITY
-  
+
     """
     `EXECUTION` features provide metadata necessary for operation execution.
     """
     EXECUTION
   }
-  
+
   type Query
     @join__type(graph: SUB1)
     @join__type(graph: SUB2)
   {
     stuff: Stuff @join__field(graph: SUB1)
   }
-  
+
   type Stuff
     @join__type(graph: SUB1, key: "id")
     @join__type(graph: SUB2, key: "id", extension: true)
@@ -1425,7 +1425,7 @@ async fn null_in_requires() {
     thing: Thing
     isEnabled: Boolean @join__field(graph: SUB2, requires: "thing { a text }")
   }
-  
+
   type Thing
   @join__type(graph: SUB1, key: "id")
   @join__type(graph: SUB2, key: "id") {
@@ -1874,7 +1874,8 @@ fn broken_plan_does_not_panic() {
             authorization: Default::default(),
             protocol: Default::default(),
             source_node: Default::default(),
-        }),
+        })
+        .into(),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
@@ -1886,8 +1887,7 @@ fn broken_plan_does_not_panic() {
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::new();
     subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
-    let result = plan
-        .root
+    let result = Arc::make_mut(&mut plan.root)
         .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
     assert_eq!(
         result.unwrap_err().to_string(),

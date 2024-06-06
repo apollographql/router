@@ -47,6 +47,7 @@ use crate::http_ext;
 use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::cache::entity::CONTEXT_CACHE_KEY;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::Context;
 
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
@@ -1241,7 +1242,8 @@ mod router_plugin {
             request
                 .query_plan
                 .formatted_query_plan
-                .clone()
+                .as_deref()
+                .cloned()
                 .unwrap_or_default()
         })
     }
@@ -1756,6 +1758,7 @@ impl Rhai {
             SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS.to_string().into(),
         );
         global_variables.insert("APOLLO_ENTITY_CACHE_KEY".into(), CONTEXT_CACHE_KEY.into());
+        global_variables.insert("APOLLO_OPERATION_ID".into(), APOLLO_OPERATION_ID.into());
 
         let shared_globals = Arc::new(global_variables);
 

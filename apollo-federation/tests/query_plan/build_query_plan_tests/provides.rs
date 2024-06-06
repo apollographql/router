@@ -112,7 +112,7 @@ fn it_works_with_nested_provides() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")] // TODO: fix bug FED-230
+#[should_panic(expected = "snapshot assertion")]
 fn it_works_on_interfaces() {
     let planner = planner!(
         Subgraph1: r#"
@@ -305,6 +305,7 @@ fn it_works_on_unions() {
         Fetch(service: "Subgraph1") {
           {
             noProvides {
+              __typename
               ... on T1 {
                 __typename
                 id
@@ -374,6 +375,7 @@ fn it_works_on_unions() {
       Fetch(service: "Subgraph1") {
         {
           withProvidesForT1 {
+            __typename
             ... on T1 {
               a
             }
@@ -477,7 +479,7 @@ fn it_works_on_unions() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn it_allow_providing_fields_for_only_some_subtype() {
     let planner = planner!(
