@@ -1933,7 +1933,7 @@ impl FederatedQueryGraphBuilder {
     }
 }
 
-const FEDERATED_GRAPH_ROOT_SOURCE: &str = "_";
+pub(super) const FEDERATED_GRAPH_ROOT_SOURCE: &str = "_";
 
 struct FederatedQueryGraphBuilderSubgraphs {
     map: IndexMap<NodeStr, FederatedQueryGraphBuilderSubgraphData>,

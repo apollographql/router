@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Name;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
@@ -51,6 +50,7 @@ use crate::query_plan::QueryPlanCost;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::ObjectOrInterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
@@ -2219,26 +2219,25 @@ impl OpGraphPath {
     // PORT_NOTE: In the JS code, this method was a free-standing function called "anImplementationIsEntityWithFieldShareable".
     fn has_an_entity_implementation_with_shareable_field(
         &self,
-        _source: &NodeStr,
-        itf: InterfaceFieldDefinitionPosition,
+        source: &NodeStr,
+        interface_field_pos: InterfaceFieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
-        let valid_schema = self.graph.schema()?;
-        let schema = valid_schema.schema();
-        let fed_spec = get_federation_spec_definition_from_subgraph(valid_schema)?;
-        let key_directive = fed_spec.key_directive_definition(valid_schema)?;
-        let shareable_directive = fed_spec.shareable_directive(valid_schema)?;
-        let comp_type_pos = CompositeTypeDefinitionPosition::Interface(itf.parent());
-        for implem in valid_schema.possible_runtime_types(comp_type_pos)? {
-            let ty = implem.get(schema)?;
-            let field = ty.fields.get(&itf.field_name).ok_or_else(|| {
-                FederationError::internal(
-                    "Unable to find interface field ({itf}) in schema: {schema}",
-                )
-            })?;
-            if !ty.directives.has(&key_directive.name) {
+        let fed_schema = self.graph.schema_by_source(source)?;
+        let schema = fed_schema.schema();
+        let fed_spec = get_federation_spec_definition_from_subgraph(fed_schema)?;
+        let key_directive = fed_spec.key_directive_definition(fed_schema)?;
+        let shareable_directive = fed_spec.shareable_directive_definition(fed_schema)?;
+        for implementation_type_pos in
+            fed_schema.possible_runtime_types(interface_field_pos.parent().into())?
+        {
+            let implementing_type = implementation_type_pos.get(schema)?;
+            if !implementing_type.directives.has(&key_directive.name) {
                 continue;
             }
-            if !field.directives.has(&shareable_directive.name) {
+            let implementing_field = implementation_type_pos
+                .field(interface_field_pos.field_name.clone())
+                .get(schema)?;
+            if !implementing_field.directives.has(&shareable_directive.name) {
                 continue;
             }
 
@@ -2249,68 +2248,79 @@ impl OpGraphPath {
             // And while it's not trivial to check this in general, there are some easy cases we can eliminate. For instance,
             // if the type in the current subgraph has only leaf fields, we can check that all other subgraphs reachable
             // from the implementation have the same set of leaf fields.
-            let base_ty_name = field.ty.inner_named_type();
-            if is_leaf_type(schema, base_ty_name) {
+            let implementing_field_base_type_name = implementing_field.ty.inner_named_type();
+            if is_leaf_type(schema, implementing_field_base_type_name) {
                 continue;
             }
-            let Some(ty) = schema.get_object(base_ty_name) else {
+            let Some(implementing_field_base_type) =
+                schema.get_object(implementing_field_base_type_name)
+            else {
+                // We officially "don't know", so we return "true" so type-explosion is tested.
                 return Ok(true);
             };
-            if ty
+            if implementing_field_base_type
                 .fields
                 .values()
                 .any(|f| !is_leaf_type(schema, f.ty.inner_named_type()))
             {
+                // Similar to above, we declare we "don't know" and test type-explosion.
                 return Ok(true);
             }
-            for node in self.graph.nodes_for_type(&ty.name) {
-                let node = self.graph.node_weight(node)?;
+            let implementing_field_base_type_fields: HashSet<_> =
+                implementing_field_base_type.fields.keys().collect();
+            for node in self.graph.nodes_for_type(&implementing_type.name)? {
+                let node = self.graph.node_weight(*node)?;
                 let tail = self.graph.node_weight(self.tail)?;
                 if node.source == tail.source {
                     continue;
                 }
-                let Some(src) = self.graph.sources.get(&node.source) else {
-                    return Err(FederationError::internal(format!(
-                        "{node} has no valid schema in QueryGraph: {:?}",
-                        self.graph
-                    )));
-                };
-                let fed_spec = get_federation_spec_definition_from_subgraph(src)?;
-                let shareable_directive = fed_spec.shareable_directive(src)?;
+                let node_fed_schema = self.graph.schema_by_source(&node.source)?;
+                let node_schema = node_fed_schema.schema();
+                let node_fed_spec = get_federation_spec_definition_from_subgraph(node_fed_schema)?;
+                let node_shareable_directive =
+                    node_fed_spec.shareable_directive_definition(node_fed_schema)?;
                 let build_err = || {
                     Err(FederationError::internal(format!(
-                        "{implem} is an object in {} but a {} in {}",
+                        "{implementation_type_pos} is an object in {} but a {} in {}",
                         tail.source, node.type_, node.source
                     )))
                 };
-                let QueryGraphNodeType::SchemaType(node_ty) = &node.type_ else {
+                let QueryGraphNodeType::SchemaType(node_type_pos) = &node.type_ else {
                     return build_err();
                 };
-                let node_ty = node_ty.get(schema)?;
-                let other_fields = match node_ty {
-                    ExtendedType::Object(obj) => &obj.fields,
-                    ExtendedType::Interface(int) => &int.fields,
-                    _ => return build_err(),
-                };
-                let Some(field) = other_fields.get(&itf.field_name) else {
+                let node_type_pos: ObjectOrInterfaceTypeDefinitionPosition =
+                    node_type_pos.clone().try_into()?;
+                let node_field_pos = node_type_pos.field(interface_field_pos.field_name.clone());
+                let Some(node_field) = node_field_pos.try_get(node_schema) else {
                     continue;
                 };
-                if !field.directives.has(&shareable_directive.name) {
+                if !node_field.directives.has(&node_shareable_directive.name) {
                     continue;
                 }
-                let field_ty = field.ty.inner_named_type();
-                if field_ty != base_ty_name
-                    || !(schema.get_object(field_ty).is_some()
-                        || schema.get_interface(field_ty).is_some())
-                {
+                let node_field_base_type_name = node_field.ty.inner_named_type();
+                if implementing_field_base_type_name != node_field_base_type_name {
                     // We have a genuine difference here, so we should explore type explosion.
                     return Ok(true);
                 }
-                let names: HashSet<_> = other_fields.keys().collect();
-                if !ty.fields.keys().all(|f| names.contains(&f)) {
-                    // Same, we have a genuine difference.
+                let node_field_base_type_pos =
+                    node_fed_schema.get_type(node_field_base_type_name.clone())?;
+                let Some(node_field_base_type_pos): Option<
+                    ObjectOrInterfaceTypeDefinitionPosition,
+                > = node_field_base_type_pos.try_into().ok() else {
+                    // Similar to above, we have a genuine difference.
+                    return Ok(true);
+                };
+
+                if !node_field_base_type_pos
+                    .fields(node_schema)?
+                    .all(|f| implementing_field_base_type_fields.contains(f.field_name()))
+                {
+                    // Similar to above, we have a genuine difference.
                     return Ok(true);
                 }
+                // Note that if the type is the same and the fields are a subset too, then we know
+                // the return types of those fields must be leaf types, or merging would have
+                // complained.
             }
             return Ok(false);
         }

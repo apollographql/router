@@ -238,7 +238,7 @@ impl QueryPlanner {
                 _ => None,
             })
             .filter(|position| {
-                query_graph.sources().any(|(_name, schema)| {
+                query_graph.source_schemas().any(|(_name, schema)| {
                     schema
                         .schema()
                         .types
@@ -249,32 +249,36 @@ impl QueryPlanner {
             .collect::<IndexSet<_>>();
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
-            let mut sources = query_graph.sources().filter_map(|(_name, subgraph)| {
-                match subgraph.try_get_type(position.type_name().clone())? {
-                    // This is only called for type names that are abstract in the supergraph, so it
-                    // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
-                    // "stand-in" for all possible runtime types, they don't create inconsistencies by themselves
-                    // and we can ignore them.
-                    TypeDefinitionPosition::Object(_) => None,
-                    TypeDefinitionPosition::Interface(interface) => Some(
-                        subgraph
-                            .referencers()
-                            .get_interface_type(&interface.type_name)
-                            .ok()?
-                            .object_types
-                            .clone(),
-                    ),
-                    TypeDefinitionPosition::Union(union_) => Some(
-                        union_
-                            .try_get(subgraph.schema())?
-                            .members
-                            .iter()
-                            .map(|member| ObjectTypeDefinitionPosition::new(member.name.clone()))
-                            .collect(),
-                    ),
-                    _ => None,
-                }
-            });
+            let mut sources = query_graph
+                .source_schemas()
+                .filter_map(|(_name, subgraph)| {
+                    match subgraph.try_get_type(position.type_name().clone())? {
+                        // This is only called for type names that are abstract in the supergraph, so it
+                        // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
+                        // "stand-in" for all possible runtime types, they don't create inconsistencies by themselves
+                        // and we can ignore them.
+                        TypeDefinitionPosition::Object(_) => None,
+                        TypeDefinitionPosition::Interface(interface) => Some(
+                            subgraph
+                                .referencers()
+                                .get_interface_type(&interface.type_name)
+                                .ok()?
+                                .object_types
+                                .clone(),
+                        ),
+                        TypeDefinitionPosition::Union(union_) => Some(
+                            union_
+                                .try_get(subgraph.schema())?
+                                .members
+                                .iter()
+                                .map(|member| {
+                                    ObjectTypeDefinitionPosition::new(member.name.clone())
+                                })
+                                .collect(),
+                        ),
+                        _ => None,
+                    }
+                });
 
             let Some(expected_runtimes) = sources.next() else {
                 return false;
@@ -307,8 +311,11 @@ impl QueryPlanner {
         })
     }
 
-    pub fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
-        &self.federated_query_graph.sources
+    pub fn subgraph_schemas(&self) -> IndexMap<NodeStr, ValidFederationSchema> {
+        self.federated_query_graph
+            .source_schemas()
+            .map(|(source, schema)| (source.clone(), schema.clone()))
+            .collect()
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
@@ -341,7 +348,7 @@ impl QueryPlanner {
             // belong to no subgraphs and use a special source named '_'. So we skip that "fake" source.
             let mut subgraphs = self
                 .federated_query_graph
-                .sources()
+                .source_schemas()
                 .filter(|&(name, _schema)| name != "_");
             if let (Some((subgraph_name, _subgraph_schema)), None) =
                 (subgraphs.next(), subgraphs.next())
