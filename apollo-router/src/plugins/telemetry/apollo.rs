@@ -359,6 +359,7 @@ impl Report {
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
+            extended_references_enabled: true, // todo pass in from configuration
             ..Default::default()
         };
 
@@ -367,6 +368,9 @@ impl Report {
                 .traces_per_query
                 .insert(key.clone(), traces_and_stats.clone().into());
         }
+
+        println!("report: {:?}", report);
+
         report
     }
 }
