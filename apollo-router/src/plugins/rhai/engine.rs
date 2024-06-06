@@ -54,7 +54,13 @@ const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
 
 const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
-    "cannot access status code on a deferred response";
+    "cannot access status_code on a deferred response";
+
+const CANNOT_ACCESS_STATUS_CODE_ON_A_SUPERGRAPH_RESPONSE: &str =
+    "cannot access status_code on a supergraph response";
+
+const CANNOT_ACCESS_STATUS_CODE_ON_AN_EXECUTION_RESPONSE: &str =
+    "cannot access status_code on an execution response";
 
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
@@ -517,11 +523,11 @@ mod router_context {
         obj.with_mut(|response| response.context = context);
         Ok(())
     }
-    #[rhai_fn(get = "status_code", pure)]
+    #[rhai_fn(get = "status_code", pure, return_raw)]
     pub(crate) fn supergraph_first_response_status_code_get(
-        obj: &mut SharedMut<supergraph::FirstResponse>,
-    ) -> status_code::StatusCode {
-        obj.with_mut(|response| response.response.status())
+        _obj: &mut SharedMut<supergraph::FirstResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_SUPERGRAPH_RESPONSE.into())
     }
 
     #[rhai_fn(get = "context", pure, return_raw)]
@@ -544,11 +550,11 @@ mod router_context {
         obj.with_mut(|response| response.context = context);
         Ok(())
     }
-    #[rhai_fn(get = "status_code", pure)]
+    #[rhai_fn(get = "status_code", pure, return_raw)]
     pub(crate) fn execution_first_response_status_code_get(
-        obj: &mut SharedMut<execution::FirstResponse>,
-    ) -> status_code::StatusCode {
-        obj.with_mut(|response| response.response.status())
+        _obj: &mut SharedMut<execution::FirstResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_AN_EXECUTION_RESPONSE.into())
     }
 
     // Add context getter/setters for deferred responses
@@ -760,7 +766,7 @@ mod router_plugin {
     pub(crate) fn get_status_code_supergraph_deferred_response(
         _obj: &mut SharedMut<supergraph::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_SUPERGRAPH_RESPONSE.into())
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -795,7 +801,7 @@ mod router_plugin {
     pub(crate) fn get_status_code_execution_deferred_response(
         _obj: &mut SharedMut<execution::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
-        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_AN_EXECUTION_RESPONSE.into())
     }
 
     #[rhai_fn(name = "is_primary", pure)]

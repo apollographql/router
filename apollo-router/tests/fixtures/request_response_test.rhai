@@ -161,7 +161,6 @@ fn process_supergraph_response(response) {
     test_response_is_primary(response);
     process_common_response(response);
     test_response_body(response);
-    test_response_status_code(response);
 }
 
 fn process_supergraph_deferred_response(response) {
@@ -174,7 +173,6 @@ fn process_execution_response(response) {
     test_response_is_primary(response);
     process_common_response(response);
     test_response_body(response);
-    test_response_status_code(response);
 }
 
 fn process_execution_deferred_response(response) {
