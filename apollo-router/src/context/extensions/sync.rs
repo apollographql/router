@@ -25,6 +25,7 @@ impl ExtensionsMutex {
     /// Doing so may cause performance degradation or even deadlocks.
     ///
     /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
+    #[deprecated]
     pub fn lock(&self) -> ExtensionsGuard {
         ExtensionsGuard {
             #[cfg(debug_assertions)]
@@ -37,7 +38,11 @@ impl ExtensionsMutex {
     ///
     /// The lock will be dropped once the closure completes.
     pub fn with_lock<'a, T, F: FnOnce(ExtensionsGuard<'a>) -> T>(&'a self, func: F) -> T {
-        let locked = self.lock();
+        let locked = ExtensionsGuard {
+            #[cfg(debug_assertions)]
+            start: Instant::now(),
+            guard: self.extensions.lock(),
+        };
         func(locked)
     }
 }

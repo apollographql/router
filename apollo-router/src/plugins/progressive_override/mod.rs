@@ -195,7 +195,7 @@ impl Plugin for ProgressiveOverridePlugin {
                 let crate::graphql::Request {query, operation_name, ..} = request.supergraph_request.body();
                 let operation_hash = hash_operation(query, operation_name);
 
-                let maybe_parsed_doc = request.context.extensions().lock().get::<ParsedDocument>().cloned();
+                let maybe_parsed_doc = request.context.extensions().with_lock(|lock| lock.get::<ParsedDocument>().cloned());
                 if let Some(parsed_doc) = maybe_parsed_doc {
                     // we have to visit the operation to find out which subset
                     // of labels are relevant unless we've already cached that

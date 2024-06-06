@@ -291,10 +291,12 @@ impl AuthorizationPlugin {
             .unwrap_or_default();
         policies.sort();
 
-        context.extensions().lock().insert(CacheKeyMetadata {
-            is_authenticated,
-            scopes,
-            policies,
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(CacheKeyMetadata {
+                is_authenticated,
+                scopes,
+                policies,
+            })
         });
     }
 

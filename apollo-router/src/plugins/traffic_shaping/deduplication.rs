@@ -81,8 +81,7 @@ where
         if request
             .context
             .extensions()
-            .lock()
-            .contains_key::<BatchQuery>()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
         {
             return service.ready_oneshot().await?.call(request).await;
         }

@@ -145,8 +145,7 @@ async fn assert_expected_and_absent_labels_for_supergraph_service(
     let context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     context
         .insert(
@@ -218,8 +217,7 @@ async fn get_json_query_plan(query: &str) -> serde_json::Value {
     let context: Context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     let request = supergraph::Request::fake_builder()
         .query(query)
@@ -293,8 +291,7 @@ async fn query_with_labels(query: &str, labels_from_coprocessors: Vec<&str>) {
     let context = Context::new();
     context
         .extensions()
-        .lock()
-        .insert::<ParsedDocument>(parsed_doc);
+        .with_lock(|mut lock| lock.insert::<ParsedDocument>(parsed_doc));
 
     context
         .insert(

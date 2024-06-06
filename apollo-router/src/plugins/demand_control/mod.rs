@@ -203,9 +203,9 @@ pub(crate) struct DemandControl {
 
 impl DemandControl {
     fn report_operation_metric(context: Context) {
-        let guard = context.extensions().lock();
-        let cost_context = guard.get::<CostContext>();
-        let result = cost_context.map_or("NO_CONTEXT", |c| c.result);
+        let result = context
+            .extensions()
+            .with_lock(|lock| lock.get::<CostContext>().map_or("NO_CONTEXT", |c| c.result));
         u64_counter!(
             "apollo.router.operations.demand_control",
             "Total operations with demand control enabled",
@@ -237,7 +237,9 @@ impl Plugin for DemandControl {
             let strategy = self.strategy_factory.create();
             ServiceBuilder::new()
                 .checkpoint(move |req: execution::Request| {
-                    req.context.extensions().lock().insert(strategy.clone());
+                    req.context
+                        .extensions()
+                        .with_lock(|mut lock| lock.insert(strategy.clone()));
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_execution_request(&req) {
                         Ok(_) => ControlFlow::Continue(req),
@@ -258,13 +260,9 @@ impl Plugin for DemandControl {
                         .context
                         .unsupported_executable_document()
                         .expect("must have document");
-                    let strategy = resp
-                        .context
-                        .extensions()
-                        .lock()
-                        .get::<Strategy>()
-                        .expect("must have strategy")
-                        .clone();
+                    let strategy = resp.context.extensions().with_lock(|lock| {
+                        lock.get::<Strategy>().expect("must have strategy").clone()
+                    });
                     let context = resp.context.clone();
 
                     // We want to sequence this code to run after all the subgraph responses have been scored.
@@ -323,13 +321,9 @@ impl Plugin for DemandControl {
         } else {
             ServiceBuilder::new()
                 .checkpoint(move |req: subgraph::Request| {
-                    let strategy = req
-                        .context
-                        .extensions()
-                        .lock()
-                        .get::<Strategy>()
-                        .expect("must have strategy")
-                        .clone();
+                    let strategy = req.context.extensions().with_lock(|lock| {
+                        lock.get::<Strategy>().expect("must have strategy").clone()
+                    });
 
                     // On the request path we need to check for estimates, checkpoint is used to do this, short-circuiting the request if it's too expensive.
                     Ok(match strategy.on_subgraph_request(&req) {
@@ -355,13 +349,9 @@ impl Plugin for DemandControl {
                     },
                     |req: Arc<Valid<ExecutableDocument>>, fut| async move {
                         let resp: subgraph::Response = fut.await?;
-                        let strategy = resp
-                            .context
-                            .extensions()
-                            .lock()
-                            .get::<Strategy>()
-                            .expect("must have strategy")
-                            .clone();
+                        let strategy = resp.context.extensions().with_lock(|lock| {
+                            lock.get::<Strategy>().expect("must have strategy").clone()
+                        });
                         Ok(match strategy.on_subgraph_response(req.as_ref(), &resp) {
                             Ok(_) => resp,
                             Err(err) => subgraph::Response::builder()
@@ -556,7 +546,7 @@ mod test {
         let strategy = plugin.strategy_factory.create();
 
         let ctx = context();
-        ctx.extensions().lock().insert(strategy);
+        ctx.extensions().with_lock(|mut lock| lock.insert(strategy));
         let mut req = subgraph::Request::fake_builder()
             .subgraph_name("test")
             .context(ctx)
@@ -582,8 +572,7 @@ mod test {
         };
         let ctx = Context::new();
         ctx.extensions()
-            .lock()
-            .insert(ParsedDocument::new(parsed_document));
+            .with_lock(|mut lock| lock.insert(ParsedDocument::new(parsed_document)));
         ctx
     }
 

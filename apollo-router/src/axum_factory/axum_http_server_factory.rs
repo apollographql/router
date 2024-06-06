@@ -754,7 +754,9 @@ impl<'a> Drop for CancelHandler<'a> {
                 self.span
                     .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
             }
-            self.context.extensions().lock().insert(CanceledRequest);
+            self.context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(CanceledRequest));
         }
     }
 }
