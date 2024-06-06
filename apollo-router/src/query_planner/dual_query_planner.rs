@@ -61,7 +61,10 @@ impl BothModeComparisonJob {
         let rust_result = std::panic::catch_unwind(|| {
             let name = self.operation_name.clone().map(Name::new).transpose()?;
             USING_CATCH_UNWIND.set(true);
+            // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);
+            // … to here, so the thread can only eiher reach here or panic.
+            // We unset USING_CATCH_UNWIND in both cases.
             USING_CATCH_UNWIND.set(false);
             result
         })
