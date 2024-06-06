@@ -60,11 +60,10 @@ impl BothModeComparisonJob {
         // rather than consume too much resources.
         //
         // Either way we move on and let this thread continue proceed with the query plan from JS.
-        let _ = dbg!(queue().try_send(self).is_err());
+        let _ = queue().try_send(self).is_err();
     }
 
     fn execute(self) {
-        dbg!();
         // TODO: once the Rust query planner does not use `todo!()` anymore,
         // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
         let rust_result = std::panic::catch_unwind(|| {
