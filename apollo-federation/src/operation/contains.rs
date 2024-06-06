@@ -99,8 +99,10 @@ fn compare_sorted_value(left: &executable::Value, right: &executable::Value) -> 
                 .unwrap_or(std::cmp::Ordering::Equal)
         }),
         (Value::Object(left), Value::Object(right)) => compare_sorted_name_value_pairs(
-            left.iter().map(|pair| (&pair.0, &pair.1)),
-            right.iter().map(|pair| (&pair.0, &pair.1)),
+            left.iter().map(|pair| &pair.0),
+            left.iter().map(|pair| &pair.1),
+            right.iter().map(|pair| &pair.0),
+            right.iter().map(|pair| &pair.1),
         ),
         _ => discriminant(left).cmp(&discriminant(right)),
     }
@@ -112,23 +114,22 @@ fn compare_sorted_value(left: &executable::Value, right: &executable::Value) -> 
 /// Note that pair iterators are compared by length, then lexicographically by name, then finally
 /// recursively by value. This is intended to compute an ordering quickly for hashing.
 fn compare_sorted_name_value_pairs<'doc>(
-    left: impl ExactSizeIterator<Item = (&'doc Name, &'doc Node<executable::Value>)>,
-    right: impl ExactSizeIterator<Item = (&'doc Name, &'doc Node<executable::Value>)>,
+    left_names: impl ExactSizeIterator<Item = &'doc Name>,
+    left_values: impl ExactSizeIterator<Item = &'doc Node<executable::Value>>,
+    right_names: impl ExactSizeIterator<Item = &'doc Name>,
+    right_values: impl ExactSizeIterator<Item = &'doc Node<executable::Value>>,
 ) -> std::cmp::Ordering {
-    left.len().cmp(&right.len()).then_with(|| {
-        let mut pairs = vec![];
-        for ((left_name, left_value), (right_name, right_value)) in left.zip(right) {
-            match left_name.cmp(right_name) {
-                std::cmp::Ordering::Equal => pairs.push((left_value, right_value)),
-                o => return o,
-            }
-        }
-        pairs
-            .into_iter()
-            .map(|(left, right)| compare_sorted_value(left, right))
-            .find(|o| o.is_ne())
-            .unwrap_or(std::cmp::Ordering::Equal)
-    })
+    left_names
+        .len()
+        .cmp(&right_names.len())
+        .then_with(|| left_names.cmp(right_names))
+        .then_with(|| {
+            left_values
+                .zip(right_values)
+                .map(|(left, right)| compare_sorted_value(left, right))
+                .find(|o| o.is_ne())
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
 }
 
 /// Returns true if two argument lists are equivalent.
@@ -171,8 +172,10 @@ fn compare_sorted_arguments(
     right: &[Node<executable::Argument>],
 ) -> std::cmp::Ordering {
     compare_sorted_name_value_pairs(
-        left.iter().map(|arg| (&arg.name, &arg.value)),
-        right.iter().map(|arg| (&arg.name, &arg.value)),
+        left.iter().map(|arg| &arg.name),
+        left.iter().map(|arg| &arg.value),
+        right.iter().map(|arg| &arg.name),
+        right.iter().map(|arg| &arg.value),
     )
 }
 
