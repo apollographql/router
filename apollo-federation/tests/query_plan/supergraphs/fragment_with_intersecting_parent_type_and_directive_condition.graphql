@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: aebf42f02d843ad0173bed996f1a5f6ddc8f980f
+# Composed from subgraphs with hash: 059bed56ce74dbb40643a1561b79514872f0ab60
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
@@ -20,7 +20,7 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-directive @test on FRAGMENT_SPREAD
+directive @test on INLINE_FRAGMENT
 
 interface I
   @join__type(graph: A)

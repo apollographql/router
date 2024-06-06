@@ -1290,7 +1290,8 @@ mod router_plugin {
             request
                 .query_plan
                 .formatted_query_plan
-                .clone()
+                .as_deref()
+                .cloned()
                 .unwrap_or_default()
         })
     }
