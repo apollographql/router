@@ -1316,7 +1316,7 @@ fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<Content
                 mime,
             )),
             None => Err(format!(
-                "subgraph response contains invalid 'content-type' value {:?}",
+                "subgraph response contains invalid 'content-type' header value {:?}",
                 raw_content_type,
             )),
         }
