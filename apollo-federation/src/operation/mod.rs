@@ -2420,7 +2420,7 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
-                let type_if_abstract = subselection_type_if_abstract(selection);
+                let type_if_abstract = subselection_type_if_abstract(selection)?;
                 let updated_selection_set =
                     selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
 
@@ -3125,17 +3125,18 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenRespon
     }
 }
 
-pub(crate) fn subselection_type_if_abstract(selection: &Selection) -> Option<AbstractType> {
-    let sub_selection_type = selection
-        .element()
-        .ok()?
-        .sub_selection_type_position()
-        .ok()
-        .flatten()?;
+pub(crate) fn subselection_type_if_abstract(
+    selection: &Selection,
+) -> Result<Option<AbstractType>, FederationError> {
+    let Some(sub_selection_type) = selection.element()?.sub_selection_type_position()? else {
+        return Ok(None);
+    };
     match sub_selection_type {
-        CompositeTypeDefinitionPosition::Interface(interface_type) => Some(interface_type.into()),
-        CompositeTypeDefinitionPosition::Union(union_type) => Some(union_type.into()),
-        CompositeTypeDefinitionPosition::Object(_) => None,
+        CompositeTypeDefinitionPosition::Interface(interface_type) => {
+            Ok(Some(interface_type.into()))
+        }
+        CompositeTypeDefinitionPosition::Union(union_type) => Ok(Some(union_type.into())),
+        CompositeTypeDefinitionPosition::Object(_) => Ok(None),
     }
 }
 
