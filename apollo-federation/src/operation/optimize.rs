@@ -42,22 +42,22 @@ use apollo_compiler::executable;
 use apollo_compiler::executable::Name;
 use apollo_compiler::Node;
 
-use super::operation::CollectedFieldInSet;
-use super::operation::Containment;
-use super::operation::ContainmentOptions;
-use super::operation::Field;
-use super::operation::FieldSelection;
-use super::operation::Fragment;
-use super::operation::FragmentSpreadSelection;
-use super::operation::InlineFragmentSelection;
-use super::operation::NamedFragments;
-use super::operation::NormalizeSelectionOption;
-use super::operation::Operation;
-use super::operation::Selection;
-use super::operation::SelectionKey;
-use super::operation::SelectionMapperReturn;
-use super::operation::SelectionOrSet;
-use super::operation::SelectionSet;
+use super::CollectedFieldInSet;
+use super::Containment;
+use super::ContainmentOptions;
+use super::Field;
+use super::FieldSelection;
+use super::Fragment;
+use super::FragmentSpreadSelection;
+use super::InlineFragmentSelection;
+use super::NamedFragments;
+use super::NormalizeSelectionOption;
+use super::Operation;
+use super::Selection;
+use super::SelectionKey;
+use super::SelectionMapperReturn;
+use super::SelectionOrSet;
+use super::SelectionSet;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 
@@ -1172,11 +1172,7 @@ impl InlineFragmentSelection {
         // above, this recursion will "ignore" those as `FragmentSpreadSelection`'s `optimize()` is
         // a no-op).
         optimized = optimized.optimize(fragments, validator)?;
-        Ok(InlineFragmentSelection {
-            inline_fragment: self.inline_fragment.clone(),
-            selection_set: optimized,
-        }
-        .into())
+        Ok(InlineFragmentSelection::new(self.inline_fragment.clone(), optimized).into())
     }
 }
 
