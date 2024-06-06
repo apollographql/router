@@ -10,6 +10,7 @@ use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::NodeStr;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
@@ -92,7 +93,7 @@ enum PlannerMode {
 struct BothModeComparisonJob {
     rust_planner: Arc<QueryPlanner>,
     document: Arc<Valid<ExecutableDocument>>,
-    operation_name: Result<Option<Name>, apollo_compiler::ast::InvalidNameError>,
+    operation_name: Option<NodeStr>,
     js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
 }
 
@@ -248,7 +249,7 @@ impl PlannerMode {
                 })
             }
             PlannerMode::Both { js, rust } => {
-                let operation_name = operation.as_deref().map(Name::new).transpose();
+                let operation_name = operation.as_deref().map(NodeStr::from);
                 let mut js_result = js
                     .plan(filtered_query, operation, plan_options)
                     .await
@@ -338,10 +339,9 @@ impl BothModeComparisonJob {
         // TODO: once the Rust query planner does not use `todo!()` anymore,
         // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
         let rust_result = std::panic::catch_unwind(|| {
+            let name = self.operation_name.clone().map(Name::new).transpose()?;
             USING_CATCH_UNWIND.set(true);
-            let result = self
-                .rust_planner
-                .build_query_plan(&self.document, self.operation_name?);
+            let result = self.rust_planner.build_query_plan(&self.document, name);
             USING_CATCH_UNWIND.set(false);
             result
         })
@@ -359,17 +359,28 @@ impl BothModeComparisonJob {
             ))
         });
 
+        let name = self.operation_name.as_deref();
+        let operation_desc = if let Ok(operation) = self.document.get_operation(name) {
+            if let Some(parsed_name) = &operation.name {
+                format!(" in {} `{parsed_name}`", operation.operation_type)
+            } else {
+                format!(" in anonymous {}", operation.operation_type)
+            }
+        } else {
+            String::new()
+        };
+
         let is_matched;
         match (&self.js_result, &rust_result) {
             (Err(js_errors), Ok(_)) => {
                 tracing::warn!(
-                    "JS query planner error: {}",
+                    "JS query planner error{operation_desc}: {}",
                     format_bridge_errors(js_errors)
                 );
                 is_matched = false;
             }
             (Ok(_), Err(rust_error)) => {
-                tracing::warn!("Rust query planner error: {}", rust_error);
+                tracing::warn!("Rust query planner error{operation_desc}: {}", rust_error);
                 is_matched = false;
             }
             (Err(_), Err(_)) => {
@@ -381,9 +392,9 @@ impl BothModeComparisonJob {
                 let rust_root_node = convert_root_query_plan_node(rust_plan);
                 is_matched = js_root_node == rust_root_node.as_ref();
                 if is_matched {
-                    tracing::debug!("JS and Rust query plans match! 🎉");
+                    tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉");
                 } else {
-                    tracing::warn!("JS v.s. Rust query plan mismatch");
+                    tracing::warn!("JS v.s. Rust query plan mismatch{operation_desc}");
                     if let Some(formatted) = &js_plan.formatted_query_plan {
                         tracing::debug!(
                             "Diff of formatted plans:\n{}",
