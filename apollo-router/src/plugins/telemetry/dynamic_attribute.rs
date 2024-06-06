@@ -194,7 +194,7 @@ impl SpanDynAttribute for ::tracing::Span {
 
 fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::Value) {
     match key.as_str() {
-        SPAN_NAME_FIELD => otel_data.builder.name = format!("{:?}", value).into(),
+        SPAN_NAME_FIELD => otel_data.forced_span_name = Some(value.to_string()),
         SPAN_KIND_FIELD => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
         SPAN_STATUS_CODE_FIELD => otel_data.forced_status = str_to_status(&value.as_str()).into(),
         SPAN_STATUS_MESSAGE_FIELD => {
