@@ -414,7 +414,7 @@ impl<'a, 'p> QueryPlanningTraversal<'a, 'p> {
                 let new_selection_set = Arc::new(
                     selection_set
                         .add_back_typename_in_attachments()?
-                        .add_typename_field_for_abstract_types(None, None)?,
+                        .add_typename_field_for_abstract_types(None)?,
                 );
                 self.record_closed_branch(ClosedBranch(
                     new_options
