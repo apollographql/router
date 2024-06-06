@@ -208,7 +208,7 @@ impl UsageReportingGenerator<'_> {
                 formatter: &ApolloReportingSignatureFormatter::Fragment(f),
                 normalization_algorithm: self.normalization_algorithm,
             };
-            result.push_str(&format!("{}", formatter))
+            write!(&mut result, "{formatter}").expect("infallible");
         });
 
         // Followed by the operation
@@ -216,7 +216,7 @@ impl UsageReportingGenerator<'_> {
             formatter: &ApolloReportingSignatureFormatter::Operation(operation),
             normalization_algorithm: self.normalization_algorithm,
         };
-        result.push_str(&format!("{}", formatter));
+        write!(&mut result, "{formatter}").expect("infallible");
 
         result
     }
@@ -440,8 +440,7 @@ fn format_selection_set(
                 formatter: &ApolloReportingSignatureFormatter::Field(field),
                 normalization_algorithm,
             };
-            let field_str = format!("{}", formatter);
-            f.write_str(&field_str)?;
+            write!(f, "{formatter}")?;
 
             // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
             let use_separator = field_str
@@ -498,7 +497,7 @@ fn format_field(
 ) -> fmt::Result {
     if is_enhanced(normalization_algorithm) {
         if let Some(alias) = &field.alias {
-            write!(f, "{}:", alias)?;
+            write!(f, "{alias}:")?;
         }
     }
 
