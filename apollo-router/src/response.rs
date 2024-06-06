@@ -308,18 +308,38 @@ pub(crate) trait ResponseVisitor {
         selection_set: &apollo_compiler::executable::SelectionSet,
         fields: &Map<ByteString, Value>,
     ) {
+        let mut value_it: serde_json_bytes::Iter = fields.iter();
+        self.visit_selections_it(request, selection_set, &mut value_it);
+    }
+
+    // this visits a list of fields, assuming that they are in the same order as the selections
+    // this should be the case since they execute after the ExecutionService has formatted the response
+    fn visit_selections_it(
+        &mut self,
+        request: &apollo_compiler::ExecutableDocument,
+        selection_set: &apollo_compiler::executable::SelectionSet,
+        value_it: &mut serde_json_bytes::Iter,
+    ) {
+        let mut current_kv = None;
         for selection in &selection_set.selections {
             match selection {
                 apollo_compiler::executable::Selection::Field(inner_field) => {
-                    if let Some(value) = fields.get(inner_field.name.as_str()) {
-                        self.visit_field(request, &selection_set.ty, inner_field.as_ref(), value);
+                    // if there's no more values available, stop the visitor
+                    let kv = match current_kv.take().or_else(|| value_it.next()) {
+                        Some(kv) => kv,
+                        None => return,
+                    };
+
+                    if kv.0.as_str() == inner_field.name.as_str() {
+                        self.visit_field(request, &selection_set.ty, inner_field.as_ref(), kv.1);
+                    // there is no value for the selection, skip to the next selection
                     } else {
-                        tracing::warn!("The response did not include a field corresponding to query field {:?}", inner_field);
+                        current_kv = Some(kv);
                     }
                 }
                 apollo_compiler::executable::Selection::FragmentSpread(fragment_spread) => {
                     if let Some(fragment) = fragment_spread.fragment_def(request) {
-                        self.visit_selections(request, &fragment.selection_set, fields);
+                        self.visit_selections_it(request, &fragment.selection_set, value_it);
                     } else {
                         tracing::warn!(
                             "The fragment {} was not found in the query document.",
@@ -328,7 +348,7 @@ pub(crate) trait ResponseVisitor {
                     }
                 }
                 apollo_compiler::executable::Selection::InlineFragment(inline_fragment) => {
-                    self.visit_selections(request, &inline_fragment.selection_set, fields);
+                    self.visit_selections_it(request, &inline_fragment.selection_set, value_it);
                 }
             }
         }
