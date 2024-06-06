@@ -4,6 +4,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::fmt::Write;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
@@ -440,7 +441,8 @@ fn format_selection_set(
                 formatter: &ApolloReportingSignatureFormatter::Field(field),
                 normalization_algorithm,
             };
-            write!(f, "{formatter}")?;
+            let field_str = format!("{}", formatter);
+            f.write_str(&field_str)?;
 
             // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
             let use_separator = field_str
