@@ -1079,7 +1079,7 @@ mod field_selection {
             selection_set: Option<SelectionSet>,
         ) -> FieldSelection {
             if cfg!(debug_assertions) {
-                if let Some(selection_set) = selection_set.clone() {
+                if let Some(ref selection_set) = selection_set {
                     if let Ok(field_type) = self.data.output_base_type() {
                         if let Ok(field_type_position) =
                             CompositeTypeDefinitionPosition::try_from(field_type)
