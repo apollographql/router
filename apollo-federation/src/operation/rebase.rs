@@ -648,16 +648,12 @@ impl SelectionSet {
         ))
     }
 
-    /// Returns true if the selection set would select cleanly from the given type in the given
-    /// schema.
-    pub fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
+    /// Returns true if the selection set would select cleanly from the given type in the
+    /// current schema.
+    pub fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
         self.selections
             .values()
-            .all(|sel| sel.can_add_to(parent_type, schema))
+            .all(|sel| sel.can_add_to(parent_type, &self.schema))
     }
 }
 
