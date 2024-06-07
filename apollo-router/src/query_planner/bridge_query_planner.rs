@@ -1814,12 +1814,7 @@ mod tests {
 
         let subgraph_queries = subgraph_queries2.lock().await;
         insta::assert_snapshot!(*subgraph_queries, @r###"
-        {
-          topProducts {
-            name
-          }
-        }
-
+        { topProducts { name } }
         "###)
     }
 }

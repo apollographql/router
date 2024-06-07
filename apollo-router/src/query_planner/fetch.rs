@@ -161,7 +161,7 @@ impl SubgraphOperation {
     pub(crate) fn from_parsed(parsed: impl Into<Arc<Valid<ExecutableDocument>>>) -> Self {
         let parsed = parsed.into();
         Self {
-            serialized: parsed.to_string(),
+            serialized: parsed.serialize().no_indent().to_string(),
             parsed: Some(parsed),
         }
     }
