@@ -214,6 +214,7 @@ impl QueryAnalysisLayer {
             }
         }
     }
+
 }
 
 pub(crate) type ParsedDocument = Arc<ParsedDocumentInner>;
