@@ -2654,7 +2654,8 @@ impl SelectionSet {
                                 RebaseErrorHandlingOption::ThrowError,
                             )
                         })
-                        .transpose()?.map(|selection_set| selection_set.without_unnecessary_fragments());
+                        .transpose()?
+                        .map(|selection_set| selection_set.without_unnecessary_fragments());
                     let selection = Selection::from_element(element, selection_set)?;
                     self.add_selection(&selection)?
                 }
