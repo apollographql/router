@@ -28,6 +28,7 @@ pub(crate) struct Schema {
     subgraphs: HashMap<String, Uri>,
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<ApiSchema>,
+    pub(crate) hash: Arc<String>,
 }
 
 /// TODO: remove and use apollo_federation::Supergraph unconditionally
@@ -128,12 +129,15 @@ impl Schema {
             Supergraph::ApolloCompiler(definitions)
         };
 
+        let hash = Arc::new(Schema::schema_id(&sdl));
+
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
             supergraph,
             subgraphs,
             implementers_map,
             api_schema: None,
+            hash,
         })
     }
 
@@ -377,6 +381,7 @@ impl std::fmt::Debug for Schema {
             subgraphs,
             implementers_map,
             api_schema: _, // skip
+            hash: _,
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
