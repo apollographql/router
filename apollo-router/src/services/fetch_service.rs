@@ -175,9 +175,8 @@ impl tower::Service<FetchRequest> for FetchService {
             .expect("we already checked that the service exists during planning; qed");
 
         Box::pin(async move {
-            if let Some(apollo_federation::sources::source::query_plan::FetchNode::Connect(
-                connect_node,
-            )) = fetch_node.source_node.as_deref()
+            if let Some(apollo_federation::sources::to_remove::FetchNode::Connect(connect_node)) =
+                fetch_node.source_node.as_deref()
             {
                 // TODO: return eventually
                 let _ = connector_service_factory

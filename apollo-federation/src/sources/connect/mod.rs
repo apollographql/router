@@ -6,13 +6,8 @@ use std::sync::Arc;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
-use super::source::SourceId;
-use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
-pub(crate) mod federated_query_graph;
-pub(crate) mod fetch_dependency_graph;
 mod json_selection;
 mod models;
-pub mod query_plan;
 pub(crate) mod spec;
 mod url_path_template;
 
@@ -33,6 +28,8 @@ pub use self::models::Connector;
 pub use self::models::HTTPMethod;
 pub use self::models::HttpJsonTransport;
 pub use self::models::Transport;
+use super::to_remove::SourceId;
+use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 
 pub type Connectors = Arc<IndexMap<SourceId, Connector>>;
 

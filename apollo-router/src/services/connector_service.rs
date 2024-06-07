@@ -6,12 +6,12 @@ use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
 use apollo_federation::sources::connect;
-use apollo_federation::sources::connect::query_plan::FetchNode;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::Connectors;
 use apollo_federation::sources::connect::HttpJsonTransport;
-use apollo_federation::sources::source::SourceId;
+use apollo_federation::sources::to_remove::connect::FetchNode;
+use apollo_federation::sources::to_remove::SourceId;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
 use tower::BoxError;

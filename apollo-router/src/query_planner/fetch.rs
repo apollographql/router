@@ -6,7 +6,7 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
-use apollo_federation::sources::source;
+use apollo_federation::sources;
 use indexmap::IndexSet;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
@@ -154,7 +154,7 @@ pub(crate) struct FetchNode {
     #[serde(default)]
     pub(crate) protocol: Arc<Protocol>,
     #[serde(default, skip)]
-    pub(crate) source_node: Option<Arc<source::query_plan::FetchNode>>,
+    pub(crate) source_node: Option<Arc<sources::to_remove::FetchNode>>,
 }
 
 #[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]

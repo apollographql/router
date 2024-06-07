@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use apollo_federation::sources::connect::query_plan::FetchNode;
+use apollo_federation::sources::to_remove::connect::FetchNode;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
