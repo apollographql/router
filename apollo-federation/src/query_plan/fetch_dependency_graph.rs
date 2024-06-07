@@ -1479,7 +1479,7 @@ impl FetchDependencyGraph {
         if path.is_empty() {
             mutable_node
                 .selection_set
-                .merge_selections(&merged.selection_set.selection_set)?;
+                .add_selections(&merged.selection_set.selection_set)?;
         } else {
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
             // we clean things up a bit.
@@ -2126,19 +2126,11 @@ impl FetchSelectionSet {
         Ok(())
     }
 
-    // JS PORT NOTE: Since we are doing selection set modifications in place we are actually merging
-    // the selections and not adding them to the updates.
-    fn merge_selections(
+    fn add_selections(
         &mut self,
         selection_set: &Arc<SelectionSet>,
     ) -> Result<(), FederationError> {
-        let rebased_selections = selection_set.rebase_on(
-            &self.selection_set.type_position,
-            &NamedFragments::default(),
-            &self.selection_set.schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
-        Arc::make_mut(&mut self.selection_set).add_selection_set(&rebased_selections)?;
+        Arc::make_mut(&mut self.selection_set).add_selection_set_with_rebase(&selection_set)?;
         Ok(())
     }
 }
@@ -2562,15 +2554,7 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    let edge_conditions = edge_conditions.rebase_on(
-        &input_type,
-        // Conditions do not use named fragments
-        &Default::default(),
-        &dependency_graph.supergraph_schema,
-        crate::operation::RebaseErrorHandlingOption::ThrowError,
-    )?;
-
-    input_selections.add_selection_set(&edge_conditions)?;
+    input_selections.add_selection_set_with_rebase(&edge_conditions)?;
 
     let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
@@ -3505,13 +3489,7 @@ fn inputs_for_require(
     // elements before they can be merged. This is different from JS implementation which relied on
     // selection set "updates" to capture changes and apply them all at once (with rebasing) when
     // generating final selection set.
-    let rebased_conditions = edge_conditions.rebase_on(
-        &input_type,
-        &NamedFragments::default(),
-        &fetch_dependency_graph.supergraph_schema,
-        RebaseErrorHandlingOption::ThrowError,
-    )?;
-    full_selection_set.add_selection_set(&rebased_conditions)?;
+    full_selection_set.add_selection_set_with_rebase(&edge_conditions)?;
     if include_key_inputs {
         let Some(key_condition) = fetch_dependency_graph
             .federated_query_graph
@@ -3538,32 +3516,9 @@ fn inputs_for_require(
                     entity_type_position.type_name
                 )));
             };
-
-            // Note: we are rebasing on another schema below, but we also know that we're working on a full expanded
-            // selection set (no spread), so passing empty fragments is actually correct.
-            let target_subgraph_name = fetch_dependency_graph
-                .federated_query_graph
-                .edge_head_weight(query_graph_edge_id)?
-                .source
-                .clone();
-            let target_subgraph = fetch_dependency_graph
-                .federated_query_graph
-                .schema_by_source(&target_subgraph_name)?;
-            let key_condition_as_input = key_condition.rebase_on(
-                &supergraph_intf_type,
-                &NamedFragments::default(),
-                target_subgraph,
-                RebaseErrorHandlingOption::ThrowError,
-            )?;
-            full_selection_set.add_selection_set(&key_condition_as_input)?;
+            full_selection_set.add_selection_set_with_rebase(&key_condition)?;
         } else {
-            let rebased_key_condition = key_condition.rebase_on(
-                &input_type,
-                &NamedFragments::default(),
-                &fetch_dependency_graph.supergraph_schema,
-                RebaseErrorHandlingOption::ThrowError,
-            )?;
-            full_selection_set.add_selection_set(&rebased_key_condition)?;
+            full_selection_set.add_selection_set_with_rebase(&key_condition)?;
         }
 
         // Note that `key_inputs` are used to ensure those input are fetch on the original group, the one having `edge`. In
@@ -3572,7 +3527,7 @@ fn inputs_for_require(
         // subgraph does not know in that particular case.
         let mut key_inputs =
             SelectionSet::for_composite_type(edge_conditions.schema.clone(), input_type.clone());
-        key_inputs.add_selection_set(&key_condition)?;
+        key_inputs.add_selection_set_with_rebase(&key_condition)?;
 
         Ok((
             wrap_input_selections(

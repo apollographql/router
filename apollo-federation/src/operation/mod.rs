@@ -2561,6 +2561,22 @@ impl SelectionSet {
         self.merge_into(std::iter::once(selection_set))
     }
 
+    /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Should any sub
+    /// selection with the same key already exist in the map, the existing selection and the given
+    /// selection are merged, replacing the existing selection while keeping the same insertion index.
+    pub(crate) fn add_selection_set_with_rebase(
+        &mut self,
+        selection_set: &SelectionSet,
+    ) -> Result<(), FederationError> {
+        let rebased = selection_set.rebase_on(
+            &self.type_position,
+            &NamedFragments::default(),
+            &self.schema,
+            RebaseErrorHandlingOption::ThrowError
+        )?;
+        self.add_selection_set(&rebased)
+    }
+
     /// Adds a path, and optional some selections following that path, to this selection map.
     ///
     /// Today, it is possible here to add conflicting paths, such as:
@@ -2663,13 +2679,7 @@ impl SelectionSet {
             // If we don't have any path, we rebase and merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
-                    let rebased = sel.rebase_on(
-                        &self.type_position,
-                        &NamedFragments::default(),
-                        &self.schema,
-                        RebaseErrorHandlingOption::ThrowError,
-                    )?;
-                    self.add_selection_set(&rebased)?
+                    self.add_selection_set_with_rebase(&sel)?
                 }
             }
         }
