@@ -475,19 +475,19 @@ impl<'a> QueryPlanningTraversal<'a> {
         // PORT_NOTE: The JS code performs the last check lazily. Instead of that, this check is
         // skipped if `nodes` is empty.
         if !nodes.is_empty()
-            && selection.selections.values().any(|val| match val {
-                Selection::InlineFragment(fragment) => {
-                    match &fragment.inline_fragment.data().type_condition_position {
-                        Some(type_condition) => self
+            && selection.any_element(&mut |element| match element {
+                OpPathElement::InlineFragment(inline_fragment) => {
+                    match &inline_fragment.data().type_condition_position {
+                        Some(type_condition) => Ok(self
                             .parameters
                             .abstract_types_with_inconsistent_runtime_types
                             .iter()
-                            .any(|ty| ty.type_name() == type_condition.type_name()),
-                        None => false,
+                            .any(|ty| ty.type_name() == type_condition.type_name())),
+                        None => Ok(false),
                     }
                 }
-                _ => false,
-            })
+                _ => Ok(false),
+            })?
         {
             return Ok(false);
         }
