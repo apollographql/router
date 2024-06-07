@@ -290,10 +290,8 @@ where
                             continue;
                         }
                     }
-                } else {
-                    if warmup_hash.schema_aware_query_hash() == &*doc.hash {
-                        reused += 1;
-                    }
+                } else if warmup_hash.schema_aware_query_hash() == &*doc.hash {
+                    reused += 1;
                 }
             }
 
@@ -669,8 +667,8 @@ pub(crate) enum CachingQueryHash {
 impl CachingQueryHash {
     fn schema_aware_query_hash(&self) -> &QueryHash {
         match self {
-            CachingQueryHash::Reuse(hash) => &hash,
-            CachingQueryHash::DoNotReuse { query_hash, .. } => &query_hash,
+            CachingQueryHash::Reuse(hash) => hash,
+            CachingQueryHash::DoNotReuse { query_hash, .. } => query_hash,
         }
     }
 }
