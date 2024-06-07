@@ -35,7 +35,6 @@ use indexmap::IndexSet;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -46,9 +45,17 @@ use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
+
+mod contains;
+mod optimize;
+mod rebase;
+#[cfg(test)]
+mod tests;
+
+pub use contains::*;
+pub use rebase::*;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
@@ -67,74 +74,6 @@ impl SelectionId {
         // atomically increment global counter
         Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
     }
-}
-
-/// Compare two input values, with two special cases for objects: assuming no duplicate keys,
-/// and order-independence.
-///
-/// This comes from apollo-rs: https://github.com/apollographql/apollo-rs/blob/6825be88fe13cd0d67b83b0e4eb6e03c8ab2555e/crates/apollo-compiler/src/validation/selection.rs#L160-L188
-/// Hopefully we can do this more easily in the future!
-fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
-    use apollo_compiler::executable::Value;
-    match (left, right) {
-        (Value::Null, Value::Null) => true,
-        (Value::Enum(left), Value::Enum(right)) => left == right,
-        (Value::Variable(left), Value::Variable(right)) => left == right,
-        (Value::String(left), Value::String(right)) => left == right,
-        (Value::Float(left), Value::Float(right)) => left == right,
-        (Value::Int(left), Value::Int(right)) => left == right,
-        (Value::Boolean(left), Value::Boolean(right)) => left == right,
-        (Value::List(left), Value::List(right)) => left
-            .iter()
-            .zip(right.iter())
-            .all(|(left, right)| same_value(left, right)),
-        (Value::Object(left), Value::Object(right)) if left.len() == right.len() => {
-            left.iter().all(|(key, value)| {
-                right
-                    .iter()
-                    .find(|(other_key, _)| key == other_key)
-                    .is_some_and(|(_, other_value)| same_value(value, other_value))
-            })
-        }
-        _ => false,
-    }
-}
-
-/// Returns true if two argument lists are equivalent.
-///
-/// The arguments and values must be the same, independent of order.
-fn same_arguments(
-    left: &[Node<executable::Argument>],
-    right: &[Node<executable::Argument>],
-) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    let right = right
-        .iter()
-        .map(|arg| (&arg.name, arg))
-        .collect::<HashMap<_, _>>();
-
-    left.iter().all(|arg| {
-        right
-            .get(&arg.name)
-            .is_some_and(|right_arg| same_value(&arg.value, &right_arg.value))
-    })
-}
-
-/// Returns true if two directive lists are equivalent.
-fn same_directives(left: &executable::DirectiveList, right: &executable::DirectiveList) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    left.iter().all(|left_directive| {
-        right.iter().any(|right_directive| {
-            left_directive.name == right_directive.name
-                && same_arguments(&left_directive.arguments, &right_directive.arguments)
-        })
-    })
 }
 
 /// An analogue of the apollo-compiler type `Operation` with these changes:
@@ -244,7 +183,7 @@ pub(crate) struct SelectionSet {
     pub(crate) selections: Arc<SelectionMap>,
 }
 
-pub(crate) mod normalized_selection_map {
+mod selection_map {
     use std::borrow::Cow;
     use std::iter::Map;
     use std::ops::Deref;
@@ -255,13 +194,13 @@ pub(crate) mod normalized_selection_map {
 
     use crate::error::FederationError;
     use crate::error::SingleFederationError::Internal;
-    use crate::query_plan::operation::normalized_field_selection::FieldSelection;
-    use crate::query_plan::operation::normalized_fragment_spread_selection::FragmentSpreadSelection;
-    use crate::query_plan::operation::normalized_inline_fragment_selection::InlineFragmentSelection;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::Selection;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
+    use crate::operation::field_selection::FieldSelection;
+    use crate::operation::fragment_spread_selection::FragmentSpreadSelection;
+    use crate::operation::inline_fragment_selection::InlineFragmentSelection;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::Selection;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -375,10 +314,10 @@ pub(crate) mod normalized_selection_map {
                     {
                         Cow::Borrowed(_) => Cow::Borrowed(selection),
                         Cow::Owned(selection_set) => Cow::Owned(Selection::InlineFragment(
-                            Arc::new(InlineFragmentSelection {
-                                inline_fragment: fragment.inline_fragment.clone(),
+                            Arc::new(InlineFragmentSelection::new(
+                                fragment.inline_fragment.clone(),
                                 selection_set,
-                            }),
+                            )),
                         )),
                     },
                     Selection::FragmentSpread(_) => {
@@ -596,11 +535,11 @@ pub(crate) mod normalized_selection_map {
     }
 }
 
-pub(crate) use normalized_selection_map::FieldSelectionValue;
-pub(crate) use normalized_selection_map::FragmentSpreadSelectionValue;
-pub(crate) use normalized_selection_map::InlineFragmentSelectionValue;
-pub(crate) use normalized_selection_map::SelectionMap;
-pub(crate) use normalized_selection_map::SelectionValue;
+pub(crate) use selection_map::FieldSelectionValue;
+pub(crate) use selection_map::FragmentSpreadSelectionValue;
+pub(crate) use selection_map::InlineFragmentSelectionValue;
+pub(crate) use selection_map::SelectionMap;
+pub(crate) use selection_map::SelectionValue;
 
 /// A selection "key" (unrelated to the federation `@key` directive) is an identifier of a selection
 /// (field, inline fragment, or fragment spread) that is used to determine whether two selections
@@ -648,41 +587,6 @@ pub(crate) trait HasSelectionKey {
     fn key(&self) -> SelectionKey;
 }
 
-/// Options for the `.containment()` family of selection functions.
-#[derive(Debug, Clone, Copy)]
-pub struct ContainmentOptions {
-    /// If the right-hand side has a __typename selection but the left-hand side does not,
-    /// still consider the left-hand side to contain the right-hand side.
-    pub ignore_missing_typename: bool,
-}
-
-// Currently Default *can* be derived, but if we add a new option
-// here, that might no longer be true.
-#[allow(clippy::derivable_impls)]
-impl Default for ContainmentOptions {
-    fn default() -> Self {
-        Self {
-            ignore_missing_typename: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Containment {
-    /// The left-hand selection does not fully contain right-hand selection.
-    NotContained,
-    /// The left-hand selection fully contains the right-hand selection, and more.
-    StrictlyContained,
-    /// Two selections are equal.
-    Equal,
-}
-impl Containment {
-    /// Returns true if the right-hand selection set is strictly contained or equal.
-    pub fn is_contained(self) -> bool {
-        matches!(self, Containment::StrictlyContained | Containment::Equal)
-    }
-}
-
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant)]
@@ -695,17 +599,6 @@ pub(crate) enum Selection {
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
         Self::Field(Arc::new(field.with_subselection(sub_selections)))
-    }
-
-    pub(crate) fn from_inline_fragment(
-        inline_fragment: InlineFragment,
-        sub_selections: SelectionSet,
-    ) -> Self {
-        let inline_fragment_selection = InlineFragmentSelection {
-            inline_fragment,
-            selection_set: sub_selections,
-        };
-        Self::InlineFragment(Arc::new(inline_fragment_selection))
     }
 
     pub(crate) fn from_element(
@@ -722,7 +615,7 @@ impl Selection {
                         "unexpected inline fragment without sub-selections",
                     ));
                 };
-                Ok(Self::from_inline_fragment(inline_fragment, sub_selections))
+                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
             }
         }
     }
@@ -851,39 +744,7 @@ impl Selection {
         }
     }
 
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        match self {
-            Selection::Field(field) => {
-                field.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-            Selection::FragmentSpread(spread) => {
-                spread.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-            Selection::InlineFragment(inline) => {
-                inline.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-        }
-    }
-
-    pub(crate) fn can_add_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        match self {
-            Selection::Field(field) => field.can_add_to(parent_type, schema),
-            Selection::FragmentSpread(_) => true,
-            Selection::InlineFragment(inline) => inline.can_add_to(parent_type, schema),
-        }
-    }
-
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -952,32 +813,6 @@ impl Selection {
                 Err(FederationError::internal("unexpected fragment spread"))
             }
         }
-    }
-
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        match (self, other) {
-            (Selection::Field(self_field), Selection::Field(other_field)) => {
-                self_field.containment(other_field, options)
-            }
-            (
-                Selection::InlineFragment(self_fragment),
-                Selection::InlineFragment(_) | Selection::FragmentSpread(_),
-            ) => self_fragment.containment(other, options),
-            (
-                Selection::FragmentSpread(self_fragment),
-                Selection::InlineFragment(_) | Selection::FragmentSpread(_),
-            ) => self_fragment.containment(other, options),
-            _ => Containment::NotContained,
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 
     /// Apply the `mapper` to self.selection_set, if it exists, and return a new `Selection`.
@@ -1082,8 +917,10 @@ impl Fragment {
     }
 }
 
-mod normalized_field_selection {
+mod field_selection {
     use std::collections::HashSet;
+    use std::hash::Hash;
+    use std::hash::Hasher;
     use std::sync::Arc;
 
     use apollo_compiler::ast;
@@ -1092,11 +929,12 @@ mod normalized_field_selection {
     use apollo_compiler::Node;
 
     use crate::error::FederationError;
+    use crate::operation::sort_arguments;
+    use crate::operation::sort_directives;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_plan::operation::directives_with_sorted_arguments;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::position::FieldDefinitionPosition;
@@ -1169,10 +1007,11 @@ mod normalized_field_selection {
 
     /// The non-selection-set data of `FieldSelection`, used with operation paths and graph
     /// paths.
-    #[derive(Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone)]
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
+        sorted_arguments: Arc<Vec<Node<executable::Argument>>>,
     }
 
     impl std::fmt::Debug for Field {
@@ -1181,10 +1020,31 @@ mod normalized_field_selection {
         }
     }
 
+    impl PartialEq for Field {
+        fn eq(&self, other: &Self) -> bool {
+            self.data.field_position.field_name() == other.data.field_position.field_name()
+                && self.key == other.key
+                && self.sorted_arguments == other.sorted_arguments
+        }
+    }
+
+    impl Eq for Field {}
+
+    impl Hash for Field {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.data.field_position.field_name().hash(state);
+            self.key.hash(state);
+            self.sorted_arguments.hash(state);
+        }
+    }
+
     impl Field {
         pub(crate) fn new(data: FieldData) -> Self {
+            let mut arguments = data.arguments.as_ref().clone();
+            sort_arguments(&mut arguments);
             Self {
                 key: data.key(),
+                sorted_arguments: Arc::new(arguments),
                 data,
             }
         }
@@ -1290,7 +1150,7 @@ mod normalized_field_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone)]
     pub(crate) struct FieldData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
@@ -1345,30 +1205,32 @@ mod normalized_field_selection {
 
     impl HasSelectionKey for FieldData {
         fn key(&self) -> SelectionKey {
+            let mut directives = self.directives.as_ref().clone();
+            sort_directives(&mut directives);
             SelectionKey::Field {
                 response_name: self.response_name(),
-                directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                directives: Arc::new(directives),
             }
         }
     }
 }
 
-pub(crate) use normalized_field_selection::Field;
-pub(crate) use normalized_field_selection::FieldData;
-pub(crate) use normalized_field_selection::FieldSelection;
+pub(crate) use field_selection::Field;
+pub(crate) use field_selection::FieldData;
+pub(crate) use field_selection::FieldSelection;
 
-mod normalized_fragment_spread_selection {
+mod fragment_spread_selection {
     use std::sync::Arc;
 
     use apollo_compiler::executable;
     use apollo_compiler::executable::Name;
 
-    use crate::query_plan::operation::directives_with_sorted_arguments;
-    use crate::query_plan::operation::is_deferred_selection;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::SelectionId;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
+    use crate::operation::is_deferred_selection;
+    use crate::operation::sort_directives;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::SelectionId;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
 
@@ -1387,7 +1249,7 @@ mod normalized_fragment_spread_selection {
     /// An analogue of the apollo-compiler type `FragmentSpread` with these changes:
     /// - Stores the schema (may be useful for directives).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Clone, PartialEq, Eq)]
+    #[derive(Clone)]
     pub(crate) struct FragmentSpread {
         data: FragmentSpreadData,
         key: SelectionKey,
@@ -1398,6 +1260,14 @@ mod normalized_fragment_spread_selection {
             self.data.fmt(f)
         }
     }
+
+    impl PartialEq for FragmentSpread {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for FragmentSpread {}
 
     impl FragmentSpread {
         pub(crate) fn new(data: FragmentSpreadData) -> Self {
@@ -1418,7 +1288,7 @@ mod normalized_fragment_spread_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone)]
     pub(crate) struct FragmentSpreadData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) fragment_name: Name,
@@ -1441,121 +1311,22 @@ mod normalized_fragment_spread_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::FragmentSpread {
                     fragment_name: self.fragment_name.clone(),
-                    directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
     }
 }
 
-pub(crate) use normalized_fragment_spread_selection::FragmentSpread;
-pub(crate) use normalized_fragment_spread_selection::FragmentSpreadData;
-pub(crate) use normalized_fragment_spread_selection::FragmentSpreadSelection;
+pub(crate) use fragment_spread_selection::FragmentSpread;
+pub(crate) use fragment_spread_selection::FragmentSpreadData;
+pub(crate) use fragment_spread_selection::FragmentSpreadSelection;
 
 impl FragmentSpreadSelection {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        // We preserve the parent type here, to make sure we don't lose context, but we actually don't
-        // want to expand the spread as that would compromise the code that optimize subgraph fetches to re-use named
-        // fragments.
-        //
-        // This is a little bit iffy, because the fragment may not apply at this parent type, but we
-        // currently leave it to the caller to ensure this is not a mistake. But most of the
-        // QP code works on selections with fully expanded fragments, so this code (and that of `can_add_to`
-        // on come into play in the code for reusing fragments, and that code calls those methods
-        // appropriately.
-        if self.spread.data().schema == *schema
-            && self.spread.data().type_condition_position == *parent_type
-        {
-            return Ok(Some(Selection::FragmentSpread(Arc::new(self.clone()))));
-        }
-
-        // If we're rebasing on a _different_ schema, then we *must* have fragments, since reusing
-        // `self.fragments` would be incorrect. If we're on the same schema though, we're happy to default
-        // to `self.fragments`.
-        let rebase_on_same_schema = self.spread.data().schema == *schema;
-        let Some(named_fragment) = named_fragments.get(&self.spread.data().fragment_name) else {
-            // If we're rebasing on another schema (think a subgraph), then named fragments will have been rebased on that, and some
-            // of them may not contain anything that is on that subgraph, in which case they will not have been included at all.
-            // If so, then as long as we're not asked to error if we cannot rebase, then we're happy to skip that spread (since again,
-            // it expands to nothing that applies on the schema).
-            return if let RebaseErrorHandlingOption::ThrowError = error_handling {
-                Err(FederationError::internal(format!(
-                    "Cannot rebase {} fragment if it isn't part of the provided fragments",
-                    self.spread.data().fragment_name
-                )))
-            } else {
-                Ok(None)
-            };
-        };
-
-        // Lastly, if we rebase on a different schema, it's possible the fragment type does not intersect the
-        // parent type. For instance, the parent type could be some object type T while the fragment is an
-        // interface I, and T may implement I in the supergraph, but not in a particular subgraph (of course,
-        // if I doesn't exist at all in the subgraph, then we'll have exited above, but I may exist in the
-        // subgraph, just not be implemented by T for some reason). In that case, we can't reuse the fragment
-        // as its spread is essentially invalid in that position, so we have to replace it by the expansion
-        // of that fragment, which we rebase on the parentType (which in turn, will remove anythings within
-        // the fragment selection that needs removing, potentially everything).
-        if !rebase_on_same_schema
-            && !runtime_types_intersect(
-                parent_type,
-                &named_fragment.type_condition_position,
-                schema,
-            )
-        {
-            // Note that we've used the rebased `named_fragment` to check the type intersection because we needed to
-            // compare runtime types "for the schema we're rebasing into". But now that we're deciding to not reuse
-            // this rebased fragment, what we rebase is the selection set of the non-rebased fragment. And that's
-            // important because the very logic we're hitting here may need to happen inside the rebase on the
-            // fragment selection, but that logic would not be triggered if we used the rebased `named_fragment` since
-            // `rebase_on_same_schema` would then be 'true'.
-            let expanded_selection_set = self.selection_set.rebase_on(
-                parent_type,
-                named_fragments,
-                schema,
-                error_handling,
-            )?;
-            // In theory, we could return the selection set directly, but making `SelectionSet.rebase_on` sometimes
-            // return a `SelectionSet` complicate things quite a bit. So instead, we encapsulate the selection set
-            // in an "empty" inline fragment. This make for non-really-optimal selection sets in the (relatively
-            // rare) case where this is triggered, but in practice this "inefficiency" is removed by future calls
-            // to `normalize`.
-            return if expanded_selection_set.selections.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(Selection::from_inline_fragment(
-                    InlineFragment::new(InlineFragmentData {
-                        schema: schema.clone(),
-                        parent_type_position: parent_type.clone(),
-                        type_condition_position: None,
-                        directives: Default::default(),
-                        selection_id: SelectionId::new(),
-                    }),
-                    expanded_selection_set,
-                )))
-            };
-        }
-
-        let spread = FragmentSpread::new(FragmentSpreadData::from_fragment(
-            &named_fragment,
-            &self.spread.data().directives,
-        ));
-        Ok(Some(Selection::FragmentSpread(Arc::new(
-            FragmentSpreadSelection {
-                spread,
-                selection_set: named_fragment.selection_set.clone(),
-            },
-        ))))
-    }
-
     pub(crate) fn has_defer(&self) -> bool {
         self.spread.data().directives.has("defer") || self.selection_set.has_defer()
     }
@@ -1597,7 +1368,7 @@ impl FragmentSpreadSelection {
         }
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -1633,27 +1404,6 @@ impl FragmentSpreadSelection {
             unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
         }
     }
-
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        match other {
-            // Using keys here means that @defer fragments never compare equal.
-            // This is a bit odd but it is consistent: the selection set data structure would not
-            // even try to compare two @defer fragments, because their keys are different.
-            Selection::FragmentSpread(other) if self.spread.key() == other.spread.key() => self
-                .selection_set
-                .containment(&other.selection_set, options),
-            _ => Containment::NotContained,
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl FragmentSpreadData {
@@ -1672,24 +1422,25 @@ impl FragmentSpreadData {
     }
 }
 
-mod normalized_inline_fragment_selection {
+mod inline_fragment_selection {
     use std::collections::HashSet;
+    use std::hash::Hash;
+    use std::hash::Hasher;
     use std::sync::Arc;
 
     use apollo_compiler::executable;
     use apollo_compiler::executable::Name;
 
-    use super::normalized_field_selection::collect_variables_from_directive;
+    use super::field_selection::collect_variables_from_directive;
     use crate::error::FederationError;
     use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
-    use crate::query_plan::operation::directives_with_sorted_arguments;
-    use crate::query_plan::operation::is_deferred_selection;
-    use crate::query_plan::operation::runtime_types_intersect;
-    use crate::query_plan::operation::HasSelectionKey;
-    use crate::query_plan::operation::SelectionId;
-    use crate::query_plan::operation::SelectionKey;
-    use crate::query_plan::operation::SelectionSet;
+    use crate::operation::is_deferred_selection;
+    use crate::operation::sort_directives;
+    use crate::operation::HasSelectionKey;
+    use crate::operation::SelectionId;
+    use crate::operation::SelectionKey;
+    use crate::operation::SelectionSet;
     use crate::query_plan::FetchDataPathElement;
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
@@ -1743,7 +1494,7 @@ mod normalized_inline_fragment_selection {
 
     /// The non-selection-set data of `InlineFragmentSelection`, used with operation paths and
     /// graph paths.
-    #[derive(Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone)]
     pub(crate) struct InlineFragment {
         data: InlineFragmentData,
         key: SelectionKey,
@@ -1752,6 +1503,20 @@ mod normalized_inline_fragment_selection {
     impl std::fmt::Debug for InlineFragment {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             self.data.fmt(f)
+        }
+    }
+
+    impl PartialEq for InlineFragment {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for InlineFragment {}
+
+    impl Hash for InlineFragment {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.key.hash(state);
         }
     }
 
@@ -1812,7 +1577,7 @@ mod normalized_inline_fragment_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone)]
     pub(crate) struct InlineFragmentData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
@@ -1832,44 +1597,10 @@ mod normalized_inline_fragment_selection {
             }
         }
 
-        pub(super) fn casted_type_if_add_to(
-            &self,
-            parent_type: &CompositeTypeDefinitionPosition,
-            schema: &ValidFederationSchema,
-        ) -> Option<CompositeTypeDefinitionPosition> {
-            if &self.parent_type_position == parent_type && &self.schema == schema {
-                return Some(self.casted_type());
-            }
-            match self.can_rebase_on(parent_type) {
-                (false, _) => None,
-                (true, None) => Some(parent_type.clone()),
-                (true, Some(ty)) => Some(ty),
-            }
-        }
-
         pub(crate) fn casted_type(&self) -> CompositeTypeDefinitionPosition {
             self.type_condition_position
                 .clone()
                 .unwrap_or_else(|| self.parent_type_position.clone())
-        }
-
-        fn can_rebase_on(
-            &self,
-            parent_type: &CompositeTypeDefinitionPosition,
-        ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
-            let Some(ty) = self.type_condition_position.as_ref() else {
-                return (true, None);
-            };
-            match self
-                .schema
-                .get_type(ty.type_name().clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
-            {
-                Ok(ty) if runtime_types_intersect(parent_type, &ty, &self.schema) => {
-                    (true, Some(ty))
-                }
-                _ => (false, None),
-            }
         }
     }
 
@@ -1880,21 +1611,23 @@ mod normalized_inline_fragment_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::InlineFragment {
                     type_condition: self
                         .type_condition_position
                         .as_ref()
                         .map(|pos| pos.type_name().clone()),
-                    directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
     }
 }
 
-pub(crate) use normalized_inline_fragment_selection::InlineFragment;
-pub(crate) use normalized_inline_fragment_selection::InlineFragmentData;
-pub(crate) use normalized_inline_fragment_selection::InlineFragmentSelection;
+pub(crate) use inline_fragment_selection::InlineFragment;
+pub(crate) use inline_fragment_selection::InlineFragmentData;
+pub(crate) use inline_fragment_selection::InlineFragmentSelection;
 
 use crate::schema::position::INTROSPECTION_TYPENAME_FIELD_NAME;
 
@@ -2230,7 +1963,7 @@ impl SelectionSet {
         for other_selection in others {
             let other_key = other_selection.key();
             match target.entry(other_key.clone()) {
-                normalized_selection_map::Entry::Occupied(existing) => match existing.get() {
+                selection_map::Entry::Occupied(existing) => match existing.get() {
                     Selection::Field(self_field_selection) => {
                         let Selection::Field(other_field_selection) = other_selection else {
                             return Err(Internal {
@@ -2283,7 +2016,7 @@ impl SelectionSet {
                             .push(other_inline_fragment_selection);
                     }
                 },
-                normalized_selection_map::Entry::Vacant(vacant) => {
+                selection_map::Entry::Vacant(vacant) => {
                     vacant.insert(other_selection.clone())?;
                 }
             }
@@ -2376,10 +2109,13 @@ impl SelectionSet {
                     }
                 }
                 Selection::InlineFragment(inline_selection) => {
-                    destination.push(Selection::from_inline_fragment(
-                        inline_selection.inline_fragment.clone(),
-                        inline_selection.selection_set.expand_all_fragments()?,
-                    ));
+                    destination.push(
+                        InlineFragmentSelection::new(
+                            inline_selection.inline_fragment.clone(),
+                            inline_selection.selection_set.expand_all_fragments()?,
+                        )
+                        .into(),
+                    );
                 }
             }
         }
@@ -2568,16 +2304,7 @@ impl SelectionSet {
                 .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
-        let element = first.element()?.rebase_on(
-            parent_type,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
-        let Some(element) = element else {
-            return Err(FederationError::internal(
-                "Unable to rebase selection updates",
-            ));
-        };
+        let element = first.element()?.rebase_on_or_error(parent_type, schema)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
@@ -2726,7 +2453,6 @@ impl SelectionSet {
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractType>,
-        fragments: &Option<&mut RebasedFragments>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
@@ -2740,10 +2466,9 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
-                let type_if_abstract =
-                    subselection_type_if_abstract(selection, &self.schema, fragments);
-                let updated_selection_set = selection_set
-                    .add_typename_field_for_abstract_types(type_if_abstract, fragments)?;
+                let type_if_abstract = subselection_type_if_abstract(selection)?;
+                let updated_selection_set =
+                    selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
 
                 if updated_selection_set == *selection_set {
                     selection.clone()
@@ -2778,12 +2503,7 @@ impl SelectionSet {
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
     /// exist in the map, the existing selection and the given selection are merged, replacing the
     /// existing selection while keeping the same insertion index.
-    fn add_selection(
-        &mut self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-        selection: Selection,
-    ) -> Result<(), FederationError> {
+    fn add_selection(&mut self, selection: Selection) -> Result<(), FederationError> {
         let selections = Arc::make_mut(&mut self.selections);
 
         let key = selection.key();
@@ -2793,8 +2513,8 @@ impl SelectionSet {
                 // `existing_selection` and `selection` both have the same selection key,
                 // so the merged selection will also have the same selection key.
                 let selection = SelectionSet::make_selection(
-                    schema,
-                    parent_type,
+                    &self.schema,
+                    &self.type_position,
                     to_merge.iter(),
                     /*named_fragments*/ &Default::default(),
                 )?;
@@ -2830,6 +2550,8 @@ impl SelectionSet {
     /// Then the resulting built selection set will be: `{ a { b { c { d } } }`,
     /// and in particular the `... on C` fragment will be eliminated since it is unecesasry
     /// (since again, `c` is of type `C`).
+    // Notes on NamedFragments argument: `add_at_path` only deals with expanded operations, so
+    // the NamedFragments argument to `rebase_on` is not needed (passing the default value).
     pub(crate) fn add_at_path(
         &mut self,
         path: &[Arc<OpPathElement>],
@@ -2840,14 +2562,15 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
-                let Some(sub_selection_type) = ele.sub_selection_type_position()? else {
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
+                let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
                         Selection::from_element(
-                            OpPathElement::clone(ele),
+                            element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
@@ -2872,38 +2595,42 @@ impl SelectionSet {
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
-                let element = OpPathElement::clone(ele);
-                let selection = Selection::from_element(
-                    element,
-                    selection_set.map(|set| SelectionSet::clone(set)),
-                )?;
-                let schema = self.schema.clone();
-                let parent_type_position = self.type_position.clone();
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
+                let selection_set = selection_set
+                    .map(|selection_set| {
+                        selection_set.rebase_on(
+                            &element.sub_selection_type_position()?.ok_or_else(|| {
+                                FederationError::internal("unexpected: Element has a selection set with non-composite base type")
+                            })?,
+                            &NamedFragments::default(),
+                            &self.schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )
+                    })
+                    .transpose()?;
+                let selection = Selection::from_element(element, selection_set)?;
                 // TODO move the rebasing to add_selection/merge_into
                 if let Some(rebased_selection) = selection.rebase_on(
-                    &parent_type_position,
+                    &self.type_position,
                     &NamedFragments::default(),
-                    &schema,
+                    &self.schema,
                     RebaseErrorHandlingOption::ThrowError,
                 )? {
-                    self.add_selection(&ele.parent_type_position(), &schema, rebased_selection)?
+                    self.add_selection(rebased_selection)?
                 }
             }
             // If we don't have any path, we rebase and merge in the given subselections at the root.
             None => {
                 if let Some(sel) = selection_set {
                     // TODO move the rebasing to add_selection/merge_into
-                    let schema = self.schema.clone();
-                    let parent_type = self.type_position.clone();
-                    let selection_type = &sel.type_position;
                     sel.selections.values().cloned().try_for_each(|s| {
                         if let Some(rebased) = s.rebase_on(
-                            &parent_type,
+                            &self.type_position,
                             &NamedFragments::default(),
-                            &schema,
+                            &self.schema,
                             RebaseErrorHandlingOption::ThrowError,
                         )? {
-                            self.add_selection(selection_type, &schema, rebased)
+                            self.add_selection(rebased)
                         } else {
                             Ok(())
                         }
@@ -2918,29 +2645,6 @@ impl SelectionSet {
         self.selections
             .iter()
             .for_each(|(_, s)| s.collect_used_fragment_names(aggregator));
-    }
-
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<SelectionSet, FederationError> {
-        let rebased_results = self
-            .selections
-            .iter()
-            .filter_map(|(_, selection)| {
-                selection
-                    .rebase_on(parent_type, named_fragments, schema, error_handling)
-                    .transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(SelectionSet::from_raw_selections(
-            schema.clone(),
-            parent_type.clone(),
-            rebased_results,
-        ))
     }
 
     /// Applies some normalization rules to this selection set in the context of the provided `parent_type`.
@@ -3016,7 +2720,9 @@ impl SelectionSet {
     /// Passing the option `recursive == false` makes the normalization only apply at the top-level, removing
     /// any unnecessary top-level inline fragments, possibly multiple layers of them, but we never recurse
     /// inside the sub-selection of an selection that is not removed by the normalization.
-    pub(crate) fn normalize(
+    // PORT_NOTE: this is now module-private, because it looks like it *can* be. If some place
+    // outside this module *does* need it, feel free to mark it pub(crate).
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -3044,12 +2750,6 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(normalized_selection_map),
         })
-    }
-
-    pub(crate) fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
-        self.selections
-            .values()
-            .all(|sel| sel.can_add_to(parent_type, &self.schema))
     }
 
     fn has_defer(&self) -> bool {
@@ -3244,60 +2944,6 @@ impl SelectionSet {
         }
     }
 
-    pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
-        if other.selections.len() > self.selections.len() {
-            // If `other` has more selections but we're ignoring missing __typename, then in the case where
-            // `other` has a __typename but `self` does not, then we need the length of `other` to be at
-            // least 2 more than other of `self` to be able to conclude there is no contains.
-            if !options.ignore_missing_typename
-                || other.selections.len() > self.selections.len() + 1
-                || self.has_top_level_typename_field()
-                || !other.has_top_level_typename_field()
-            {
-                return Containment::NotContained;
-            }
-        }
-
-        let mut is_equal = true;
-        let mut did_ignore_typename = false;
-
-        for (key, other_selection) in other.selections.iter() {
-            if key.is_typename_field() && options.ignore_missing_typename {
-                if !self.has_top_level_typename_field() {
-                    did_ignore_typename = true;
-                }
-                continue;
-            }
-
-            let Some(self_selection) = self.selections.get(key) else {
-                return Containment::NotContained;
-            };
-
-            match self_selection.containment(other_selection, options) {
-                Containment::NotContained => return Containment::NotContained,
-                Containment::StrictlyContained if is_equal => is_equal = false,
-                Containment::StrictlyContained | Containment::Equal => {}
-            }
-        }
-
-        let expected_len = if did_ignore_typename {
-            self.selections.len() + 1
-        } else {
-            self.selections.len()
-        };
-
-        if is_equal && other.selections.len() == expected_len {
-            Containment::Equal
-        } else {
-            Containment::StrictlyContained
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Self) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
-
     // TODO move this logic to SelectionSet add_selection/merge_into
     /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
     /// JS code was pooling the updates and only apply those when building the final selection set.
@@ -3401,9 +3047,11 @@ fn compute_aliases_for_non_merging_fields(
     }
 
     for FieldInPath { mut path, field } in selections.iter().flat_map(rebased_fields_in_set) {
-        let field_name = field.field.data().name();
-        let response_name = field.field.data().response_name();
-        let field_type = &field.field.data().field_position.get(schema.schema())?.ty;
+        let field_schema = field.field.schema().schema();
+        let field_data = field.field.data();
+        let field_name = field_data.name();
+        let response_name = field_data.response_name();
+        let field_type = &field_data.field_position.get(field_schema)?.ty;
 
         match seen_response_names.get(&response_name) {
             Some(previous) => {
@@ -3526,54 +3174,16 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenRespon
 
 pub(crate) fn subselection_type_if_abstract(
     selection: &Selection,
-    schema: &ValidFederationSchema,
-    fragments: &Option<&mut RebasedFragments>,
-) -> Option<AbstractType> {
-    match selection {
-        Selection::Field(field) => {
-            match schema
-                .get_type(field.field.data().field_position.type_name().clone())
-                .ok()?
-            {
-                crate::schema::position::TypeDefinitionPosition::Interface(i) => {
-                    Some(AbstractType::Interface(i))
-                }
-                crate::schema::position::TypeDefinitionPosition::Union(u) => {
-                    Some(AbstractType::Union(u))
-                }
-                _ => None,
-            }
+) -> Result<Option<AbstractType>, FederationError> {
+    let Some(sub_selection_type) = selection.element()?.sub_selection_type_position()? else {
+        return Ok(None);
+    };
+    match sub_selection_type {
+        CompositeTypeDefinitionPosition::Interface(interface_type) => {
+            Ok(Some(interface_type.into()))
         }
-        Selection::FragmentSpread(fragment_spread) => {
-            let fragment = fragments
-                .as_ref()
-                .and_then(|r| {
-                    r.original_fragments
-                        .get(&fragment_spread.spread.data().fragment_name)
-                })
-                .ok_or(crate::error::SingleFederationError::InvalidGraphQL {
-                    message: "missing fragment".to_string(),
-                })
-                //FIXME: return error
-                .ok()?;
-            match fragment.type_condition_position.clone() {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
-            }
-        }
-        Selection::InlineFragment(inline_fragment) => {
-            match inline_fragment
-                .inline_fragment
-                .data()
-                .type_condition_position
-                .clone()?
-            {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
-            }
-        }
+        CompositeTypeDefinitionPosition::Union(union_type) => Ok(Some(union_type.into())),
+        CompositeTypeDefinitionPosition::Object(_) => Ok(None),
     }
 }
 
@@ -3626,7 +3236,7 @@ impl FieldSelection {
         }))
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -3694,128 +3304,8 @@ impl FieldSelection {
         }
     }
 
-    /// Returns a field selection "equivalent" to the one represented by this object, but such that its parent type
-    /// is the one provided as argument.
-    ///
-    /// Obviously, this operation will only succeed if this selection (both the field itself and its subselections)
-    /// make sense from the provided parent type. If this is not the case, this method will throw.
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        if &self.field.data().schema == schema
-            && &self.field.data().field_position.parent() == parent_type
-        {
-            // we are rebasing field on the same parent within the same schema - we can just return self
-            return Ok(Some(Selection::from(self.clone())));
-        }
-
-        let Some(rebased) = self.field.rebase_on(parent_type, schema, error_handling)? else {
-            // rebasing failed but we are ignoring errors
-            return Ok(None);
-        };
-
-        let Some(selection_set) = &self.selection_set else {
-            // leaf field
-            return Ok(Some(Selection::from_field(rebased, None)));
-        };
-
-        let rebased_type_name = rebased
-            .data()
-            .field_position
-            .get(schema.schema())?
-            .ty
-            .inner_named_type();
-        let rebased_base_type: CompositeTypeDefinitionPosition =
-            schema.get_type(rebased_type_name.clone())?.try_into()?;
-
-        let selection_set_type = &selection_set.type_position;
-        if self.field.data().schema == rebased.data().schema
-            && &rebased_base_type == selection_set_type
-        {
-            // we are rebasing within the same schema and the same base type
-            return Ok(Some(Selection::from_field(
-                rebased.clone(),
-                self.selection_set.clone(),
-            )));
-        }
-
-        let rebased_selection_set =
-            selection_set.rebase_on(&rebased_base_type, named_fragments, schema, error_handling)?;
-        if rebased_selection_set.selections.is_empty() {
-            // empty selection set
-            Ok(None)
-        } else {
-            Ok(Some(Selection::from_field(
-                rebased.clone(),
-                Some(rebased_selection_set),
-            )))
-        }
-    }
-
-    fn can_add_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        if &self.field.data().schema == schema
-            && parent_type == &self.field.data().field_position.parent()
-        {
-            return true;
-        }
-
-        let Some(ty) = self.field.type_if_added_to(parent_type, schema) else {
-            return false;
-        };
-
-        if let Some(set) = &self.selection_set {
-            if set.type_position != ty {
-                return set
-                    .selections
-                    .values()
-                    .all(|sel| sel.can_add_to(parent_type, schema));
-            }
-        }
-        true
-    }
-
     pub(crate) fn has_defer(&self) -> bool {
         self.field.has_defer() || self.selection_set.as_ref().is_some_and(|s| s.has_defer())
-    }
-
-    pub(crate) fn containment(
-        &self,
-        other: &FieldSelection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        let self_field = self.field.data();
-        let other_field = other.field.data();
-        if self_field.name() != other_field.name()
-            || self_field.alias != other_field.alias
-            || !same_arguments(&self_field.arguments, &other_field.arguments)
-            || !same_directives(&self_field.directives, &other_field.directives)
-        {
-            return Containment::NotContained;
-        }
-
-        match (&self.selection_set, &other.selection_set) {
-            (None, None) => Containment::Equal,
-            (Some(self_selection), Some(other_selection)) => {
-                self_selection.containment(other_selection, options)
-            }
-            (None, Some(_)) | (Some(_), None) => {
-                debug_assert!(false, "field selections have the same element, so if one does not have a subselection, neither should the other one");
-                Containment::NotContained
-            }
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &FieldSelection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 }
 
@@ -3874,134 +3364,9 @@ impl<'a> FieldSelectionValue<'a> {
 }
 
 impl Field {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Field>, FederationError> {
-        let field_parent = self.data().field_position.parent();
-        if self.data().schema == *schema && field_parent == *parent_type {
-            // pointing to the same parent -> return self
-            return Ok(Some(self.clone()));
-        }
-
-        if self.data().name() == &TYPENAME_FIELD {
-            // TODO interface object info should be precomputed in QP constructor
-            return if schema
-                .possible_runtime_types(parent_type.clone())?
-                .iter()
-                .any(|t| is_interface_object(t, schema))
-            {
-                if let RebaseErrorHandlingOption::ThrowError = error_handling {
-                    Err(FederationError::internal(
-                        format!("Cannot add selection of field \"{}\" to selection set of parent type \"{}\" that is potentially an interface object type at runtime",
-                                self.data().field_position,
-                                parent_type
-                        )))
-                } else {
-                    Ok(None)
-                }
-            } else {
-                let mut updated_field_data = self.data().clone();
-                updated_field_data.schema = schema.clone();
-                updated_field_data.field_position = parent_type.introspection_typename_field();
-                Ok(Some(Field::new(updated_field_data)))
-            };
-        }
-
-        let field_from_parent = parent_type.field(self.data().name().clone())?;
-        return if field_from_parent.get(schema.schema()).is_ok()
-            && self.can_rebase_on(parent_type, schema)
-        {
-            let mut updated_field_data = self.data().clone();
-            updated_field_data.schema = schema.clone();
-            updated_field_data.field_position = field_from_parent;
-            Ok(Some(Field::new(updated_field_data)))
-        } else if let RebaseErrorHandlingOption::IgnoreError = error_handling {
-            Ok(None)
-        } else {
-            Err(FederationError::internal(format!(
-                "Cannot add selection of field \"{}\" to selection set of parent type \"{}\"",
-                self.data().field_position,
-                parent_type
-            )))
-        };
-    }
-
-    /// Verifies whether given field can be rebase on following parent type.
-    ///
-    /// There are 2 valid cases we want to allow:
-    /// 1. either `parent_type` and `field_parent_type` are the same underlying type (same name) but from different underlying schema. Typically,
-    ///  happens when we're building subgraph queries but using selections from the original query which is against the supergraph API schema.
-    /// 2. or they are not the same underlying type, but the field parent type is from an interface (or an interface object, which is the same
-    ///  here), in which case we may be rebasing an interface field on one of the implementation type, which is ok. Note that we don't verify
-    ///  that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
-    ///  in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
-    ///  if the field name simply does not exist in `parent_type`.
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        let field_parent_type = self.data().field_position.parent();
-        // case 1
-        if field_parent_type.type_name() == parent_type.type_name() {
-            return true;
-        }
-        // case 2
-        let is_interface_object_type =
-            match TryInto::<ObjectTypeDefinitionPosition>::try_into(field_parent_type.clone()) {
-                Ok(ref o) => is_interface_object(o, schema),
-                Err(_) => false,
-            };
-        field_parent_type.is_interface_type() || is_interface_object_type
-    }
-
     pub(crate) fn has_defer(&self) -> bool {
         // @defer cannot be on field at the moment
         false
-    }
-
-    pub(crate) fn type_if_added_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> Option<CompositeTypeDefinitionPosition> {
-        let data = self.data();
-        if data.field_position.parent() == *parent_type && data.schema == *schema {
-            let base_ty_name = data
-                .field_position
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            return schema
-                .get_type(base_ty_name.clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
-                .ok();
-        }
-        if data.name() == &TYPENAME_FIELD {
-            let type_name = parent_type
-                .introspection_typename_field()
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            return schema.try_get_type(type_name.clone())?.try_into().ok();
-        }
-        if self.can_rebase_on(parent_type, schema) {
-            let type_name = parent_type
-                .field(data.field_position.field_name().clone())
-                .ok()?
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            schema.try_get_type(type_name.clone())?.try_into().ok()
-        } else {
-            None
-        }
     }
 
     pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
@@ -4046,6 +3411,17 @@ impl<'a> FragmentSpreadSelectionValue<'a> {
 }
 
 impl InlineFragmentSelection {
+    pub(crate) fn new(inline_fragment: InlineFragment, selection_set: SelectionSet) -> Self {
+        debug_assert_eq!(
+            inline_fragment.data().casted_type(),
+            selection_set.type_position
+        );
+        Self {
+            inline_fragment,
+            selection_set,
+        }
+    }
+
     /// Copies inline fragment selection and assigns it a new unique selection ID.
     pub(crate) fn with_unique_id(&self) -> Self {
         let mut data = self.inline_fragment.data().clone();
@@ -4075,20 +3451,19 @@ impl InlineFragmentSelection {
             } else {
                 None
             };
-        Ok(InlineFragmentSelection {
-            inline_fragment: InlineFragment::new(InlineFragmentData {
-                schema: schema.clone(),
-                parent_type_position: parent_type_position.clone(),
-                type_condition_position,
-                directives: Arc::new(inline_fragment.directives.clone()),
-                selection_id: SelectionId::new(),
-            }),
-            selection_set: SelectionSet::from_selection_set(
-                &inline_fragment.selection_set,
-                fragments,
-                schema,
-            )?,
-        })
+        let new_selection_set =
+            SelectionSet::from_selection_set(&inline_fragment.selection_set, fragments, schema)?;
+        let new_inline_fragment = InlineFragment::new(InlineFragmentData {
+            schema: schema.clone(),
+            parent_type_position: parent_type_position.clone(),
+            type_condition_position,
+            directives: Arc::new(inline_fragment.directives.clone()),
+            selection_id: SelectionId::new(),
+        });
+        Ok(InlineFragmentSelection::new(
+            new_inline_fragment,
+            new_selection_set,
+        ))
     }
 
     pub(crate) fn from_fragment_spread_selection(
@@ -4096,18 +3471,20 @@ impl InlineFragmentSelection {
         fragment_spread_selection: &Arc<FragmentSpreadSelection>,
     ) -> Result<InlineFragmentSelection, FederationError> {
         let fragment_spread_data = fragment_spread_selection.spread.data();
-        Ok(InlineFragmentSelection {
-            inline_fragment: InlineFragment::new(InlineFragmentData {
+        // Note: We assume that fragment_spread_data.type_condition_position is the same as
+        //       fragment_spread_selection.selection_set.type_position.
+        Ok(InlineFragmentSelection::new(
+            InlineFragment::new(InlineFragmentData {
                 schema: fragment_spread_data.schema.clone(),
                 parent_type_position,
                 type_condition_position: Some(fragment_spread_data.type_condition_position.clone()),
                 directives: fragment_spread_data.directives.clone(),
                 selection_id: SelectionId::new(),
             }),
-            selection_set: fragment_spread_selection
+            fragment_spread_selection
                 .selection_set
                 .expand_all_fragments()?,
-        })
+        ))
     }
 
     /// Construct a new InlineFragmentSelection out of a selection set.
@@ -4130,7 +3507,7 @@ impl InlineFragmentSelection {
         }
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -4164,6 +3541,8 @@ impl InlineFragmentSelection {
                 Some(ref c) => self.inline_fragment.data().schema == *schema && c == parent_type,
             };
             if useless_fragment || parent_type.is_object_type() {
+                // Try to skip this fragment and normalize self.selection_set with `parent_type`,
+                // instead of its original type.
                 let normalized_selection_set =
                     self.selection_set
                         .normalize(parent_type, named_fragments, schema, option)?;
@@ -4178,9 +3557,12 @@ impl InlineFragmentSelection {
         // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
         // (note that even if we're not recursive, we may still have some "lifting" to do)
         let normalized_selection_set = if NormalizeSelectionOption::NormalizeRecursively == option {
-            let normalized =
-                self.selection_set
-                    .normalize(parent_type, named_fragments, schema, option)?;
+            let normalized = self.selection_set.normalize(
+                self.casted_type(),
+                named_fragments,
+                schema,
+                option,
+            )?;
             // It could be that nothing was satisfiable.
             if normalized.is_empty() {
                 if self.inline_fragment.data().directives.is_empty() {
@@ -4218,14 +3600,17 @@ impl InlineFragmentSelection {
                         None,
                     );
 
+                    // Return `... [on <rebased condition>] { __typename @include(if: false) }`
+                    let rebased_casted_type = rebased_fragment.data().casted_type();
                     return Ok(Some(SelectionOrSet::Selection(
-                        Selection::from_inline_fragment(
+                        InlineFragmentSelection::new(
                             rebased_fragment,
                             SelectionSet::from_selection(
-                                parent_type.clone(),
+                                rebased_casted_type,
                                 typename_field_selection,
                             ),
-                        ),
+                        )
+                        .into(),
                     )));
                 }
             }
@@ -4288,14 +3673,15 @@ impl InlineFragmentSelection {
                 let mut mutable_selections = self.selection_set.selections.clone();
                 let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
                 final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
-                let final_inline_fragment = Selection::from_inline_fragment(
+                let final_inline_fragment: Selection = InlineFragmentSelection::new(
                     self.inline_fragment.clone(),
                     SelectionSet {
                         schema: schema.clone(),
-                        type_position: parent_type.clone(),
+                        type_position: self.inline_fragment.data().casted_type(),
                         selections: Arc::new(final_fragment_selections.clone()),
                     },
-                );
+                )
+                .into();
 
                 let mut final_selection_map = SelectionMap::new();
                 final_selection_map.insert(final_inline_fragment);
@@ -4323,105 +3709,14 @@ impl InlineFragmentSelection {
             RebaseErrorHandlingOption::ThrowError,
         )? {
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
-                Arc::new(InlineFragmentSelection {
-                    inline_fragment: rebased,
-                    selection_set: normalized_selection_set,
-                }),
+                Arc::new(InlineFragmentSelection::new(
+                    rebased,
+                    normalized_selection_set,
+                )),
             ))))
         } else {
             unreachable!("We should always be able to either rebase the inline fragment OR throw an exception");
         }
-    }
-
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        if &self.inline_fragment.data().schema == schema
-            && self.inline_fragment.data().parent_type_position == *parent_type
-        {
-            // we are rebasing inline fragment on the same parent within the same schema - we can just return self
-            return Ok(Some(Selection::from(self.clone())));
-        }
-
-        let Some(rebased_fragment) =
-            self.inline_fragment
-                .rebase_on(parent_type, schema, error_handling)?
-        else {
-            // rebasing failed but we are ignoring errors
-            return Ok(None);
-        };
-
-        let rebased_casted_type = rebased_fragment
-            .data()
-            .type_condition_position
-            .clone()
-            .unwrap_or(rebased_fragment.data().parent_type_position.clone());
-        if &self.inline_fragment.data().schema == schema && rebased_casted_type == *parent_type {
-            // we are within the same schema - selection set does not have to be rebased
-            Ok(Some(Selection::from_inline_fragment(
-                rebased_fragment,
-                self.selection_set.clone(),
-            )))
-        } else {
-            let rebased_selection_set = self.selection_set.rebase_on(
-                &rebased_casted_type,
-                named_fragments,
-                schema,
-                error_handling,
-            )?;
-            if rebased_selection_set.selections.is_empty() {
-                // empty selection set
-                Ok(None)
-            } else {
-                Ok(Some(Selection::from_inline_fragment(
-                    rebased_fragment,
-                    rebased_selection_set,
-                )))
-            }
-        }
-    }
-
-    pub(crate) fn can_add_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        if &self.inline_fragment.data().parent_type_position == parent_type
-            && self.inline_fragment.data().schema == *schema
-        {
-            return true;
-        }
-        let Some(ty) = self
-            .inline_fragment
-            .data()
-            .casted_type_if_add_to(parent_type, schema)
-        else {
-            return false;
-        };
-        if self.selection_set.type_position != ty {
-            for sel in self.selection_set.selections.values() {
-                if !sel.can_add_to(&ty, schema) {
-                    return false;
-                }
-            }
-            true
-        } else {
-            true
-        }
-    }
-
-    pub(crate) fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        parent_schema: &ValidFederationSchema,
-    ) -> bool {
-        self.inline_fragment
-            .can_rebase_on(parent_type, parent_schema)
-            .0
     }
 
     pub(crate) fn casted_type(&self) -> &CompositeTypeDefinitionPosition {
@@ -4438,30 +3733,6 @@ impl InlineFragmentSelection {
                 .selections
                 .values()
                 .any(|s| s.has_defer())
-    }
-
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        match other {
-            // Using keys here means that @defer fragments never compare equal.
-            // This is a bit odd but it is consistent: the selection set data structure would not
-            // even try to compare two @defer fragments, because their keys are different.
-            Selection::InlineFragment(other)
-                if self.inline_fragment.key() == other.inline_fragment.key() =>
-            {
-                self.selection_set
-                    .containment(&other.selection_set, options)
-            }
-            _ => Containment::NotContained,
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 
     /// Returns true if this inline fragment selection is "unnecessary" and should be inlined.
@@ -4514,88 +3785,6 @@ impl<'a> InlineFragmentSelectionValue<'a> {
     }
 }
 
-impl InlineFragment {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<InlineFragment>, FederationError> {
-        if &self.data().parent_type_position == parent_type {
-            return Ok(Some(self.clone()));
-        }
-
-        let type_condition = self.data().type_condition_position.clone();
-        // This usually imply that the fragment is not from the same subgraph than the selection. So we need
-        // to update the source type of the fragment, but also "rebase" the condition to the selection set
-        // schema.
-        let (can_rebase, rebased_condition) = self.can_rebase_on(parent_type, schema);
-        if !can_rebase {
-            if let RebaseErrorHandlingOption::ThrowError = error_handling {
-                let printable_type_condition = self
-                    .data()
-                    .type_condition_position
-                    .clone()
-                    .map_or_else(|| "".to_string(), |t| t.to_string());
-                let printable_runtimes = type_condition.map_or_else(
-                    || "undefined".to_string(),
-                    |t| print_possible_runtimes(&t, schema),
-                );
-                let printable_parent_runtimes = print_possible_runtimes(parent_type, schema);
-                Err(FederationError::internal(
-                    format!("Cannot add fragment of condition \"{}\" (runtimes: [{}]) to parent type \"{}\" (runtimes: [{})",
-                            printable_type_condition,
-                            printable_runtimes,
-                            parent_type,
-                            printable_parent_runtimes,
-                    ),
-                ))
-            } else {
-                Ok(None)
-            }
-        } else {
-            let mut rebased_fragment_data = self.data().clone();
-            rebased_fragment_data.type_condition_position = rebased_condition;
-            Ok(Some(InlineFragment::new(rebased_fragment_data)))
-        }
-    }
-
-    pub(crate) fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        parent_schema: &ValidFederationSchema,
-    ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
-        if self.data().type_condition_position.is_none() {
-            // can_rebase = true, condition = undefined
-            return (true, None);
-        }
-
-        if let Some(Ok(rebased_condition)) = self
-            .data()
-            .type_condition_position
-            .clone()
-            .and_then(|condition_position| {
-                parent_schema.try_get_type(condition_position.type_name().clone())
-            })
-            .map(|rebased_condition_position| {
-                CompositeTypeDefinitionPosition::try_from(rebased_condition_position)
-            })
-        {
-            // chained if let chains are not yet supported
-            // see https://github.com/rust-lang/rust/issues/53667
-            if runtime_types_intersect(parent_type, &rebased_condition, parent_schema) {
-                // can_rebase = true, condition = rebased_condition
-                (true, Some(rebased_condition))
-            } else {
-                (false, None)
-            }
-        } else {
-            // can_rebase = false, condition = undefined
-            (false, None)
-        }
-    }
-}
-
 pub(crate) fn merge_selection_sets(
     mut selection_sets: Vec<SelectionSet>,
 ) -> Result<SelectionSet, FederationError> {
@@ -4610,13 +3799,6 @@ pub(crate) fn merge_selection_sets(
     // Take ownership of the first element and discard the rest;
     // we can unwrap because `split_first_mut()` guarantees at least one element will be yielded
     Ok(selection_sets.into_iter().next().unwrap())
-}
-
-/// Options for handling rebasing errors.
-#[derive(Clone, Copy)]
-pub(crate) enum RebaseErrorHandlingOption {
-    IgnoreError,
-    ThrowError,
 }
 
 /// Options for normalizing the selection sets
@@ -4817,46 +3999,6 @@ impl NamedFragments {
         true
     }
 
-    pub(crate) fn rebase_on(
-        &self,
-        schema: &ValidFederationSchema,
-    ) -> Result<NamedFragments, FederationError> {
-        let mut rebased_fragments = NamedFragments::default();
-        for fragment in self.fragments.values() {
-            if let Ok(rebased_type) = schema
-                .get_type(fragment.type_condition_position.type_name().clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
-            {
-                if let Ok(mut rebased_selection) = fragment.selection_set.rebase_on(
-                    &rebased_type,
-                    &rebased_fragments,
-                    schema,
-                    RebaseErrorHandlingOption::IgnoreError,
-                ) {
-                    // Rebasing can leave some inefficiencies in some case (particularly when a spread has to be "expanded", see `FragmentSpreadSelection.rebaseOn`),
-                    // so we do a top-level normalization to keep things clean.
-                    rebased_selection = rebased_selection.normalize(
-                        &rebased_type,
-                        &rebased_fragments,
-                        schema,
-                        NormalizeSelectionOption::NormalizeRecursively,
-                    )?;
-                    if NamedFragments::is_selection_set_worth_using(&rebased_selection) {
-                        let fragment = Fragment {
-                            schema: schema.clone(),
-                            name: fragment.name.clone(),
-                            type_condition_position: rebased_type.clone(),
-                            directives: fragment.directives.clone(),
-                            selection_set: rebased_selection,
-                        };
-                        rebased_fragments.insert(fragment);
-                    }
-                }
-            }
-        }
-        Ok(rebased_fragments)
-    }
-
     /// - Expands all nested fragments
     /// - Applies the provided `mapper` to each selection set of the expanded fragments.
     /// - Finally, re-fragments the nested fragments.
@@ -4952,9 +4094,7 @@ impl NamedFragments {
             return Ok(self.clone());
         }
         let updated = self.map_to_expanded_selection_sets(|ss| {
-            ss.add_typename_field_for_abstract_types(
-                /*parent_type_if_abstract*/ None, /*fragments*/ &None,
-            )
+            ss.add_typename_field_for_abstract_types(/*parent_type_if_abstract*/ None)
         })?;
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
         // check the `updated` has the same set of fragments. To avoid performance hit, only the
@@ -4968,6 +4108,24 @@ impl NamedFragments {
     }
 }
 
+/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
+// XXX(@goto-bus-stop): improve/replace/reduce this structure. My notes:
+// This gets cloned only in recursive query planning. Then whenever `.for_subgraph()` ends up being
+// called, it always clones the `rebased_fragments` map. `.for_subgraph()` is called whenever the
+// plan is turned into plan nodes by the FetchDependencyGraphToQueryPlanProcessor.
+// This suggests that we can remove the Arc wrapper for `rebased_fragments` because we end up cloning the inner data anyways.
+//
+// This data structure is also used as an argument in several `crate::operation` functions. This
+// seems wrong. The only useful method on this structure is `.for_subgraph()`, which is only used
+// by the fetch dependency graph when creating plan nodes. That necessarily implies that all other
+// uses of this structure only access `.original_fragments`. In that case, we should pass around
+// the `NamedFragments` itself, not this wrapper structure.
+//
+// `.for_subgraph()` also requires a mutable reference to fill in the data. But
+// `.rebased_fragments` is really a cache, so requiring a mutable reference isn't an ideal API.
+// Conceptually you are just computing something and getting the result. Perhaps we can use a
+// concurrent map, or prepopulate the HashMap for all subgraphs, or precompute the whole thing for
+// all subgraphs (or precompute a hash map of subgraph names to OnceLocks).
 #[derive(Clone)]
 pub(crate) struct RebasedFragments {
     pub(crate) original_fragments: NamedFragments,
@@ -5286,23 +4444,6 @@ impl Display for InlineFragment {
     }
 }
 
-fn directives_with_sorted_arguments(
-    directives: &executable::DirectiveList,
-) -> executable::DirectiveList {
-    let mut directives = directives.clone();
-    for directive in &mut directives {
-        directive
-            .make_mut()
-            .arguments
-            .sort_by(|a1, a2| a1.name.cmp(&a2.name))
-    }
-    directives
-}
-
-fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
-    directives.has("defer")
-}
-
 /// Normalizes the selection set of the specified operation.
 ///
 /// This method applies the following transformations:
@@ -5321,6 +4462,18 @@ pub(crate) fn normalize_operation(
     let mut normalized_selection_set =
         SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)?;
     normalized_selection_set = normalized_selection_set.expand_all_fragments()?;
+    // We clear up the fragments since we've expanded all.
+    // Also note that expanding fragment usually generate unnecessary fragments/inefficient
+    // selections, so it basically always make sense to normalize afterwards. Besides, fragment
+    // reuse (done by `optimize`) rely on the fact that its input is normalized to work properly,
+    // so all the more reason to do it here.
+    // PORT_NOTE: This was done in `Operation.expandAllFragments`, but it's moved here.
+    normalized_selection_set = normalized_selection_set.normalize(
+        &normalized_selection_set.type_position,
+        &named_fragments,
+        schema,
+        NormalizeSelectionOption::NormalizeRecursively,
+    )?;
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
 
     let normalized_operation = Operation {
@@ -5333,18 +4486,6 @@ pub(crate) fn normalize_operation(
         named_fragments,
     };
     Ok(normalized_operation)
-}
-
-// TODO remove once it is available in schema metadata
-fn is_interface_object(obj: &ObjectTypeDefinitionPosition, schema: &ValidFederationSchema) -> bool {
-    if let Ok(intf_obj_directive) = get_federation_spec_definition_from_subgraph(schema)
-        .and_then(|spec| spec.interface_object_directive(schema))
-    {
-        obj.try_get(schema.schema())
-            .is_some_and(|o| o.directives.has(&intf_obj_directive.name))
-    } else {
-        false
-    }
 }
 
 fn runtime_types_intersect(
@@ -5364,2295 +4505,4 @@ fn runtime_types_intersect(
     }
 
     false
-}
-
-fn print_possible_runtimes(
-    composite_type: &CompositeTypeDefinitionPosition,
-    schema: &ValidFederationSchema,
-) -> String {
-    schema
-        .possible_runtime_types(composite_type.clone())
-        .map_or_else(
-            |_| "undefined".to_string(),
-            |runtimes| {
-                runtimes
-                    .iter()
-                    .map(|r| r.type_name.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            },
-        )
-}
-
-#[cfg(test)]
-mod tests {
-    use apollo_compiler::name;
-    use apollo_compiler::ExecutableDocument;
-    use indexmap::IndexSet;
-
-    use super::normalize_operation;
-    use super::Containment;
-    use super::ContainmentOptions;
-    use super::Name;
-    use super::NamedFragments;
-    use super::Operation;
-    use super::Selection;
-    use super::SelectionKey;
-    use super::SelectionSet;
-    use crate::query_graph::graph_path::OpPathElement;
-    use crate::schema::position::InterfaceTypeDefinitionPosition;
-    use crate::schema::position::ObjectTypeDefinitionPosition;
-    use crate::schema::ValidFederationSchema;
-    use crate::subgraph::Subgraph;
-
-    fn parse_schema_and_operation(
-        schema_and_operation: &str,
-    ) -> (ValidFederationSchema, ExecutableDocument) {
-        let (schema, executable_document) =
-            apollo_compiler::parse_mixed_validate(schema_and_operation, "document.graphql")
-                .unwrap();
-        let executable_document = executable_document.into_inner();
-        let schema = ValidFederationSchema::new(schema).unwrap();
-        (schema, executable_document)
-    }
-
-    fn parse_subgraph(name: &str, schema: &str) -> ValidFederationSchema {
-        let parsed_schema =
-            Subgraph::parse_and_expand(name, &format!("https://{name}"), schema).unwrap();
-        ValidFederationSchema::new(parsed_schema.schema).unwrap()
-    }
-
-    #[test]
-    fn expands_named_fragments() {
-        let operation_with_named_fragment = r#"
-query NamedFragmentQuery {
-  foo {
-    id
-    ...Bar
-  }
-}
-
-fragment Bar on Foo {
-  bar
-  baz
-}
-
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  id: ID!
-  bar: String!
-  baz: Int
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_named_fragment);
-        if let Some(operation) = executable_document
-            .named_operations
-            .get_mut("NamedFragmentQuery")
-        {
-            let mut normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            normalized_operation.named_fragments = Default::default();
-            insta::assert_snapshot!(normalized_operation, @r###"
-                query NamedFragmentQuery {
-                  foo {
-                    id
-                    bar
-                    baz
-                  }
-                }
-            "###);
-        }
-    }
-
-    #[test]
-    fn expands_and_deduplicates_fragments() {
-        let operation_with_named_fragment = r#"
-query NestedFragmentQuery {
-  foo {
-    ...FirstFragment
-    ...SecondFragment
-  }
-}
-
-fragment FirstFragment on Foo {
-  id
-  bar
-  baz
-}
-
-fragment SecondFragment on Foo {
-  id
-  bar
-}
-
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  id: ID!
-  bar: String!
-  baz: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_named_fragment);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let mut normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            normalized_operation.named_fragments = Default::default();
-            insta::assert_snapshot!(normalized_operation, @r###"
-              query NestedFragmentQuery {
-                foo {
-                  id
-                  bar
-                  baz
-                }
-              }
-            "###);
-        }
-    }
-
-    #[test]
-    fn can_remove_introspection_selections() {
-        let operation_with_introspection = r#"
-query TestIntrospectionQuery {
-  __schema {
-    types {
-      name
-    }
-  }
-}
-
-type Query {
-  foo: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_introspection);
-        if let Some(operation) = executable_document
-            .named_operations
-            .get_mut("TestIntrospectionQuery")
-        {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-
-            assert!(normalized_operation.selection_set.selections.is_empty());
-        }
-    }
-
-    #[test]
-    fn merge_same_fields_without_directives() {
-        let operation_string = r#"
-query Test {
-  t {
-    v1
-  }
-  t {
-    v2
- }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_string);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test {
-  t {
-    v1
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn merge_same_fields_with_same_directive() {
-        let operation_with_directives = r#"
-query Test($skipIf: Boolean!) {
-  t @skip(if: $skipIf) {
-    v1
-  }
-  t @skip(if: $skipIf) {
-    v2
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_directives);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skipIf: Boolean!) {
-  t @skip(if: $skipIf) {
-    v1
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn merge_same_fields_with_same_directive_but_different_arg_order() {
-        let operation_with_directives_different_arg_order = r#"
-query Test($skipIf: Boolean!) {
-  t @customSkip(if: $skipIf, label: "foo") {
-    v1
-  }
-  t @customSkip(label: "foo", if: $skipIf) {
-    v2
-  }
-}
-
-directive @customSkip(if: Boolean!, label: String!) on FIELD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_directives_different_arg_order);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skipIf: Boolean!) {
-  t @customSkip(if: $skipIf, label: "foo") {
-    v1
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn do_not_merge_when_only_one_field_specifies_directive() {
-        let operation_one_field_with_directives = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    v1
-  }
-  t @skip(if: $skipIf) {
-    v2
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_one_field_with_directives);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    v1
-  }
-  t @skip(if: $skipIf) {
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn do_not_merge_when_fields_have_different_directives() {
-        let operation_different_directives = r#"
-query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t @skip(if: $skip1) {
-    v1
-  }
-  t @skip(if: $skip2) {
-    v2
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_different_directives);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t @skip(if: $skip1) {
-    v1
-  }
-  t @skip(if: $skip2) {
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn do_not_merge_fields_with_defer_directive() {
-        let operation_defer_fields = r#"
-query Test {
-  t {
-    ... @defer {
-      v1
-    }
-  }
-  t {
-    ... @defer {
-      v2
-    }
-  }
-}
-
-directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_defer_fields);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test {
-  t {
-    ... @defer {
-      v1
-    }
-    ... @defer {
-      v2
-    }
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn merge_nested_field_selections() {
-        let nested_operation = r#"
-query Test {
-  t {
-    t1
-    ... @defer {
-      v {
-        v1
-      }
-    }
-  }
-  t {
-    t1
-    t2
-    ... @defer {
-      v {
-        v2
-      }
-    }
-  }
-}
-
-directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  t1: Int
-  t2: String
-  v: V
-}
-
-type V {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(nested_operation);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test {
-  t {
-    t1
-    ... @defer {
-      v {
-        v1
-      }
-    }
-    t2
-    ... @defer {
-      v {
-        v2
-      }
-    }
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    //
-    // inline fragments
-    //
-
-    #[test]
-    fn merge_same_fragment_without_directives() {
-        let operation_with_fragments = r#"
-query Test {
-  t {
-    ... on T {
-      v1
-    }
-    ... on T {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_fragments);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test {
-  t {
-    v1
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn merge_same_fragments_with_same_directives() {
-        let operation_fragments_with_directives = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    ... on T @skip(if: $skipIf) {
-      v1
-    }
-    ... on T @skip(if: $skipIf) {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_fragments_with_directives);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    ... on T @skip(if: $skipIf) {
-      v1
-      v2
-    }
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn merge_same_fragments_with_same_directive_but_different_arg_order() {
-        let operation_fragments_with_directives_args_order = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    ... on T @customSkip(if: $skipIf, label: "foo") {
-      v1
-    }
-    ... on T @customSkip(label: "foo", if: $skipIf) {
-      v2
-    }
-  }
-}
-
-directive @customSkip(if: Boolean!, label: String!) on FIELD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_fragments_with_directives_args_order);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    ... on T @customSkip(if: $skipIf, label: "foo") {
-      v1
-      v2
-    }
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn do_not_merge_when_only_one_fragment_specifies_directive() {
-        let operation_one_fragment_with_directive = r#"
-query Test($skipIf: Boolean!) {
-  t {
-    ... on T {
-      v1
-    }
-    ... on T @skip(if: $skipIf) {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_one_fragment_with_directive);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skipIf: Boolean!) {
-  t {
-    v1
-    ... on T @skip(if: $skipIf) {
-      v2
-    }
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn do_not_merge_when_fragments_have_different_directives() {
-        let operation_fragments_with_different_directive = r#"
-query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t {
-    ... on T @skip(if: $skip1) {
-      v1
-    }
-    ... on T @skip(if: $skip2) {
-      v2
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_fragments_with_different_directive);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test($skip1: Boolean!, $skip2: Boolean!) {
-  t {
-    ... on T @skip(if: $skip1) {
-      v1
-    }
-    ... on T @skip(if: $skip2) {
-      v2
-    }
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn do_not_merge_fragments_with_defer_directive() {
-        let operation_fragments_with_defer = r#"
-query Test {
-  t {
-    ... on T @defer {
-      v1
-    }
-    ... on T @defer {
-      v2
-    }
-  }
-}
-
-directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
-type Query {
-  t: T
-}
-
-type T {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_fragments_with_defer);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test {
-  t {
-    ... on T @defer {
-      v1
-    }
-    ... on T @defer {
-      v2
-    }
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn merge_nested_fragments() {
-        let operation_nested_fragments = r#"
-query Test {
-  t {
-    ... on T {
-      t1
-    }
-    ... on T {
-      v {
-        v1
-      }
-    }
-  }
-  t {
-    ... on T {
-      t1
-      t2
-    }
-    ... on T {
-      v {
-        v2
-      }
-    }
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  t1: Int
-  t2: String
-  v: V
-}
-
-type V {
-  v1: Int
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_nested_fragments);
-        if let Some((_, operation)) = executable_document.named_operations.first_mut() {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query Test {
-  t {
-    t1
-    v {
-      v1
-      v2
-    }
-    t2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        } else {
-            panic!("unable to parse document")
-        }
-    }
-
-    #[test]
-    fn removes_sibling_typename() {
-        let operation_with_typename = r#"
-query TestQuery {
-  foo {
-    __typename
-    v1
-    v2
-  }
-}
-
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  v1: ID!
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) = parse_schema_and_operation(operation_with_typename);
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query TestQuery {
-  foo {
-    v1
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        }
-    }
-
-    #[test]
-    fn keeps_typename_if_no_other_selection() {
-        let operation_with_single_typename = r#"
-query TestQuery {
-  foo {
-    __typename
-  }
-}
-
-type Query {
-  foo: Foo
-}
-
-type Foo {
-  v1: ID!
-  v2: String
-}
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_single_typename);
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &IndexSet::new(),
-            )
-            .unwrap();
-            let expected = r#"query TestQuery {
-  foo {
-    __typename
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        }
-    }
-
-    #[test]
-    fn keeps_typename_for_interface_object() {
-        let operation_with_intf_object_typename = r#"
-query TestQuery {
-  foo {
-    __typename
-    v1
-    v2
-  }
-}
-
-directive @interfaceObject on OBJECT
-directive @key(fields: FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-type Query {
-  foo: Foo
-}
-
-type Foo @interfaceObject @key(fields: "id") {
-  v1: ID!
-  v2: String
-}
-
-scalar FieldSet
-"#;
-        let (schema, mut executable_document) =
-            parse_schema_and_operation(operation_with_intf_object_typename);
-        if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-            let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> = IndexSet::new();
-            interface_objects.insert(InterfaceTypeDefinitionPosition {
-                type_name: name!("Foo"),
-            });
-
-            let normalized_operation = normalize_operation(
-                operation,
-                NamedFragments::new(&executable_document.fragments, &schema),
-                &schema,
-                &interface_objects,
-            )
-            .unwrap();
-            let expected = r#"query TestQuery {
-  foo {
-    __typename
-    v1
-    v2
-  }
-}"#;
-            let actual = normalized_operation.to_string();
-            assert_eq!(expected, actual);
-        }
-    }
-
-    //
-    // REBASE TESTS
-    //
-    #[cfg(test)]
-    mod rebase_tests {
-        use apollo_compiler::name;
-        use indexmap::IndexSet;
-
-        use crate::query_plan::operation::normalize_operation;
-        use crate::query_plan::operation::tests::parse_schema_and_operation;
-        use crate::query_plan::operation::tests::parse_subgraph;
-        use crate::query_plan::operation::NamedFragments;
-        use crate::schema::position::InterfaceTypeDefinitionPosition;
-
-        #[test]
-        fn skips_unknown_fragment_fields() {
-            let operation_fragments = r#"
-query TestQuery {
-  t {
-    ...FragOnT
-  }
-}
-
-fragment FragOnT on T {
-  v0
-  v1
-  v2
-  u1 {
-    v3
-    v4
-    v5
-  }
-  u2 {
-    v4
-    v5
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  v0: Int
-  v1: Int
-  v2: Int
-  u1: U
-  u2: U
-}
-
-type U {
-  v3: Int
-  v4: Int
-  v5: Int
-}
-"#;
-            let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-            assert!(
-                !executable_document.fragments.is_empty(),
-                "operation should have some fragments"
-            );
-
-            if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let normalized_operation = normalize_operation(
-                    operation,
-                    NamedFragments::new(&executable_document.fragments, &schema),
-                    &schema,
-                    &IndexSet::new(),
-                )
-                .unwrap();
-
-                let subgraph_schema = r#"type Query {
-  _: Int
-}
-
-type T {
-  v1: Int
-  u1: U
-}
-
-type U {
-  v3: Int
-  v5: Int
-}"#;
-                let subgraph = parse_subgraph("A", subgraph_schema);
-                let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-                assert!(rebased_fragments.is_ok());
-                let rebased_fragments = rebased_fragments.unwrap();
-                assert!(!rebased_fragments.is_empty());
-                assert!(rebased_fragments.contains(&name!("FragOnT")));
-                let rebased_fragment = rebased_fragments.fragments.get("FragOnT").unwrap();
-
-                insta::assert_snapshot!(rebased_fragment, @r###"
-                    fragment FragOnT on T {
-                      v1
-                      u1 {
-                        v3
-                        v5
-                      }
-                    }
-                "###);
-            }
-        }
-
-        #[test]
-        fn skips_unknown_fragment_on_condition() {
-            let operation_fragments = r#"
-query TestQuery {
-  t {
-    ...FragOnT
-  }
-  u {
-    ...FragOnU
-  }
-}
-
-fragment FragOnT on T {
-  x
-  y
-}
-
-fragment FragOnU on U {
-  x
-  y
-}
-
-type Query {
-  t: T
-  u: U
-}
-
-type T {
-  x: Int
-  y: Int
-}
-
-type U {
-  x: Int
-  y: Int
-}
-"#;
-            let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-            assert!(
-                !executable_document.fragments.is_empty(),
-                "operation should have some fragments"
-            );
-            assert_eq!(2, executable_document.fragments.len());
-
-            if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let normalized_operation = normalize_operation(
-                    operation,
-                    NamedFragments::new(&executable_document.fragments, &schema),
-                    &schema,
-                    &IndexSet::new(),
-                )
-                .unwrap();
-
-                let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  x: Int
-  y: Int
-}"#;
-                let subgraph = parse_subgraph("A", subgraph_schema);
-                let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-                assert!(rebased_fragments.is_ok());
-                let rebased_fragments = rebased_fragments.unwrap();
-                assert!(!rebased_fragments.is_empty());
-                assert!(rebased_fragments.contains(&name!("FragOnT")));
-                assert!(!rebased_fragments.contains(&name!("FragOnU")));
-                let rebased_fragment = rebased_fragments.fragments.get("FragOnT").unwrap();
-
-                let expected = r#"fragment FragOnT on T {
-  x
-  y
-}"#;
-                let actual = rebased_fragment.to_string();
-                assert_eq!(actual, expected);
-            }
-        }
-
-        #[test]
-        fn skips_unknown_type_within_fragment() {
-            let operation_fragments = r#"
-query TestQuery {
-  i {
-    ...FragOnI
-  }
-}
-
-fragment FragOnI on I {
-  id
-  otherId
-  ... on T1 {
-    x
-  }
-  ... on T2 {
-    y
-  }
-}
-
-type Query {
-  i: I
-}
-
-interface I {
-  id: ID!
-  otherId: ID!
-}
-
-type T1 implements I {
-  id: ID!
-  otherId: ID!
-  x: Int
-}
-
-type T2 implements I {
-  id: ID!
-  otherId: ID!
-  y: Int
-}
-"#;
-            let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-            assert!(
-                !executable_document.fragments.is_empty(),
-                "operation should have some fragments"
-            );
-
-            if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let normalized_operation = normalize_operation(
-                    operation,
-                    NamedFragments::new(&executable_document.fragments, &schema),
-                    &schema,
-                    &IndexSet::new(),
-                )
-                .unwrap();
-
-                let subgraph_schema = r#"type Query {
-  i: I
-}
-
-interface I {
-  id: ID!
-}
-
-type T2 implements I {
-  id: ID!
-  y: Int
-}
-"#;
-                let subgraph = parse_subgraph("A", subgraph_schema);
-                let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-                assert!(rebased_fragments.is_ok());
-                let rebased_fragments = rebased_fragments.unwrap();
-                assert!(!rebased_fragments.is_empty());
-                assert!(rebased_fragments.contains(&name!("FragOnI")));
-                let rebased_fragment = rebased_fragments.fragments.get("FragOnI").unwrap();
-
-                let expected = r#"fragment FragOnI on I {
-  id
-  ... on T2 {
-    y
-  }
-}"#;
-                let actual = rebased_fragment.to_string();
-                assert_eq!(actual, expected);
-            }
-        }
-
-        #[test]
-        fn skips_typename_on_possible_interface_objects_within_fragment() {
-            let operation_fragments = r#"
-query TestQuery {
-  i {
-    ...FragOnI
-  }
-}
-
-fragment FragOnI on I {
-  __typename
-  id
-  x
-}
-
-type Query {
-  i: I
-}
-
-interface I {
-  id: ID!
-  x: String!
-}
-
-type T implements I {
-  id: ID!
-  x: String!
-}
-"#;
-
-            let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-            assert!(
-                !executable_document.fragments.is_empty(),
-                "operation should have some fragments"
-            );
-
-            if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let mut interface_objects: IndexSet<InterfaceTypeDefinitionPosition> =
-                    IndexSet::new();
-                interface_objects.insert(InterfaceTypeDefinitionPosition {
-                    type_name: name!("I"),
-                });
-                let normalized_operation = normalize_operation(
-                    operation,
-                    NamedFragments::new(&executable_document.fragments, &schema),
-                    &schema,
-                    &interface_objects,
-                )
-                .unwrap();
-
-                let subgraph_schema = r#"extend schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/federation/v2.5", import: [{ name: "@interfaceObject" }, { name: "@key" }])
-
-directive @link(url: String, as: String, import: [link__Import]) repeatable on SCHEMA
-
-directive @key(fields: federation__FieldSet!, resolvable: Boolean = true) repeatable on OBJECT | INTERFACE
-
-directive @interfaceObject on OBJECT
-
-type Query {
-  i: I
-}
-
-type I @interfaceObject @key(fields: "id") {
-  id: ID!
-  x: String!
-}
-
-scalar link__Import
-
-scalar federation__FieldSet
-"#;
-                let subgraph = parse_subgraph("A", subgraph_schema);
-                let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-                assert!(rebased_fragments.is_ok());
-                let rebased_fragments = rebased_fragments.unwrap();
-                assert!(!rebased_fragments.is_empty());
-                assert!(rebased_fragments.contains(&name!("FragOnI")));
-                let rebased_fragment = rebased_fragments.fragments.get("FragOnI").unwrap();
-
-                let expected = r#"fragment FragOnI on I {
-  id
-  x
-}"#;
-                let actual = rebased_fragment.to_string();
-                assert_eq!(actual, expected);
-            }
-        }
-
-        #[test]
-        fn skips_fragments_with_trivial_selections() {
-            let operation_fragments = r#"
-query TestQuery {
-  t {
-    ...F1
-    ...F2
-    ...F3
-  }
-}
-
-fragment F1 on T {
-  a
-  b
-}
-
-fragment F2 on T {
-  __typename
-  a
-  b
-}
-
-fragment F3 on T {
-  __typename
-  a
-  b
-  c
-  d
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  a: Int
-  b: Int
-  c: Int
-  d: Int
-}
-"#;
-            let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-            assert!(
-                !executable_document.fragments.is_empty(),
-                "operation should have some fragments"
-            );
-
-            if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let normalized_operation = normalize_operation(
-                    operation,
-                    NamedFragments::new(&executable_document.fragments, &schema),
-                    &schema,
-                    &IndexSet::new(),
-                )
-                .unwrap();
-
-                let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  c: Int
-  d: Int
-}
-"#;
-                let subgraph = parse_subgraph("A", subgraph_schema);
-                let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-                assert!(rebased_fragments.is_ok());
-                let rebased_fragments = rebased_fragments.unwrap();
-                // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-                assert_eq!(1, rebased_fragments.size());
-                assert!(rebased_fragments.contains(&name!("F3")));
-                let rebased_fragment = rebased_fragments.fragments.get("F3").unwrap();
-
-                let expected = r#"fragment F3 on T {
-  __typename
-  c
-  d
-}"#;
-                let actual = rebased_fragment.to_string();
-                assert_eq!(actual, expected);
-            }
-        }
-
-        #[test]
-        fn handles_skipped_fragments_within_fragments() {
-            let operation_fragments = r#"
-query TestQuery {
-  ...TheQuery
-}
-
-fragment TheQuery on Query {
-  t {
-    x
-    ... GetU
-  }
-}
-
-fragment GetU on T {
-  u {
-    y
-    z
-  }
-}
-
-type Query {
-  t: T
-}
-
-type T {
-  x: Int
-  u: U
-}
-
-type U {
-  y: Int
-  z: Int
-}
-"#;
-            let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-            assert!(
-                !executable_document.fragments.is_empty(),
-                "operation should have some fragments"
-            );
-
-            if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let normalized_operation = normalize_operation(
-                    operation,
-                    NamedFragments::new(&executable_document.fragments, &schema),
-                    &schema,
-                    &IndexSet::new(),
-                )
-                .unwrap();
-
-                let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  x: Int
-}"#;
-                let subgraph = parse_subgraph("A", subgraph_schema);
-                let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-                assert!(rebased_fragments.is_ok());
-                let rebased_fragments = rebased_fragments.unwrap();
-                // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-                assert_eq!(1, rebased_fragments.size());
-                assert!(rebased_fragments.contains(&name!("TheQuery")));
-                let rebased_fragment = rebased_fragments.fragments.get("TheQuery").unwrap();
-
-                let expected = r#"fragment TheQuery on Query {
-  t {
-    x
-  }
-}"#;
-                let actual = rebased_fragment.to_string();
-                assert_eq!(actual, expected);
-            }
-        }
-
-        #[test]
-        fn handles_subtypes_within_subgraphs() {
-            let operation_fragments = r#"
-query TestQuery {
-  ...TQuery
-}
-
-fragment TQuery on Query {
-  t {
-    x
-    y
-    ... on T {
-      z
-    }
-  }
-}
-
-type Query {
-  t: I
-}
-
-interface I {
-  x: Int
-  y: Int
-}
-
-type T implements I {
-  x: Int
-  y: Int
-  z: Int
-}
-"#;
-            let (schema, mut executable_document) = parse_schema_and_operation(operation_fragments);
-            assert!(
-                !executable_document.fragments.is_empty(),
-                "operation should have some fragments"
-            );
-
-            if let Some(operation) = executable_document.named_operations.get_mut("TestQuery") {
-                let normalized_operation = normalize_operation(
-                    operation,
-                    NamedFragments::new(&executable_document.fragments, &schema),
-                    &schema,
-                    &IndexSet::new(),
-                )
-                .unwrap();
-
-                let subgraph_schema = r#"type Query {
-  t: T
-}
-
-type T {
-  x: Int
-  y: Int
-  z: Int
-}
-"#;
-
-                let subgraph = parse_subgraph("A", subgraph_schema);
-                let rebased_fragments = normalized_operation.named_fragments.rebase_on(&subgraph);
-                assert!(rebased_fragments.is_ok());
-                let rebased_fragments = rebased_fragments.unwrap();
-                // F1 reduces to nothing, and F2 reduces to just __typename so we shouldn't keep them.
-                assert_eq!(1, rebased_fragments.size());
-                assert!(rebased_fragments.contains(&name!("TQuery")));
-                let rebased_fragment = rebased_fragments.fragments.get("TQuery").unwrap();
-
-                let expected = r#"fragment TQuery on Query {
-  t {
-    x
-    y
-    z
-  }
-}"#;
-                let actual = rebased_fragment.to_string();
-                assert_eq!(actual, expected);
-            }
-        }
-    }
-
-    fn containment_custom(left: &str, right: &str, ignore_missing_typename: bool) -> Containment {
-        let schema = apollo_compiler::Schema::parse_and_validate(
-            r#"
-        directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
-
-        interface Intf {
-            intfField: Int
-        }
-        type HasA implements Intf {
-            a: Boolean
-            intfField: Int
-        }
-        type Nested {
-            a: Int
-            b: Int
-            c: Int
-        }
-        input Input {
-            recur: Input
-            f: Boolean
-            g: Boolean
-            h: Boolean
-        }
-        type Query {
-            a: Int
-            b: Int
-            c: Int
-            object: Nested
-            intf: Intf
-            arg(a: Int, b: Int, c: Int, d: Input): Int
-        }
-        "#,
-            "schema.graphql",
-        )
-        .unwrap();
-        let schema = ValidFederationSchema::new(schema).unwrap();
-        let left = Operation::parse(schema.clone(), left, "left.graphql", None).unwrap();
-        let right = Operation::parse(schema.clone(), right, "right.graphql", None).unwrap();
-
-        left.selection_set.containment(
-            &right.selection_set,
-            ContainmentOptions {
-                ignore_missing_typename,
-            },
-        )
-    }
-
-    fn containment(left: &str, right: &str) -> Containment {
-        containment_custom(left, right, false)
-    }
-
-    #[test]
-    fn selection_set_contains() {
-        assert_eq!(containment("{ a }", "{ a }"), Containment::Equal);
-        assert_eq!(containment("{ a b }", "{ b a }"), Containment::Equal);
-        assert_eq!(
-            containment("{ arg(a: 1) }", "{ arg(a: 2) }"),
-            Containment::NotContained
-        );
-        assert_eq!(
-            containment("{ arg(a: 1) }", "{ arg(b: 1) }"),
-            Containment::NotContained
-        );
-        assert_eq!(
-            containment("{ arg(a: 1) }", "{ arg(a: 1) }"),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment("{ arg(a: 1, b: 1) }", "{ arg(b: 1 a: 1) }"),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment("{ arg(a: 1) }", "{ arg(a: 1) }"),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment(
-                "{ arg(d: { f: true, g: true }) }",
-                "{ arg(d: { f: true }) }"
-            ),
-            Containment::NotContained
-        );
-        assert_eq!(
-            containment(
-                "{ arg(d: { recur: { f: true } g: true h: false }) }",
-                "{ arg(d: { h: false recur: {f: true} g: true }) }"
-            ),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment("{ arg @skip(if: true) }", "{ arg @skip(if: true) }"),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment("{ arg @skip(if: true) }", "{ arg @skip(if: false) }"),
-            Containment::NotContained
-        );
-        assert_eq!(
-            containment("{ ... @defer { arg } }", "{ ... @defer { arg } }"),
-            Containment::NotContained,
-            "@defer selections never contain each other"
-        );
-        assert_eq!(
-            containment("{ a b c }", "{ b a }"),
-            Containment::StrictlyContained
-        );
-        assert_eq!(
-            containment("{ a b }", "{ b c a }"),
-            Containment::NotContained
-        );
-        assert_eq!(containment("{ a }", "{ b }"), Containment::NotContained);
-        assert_eq!(
-            containment("{ object { a } }", "{ object { b a } }"),
-            Containment::NotContained
-        );
-
-        assert_eq!(
-            containment("{ ... { a } }", "{ ... { a } }"),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment(
-                "{ intf { ... on HasA { a } } }",
-                "{ intf { ... on HasA { a } } }",
-            ),
-            Containment::Equal
-        );
-        // These select the same things, but containment also counts fragment namedness
-        assert_eq!(
-            containment(
-                "{ intf { ... on HasA { a } } }",
-                "{ intf { ...named } } fragment named on HasA { a }",
-            ),
-            Containment::NotContained
-        );
-        assert_eq!(
-            containment(
-                "{ intf { ...named } } fragment named on HasA { a intfField }",
-                "{ intf { ...named } } fragment named on HasA { a }",
-            ),
-            Containment::StrictlyContained
-        );
-        assert_eq!(
-            containment(
-                "{ intf { ...named } } fragment named on HasA { a }",
-                "{ intf { ...named } } fragment named on HasA { a intfField }",
-            ),
-            Containment::NotContained
-        );
-    }
-
-    #[test]
-    fn selection_set_contains_missing_typename() {
-        assert_eq!(
-            containment_custom("{ a }", "{ a __typename }", true),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment_custom("{ a b }", "{ b a __typename }", true),
-            Containment::Equal
-        );
-        assert_eq!(
-            containment_custom("{ a b }", "{ b __typename }", true),
-            Containment::StrictlyContained
-        );
-        assert_eq!(
-            containment_custom("{ object { a b } }", "{ object { b __typename } }", true),
-            Containment::StrictlyContained
-        );
-        assert_eq!(
-            containment_custom(
-                "{ intf { intfField __typename } }",
-                "{ intf { intfField } }",
-                true
-            ),
-            Containment::StrictlyContained,
-        );
-        assert_eq!(
-            containment_custom(
-                "{ intf { intfField __typename } }",
-                "{ intf { intfField __typename } }",
-                true
-            ),
-            Containment::Equal,
-        );
-    }
-
-    /// This regression-tests an assumption from
-    /// https://github.com/apollographql/federation-next/pull/290#discussion_r1587200664
-    #[test]
-    fn converting_operation_types() {
-        let schema = apollo_compiler::Schema::parse_and_validate(
-            r#"
-        interface Intf {
-            intfField: Int
-        }
-        type HasA implements Intf {
-            a: Boolean
-            intfField: Int
-        }
-        type Nested {
-            a: Int
-            b: Int
-            c: Int
-        }
-        type Query {
-            a: Int
-            b: Int
-            c: Int
-            object: Nested
-            intf: Intf
-        }
-        "#,
-            "schema.graphql",
-        )
-        .unwrap();
-        let schema = ValidFederationSchema::new(schema).unwrap();
-        insta::assert_snapshot!(Operation::parse(
-            schema.clone(),
-            r#"
-        {
-            intf {
-                ... on HasA { a }
-                ... frag
-            }
-        }
-        fragment frag on HasA { intfField }
-        "#,
-            "operation.graphql",
-            None,
-        )
-        .unwrap(), @r###"
-        fragment frag on HasA {
-          intfField
-        }
-
-        {
-          intf {
-            ... on HasA {
-              a
-            }
-            ...frag
-          }
-        }
-        "###);
-    }
-
-    fn contains_field(ss: &SelectionSet, field_name: Name) -> bool {
-        ss.selections.contains_key(&SelectionKey::Field {
-            response_name: field_name,
-            directives: Default::default(),
-        })
-    }
-
-    fn is_named_field(sk: &SelectionKey, name: Name) -> bool {
-        matches!(sk,
-            SelectionKey::Field { response_name, directives: _ }
-                if *response_name == name)
-    }
-
-    fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Selection> {
-        let Some((first, rest)) = path.split_first() else {
-            // Error: empty path
-            return None;
-        };
-        let result = ss.selections.get(&SelectionKey::Field {
-            response_name: (*first).clone(),
-            directives: Default::default(),
-        });
-        let Some(value) = result else {
-            // Error: No matching field found.
-            return None;
-        };
-        if rest.is_empty() {
-            // Base case => We are done.
-            Some(value)
-        } else {
-            // Recursive case
-            match value.selection_set().unwrap() {
-                None => None, // Error: Sub-selection expected, but not found.
-                Some(ss) => get_value_at_path(ss, rest),
-            }
-        }
-    }
-
-    #[cfg(test)]
-    mod make_selection_tests {
-        use super::super::*;
-        use super::*;
-
-        const SAMPLE_OPERATION_DOC: &str = r#"
-        type Query {
-            foo: Foo!
-        }
-
-        type Foo {
-            a: Int!
-            b: Int!
-            c: Int!
-        }
-
-        query TestQuery {
-            foo {
-                a
-                b
-                c
-            }
-        }
-        "#;
-
-        // Tests if `make_selection`'s subselection ordering is preserved.
-        #[test]
-        fn test_make_selection_order() {
-            let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
-            let normalized_operation = normalize_operation(
-                executable_document.get_operation(None).unwrap(),
-                Default::default(),
-                &schema,
-                &Default::default(),
-            )
-            .unwrap();
-
-            let foo = get_value_at_path(&normalized_operation.selection_set, &[name!("foo")])
-                .expect("foo should exist");
-            assert_eq!(foo.to_string(), "foo { a b c }");
-
-            // Create a new foo with a different selection order using `make_selection`.
-            let clone_selection_at_path = |base: &Selection, path: &[Name]| {
-                let base_selection_set = base.selection_set().unwrap().unwrap();
-                let selection =
-                    get_value_at_path(base_selection_set, path).expect("path should exist");
-                let subselections = SelectionSet::from_selection(
-                    base_selection_set.type_position.clone(),
-                    selection.clone(),
-                );
-                Selection::from_element(base.element().unwrap(), Some(subselections)).unwrap()
-            };
-
-            let foo_with_a = clone_selection_at_path(foo, &[name!("a")]);
-            let foo_with_b = clone_selection_at_path(foo, &[name!("b")]);
-            let foo_with_c = clone_selection_at_path(foo, &[name!("c")]);
-            let new_selection = SelectionSet::make_selection(
-                &schema,
-                &foo.element().unwrap().parent_type_position(),
-                [foo_with_c, foo_with_b, foo_with_a].iter(),
-                /*named_fragments*/ &Default::default(),
-            )
-            .unwrap();
-            // Make sure the ordering of c, b and a is preserved.
-            assert_eq!(new_selection.to_string(), "foo { c b a }");
-        }
-    }
-
-    #[cfg(test)]
-    mod lazy_map_tests {
-        use super::super::*;
-        use super::*;
-
-        // recursive filter implementation using `lazy_map`
-        fn filter_rec(
-            ss: &SelectionSet,
-            pred: &impl Fn(&Selection) -> bool,
-        ) -> Result<SelectionSet, FederationError> {
-            ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
-                if !pred(s) {
-                    return Ok(SelectionMapperReturn::None);
-                }
-                match s.selection_set()? {
-                    // Base case: leaf field
-                    None => Ok(s.clone().into()),
-
-                    // Recursive case: non-leaf field
-                    Some(inner_ss) => {
-                        let updated_ss = filter_rec(inner_ss, pred).map(Some)?;
-                        // see if `updated_ss` is an non-empty selection set.
-                        if matches!(updated_ss, Some(ref sub_ss) if !sub_ss.is_empty()) {
-                            s.with_updated_selection_set(updated_ss).map(|ss| ss.into())
-                        } else {
-                            Ok(SelectionMapperReturn::None)
-                        }
-                    }
-                }
-            })
-        }
-
-        const SAMPLE_OPERATION_DOC: &str = r#"
-        type Query {
-            foo: Foo!
-            some_int: Int!
-            foo2: Foo!
-        }
-
-        type Foo {
-            id: ID!
-            bar: String!
-            baz: Int
-        }
-
-        query TestQuery {
-            foo {
-                id
-                bar
-            },
-            some_int
-            foo2 {
-                bar
-            }
-        }
-        "#;
-
-        // Tests `lazy_map` via `filter_rec` function.
-        #[test]
-        fn test_lazy_map() {
-            let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
-            let normalized_operation = normalize_operation(
-                executable_document.get_operation(None).unwrap(),
-                Default::default(),
-                &schema,
-                &Default::default(),
-            )
-            .unwrap();
-
-            let selection_set = normalized_operation.selection_set;
-
-            // Select none
-            let select_none = filter_rec(&selection_set, &|_| false).unwrap();
-            assert!(select_none.is_empty());
-
-            // Select all
-            let select_all = filter_rec(&selection_set, &|_| true).unwrap();
-            assert!(select_all == selection_set);
-
-            // Remove `foo`
-            let remove_foo =
-                filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("foo"))).unwrap();
-            assert!(contains_field(&remove_foo, name!("some_int")));
-            assert!(contains_field(&remove_foo, name!("foo2")));
-            assert!(!contains_field(&remove_foo, name!("foo")));
-
-            // Remove `bar`
-            let remove_bar =
-                filter_rec(&selection_set, &|s| !is_named_field(&s.key(), name!("bar"))).unwrap();
-            // "foo2" should be removed, since it has no sub-selections left.
-            assert!(!contains_field(&remove_bar, name!("foo2")));
-        }
-
-        fn add_typename_if(
-            ss: &SelectionSet,
-            pred: &impl Fn(&Selection) -> bool,
-        ) -> Result<SelectionSet, FederationError> {
-            ss.lazy_map(/*named_fragments*/ &Default::default(), |s| {
-                let to_add_typename = pred(s);
-                let updated = s.map_selection_set(|ss| add_typename_if(ss, pred).map(Some))?;
-                if !to_add_typename {
-                    return Ok(updated.into());
-                }
-
-                let parent_type_pos = s.element()?.parent_type_position();
-                // "__typename" field
-                let field_element =
-                    Field::new_introspection_typename(s.schema(), &parent_type_pos, None);
-                let typename_selection =
-                    Selection::from_element(field_element.into(), /*subselection*/ None)?;
-                // return `updated` and `typename_selection`
-                Ok([updated, typename_selection].into_iter().collect())
-            })
-        }
-
-        // Tests `lazy_map` via `add_typename_if` function.
-        #[test]
-        fn test_lazy_map2() {
-            let (schema, executable_document) = parse_schema_and_operation(SAMPLE_OPERATION_DOC);
-            let normalized_operation = normalize_operation(
-                executable_document.get_operation(None).unwrap(),
-                Default::default(),
-                &schema,
-                &Default::default(),
-            )
-            .unwrap();
-
-            let selection_set = normalized_operation.selection_set;
-
-            // Add __typename next to any "id" field.
-            let result =
-                add_typename_if(&selection_set, &|s| is_named_field(&s.key(), name!("id")))
-                    .unwrap();
-
-            // The top level won't have __typename, since it doesn't have "id".
-            assert!(!contains_field(&result, name!("__typename")));
-
-            // Check if "foo" has "__typename".
-            get_value_at_path(&result, &[name!("foo"), name!("__typename")])
-                .expect("foo.__typename should exist");
-        }
-    }
-
-    fn field_element(
-        schema: &ValidFederationSchema,
-        object: apollo_compiler::schema::Name,
-        field: apollo_compiler::schema::Name,
-    ) -> OpPathElement {
-        OpPathElement::Field(super::Field::new(super::FieldData {
-            schema: schema.clone(),
-            field_position: ObjectTypeDefinitionPosition::new(object)
-                .field(field)
-                .into(),
-            alias: None,
-            arguments: Default::default(),
-            directives: Default::default(),
-            sibling_typename: None,
-        }))
-    }
-
-    const ADD_AT_PATH_TEST_SCHEMA: &str = r#"
-        type A { b: B }
-        type B { c: C }
-        type C implements X {
-            d: Int
-            e(arg: Int): Int
-        }
-        type D implements X {
-            d: Int
-            e: Boolean
-        }
-
-        interface X {
-            d: Int
-        }
-        type Query {
-            a: A
-            something: Boolean!
-            scalar: String
-            withArg(arg: Int): X
-        }
-    "#;
-
-    #[test]
-    fn add_at_path_merge_scalar_fields() {
-        let schema =
-            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-                .unwrap();
-        let schema = ValidFederationSchema::new(schema).unwrap();
-
-        let mut selection_set = SelectionSet::empty(
-            schema.clone(),
-            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
-        );
-
-        selection_set
-            .add_at_path(
-                &[field_element(&schema, name!("Query"), name!("scalar")).into()],
-                None,
-            )
-            .unwrap();
-
-        selection_set
-            .add_at_path(
-                &[field_element(&schema, name!("Query"), name!("scalar")).into()],
-                None,
-            )
-            .unwrap();
-
-        insta::assert_snapshot!(selection_set, @r#"{ scalar }"#);
-    }
-
-    #[test]
-    fn add_at_path_merge_subselections() {
-        let schema =
-            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-                .unwrap();
-        let schema = ValidFederationSchema::new(schema).unwrap();
-
-        let mut selection_set = SelectionSet::empty(
-            schema.clone(),
-            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
-        );
-
-        let path_to_c = [
-            field_element(&schema, name!("Query"), name!("a")).into(),
-            field_element(&schema, name!("A"), name!("b")).into(),
-            field_element(&schema, name!("B"), name!("c")).into(),
-        ];
-
-        selection_set
-            .add_at_path(
-                &path_to_c,
-                Some(
-                    &SelectionSet::parse(
-                        schema.clone(),
-                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
-                        "d",
-                    )
-                    .unwrap()
-                    .into(),
-                ),
-            )
-            .unwrap();
-        selection_set
-            .add_at_path(
-                &path_to_c,
-                Some(
-                    &SelectionSet::parse(
-                        schema.clone(),
-                        ObjectTypeDefinitionPosition::new(name!("C")).into(),
-                        "e(arg: 1)",
-                    )
-                    .unwrap()
-                    .into(),
-                ),
-            )
-            .unwrap();
-
-        insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d e(arg: 1) } } } }"#);
-    }
-
-    // TODO: `.add_at_path` should collapse unnecessary fragments
-    #[test]
-    #[ignore]
-    fn add_at_path_collapses_unnecessary_fragments() {
-        let schema =
-            apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
-                .unwrap();
-        let schema = ValidFederationSchema::new(schema).unwrap();
-
-        let mut selection_set = SelectionSet::empty(
-            schema.clone(),
-            ObjectTypeDefinitionPosition::new(name!("Query")).into(),
-        );
-        selection_set
-            .add_at_path(
-                &[
-                    field_element(&schema, name!("Query"), name!("a")).into(),
-                    field_element(&schema, name!("A"), name!("b")).into(),
-                    field_element(&schema, name!("B"), name!("c")).into(),
-                ],
-                Some(
-                    &SelectionSet::parse(
-                        schema.clone(),
-                        InterfaceTypeDefinitionPosition::new(name!("X")).into(),
-                        "... on C { d }",
-                    )
-                    .unwrap()
-                    .into(),
-                ),
-            )
-            .unwrap();
-
-        insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d } } } }"#);
-    }
 }

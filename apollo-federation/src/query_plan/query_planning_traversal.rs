@@ -5,6 +5,9 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
 use crate::error::FederationError;
+use crate::operation::Operation;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
 use crate::query_graph::condition_resolver::ConditionResolver;
@@ -30,9 +33,6 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToC
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::operation::Operation;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
@@ -414,7 +414,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 let new_selection_set = Arc::new(
                     selection_set
                         .add_back_typename_in_attachments()?
-                        .add_typename_field_for_abstract_types(None, &None)?,
+                        .add_typename_field_for_abstract_types(None)?,
                 );
                 self.record_closed_branch(ClosedBranch(
                     new_options
@@ -512,7 +512,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn cost(
         &mut self,
         dependency_graph: &mut FetchDependencyGraph,
-    ) -> Result<i64, FederationError> {
+    ) -> Result<QueryPlanCost, FederationError> {
         let (main, deferred) = dependency_graph.process(self.cost_processor, self.root_kind)?;
         if deferred.is_empty() {
             Ok(main)
@@ -876,8 +876,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn resolve_condition_plan(
         &self,
         edge: EdgeIndex,
-        // PORT_NOTE: The following parameters are not currently used.
-        _context: &OpGraphPathContext,
+        context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
@@ -914,7 +913,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             self.has_defers,
             self.root_kind,
             self.cost_processor,
-            Default::default(),
+            context.clone(),
             excluded_destinations.clone(),
             excluded_conditions.add_item(edge_conditions),
         )?

@@ -67,8 +67,6 @@ fn it_handles_a_simple_at_requires_triggered_within_a_conditional() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure - context is not passed, expected [@include(if: $test)] but was []
 fn it_handles_an_at_requires_triggered_conditionally() {
     let planner = planner!(
         Subgraph1: r#"

@@ -1,8 +1,6 @@
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure - missing `__typename` under `a`
 fn it_works_with_nested_fragments_1() {
     let planner = planner!(
         Subgraph1: r#"
@@ -94,7 +92,7 @@ fn it_works_with_nested_fragments_1() {
                 }
               }
             }
-            
+
             fragment FooChildSelect on Foo {
               __typename
               foo
@@ -109,7 +107,7 @@ fn it_works_with_nested_fragments_1() {
                 }
               }
             }
-            
+
             fragment FooSelect on Foo {
               __typename
               foo
@@ -462,8 +460,10 @@ fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved()
 }
 
 #[test]
-#[should_panic(expected = r#"called `Result::unwrap()` on an `Err` value: "#)]
-// TODO: investigate this failure (Error: variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`)
+#[should_panic(
+    expected = r#"variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"#
+)]
+// TODO: investigate this failure
 fn it_preserves_directives_when_fragment_not_used() {
     // (because used only once)
     let planner = planner!(
@@ -569,10 +569,6 @@ fn it_preserves_directives_when_fragment_is_reused() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"I.b\" to selection set of parent type \"I\""
-)]
-// TODO: investigate this failure
 fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
     // Slightly artificial example for simplicity, but this highlight the problem.
     // In that example, the only queried subgraph is the first one (there is in fact
@@ -650,9 +646,7 @@ fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"Outer.v\" to selection set of parent type \"I\""
-)]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure - snapshot mismatch (complicated)
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_differs() {
     // This test is designed such that type `Outer` implements the interface `I` in `Subgraph1`
@@ -1000,8 +994,8 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
 }
 
 #[test]
-#[should_panic(expected = "called `Result::unwrap()` on an `Err` value")]
-// TODO: investigate this failure (Object type "Outer" has no field "v")
+#[should_panic(expected = r#"snapshot assertion"#)]
+// TODO: investigate this failure
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relation_differs() {
     // This test is similar to the subtyping case (it tests the same problems), but test the case
     // of unions instead of interfaces.

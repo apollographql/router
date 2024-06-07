@@ -19,6 +19,7 @@ use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 
+use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
@@ -958,6 +959,9 @@ async fn query_planner_redis_update_reuse_query_fragments() {
 }
 
 async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key: &str) {
+    if !graph_os_enabled() {
+        return;
+    }
     // This test shows that the redis key changes when the query planner config changes.
     // The test starts a router with a specific config, executes a query, and checks the redis cache key.
     // Then it updates the config, executes the query again, and checks the redis cache key.
