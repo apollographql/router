@@ -129,7 +129,7 @@ impl Schema {
             Supergraph::ApolloCompiler(definitions)
         };
 
-        let hash = Arc::new(Schema::schema_id(&sdl));
+        let hash = Arc::new(Schema::schema_id(sdl));
 
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
