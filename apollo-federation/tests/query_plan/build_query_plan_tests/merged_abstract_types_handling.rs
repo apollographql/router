@@ -14,21 +14,21 @@ fn union_interface_interaction() {
           type Query {
             u: U
           }
-  
+
           union U = A | B | C
-  
+
           interface I {
             v: Int
           }
-  
+
           type A {
             v: Int @shareable
           }
-  
+
           type B implements I {
             v: Int
           }
-  
+
           type C implements I {
             v: Int
           }
@@ -37,7 +37,7 @@ fn union_interface_interaction() {
           interface I {
             v: Int
           }
-  
+
           type A implements I {
             v: Int @shareable
           }
@@ -88,28 +88,28 @@ fn union_interface_interaction_but_no_need_to_type_explode() {
           type Query {
             u: U
           }
-  
+
           union U = B | C
-  
+
           interface I {
             v: Int
           }
-  
+
           type A implements I {
             v: Int @shareable
           }
-  
+
           type B implements I {
             v: Int
           }
-  
+
           type C implements I {
             v: Int
           }
         "#,
         Subgraph2: r#"
           union U = A
-  
+
           type A {
             v: Int @shareable
           }
@@ -156,28 +156,28 @@ fn interface_union_interaction() {
           type Query {
             i: I
           }
-  
+
           union U = B | C
-  
+
           interface I {
             v: Int
           }
-  
+
           type A implements I {
             v: Int @shareable
           }
-  
+
           type B implements I {
             v: Int
           }
-  
+
           type C implements I {
             v: Int
           }
         "#,
         Subgraph2: r#"
           union U = A
-  
+
           type A {
             v: Int @shareable
           }
@@ -228,21 +228,21 @@ fn interface_union_interaction_but_no_need_to_type_explode() {
           type Query {
             i: I
           }
-  
+
           union U = A | B | C
-  
+
           interface I {
             v: Int
           }
-  
+
           type A {
             v: Int @shareable
           }
-  
+
           type B implements I {
             v: Int
           }
-  
+
           type C implements I {
             v: Int
           }
@@ -251,7 +251,7 @@ fn interface_union_interaction_but_no_need_to_type_explode() {
           interface I {
             v: Int
           }
-  
+
           type A implements I {
             v: Int @shareable
           }
@@ -297,23 +297,23 @@ fn interface_interface_interaction() {
           type Query {
             i1: I1
           }
-  
+
           interface I1 {
             v: Int
           }
-  
+
           interface I2 {
             v: Int
           }
-  
+
           type A implements I1 {
             v: Int @shareable
           }
-  
+
           type B implements I1 & I2 {
             v: Int
           }
-  
+
           type C implements I1 & I2 {
             v: Int
           }
@@ -322,7 +322,7 @@ fn interface_interface_interaction() {
           interface I2 {
             v: Int
           }
-  
+
           type A implements I2 {
             v: Int @shareable
           }
@@ -373,23 +373,23 @@ fn interface_interface_interaction_but_no_need_to_type_explode() {
           type Query {
             i1: I1
           }
-  
+
           interface I1 {
             v: Int
           }
-  
+
           interface I2 {
             v: Int
           }
-  
+
           type A implements I2 {
             v: Int @shareable
           }
-  
+
           type B implements I1 & I2 {
             v: Int
           }
-  
+
           type C implements I1 & I2 {
             v: Int
           }
@@ -398,7 +398,7 @@ fn interface_interface_interaction_but_no_need_to_type_explode() {
           interface I1 {
             v: Int
           }
-  
+
           type A implements I1 {
             v: Int @shareable
           }
@@ -446,25 +446,25 @@ fn union_union_interaction() {
           type Query {
             u1: U1
           }
-  
+
           union U1 = A | B | C
           union U2 = B | C
-  
+
           type A {
             v: Int @shareable
           }
-  
+
           type B {
             v: Int
           }
-  
+
           type C {
             v: Int
           }
         "#,
         Subgraph2: r#"
           union U2 = A
-  
+
           type A {
             v: Int @shareable
           }
@@ -515,25 +515,25 @@ fn union_union_interaction_but_no_need_to_type_explode() {
           type Query {
             u1: U1
           }
-  
+
           union U1 = B | C
           union U2 = A | B | C
-  
+
           type A {
             v: Int @shareable
           }
-  
+
           type B {
             v: Int
           }
-  
+
           type C {
             v: Int
           }
         "#,
         Subgraph2: r#"
           union U1 = A
-  
+
           type A {
             v: Int @shareable
           }
@@ -577,19 +577,19 @@ fn handles_spread_unions_correctly() {
         type Query {
           u: U
         }
-  
+
         union U = A | B
-  
+
         type A @key(fields: "id") {
           id: ID!
           a1: Int
         }
-  
+
         type B {
           id: ID!
           b: Int
         }
-  
+
         type C @key(fields: "id") {
           id: ID!
           c1: Int
@@ -599,14 +599,14 @@ fn handles_spread_unions_correctly() {
         type Query {
           otherQuery: U
         }
-  
+
         union U = A | C
-  
+
         type A @key(fields: "id") {
           id: ID!
           a2: Int
         }
-  
+
         type C @key(fields: "id") {
           id: ID!
           c2: Int
@@ -652,13 +652,13 @@ fn handles_case_of_key_chains_in_parallel_requires() {
         type Query {
           t: T
         }
-  
+
         union T = T1 | T2
-  
+
         type T1 @key(fields: "id1") {
           id1: ID!
         }
-  
+
         type T2 @key(fields: "id") {
           id: ID!
           y: Int
@@ -675,7 +675,7 @@ fn handles_case_of_key_chains_in_parallel_requires() {
           id2: ID!
           x: Int
         }
-  
+
         type T2 @key(fields: "id") {
           id: ID!
           y: Int @external
@@ -782,24 +782,24 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
         type Query {
           t: T
         }
-  
+
         union T = T1 | T2
-  
+
         type T1 @key(fields: "id") {
           id: ID!
           sub: Foo
         }
-  
+
         type Foo @key(fields: "id") {
           id: ID!
           x: Int
         }
-  
+
         type T2 @key(fields: "id") {
           id: ID!
           sub: Bar
         }
-  
+
         type Bar @key(fields: "id") {
           id: ID!
           x: Int
@@ -810,7 +810,7 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
           id: ID!
           y: Int
         }
-  
+
         type Bar @key(fields: "id") {
           id: ID!
           y: Int
@@ -896,19 +896,19 @@ fn does_not_error_out_handling_fragments_when_interface_subtyping_is_involved() 
         type Query {
           a: A!
         }
-  
+
         interface IA {
           b: IB!
         }
-  
+
         type A implements IA {
           b: B!
         }
-  
+
         interface IB {
           v1: Int!
         }
-  
+
         type B implements IB {
           v1: Int!
           v2: Int!
@@ -925,19 +925,19 @@ fn does_not_error_out_handling_fragments_when_interface_subtyping_is_involved() 
             ...F3
           }
         }
-  
+
         fragment F1 on A {
           b {
             v2
           }
         }
-  
+
         fragment F2 on IA {
           b {
             v1
           }
         }
-  
+
         fragment F3 on IA {
           b {
             __typename
