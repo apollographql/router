@@ -109,8 +109,8 @@ traces_per_query:
     referenced_fields_by_type:
       Product:
         field_names:
-          - reviews
           - name
+          - reviews
         is_interface: false
       Query:
         field_names:
