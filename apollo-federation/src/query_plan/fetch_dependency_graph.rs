@@ -1577,19 +1577,21 @@ impl FetchDependencyGraph {
         };
         let type_at_path = self.type_at_path(
             &parent.selection_set.selection_set.type_position,
+            &parent.selection_set.selection_set.schema,
             parent_op_path,
         )?;
         let new_node_is_unneeded = parent_relation.path_in_parent.is_some()
             && node
                 .selection_set
                 .selection_set
-                .can_rebase_on(&type_at_path);
+                .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema);
         Ok(new_node_is_unneeded)
     }
 
     fn type_at_path(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
         path: &Arc<OpPath>,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
         let mut type_ = parent_type.clone();
@@ -1597,11 +1599,9 @@ impl FetchDependencyGraph {
             match &**element {
                 OpPathElement::Field(field) => {
                     let field_position = type_.field(field.data().name().clone())?;
-                    let field_definition = field_position.get(field.data().schema.schema())?;
+                    let field_definition = field_position.get(schema.schema())?;
                     let field_type = field_definition.ty.inner_named_type();
-                    type_ = field
-                        .data()
-                        .schema
+                    type_ = schema
                         .get_type(field_type.clone())?
                         .try_into()
                         .map_or_else(
@@ -1617,14 +1617,25 @@ impl FetchDependencyGraph {
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition_position) = &fragment.data().type_condition_position
                     {
-                        type_ = type_condition_position.clone();
+                        type_ = schema
+                            .get_type(type_condition_position.type_name().clone())?
+                            .try_into()
+                            .map_or_else(
+                                |_| {
+                                    Err(FederationError::internal(format!(
+                                        "Invalid call from {} starting at {}: {} is not composite",
+                                        path, parent_type, type_condition_position
+                                    )))
+                                },
+                                Ok,
+                            )?;
                     } else {
                         continue;
                     }
                 }
             }
         }
-        Ok(type_.clone())
+        Ok(type_)
     }
 }
 
