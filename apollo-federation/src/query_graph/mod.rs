@@ -38,7 +38,6 @@ pub(crate) mod path_tree;
 
 pub use build_query_graph::build_federated_query_graph;
 
-use crate::query_graph::build_query_graph::FEDERATED_GRAPH_ROOT_SOURCE;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::graph_path::ExcludedConditions;
@@ -285,6 +284,10 @@ pub struct QueryGraph {
     /// GraphQL schema keyed by the name identifying them. Note that the `source` strings in the
     /// nodes/edges of a query graph are guaranteed to be valid key in this map.
     sources: IndexMap<NodeStr, ValidFederationSchema>,
+    /// For federated query graphs, this is a map from subgraph names to their schemas. This is the
+    /// same as `sources`, but is missing the dummy source FEDERATED_GRAPH_ROOT_SOURCE which isn't
+    /// really a subgraph.
+    subgraphs_by_name: IndexMap<NodeStr, ValidFederationSchema>,
     /// A map (keyed by source) that associates type names of the underlying schema on which this
     /// query graph was built to each of the nodes that points to a type of that name. Note that for
     /// a "federated" query graph source, each type name will only map to a single node.
@@ -397,12 +400,12 @@ impl QueryGraph {
         })
     }
 
-    pub(crate) fn source_schemas(
-        &self,
-    ) -> impl Iterator<Item = (&NodeStr, &ValidFederationSchema)> {
-        self.sources
-            .iter()
-            .filter(|(source, _)| **source != FEDERATED_GRAPH_ROOT_SOURCE)
+    pub(crate) fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
+        &self.subgraphs_by_name
+    }
+
+    pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&NodeStr, &ValidFederationSchema)> {
+        self.subgraphs_by_name.iter()
     }
 
     /// Returns the node indices whose name matches the given type name.

@@ -1,6 +1,5 @@
 use std::cmp::Ordering;
 use std::collections::BinaryHeap;
-use std::collections::HashSet;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
@@ -2266,8 +2265,6 @@ impl OpGraphPath {
                 // Similar to above, we declare we "don't know" and test type-explosion.
                 return Ok(true);
             }
-            let implementing_field_base_type_fields: HashSet<_> =
-                implementing_field_base_type.fields.keys().collect();
             for node in self.graph.nodes_for_type(&implementing_type.name)? {
                 let node = self.graph.node_weight(*node)?;
                 let tail = self.graph.node_weight(self.tail)?;
@@ -2311,10 +2308,11 @@ impl OpGraphPath {
                     return Ok(true);
                 };
 
-                if !node_field_base_type_pos
-                    .fields(node_schema)?
-                    .all(|f| implementing_field_base_type_fields.contains(f.field_name()))
-                {
+                if !node_field_base_type_pos.fields(node_schema)?.all(|f| {
+                    implementing_field_base_type
+                        .fields
+                        .contains_key(f.field_name())
+                }) {
                     // Similar to above, we have a genuine difference.
                     return Ok(true);
                 }
