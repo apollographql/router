@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::io;
 use std::sync::Arc;
 
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use axum::response::IntoResponse;
 use http::StatusCode;
@@ -51,6 +52,9 @@ use crate::spec::Schema;
 use crate::ListenAddr;
 
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
+pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
+pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
+pub(crate) const JOIN_DIRECTIVE: &str = "join__directive";
 
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
@@ -237,6 +241,14 @@ impl YamlRouterFactory {
                 extra_plugins,
             )
             .await?;
+
+        // Don't let the router start in experimental_query_planner_mode and
+        // unimplemented Rust QP features.
+        can_use_with_experimental_query_planner(
+            configuration.clone(),
+            supergraph_creator.schema(),
+        )?;
+
         // Instantiate the parser here so we can use it to warm up the planner below
         let query_analysis_layer =
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
@@ -724,6 +736,105 @@ fn inject_schema_id(schema_id: Option<&str>, configuration: &mut Value) {
     }
 }
 
+// The Rust QP has not yet implemented setContext
+// (`@context` directives), progressive overrides, and it
+// doesn't support fed v1 *supergraphs*.
+//
+// If users are using the Rust QP as standalone (`new`) or in comparison mode (`both`),
+// fail to start up the router emitting an error.
+fn can_use_with_experimental_query_planner(
+    configuration: Arc<Configuration>,
+    schema: Arc<Schema>,
+) -> Result<(), ConfigurationError> {
+    match configuration.experimental_query_planner_mode {
+        crate::configuration::QueryPlannerMode::New
+        | crate::configuration::QueryPlannerMode::Both => {
+            // We have a *progressive* override when `join__directive` has a
+            // non-null value for `overrideLabel` field.
+            //
+            // This looks at object types' fields and their directive
+            // applications, looking specifically for `@join__direcitve`
+            // arguments list.
+            let has_progressive_overrides = schema
+                .supergraph_schema()
+                .types
+                .values()
+                .filter_map(|extended_type| {
+                    // The override label args can be only on ObjectTypes
+                    if let ExtendedType::Object(object_type) = extended_type {
+                        Some(object_type)
+                    } else {
+                        None
+                    }
+                })
+                .flat_map(|object_type| &object_type.fields)
+                .filter_map(|(_, field)| {
+                    let join_field_directives = field
+                        .directives
+                        .iter()
+                        .filter(|d| d.name.as_str() == JOIN_DIRECTIVE)
+                        .collect::<Vec<_>>();
+                    if !join_field_directives.is_empty() {
+                        Some(join_field_directives)
+                    } else {
+                        None
+                    }
+                })
+                .flatten()
+                .any(|join_directive| {
+                    if let Some(override_label_arg) =
+                        join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
+                    {
+                        if !override_label_arg.is_null() {
+                            return true;
+                        }
+                        return false;
+                    }
+                    false
+                });
+            if has_progressive_overrides {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_query_planner_mode` cannot be used with progressive overrides",
+                    error: "remove uses of progressive overrides to try the experimental_query_planner_mode in `both` or `new`, otherwise switch back to `legacy`.".to_string(),
+                });
+            }
+
+            // We will only check for `@context` direcive, since
+            // `@fromContext` can only be used if `@context` is already
+            // applied, and we assume a correctly composed supergraph.
+            //
+            // `@context` can only be applied on Object Types, Interface
+            // Types and Unions. For simplicity of this function, we just
+            // check all 'extended_type` directives.
+            let has_set_context = schema
+                .supergraph_schema()
+                .types
+                .values()
+                .any(|extended_type| extended_type.directives().has(CONTEXT_DIRECTIVE));
+            if has_set_context {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_query_planner_mode` cannot be used with `@context`",
+                    error: "remove uses of `@context` to try the experimental_query_planner_mode in `both` or `new`, otherwise switch back to `legacy`.".to_string(),
+                });
+            }
+
+            // Fed1 supergraphs will not work with the rust query planner.
+            let is_fed1_supergraph = match schema.federation_version() {
+                Some(v) => v == 1,
+                None => false,
+            };
+            if is_fed1_supergraph {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_query_planner_mode` cannot be used with fed1 supergraph",
+                    error: "switch back to `experimental_query_planner_mode: legacy` to use the router with fed1 supergraph".to_string(),
+                });
+            }
+
+            Ok(())
+        }
+        crate::configuration::QueryPlannerMode::Legacy => Ok(()),
+    }
+}
 #[cfg(test)]
 mod test {
     use std::error::Error;
