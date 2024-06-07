@@ -44,6 +44,7 @@ use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
@@ -3278,6 +3279,20 @@ pub(crate) fn subselection_type_if_abstract(
     }
 }
 
+impl FieldData {
+    fn with_updated_position(
+        &self,
+        schema: ValidFederationSchema,
+        field_position: FieldDefinitionPosition,
+    ) -> Self {
+        Self {
+            schema,
+            field_position,
+            ..self.clone()
+        }
+    }
+}
+
 impl FieldSelection {
     /// Normalize this field selection (merging selections with the same keys), with the following
     /// additional transformations:
@@ -3327,6 +3342,13 @@ impl FieldSelection {
         }))
     }
 
+    fn with_updated_element(&self, element: FieldData) -> Self {
+        Self {
+            field: Field::new(element),
+            ..self.clone()
+        }
+    }
+
     fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -3334,13 +3356,25 @@ impl FieldSelection {
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
+        let field_position = if self.field.parent_type_position() == *parent_type {
+            self.field.data().field_position.clone()
+        } else {
+            parent_type.field(self.field.data().name().clone())?
+        };
+
+        let field_element = if self.field.data().field_position == field_position {
+            self.field.data().clone()
+        } else {
+            self.field
+                .data()
+                .with_updated_position(schema.clone(), field_position)
+        };
+
         if let Some(selection_set) = &self.selection_set {
+            let field_composite_type_position: CompositeTypeDefinitionPosition =
+                field_element.output_base_type()?.try_into()?;
             let mut normalized_selection: SelectionSet =
                 if NormalizeSelectionOption::NormalizeRecursively == option {
-                    let field = self.field.data().field_position.get(schema.schema())?;
-                    let field_composite_type_position: CompositeTypeDefinitionPosition = schema
-                        .get_type(field.ty.inner_named_type().clone())?
-                        .try_into()?;
                     selection_set.normalize(
                         &field_composite_type_position,
                         named_fragments,
@@ -3351,7 +3385,7 @@ impl FieldSelection {
                     selection_set.clone()
                 };
 
-            let mut selection = self.clone();
+            let mut selection = self.with_updated_element(field_element);
             if normalized_selection.is_empty() {
                 // In rare cases, it's possible that everything in the sub-selection was trimmed away and so the
                 // sub-selection is empty. Which suggest something may be wrong with this part of the query
@@ -3368,7 +3402,8 @@ impl FieldSelection {
                 let non_included_typename = Selection::from_field(
                     Field::new(FieldData {
                         schema: schema.clone(),
-                        field_position: parent_type.introspection_typename_field(),
+                        field_position: field_composite_type_position
+                            .introspection_typename_field(),
                         alias: None,
                         arguments: Arc::new(vec![]),
                         directives: Arc::new(directives),
@@ -3390,7 +3425,7 @@ impl FieldSelection {
             // in RS version we only store the field position reference so we don't need to update the
             // underlying elements
             Ok(Some(SelectionOrSet::Selection(Selection::from(
-                self.clone(),
+                self.with_updated_element(field_element),
             ))))
         }
     }
