@@ -849,6 +849,7 @@ mod test {
     use tower_http::BoxError;
 
     use crate::configuration::Configuration;
+    use crate::configuration::QueryPlannerMode;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
@@ -856,6 +857,7 @@ mod test {
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
+    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -996,12 +998,7 @@ mod test {
     }
 
     #[test]
-    fn test_can_use_with_experimental_query_planner() {
-        use crate::configuration::Configuration;
-        use crate::configuration::QueryPlannerMode;
-        use crate::spec::Schema;
-
-        // @CONTEXT
+    fn test_cannot_use_context_with_experimental_query_planner() {
         let config = Configuration {
             experimental_query_planner_mode: QueryPlannerMode::Both,
             ..Default::default()
@@ -1028,7 +1025,10 @@ mod test {
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
             "experimental_query_planner_mode: legacy should be able to be used with @context"
         );
+    }
 
+    #[test]
+    fn test_cannot_use_progressive_overrides_with_experimental_query_planner() {
         // PROGRESSIVE OVERRIDES
         let config = Configuration {
             experimental_query_planner_mode: QueryPlannerMode::Both,
@@ -1056,8 +1056,10 @@ mod test {
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
             "experimental_query_planner_mode: legacy should be able to be used with progressive overrides"
         );
+    }
 
-        // FED1 SUPERGPRAPH
+    #[test]
+    fn test_cannot_use_fed1_supergraphs_with_experimental_query_planner() {
         let config = Configuration {
             experimental_query_planner_mode: QueryPlannerMode::Both,
             ..Default::default()
@@ -1084,7 +1086,10 @@ mod test {
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
             "experimental_query_planner_mode: legacy should be able to be used with fed1 supergraph"
         );
-        // FED2 SUPERGRAPH
+    }
+
+    #[test]
+    fn test_can_use_fed2_supergraphs_with_experimental_query_planner() {
         let config = Configuration {
             experimental_query_planner_mode: QueryPlannerMode::Both,
             ..Default::default()
