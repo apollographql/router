@@ -82,8 +82,6 @@ fn union_interface_interaction() {
 }
 
 #[test]
-#[should_panic(expected = "unexpected inline fragment without sub-selections")]
-// TODO: investigate this failure
 fn union_interface_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
@@ -369,8 +367,6 @@ fn interface_interface_interaction() {
 }
 
 #[test]
-#[should_panic(expected = "unexpected inline fragment without sub-selections")]
-// TODO: investigate this failure
 fn interface_interface_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
