@@ -1,7 +1,5 @@
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "S.y" to selection set of parent type "S""#
-)]
+#[should_panic(expected = r#"Invalid empty selection set"#)]
 // TODO: investigate this failure (appears to be visiting wrong subgraph)
 // Note that Rover composition warns:
 // ```text

@@ -220,10 +220,6 @@ fn interface_union_interaction() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add fragment of condition "A" (runtimes: [A]) to parent type "I" (runtimes: [B, C])"#
-)]
-// TODO: investigate this failure
 fn interface_union_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
@@ -509,10 +505,6 @@ fn union_union_interaction() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add fragment of condition "A" (runtimes: [A]) to parent type "U1" (runtimes: [B, C])"#
-)]
-// TODO: investigate this failure
 fn union_union_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
@@ -890,8 +882,6 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn does_not_error_out_handling_fragments_when_interface_subtyping_is_involved() {
     // This test essentially make sure the issue in https://github.com/apollographql/federation/issues/2592
     // is resolved.

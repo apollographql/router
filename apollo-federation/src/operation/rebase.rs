@@ -241,7 +241,10 @@ impl FieldSelection {
             return Ok(Some(Selection::from(self.clone())));
         }
 
-        let Some(rebased) = self.field.rebase_on(parent_type, schema, error_handling)? else {
+        let Some(rebased) =
+            self.field
+                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::IgnoreError)?
+        else {
             // rebasing failed but we are ignoring errors
             return Ok(None);
         };
@@ -548,9 +551,11 @@ impl InlineFragmentSelection {
             return Ok(Some(Selection::from(self.clone())));
         }
 
-        let Some(rebased_fragment) =
-            self.inline_fragment
-                .rebase_on(parent_type, schema, error_handling)?
+        let Some(rebased_fragment) = self.inline_fragment.rebase_on(
+            parent_type,
+            schema,
+            RebaseErrorHandlingOption::IgnoreError,
+        )?
         else {
             // rebasing failed but we are ignoring errors
             return Ok(None);
@@ -667,12 +672,13 @@ impl NamedFragments {
                 .get_type(fragment.type_condition_position.type_name().clone())
                 .and_then(CompositeTypeDefinitionPosition::try_from)
             {
-                if let Ok(mut rebased_selection) = fragment.selection_set.rebase_on(
+                let mut rebased_selection = fragment.selection_set.rebase_on(
                     &rebased_type,
                     &rebased_fragments,
                     schema,
                     RebaseErrorHandlingOption::IgnoreError,
-                ) {
+                )?;
+                if !rebased_selection.is_empty() {
                     // Rebasing can leave some inefficiencies in some case (particularly when a spread has to be "expanded", see `FragmentSpreadSelection.rebaseOn`),
                     // so we do a top-level normalization to keep things clean.
                     rebased_selection = rebased_selection.normalize(
