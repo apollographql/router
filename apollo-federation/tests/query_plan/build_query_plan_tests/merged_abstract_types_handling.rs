@@ -6,8 +6,6 @@
  */
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn union_interface_interaction() {
     let planner = planner!(
         Subgraph1: r#"
@@ -289,8 +287,6 @@ fn interface_union_interaction_but_no_need_to_type_explode() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn interface_interface_interaction() {
     let planner = planner!(
         Subgraph1: r#"
