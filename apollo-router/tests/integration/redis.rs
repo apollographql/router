@@ -23,7 +23,7 @@ use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn query_planner() -> Result<(), BoxError> {
+async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // 1. Force this test to run locally by removing the cfg() line at the top of this file.
     // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
@@ -932,6 +932,7 @@ async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
         "plan:cache:0:federation:v2.8.0:query_hash:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9480a5952736bc172c453c2e7c2189c0ea083380c33cd6b099d5f6f7b5e926b3",
+
     )
     .await;
 }
@@ -943,6 +944,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
         "plan:cache:0:federation:v2.8.0:query_hash:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9480a5952736bc172c453c2e7c2189c0ea083380c33cd6b099d5f6f7b5e926b3",
+
     )
     .await;
 }
@@ -954,6 +956,7 @@ async fn query_planner_redis_update_reuse_query_fragments() {
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
         "plan:cache:0:federation:v2.8.0:query_hash:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9480a5952736bc172c453c2e7c2189c0ea083380c33cd6b099d5f6f7b5e926b3",
+
     )
     .await;
 }
@@ -977,6 +980,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.clear_redis_cache().await;
 
     let starting_key = "plan:cache:0:federation:v2.8.0:query_hash:522be889cf593392b55a9794fc0e3b636d06f5dee9ac886d459dd1c24cc0b0e2:query:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:metadata:9480a5952736bc172c453c2e7c2189c0ea083380c33cd6b099d5f6f7b5e926b3";
+
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;
