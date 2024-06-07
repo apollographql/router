@@ -76,8 +76,8 @@ async fn call_rhai_function(fn_name: &str) -> Result<(), Box<rhai::EvalAltResult
         .call_fn(&mut guard, &block.ast, fn_name, (response,))
 }
 
-async fn call_rhai_function_with_arg<'a, T: Sync + Send + 'a + 'static>(
-    fn_name: &'a str,
+async fn call_rhai_function_with_arg<T: Sync + Send + 'static>(
+    fn_name: &str,
     arg: T,
 ) -> Result<(), Box<rhai::EvalAltResult>> {
     let dyn_plugin: Box<dyn DynPlugin> = crate::plugin::plugins()
