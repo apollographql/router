@@ -279,7 +279,7 @@ impl QueryPlanner {
             let Some(expected_runtimes) = sources.next() else {
                 return false;
             };
-            sources.all(|runtimes| runtimes == expected_runtimes)
+            !sources.all(|runtimes| runtimes == expected_runtimes)
         };
 
         let abstract_types_with_inconsistent_runtime_types = supergraph
