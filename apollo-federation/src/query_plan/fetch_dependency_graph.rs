@@ -2138,7 +2138,7 @@ impl FetchSelectionSet {
             &self.selection_set.schema,
             RebaseErrorHandlingOption::ThrowError,
         )?;
-        Arc::make_mut(&mut self.selection_set).merge_into(iter::once(&rebased_selections))?;
+        Arc::make_mut(&mut self.selection_set).add_selection_set(&rebased_selections)?;
         Ok(())
     }
 }
@@ -2165,7 +2165,7 @@ impl FetchInputs {
                     selection.type_position.clone(),
                 ))
             });
-        Arc::make_mut(type_selections).merge_into(std::iter::once(selection))
+        Arc::make_mut(type_selections).add_selection_set(selection)
         // PORT_NOTE: `onUpdateCallback` call is moved to `FetchDependencyGraphNode::on_inputs_updated`.
     }
 
@@ -2570,7 +2570,7 @@ fn compute_nodes_for_key_resolution<'a>(
         crate::operation::RebaseErrorHandlingOption::ThrowError,
     )?;
 
-    input_selections.merge_into(std::iter::once(&edge_conditions))?;
+    input_selections.add_selection_set(&edge_conditions)?;
 
     let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
@@ -3511,7 +3511,7 @@ fn inputs_for_require(
         &fetch_dependency_graph.supergraph_schema,
         RebaseErrorHandlingOption::ThrowError,
     )?;
-    full_selection_set.merge_into(iter::once(&rebased_conditions))?;
+    full_selection_set.add_selection_set(&rebased_conditions)?;
     if include_key_inputs {
         let Some(key_condition) = fetch_dependency_graph
             .federated_query_graph
@@ -3555,7 +3555,7 @@ fn inputs_for_require(
                 target_subgraph,
                 RebaseErrorHandlingOption::ThrowError,
             )?;
-            full_selection_set.merge_into(iter::once(&key_condition_as_input))?;
+            full_selection_set.add_selection_set(&key_condition_as_input)?;
         } else {
             let rebased_key_condition = key_condition.rebase_on(
                 &input_type,
@@ -3563,7 +3563,7 @@ fn inputs_for_require(
                 &fetch_dependency_graph.supergraph_schema,
                 RebaseErrorHandlingOption::ThrowError,
             )?;
-            full_selection_set.merge_into(iter::once(&rebased_key_condition))?;
+            full_selection_set.add_selection_set(&rebased_key_condition)?;
         }
 
         // Note that `key_inputs` are used to ensure those input are fetch on the original group, the one having `edge`. In
@@ -3572,7 +3572,7 @@ fn inputs_for_require(
         // subgraph does not know in that particular case.
         let mut key_inputs =
             SelectionSet::for_composite_type(edge_conditions.schema.clone(), input_type.clone());
-        key_inputs.merge_into(iter::once(&key_condition))?;
+        key_inputs.add_selection_set(&key_condition)?;
 
         Ok((
             wrap_input_selections(
