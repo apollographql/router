@@ -919,6 +919,8 @@ impl Fragment {
 
 mod field_selection {
     use std::collections::HashSet;
+    use std::hash::Hash;
+    use std::hash::Hasher;
     use std::sync::Arc;
 
     use apollo_compiler::ast;
@@ -927,7 +929,8 @@ mod field_selection {
     use apollo_compiler::Node;
 
     use crate::error::FederationError;
-    use crate::operation::directives_with_sorted_arguments;
+    use crate::operation::sort_arguments;
+    use crate::operation::sort_directives;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
@@ -1004,10 +1007,11 @@ mod field_selection {
 
     /// The non-selection-set data of `FieldSelection`, used with operation paths and graph
     /// paths.
-    #[derive(Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone)]
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
+        sorted_arguments: Arc<Vec<Node<executable::Argument>>>,
     }
 
     impl std::fmt::Debug for Field {
@@ -1016,10 +1020,31 @@ mod field_selection {
         }
     }
 
+    impl PartialEq for Field {
+        fn eq(&self, other: &Self) -> bool {
+            self.data.field_position.field_name() == other.data.field_position.field_name()
+                && self.key == other.key
+                && self.sorted_arguments == other.sorted_arguments
+        }
+    }
+
+    impl Eq for Field {}
+
+    impl Hash for Field {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.data.field_position.field_name().hash(state);
+            self.key.hash(state);
+            self.sorted_arguments.hash(state);
+        }
+    }
+
     impl Field {
         pub(crate) fn new(data: FieldData) -> Self {
+            let mut arguments = data.arguments.as_ref().clone();
+            sort_arguments(&mut arguments);
             Self {
                 key: data.key(),
+                sorted_arguments: Arc::new(arguments),
                 data,
             }
         }
@@ -1125,7 +1150,7 @@ mod field_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone)]
     pub(crate) struct FieldData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
@@ -1180,9 +1205,11 @@ mod field_selection {
 
     impl HasSelectionKey for FieldData {
         fn key(&self) -> SelectionKey {
+            let mut directives = self.directives.as_ref().clone();
+            sort_directives(&mut directives);
             SelectionKey::Field {
                 response_name: self.response_name(),
-                directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                directives: Arc::new(directives),
             }
         }
     }
@@ -1198,8 +1225,8 @@ mod fragment_spread_selection {
     use apollo_compiler::executable;
     use apollo_compiler::executable::Name;
 
-    use crate::operation::directives_with_sorted_arguments;
     use crate::operation::is_deferred_selection;
+    use crate::operation::sort_directives;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
@@ -1222,7 +1249,7 @@ mod fragment_spread_selection {
     /// An analogue of the apollo-compiler type `FragmentSpread` with these changes:
     /// - Stores the schema (may be useful for directives).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Clone, PartialEq, Eq)]
+    #[derive(Clone)]
     pub(crate) struct FragmentSpread {
         data: FragmentSpreadData,
         key: SelectionKey,
@@ -1233,6 +1260,14 @@ mod fragment_spread_selection {
             self.data.fmt(f)
         }
     }
+
+    impl PartialEq for FragmentSpread {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for FragmentSpread {}
 
     impl FragmentSpread {
         pub(crate) fn new(data: FragmentSpreadData) -> Self {
@@ -1253,7 +1288,7 @@ mod fragment_spread_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone)]
     pub(crate) struct FragmentSpreadData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) fragment_name: Name,
@@ -1276,9 +1311,11 @@ mod fragment_spread_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::FragmentSpread {
                     fragment_name: self.fragment_name.clone(),
-                    directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
@@ -1387,6 +1424,8 @@ impl FragmentSpreadData {
 
 mod inline_fragment_selection {
     use std::collections::HashSet;
+    use std::hash::Hash;
+    use std::hash::Hasher;
     use std::sync::Arc;
 
     use apollo_compiler::executable;
@@ -1396,8 +1435,8 @@ mod inline_fragment_selection {
     use crate::error::FederationError;
     use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
-    use crate::operation::directives_with_sorted_arguments;
     use crate::operation::is_deferred_selection;
+    use crate::operation::sort_directives;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
@@ -1455,7 +1494,7 @@ mod inline_fragment_selection {
 
     /// The non-selection-set data of `InlineFragmentSelection`, used with operation paths and
     /// graph paths.
-    #[derive(Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone)]
     pub(crate) struct InlineFragment {
         data: InlineFragmentData,
         key: SelectionKey,
@@ -1464,6 +1503,20 @@ mod inline_fragment_selection {
     impl std::fmt::Debug for InlineFragment {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             self.data.fmt(f)
+        }
+    }
+
+    impl PartialEq for InlineFragment {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for InlineFragment {}
+
+    impl Hash for InlineFragment {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.key.hash(state);
         }
     }
 
@@ -1524,7 +1577,7 @@ mod inline_fragment_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone)]
     pub(crate) struct InlineFragmentData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
@@ -1558,12 +1611,14 @@ mod inline_fragment_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::InlineFragment {
                     type_condition: self
                         .type_condition_position
                         .as_ref()
                         .map(|pos| pos.type_name().clone()),
-                    directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
@@ -2249,16 +2304,7 @@ impl SelectionSet {
                 .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
-        let element = first.element()?.rebase_on(
-            parent_type,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
-        let Some(element) = element else {
-            return Err(FederationError::internal(
-                "Unable to rebase selection updates",
-            ));
-        };
+        let element = first.element()?.rebase_on_or_error(parent_type, schema)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
@@ -2516,14 +2562,15 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
-                let Some(sub_selection_type) = ele.sub_selection_type_position()? else {
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
+                let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
                         Selection::from_element(
-                            OpPathElement::clone(ele),
+                            element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
@@ -2548,7 +2595,7 @@ impl SelectionSet {
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
-                let element = OpPathElement::clone(ele);
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
                 let selection_set = selection_set
                     .map(|selection_set| {
                         selection_set.rebase_on(
@@ -4395,23 +4442,6 @@ impl Display for InlineFragment {
         }
         data.directives.serialize().no_indent().fmt(f)
     }
-}
-
-fn directives_with_sorted_arguments(
-    directives: &executable::DirectiveList,
-) -> executable::DirectiveList {
-    let mut directives = directives.clone();
-    for directive in &mut directives {
-        directive
-            .make_mut()
-            .arguments
-            .sort_by(|a1, a2| a1.name.cmp(&a2.name))
-    }
-    directives
-}
-
-fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
-    directives.has("defer")
 }
 
 /// Normalizes the selection set of the specified operation.

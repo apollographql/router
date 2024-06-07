@@ -482,7 +482,7 @@ fn it_executes_mutation_operations_in_sequence() {
 #[should_panic(
     expected = r#"Cannot add selection of field "U.k2" to selection set of parent type "U""#
 )]
-// TODO: investigate this failure
+// TODO: investigate this failure (appears to be visiting wrong subgraph)
 fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
     // Field issue where we were seeing a FetchGroup created where the fields used by the key to jump subgraphs
     // were not properly fetched. In the below test, this test will ensure that 'k2' is properly collected
