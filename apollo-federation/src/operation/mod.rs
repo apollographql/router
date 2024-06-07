@@ -1956,6 +1956,8 @@ impl SelectionSet {
         Ok(())
     }
 
+    /// NOTE: This is a private API and should be used with care, use `add_selection_set` instead.
+    ///
     /// Merges the given normalized selection sets into this one.
     fn merge_into<'op>(
         &mut self,
@@ -1982,6 +1984,8 @@ impl SelectionSet {
         self.merge_selections_into(selections_to_merge.into_iter())
     }
 
+    /// NOTE: This is a private API and should be used with care, use `add_selection` instead.
+    ///
     /// A helper function for merging the given selections into this one.
     fn merge_selections_into<'op>(
         &mut self,
@@ -2534,7 +2538,12 @@ impl SelectionSet {
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
     /// exist in the map, the existing selection and the given selection are merged, replacing the
     /// existing selection while keeping the same insertion index.
-    pub(crate) fn add_selection(&mut self, selection: &Selection) -> Result<(), FederationError> {
+    ///
+    /// NOTE: This method assumes selection already points to the correct schema and parent type.
+    pub(crate) fn add_local_selection(
+        &mut self,
+        selection: &Selection,
+    ) -> Result<(), FederationError> {
         debug_assert_eq!(
             &self.schema,
             selection.schema(),
@@ -2546,13 +2555,16 @@ impl SelectionSet {
     /// Inserts a `SelectionSet` into the inner map. Should any sub selection with the same key already
     /// exist in the map, the existing selection and the given selection are merged, replacing the
     /// existing selection while keeping the same insertion index.
-    pub(crate) fn add_selection_set(
+    ///
+    /// NOTE: This method assumes the target selection set already points to the same schema and type
+    /// position. Use `add_selection_set` instead if you need to rebase the selection set.
+    pub(crate) fn add_local_selection_set(
         &mut self,
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
         debug_assert_eq!(
             self.schema, selection_set.schema,
-            "In order to add selection set it needs to point to the same schema"
+            "In order to add selection set it needs to point to the same schema."
         );
         debug_assert_eq!(
             self.type_position, selection_set.type_position,
@@ -2564,7 +2576,7 @@ impl SelectionSet {
     /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Should any sub
     /// selection with the same key already exist in the map, the existing selection and the given
     /// selection are merged, replacing the existing selection while keeping the same insertion index.
-    pub(crate) fn add_selection_set_with_rebase(
+    pub(crate) fn add_selection_set(
         &mut self,
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
@@ -2572,9 +2584,9 @@ impl SelectionSet {
             &self.type_position,
             &NamedFragments::default(),
             &self.schema,
-            RebaseErrorHandlingOption::ThrowError
+            RebaseErrorHandlingOption::ThrowError,
         )?;
-        self.add_selection_set(&rebased)
+        self.add_local_selection_set(&rebased)
     }
 
     /// Adds a path, and optional some selections following that path, to this selection map.
@@ -2656,7 +2668,7 @@ impl SelectionSet {
                     } else {
                         // add leaf
                         let selection = Selection::from_element(element, None)?;
-                        self.add_selection(&selection)?
+                        self.add_local_selection(&selection)?
                     }
                 } else {
                     let selection_set = selection_set
@@ -2673,13 +2685,13 @@ impl SelectionSet {
                         .transpose()?
                         .map(|selection_set| selection_set.without_unnecessary_fragments());
                     let selection = Selection::from_element(element, selection_set)?;
-                    self.add_selection(&selection)?
+                    self.add_local_selection(&selection)?
                 }
             }
-            // If we don't have any path, we rebase and merge in the given subselections at the root.
+            // If we don't have any path, we rebase and merge in the given sub selections at the root.
             None => {
                 if let Some(sel) = selection_set {
-                    self.add_selection_set_with_rebase(&sel)?
+                    self.add_selection_set(sel)?
                 }
             }
         }

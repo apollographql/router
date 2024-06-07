@@ -694,7 +694,7 @@ fn compute_plan_internal(
             match primary_selection.as_mut() {
                 Some(selection) => {
                     if let Some(new_selection) = new_selection {
-                        selection.add_selection_set(&new_selection)?
+                        selection.add_local_selection_set(&new_selection)?
                     }
                 }
                 None => primary_selection = new_selection,

@@ -812,10 +812,10 @@ impl SelectionSet {
                 &fragment,
                 /*directives*/ &Default::default(),
             );
-            optimized.add_selection(&fragment_selection.into())?;
+            optimized.add_local_selection(&fragment_selection.into())?;
         }
 
-        optimized.add_selection_set(&not_covered_so_far)?;
+        optimized.add_local_selection_set(&not_covered_so_far)?;
         Ok(SelectionSet::make_selection_set(
             &self.schema,
             parent_type,

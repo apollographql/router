@@ -33,9 +33,7 @@ use crate::operation::FieldData;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
 use crate::operation::InlineFragmentSelection;
-use crate::operation::NamedFragments;
 use crate::operation::Operation;
-use crate::operation::RebaseErrorHandlingOption;
 use crate::operation::RebasedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
@@ -2126,11 +2124,8 @@ impl FetchSelectionSet {
         Ok(())
     }
 
-    fn add_selections(
-        &mut self,
-        selection_set: &Arc<SelectionSet>,
-    ) -> Result<(), FederationError> {
-        Arc::make_mut(&mut self.selection_set).add_selection_set_with_rebase(&selection_set)?;
+    fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
+        Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
         Ok(())
     }
 }
@@ -2157,7 +2152,7 @@ impl FetchInputs {
                     selection.type_position.clone(),
                 ))
             });
-        Arc::make_mut(type_selections).add_selection_set(selection)
+        Arc::make_mut(type_selections).add_local_selection_set(selection)
         // PORT_NOTE: `onUpdateCallback` call is moved to `FetchDependencyGraphNode::on_inputs_updated`.
     }
 
@@ -2554,7 +2549,7 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    input_selections.add_selection_set_with_rebase(&edge_conditions)?;
+    input_selections.add_selection_set(edge_conditions)?;
 
     let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
@@ -3489,7 +3484,7 @@ fn inputs_for_require(
     // elements before they can be merged. This is different from JS implementation which relied on
     // selection set "updates" to capture changes and apply them all at once (with rebasing) when
     // generating final selection set.
-    full_selection_set.add_selection_set_with_rebase(&edge_conditions)?;
+    full_selection_set.add_selection_set(edge_conditions)?;
     if include_key_inputs {
         let Some(key_condition) = fetch_dependency_graph
             .federated_query_graph
@@ -3516,9 +3511,9 @@ fn inputs_for_require(
                     entity_type_position.type_name
                 )));
             };
-            full_selection_set.add_selection_set_with_rebase(&key_condition)?;
+            full_selection_set.add_selection_set(&key_condition)?;
         } else {
-            full_selection_set.add_selection_set_with_rebase(&key_condition)?;
+            full_selection_set.add_selection_set(&key_condition)?;
         }
 
         // Note that `key_inputs` are used to ensure those input are fetch on the original group, the one having `edge`. In
@@ -3527,7 +3522,7 @@ fn inputs_for_require(
         // subgraph does not know in that particular case.
         let mut key_inputs =
             SelectionSet::for_composite_type(edge_conditions.schema.clone(), input_type.clone());
-        key_inputs.add_selection_set_with_rebase(&key_condition)?;
+        key_inputs.add_selection_set(&key_condition)?;
 
         Ok((
             wrap_input_selections(
