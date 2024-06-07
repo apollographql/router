@@ -830,6 +830,22 @@ impl Selection {
             Ok(self.clone())
         }
     }
+
+    pub(crate) fn any_element(
+        &self,
+        parent_type_position: CompositeTypeDefinitionPosition,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        match self {
+            Selection::Field(field_selection) => field_selection.any_element(predicate),
+            Selection::InlineFragment(inline_fragment_selection) => {
+                inline_fragment_selection.any_element(predicate)
+            }
+            Selection::FragmentSpread(fragment_spread_selection) => {
+                fragment_spread_selection.any_element(parent_type_position, predicate)
+            }
+        }
+    }
 }
 
 impl From<FieldSelection> for Selection {
@@ -1434,6 +1450,24 @@ impl FragmentSpreadSelection {
         } else {
             unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
         }
+    }
+
+    pub(crate) fn any_element(
+        &self,
+        parent_type_position: CompositeTypeDefinitionPosition,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        let inline_fragment = InlineFragment::new(InlineFragmentData {
+            schema: self.spread.data().schema.clone(),
+            parent_type_position,
+            type_condition_position: Some(self.spread.data().type_condition_position.clone()),
+            directives: self.spread.data().directives.clone(),
+            selection_id: self.spread.data().selection_id.clone(),
+        });
+        if predicate(inline_fragment.into())? {
+            return Ok(true);
+        }
+        self.selection_set.any_element(predicate)
     }
 }
 
@@ -3035,6 +3069,23 @@ impl SelectionSet {
             selections: Arc::new(final_selections),
         }
     }
+
+    /// Returns true if any elements in this selection set or its descendants returns true for the
+    /// given predicate. Note that fragment spread selections are converted to inline fragment
+    /// elements, and their fragment selection sets are recursed into.
+    // PORT_NOTE: The JS codebase calls this "some()", but that's easy to confuse with "Some" in
+    // Rust.
+    pub(crate) fn any_element(
+        &self,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        for selection in self.selections.values() {
+            if selection.any_element(self.type_position.clone(), predicate)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
 }
 
 impl IntoIterator for SelectionSet {
@@ -3362,6 +3413,21 @@ impl FieldSelection {
 
     pub(crate) fn has_defer(&self) -> bool {
         self.field.has_defer() || self.selection_set.as_ref().is_some_and(|s| s.has_defer())
+    }
+
+    pub(crate) fn any_element(
+        &self,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        if predicate(self.field.clone().into())? {
+            return Ok(true);
+        }
+        if let Some(selection_set) = &self.selection_set {
+            if selection_set.any_element(predicate)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -3805,6 +3871,16 @@ impl InlineFragmentSelection {
         inline_fragment.directives.is_empty()
             && (inline_fragment_type_condition.is_none()
                 || inline_fragment_type_condition.is_some_and(|t| t == *maybe_parent))
+    }
+
+    pub(crate) fn any_element(
+        &self,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        if predicate(self.inline_fragment.clone().into())? {
+            return Ok(true);
+        }
+        self.selection_set.any_element(predicate)
     }
 }
 
