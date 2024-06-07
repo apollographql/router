@@ -35,7 +35,6 @@ use indexmap::IndexSet;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::error::SingleFederationError::Internal;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::query_graph::graph_path::OpPathElement;
 use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
@@ -46,13 +45,17 @@ use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 
+mod contains;
 mod optimize;
+mod rebase;
 #[cfg(test)]
 mod tests;
+
+pub use contains::*;
+pub use rebase::*;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
@@ -71,74 +74,6 @@ impl SelectionId {
         // atomically increment global counter
         Self(NEXT_ID.fetch_add(1, atomic::Ordering::AcqRel))
     }
-}
-
-/// Compare two input values, with two special cases for objects: assuming no duplicate keys,
-/// and order-independence.
-///
-/// This comes from apollo-rs: https://github.com/apollographql/apollo-rs/blob/6825be88fe13cd0d67b83b0e4eb6e03c8ab2555e/crates/apollo-compiler/src/validation/selection.rs#L160-L188
-/// Hopefully we can do this more easily in the future!
-fn same_value(left: &executable::Value, right: &executable::Value) -> bool {
-    use apollo_compiler::executable::Value;
-    match (left, right) {
-        (Value::Null, Value::Null) => true,
-        (Value::Enum(left), Value::Enum(right)) => left == right,
-        (Value::Variable(left), Value::Variable(right)) => left == right,
-        (Value::String(left), Value::String(right)) => left == right,
-        (Value::Float(left), Value::Float(right)) => left == right,
-        (Value::Int(left), Value::Int(right)) => left == right,
-        (Value::Boolean(left), Value::Boolean(right)) => left == right,
-        (Value::List(left), Value::List(right)) => left
-            .iter()
-            .zip(right.iter())
-            .all(|(left, right)| same_value(left, right)),
-        (Value::Object(left), Value::Object(right)) if left.len() == right.len() => {
-            left.iter().all(|(key, value)| {
-                right
-                    .iter()
-                    .find(|(other_key, _)| key == other_key)
-                    .is_some_and(|(_, other_value)| same_value(value, other_value))
-            })
-        }
-        _ => false,
-    }
-}
-
-/// Returns true if two argument lists are equivalent.
-///
-/// The arguments and values must be the same, independent of order.
-fn same_arguments(
-    left: &[Node<executable::Argument>],
-    right: &[Node<executable::Argument>],
-) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    let right = right
-        .iter()
-        .map(|arg| (&arg.name, arg))
-        .collect::<HashMap<_, _>>();
-
-    left.iter().all(|arg| {
-        right
-            .get(&arg.name)
-            .is_some_and(|right_arg| same_value(&arg.value, &right_arg.value))
-    })
-}
-
-/// Returns true if two directive lists are equivalent.
-fn same_directives(left: &executable::DirectiveList, right: &executable::DirectiveList) -> bool {
-    if left.len() != right.len() {
-        return false;
-    }
-
-    left.iter().all(|left_directive| {
-        right.iter().any(|right_directive| {
-            left_directive.name == right_directive.name
-                && same_arguments(&left_directive.arguments, &right_directive.arguments)
-        })
-    })
 }
 
 /// An analogue of the apollo-compiler type `Operation` with these changes:
@@ -652,41 +587,6 @@ pub(crate) trait HasSelectionKey {
     fn key(&self) -> SelectionKey;
 }
 
-/// Options for the `.containment()` family of selection functions.
-#[derive(Debug, Clone, Copy)]
-pub struct ContainmentOptions {
-    /// If the right-hand side has a __typename selection but the left-hand side does not,
-    /// still consider the left-hand side to contain the right-hand side.
-    pub ignore_missing_typename: bool,
-}
-
-// Currently Default *can* be derived, but if we add a new option
-// here, that might no longer be true.
-#[allow(clippy::derivable_impls)]
-impl Default for ContainmentOptions {
-    fn default() -> Self {
-        Self {
-            ignore_missing_typename: false,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Containment {
-    /// The left-hand selection does not fully contain right-hand selection.
-    NotContained,
-    /// The left-hand selection fully contains the right-hand selection, and more.
-    StrictlyContained,
-    /// Two selections are equal.
-    Equal,
-}
-impl Containment {
-    /// Returns true if the right-hand selection set is strictly contained or equal.
-    pub fn is_contained(self) -> bool {
-        matches!(self, Containment::StrictlyContained | Containment::Equal)
-    }
-}
-
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
 #[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant)]
@@ -844,39 +744,7 @@ impl Selection {
         }
     }
 
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        match self {
-            Selection::Field(field) => {
-                field.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-            Selection::FragmentSpread(spread) => {
-                spread.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-            Selection::InlineFragment(inline) => {
-                inline.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-        }
-    }
-
-    pub(crate) fn can_add_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        match self {
-            Selection::Field(field) => field.can_add_to(parent_type, schema),
-            Selection::FragmentSpread(_) => true,
-            Selection::InlineFragment(inline) => inline.can_add_to(parent_type, schema),
-        }
-    }
-
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -945,32 +813,6 @@ impl Selection {
                 Err(FederationError::internal("unexpected fragment spread"))
             }
         }
-    }
-
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        match (self, other) {
-            (Selection::Field(self_field), Selection::Field(other_field)) => {
-                self_field.containment(other_field, options)
-            }
-            (
-                Selection::InlineFragment(self_fragment),
-                Selection::InlineFragment(_) | Selection::FragmentSpread(_),
-            ) => self_fragment.containment(other, options),
-            (
-                Selection::FragmentSpread(self_fragment),
-                Selection::InlineFragment(_) | Selection::FragmentSpread(_),
-            ) => self_fragment.containment(other, options),
-            _ => Containment::NotContained,
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 
     /// Apply the `mapper` to self.selection_set, if it exists, and return a new `Selection`.
@@ -1077,6 +919,8 @@ impl Fragment {
 
 mod field_selection {
     use std::collections::HashSet;
+    use std::hash::Hash;
+    use std::hash::Hasher;
     use std::sync::Arc;
 
     use apollo_compiler::ast;
@@ -1085,7 +929,8 @@ mod field_selection {
     use apollo_compiler::Node;
 
     use crate::error::FederationError;
-    use crate::operation::directives_with_sorted_arguments;
+    use crate::operation::sort_arguments;
+    use crate::operation::sort_directives;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
@@ -1162,10 +1007,11 @@ mod field_selection {
 
     /// The non-selection-set data of `FieldSelection`, used with operation paths and graph
     /// paths.
-    #[derive(Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone)]
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
+        sorted_arguments: Arc<Vec<Node<executable::Argument>>>,
     }
 
     impl std::fmt::Debug for Field {
@@ -1174,10 +1020,31 @@ mod field_selection {
         }
     }
 
+    impl PartialEq for Field {
+        fn eq(&self, other: &Self) -> bool {
+            self.data.field_position.field_name() == other.data.field_position.field_name()
+                && self.key == other.key
+                && self.sorted_arguments == other.sorted_arguments
+        }
+    }
+
+    impl Eq for Field {}
+
+    impl Hash for Field {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.data.field_position.field_name().hash(state);
+            self.key.hash(state);
+            self.sorted_arguments.hash(state);
+        }
+    }
+
     impl Field {
         pub(crate) fn new(data: FieldData) -> Self {
+            let mut arguments = data.arguments.as_ref().clone();
+            sort_arguments(&mut arguments);
             Self {
                 key: data.key(),
+                sorted_arguments: Arc::new(arguments),
                 data,
             }
         }
@@ -1283,7 +1150,7 @@ mod field_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone)]
     pub(crate) struct FieldData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
@@ -1338,9 +1205,11 @@ mod field_selection {
 
     impl HasSelectionKey for FieldData {
         fn key(&self) -> SelectionKey {
+            let mut directives = self.directives.as_ref().clone();
+            sort_directives(&mut directives);
             SelectionKey::Field {
                 response_name: self.response_name(),
-                directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                directives: Arc::new(directives),
             }
         }
     }
@@ -1356,8 +1225,8 @@ mod fragment_spread_selection {
     use apollo_compiler::executable;
     use apollo_compiler::executable::Name;
 
-    use crate::operation::directives_with_sorted_arguments;
     use crate::operation::is_deferred_selection;
+    use crate::operation::sort_directives;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
@@ -1380,7 +1249,7 @@ mod fragment_spread_selection {
     /// An analogue of the apollo-compiler type `FragmentSpread` with these changes:
     /// - Stores the schema (may be useful for directives).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Clone, PartialEq, Eq)]
+    #[derive(Clone)]
     pub(crate) struct FragmentSpread {
         data: FragmentSpreadData,
         key: SelectionKey,
@@ -1391,6 +1260,14 @@ mod fragment_spread_selection {
             self.data.fmt(f)
         }
     }
+
+    impl PartialEq for FragmentSpread {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for FragmentSpread {}
 
     impl FragmentSpread {
         pub(crate) fn new(data: FragmentSpreadData) -> Self {
@@ -1411,7 +1288,7 @@ mod fragment_spread_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone)]
     pub(crate) struct FragmentSpreadData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) fragment_name: Name,
@@ -1434,9 +1311,11 @@ mod fragment_spread_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::FragmentSpread {
                     fragment_name: self.fragment_name.clone(),
-                    directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
@@ -1448,110 +1327,6 @@ pub(crate) use fragment_spread_selection::FragmentSpreadData;
 pub(crate) use fragment_spread_selection::FragmentSpreadSelection;
 
 impl FragmentSpreadSelection {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        // We preserve the parent type here, to make sure we don't lose context, but we actually don't
-        // want to expand the spread as that would compromise the code that optimize subgraph fetches to re-use named
-        // fragments.
-        //
-        // This is a little bit iffy, because the fragment may not apply at this parent type, but we
-        // currently leave it to the caller to ensure this is not a mistake. But most of the
-        // QP code works on selections with fully expanded fragments, so this code (and that of `can_add_to`
-        // on come into play in the code for reusing fragments, and that code calls those methods
-        // appropriately.
-        if self.spread.data().schema == *schema
-            && self.spread.data().type_condition_position == *parent_type
-        {
-            return Ok(Some(Selection::FragmentSpread(Arc::new(self.clone()))));
-        }
-
-        // If we're rebasing on a _different_ schema, then we *must* have fragments, since reusing
-        // `self.fragments` would be incorrect. If we're on the same schema though, we're happy to default
-        // to `self.fragments`.
-        let rebase_on_same_schema = self.spread.data().schema == *schema;
-        let Some(named_fragment) = named_fragments.get(&self.spread.data().fragment_name) else {
-            // If we're rebasing on another schema (think a subgraph), then named fragments will have been rebased on that, and some
-            // of them may not contain anything that is on that subgraph, in which case they will not have been included at all.
-            // If so, then as long as we're not asked to error if we cannot rebase, then we're happy to skip that spread (since again,
-            // it expands to nothing that applies on the schema).
-            return if let RebaseErrorHandlingOption::ThrowError = error_handling {
-                Err(FederationError::internal(format!(
-                    "Cannot rebase {} fragment if it isn't part of the provided fragments",
-                    self.spread.data().fragment_name
-                )))
-            } else {
-                Ok(None)
-            };
-        };
-
-        // Lastly, if we rebase on a different schema, it's possible the fragment type does not intersect the
-        // parent type. For instance, the parent type could be some object type T while the fragment is an
-        // interface I, and T may implement I in the supergraph, but not in a particular subgraph (of course,
-        // if I doesn't exist at all in the subgraph, then we'll have exited above, but I may exist in the
-        // subgraph, just not be implemented by T for some reason). In that case, we can't reuse the fragment
-        // as its spread is essentially invalid in that position, so we have to replace it by the expansion
-        // of that fragment, which we rebase on the parentType (which in turn, will remove anythings within
-        // the fragment selection that needs removing, potentially everything).
-        if !rebase_on_same_schema
-            && !runtime_types_intersect(
-                parent_type,
-                &named_fragment.type_condition_position,
-                schema,
-            )
-        {
-            // Note that we've used the rebased `named_fragment` to check the type intersection because we needed to
-            // compare runtime types "for the schema we're rebasing into". But now that we're deciding to not reuse
-            // this rebased fragment, what we rebase is the selection set of the non-rebased fragment. And that's
-            // important because the very logic we're hitting here may need to happen inside the rebase on the
-            // fragment selection, but that logic would not be triggered if we used the rebased `named_fragment` since
-            // `rebase_on_same_schema` would then be 'true'.
-            let expanded_selection_set = self.selection_set.rebase_on(
-                parent_type,
-                named_fragments,
-                schema,
-                error_handling,
-            )?;
-            // In theory, we could return the selection set directly, but making `SelectionSet.rebase_on` sometimes
-            // return a `SelectionSet` complicate things quite a bit. So instead, we encapsulate the selection set
-            // in an "empty" inline fragment. This make for non-really-optimal selection sets in the (relatively
-            // rare) case where this is triggered, but in practice this "inefficiency" is removed by future calls
-            // to `normalize`.
-            return if expanded_selection_set.selections.is_empty() {
-                Ok(None)
-            } else {
-                Ok(Some(
-                    InlineFragmentSelection::new(
-                        InlineFragment::new(InlineFragmentData {
-                            schema: schema.clone(),
-                            parent_type_position: parent_type.clone(),
-                            type_condition_position: None,
-                            directives: Default::default(),
-                            selection_id: SelectionId::new(),
-                        }),
-                        expanded_selection_set,
-                    )
-                    .into(),
-                ))
-            };
-        }
-
-        let spread = FragmentSpread::new(FragmentSpreadData::from_fragment(
-            &named_fragment,
-            &self.spread.data().directives,
-        ));
-        Ok(Some(Selection::FragmentSpread(Arc::new(
-            FragmentSpreadSelection {
-                spread,
-                selection_set: named_fragment.selection_set.clone(),
-            },
-        ))))
-    }
-
     pub(crate) fn has_defer(&self) -> bool {
         self.spread.data().directives.has("defer") || self.selection_set.has_defer()
     }
@@ -1593,7 +1368,7 @@ impl FragmentSpreadSelection {
         }
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -1629,27 +1404,6 @@ impl FragmentSpreadSelection {
             unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
         }
     }
-
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        match other {
-            // Using keys here means that @defer fragments never compare equal.
-            // This is a bit odd but it is consistent: the selection set data structure would not
-            // even try to compare two @defer fragments, because their keys are different.
-            Selection::FragmentSpread(other) if self.spread.key() == other.spread.key() => self
-                .selection_set
-                .containment(&other.selection_set, options),
-            _ => Containment::NotContained,
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
-    }
 }
 
 impl FragmentSpreadData {
@@ -1670,6 +1424,8 @@ impl FragmentSpreadData {
 
 mod inline_fragment_selection {
     use std::collections::HashSet;
+    use std::hash::Hash;
+    use std::hash::Hasher;
     use std::sync::Arc;
 
     use apollo_compiler::executable;
@@ -1679,9 +1435,8 @@ mod inline_fragment_selection {
     use crate::error::FederationError;
     use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
-    use crate::operation::directives_with_sorted_arguments;
     use crate::operation::is_deferred_selection;
-    use crate::operation::runtime_types_intersect;
+    use crate::operation::sort_directives;
     use crate::operation::HasSelectionKey;
     use crate::operation::SelectionId;
     use crate::operation::SelectionKey;
@@ -1739,7 +1494,7 @@ mod inline_fragment_selection {
 
     /// The non-selection-set data of `InlineFragmentSelection`, used with operation paths and
     /// graph paths.
-    #[derive(Clone, PartialEq, Eq, Hash)]
+    #[derive(Clone)]
     pub(crate) struct InlineFragment {
         data: InlineFragmentData,
         key: SelectionKey,
@@ -1748,6 +1503,20 @@ mod inline_fragment_selection {
     impl std::fmt::Debug for InlineFragment {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             self.data.fmt(f)
+        }
+    }
+
+    impl PartialEq for InlineFragment {
+        fn eq(&self, other: &Self) -> bool {
+            self.key == other.key
+        }
+    }
+
+    impl Eq for InlineFragment {}
+
+    impl Hash for InlineFragment {
+        fn hash<H: Hasher>(&self, state: &mut H) {
+            self.key.hash(state);
         }
     }
 
@@ -1808,7 +1577,7 @@ mod inline_fragment_selection {
         }
     }
 
-    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    #[derive(Debug, Clone)]
     pub(crate) struct InlineFragmentData {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
@@ -1828,44 +1597,10 @@ mod inline_fragment_selection {
             }
         }
 
-        pub(super) fn casted_type_if_add_to(
-            &self,
-            parent_type: &CompositeTypeDefinitionPosition,
-            schema: &ValidFederationSchema,
-        ) -> Option<CompositeTypeDefinitionPosition> {
-            if &self.parent_type_position == parent_type && &self.schema == schema {
-                return Some(self.casted_type());
-            }
-            match self.can_rebase_on(parent_type) {
-                (false, _) => None,
-                (true, None) => Some(parent_type.clone()),
-                (true, Some(ty)) => Some(ty),
-            }
-        }
-
         pub(crate) fn casted_type(&self) -> CompositeTypeDefinitionPosition {
             self.type_condition_position
                 .clone()
                 .unwrap_or_else(|| self.parent_type_position.clone())
-        }
-
-        fn can_rebase_on(
-            &self,
-            parent_type: &CompositeTypeDefinitionPosition,
-        ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
-            let Some(ty) = self.type_condition_position.as_ref() else {
-                return (true, None);
-            };
-            match self
-                .schema
-                .get_type(ty.type_name().clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
-            {
-                Ok(ty) if runtime_types_intersect(parent_type, &ty, &self.schema) => {
-                    (true, Some(ty))
-                }
-                _ => (false, None),
-            }
         }
     }
 
@@ -1876,12 +1611,14 @@ mod inline_fragment_selection {
                     deferred_id: self.selection_id.clone(),
                 }
             } else {
+                let mut directives = self.directives.as_ref().clone();
+                sort_directives(&mut directives);
                 SelectionKey::InlineFragment {
                     type_condition: self
                         .type_condition_position
                         .as_ref()
                         .map(|pos| pos.type_name().clone()),
-                    directives: Arc::new(directives_with_sorted_arguments(&self.directives)),
+                    directives: Arc::new(directives),
                 }
             }
         }
@@ -2567,16 +2304,7 @@ impl SelectionSet {
                 .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
-        let element = first.element()?.rebase_on(
-            parent_type,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
-        let Some(element) = element else {
-            return Err(FederationError::internal(
-                "Unable to rebase selection updates",
-            ));
-        };
+        let element = first.element()?.rebase_on_or_error(parent_type, schema)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
@@ -2725,7 +2453,6 @@ impl SelectionSet {
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
         parent_type_if_abstract: Option<AbstractType>,
-        fragments: &Option<&mut RebasedFragments>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
@@ -2739,10 +2466,9 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
-                let type_if_abstract =
-                    subselection_type_if_abstract(selection, &self.schema, fragments);
-                let updated_selection_set = selection_set
-                    .add_typename_field_for_abstract_types(type_if_abstract, fragments)?;
+                let type_if_abstract = subselection_type_if_abstract(selection)?;
+                let updated_selection_set =
+                    selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
 
                 if updated_selection_set == *selection_set {
                     selection.clone()
@@ -2836,14 +2562,15 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
-                let Some(sub_selection_type) = ele.sub_selection_type_position()? else {
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
+                let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
                 let mut selection = Arc::make_mut(&mut self.selections)
                     .entry(ele.key())
                     .or_insert(|| {
                         Selection::from_element(
-                            OpPathElement::clone(ele),
+                            element,
                             // We immediately add a selection afterward to make this selection set
                             // valid.
                             Some(SelectionSet::empty(self.schema.clone(), sub_selection_type)),
@@ -2868,7 +2595,7 @@ impl SelectionSet {
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
-                let element = OpPathElement::clone(ele);
+                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
                 let selection_set = selection_set
                     .map(|selection_set| {
                         selection_set.rebase_on(
@@ -2918,29 +2645,6 @@ impl SelectionSet {
         self.selections
             .iter()
             .for_each(|(_, s)| s.collect_used_fragment_names(aggregator));
-    }
-
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<SelectionSet, FederationError> {
-        let rebased_results = self
-            .selections
-            .iter()
-            .filter_map(|(_, selection)| {
-                selection
-                    .rebase_on(parent_type, named_fragments, schema, error_handling)
-                    .transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(SelectionSet::from_raw_selections(
-            schema.clone(),
-            parent_type.clone(),
-            rebased_results,
-        ))
     }
 
     /// Applies some normalization rules to this selection set in the context of the provided `parent_type`.
@@ -3016,7 +2720,9 @@ impl SelectionSet {
     /// Passing the option `recursive == false` makes the normalization only apply at the top-level, removing
     /// any unnecessary top-level inline fragments, possibly multiple layers of them, but we never recurse
     /// inside the sub-selection of an selection that is not removed by the normalization.
-    pub(crate) fn normalize(
+    // PORT_NOTE: this is now module-private, because it looks like it *can* be. If some place
+    // outside this module *does* need it, feel free to mark it pub(crate).
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -3044,12 +2750,6 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(normalized_selection_map),
         })
-    }
-
-    pub(crate) fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
-        self.selections
-            .values()
-            .all(|sel| sel.can_add_to(parent_type, &self.schema))
     }
 
     fn has_defer(&self) -> bool {
@@ -3242,60 +2942,6 @@ impl SelectionSet {
 
             Ok(())
         }
-    }
-
-    pub(crate) fn containment(&self, other: &Self, options: ContainmentOptions) -> Containment {
-        if other.selections.len() > self.selections.len() {
-            // If `other` has more selections but we're ignoring missing __typename, then in the case where
-            // `other` has a __typename but `self` does not, then we need the length of `other` to be at
-            // least 2 more than other of `self` to be able to conclude there is no contains.
-            if !options.ignore_missing_typename
-                || other.selections.len() > self.selections.len() + 1
-                || self.has_top_level_typename_field()
-                || !other.has_top_level_typename_field()
-            {
-                return Containment::NotContained;
-            }
-        }
-
-        let mut is_equal = true;
-        let mut did_ignore_typename = false;
-
-        for (key, other_selection) in other.selections.iter() {
-            if key.is_typename_field() && options.ignore_missing_typename {
-                if !self.has_top_level_typename_field() {
-                    did_ignore_typename = true;
-                }
-                continue;
-            }
-
-            let Some(self_selection) = self.selections.get(key) else {
-                return Containment::NotContained;
-            };
-
-            match self_selection.containment(other_selection, options) {
-                Containment::NotContained => return Containment::NotContained,
-                Containment::StrictlyContained if is_equal => is_equal = false,
-                Containment::StrictlyContained | Containment::Equal => {}
-            }
-        }
-
-        let expected_len = if did_ignore_typename {
-            self.selections.len() + 1
-        } else {
-            self.selections.len()
-        };
-
-        if is_equal && other.selections.len() == expected_len {
-            Containment::Equal
-        } else {
-            Containment::StrictlyContained
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Self) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 
     // TODO move this logic to SelectionSet add_selection/merge_into
@@ -3528,54 +3174,16 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenRespon
 
 pub(crate) fn subselection_type_if_abstract(
     selection: &Selection,
-    schema: &ValidFederationSchema,
-    fragments: &Option<&mut RebasedFragments>,
-) -> Option<AbstractType> {
-    match selection {
-        Selection::Field(field) => {
-            match schema
-                .get_type(field.field.data().field_position.type_name().clone())
-                .ok()?
-            {
-                crate::schema::position::TypeDefinitionPosition::Interface(i) => {
-                    Some(AbstractType::Interface(i))
-                }
-                crate::schema::position::TypeDefinitionPosition::Union(u) => {
-                    Some(AbstractType::Union(u))
-                }
-                _ => None,
-            }
+) -> Result<Option<AbstractType>, FederationError> {
+    let Some(sub_selection_type) = selection.element()?.sub_selection_type_position()? else {
+        return Ok(None);
+    };
+    match sub_selection_type {
+        CompositeTypeDefinitionPosition::Interface(interface_type) => {
+            Ok(Some(interface_type.into()))
         }
-        Selection::FragmentSpread(fragment_spread) => {
-            let fragment = fragments
-                .as_ref()
-                .and_then(|r| {
-                    r.original_fragments
-                        .get(&fragment_spread.spread.data().fragment_name)
-                })
-                .ok_or(crate::error::SingleFederationError::InvalidGraphQL {
-                    message: "missing fragment".to_string(),
-                })
-                //FIXME: return error
-                .ok()?;
-            match fragment.type_condition_position.clone() {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
-            }
-        }
-        Selection::InlineFragment(inline_fragment) => {
-            match inline_fragment
-                .inline_fragment
-                .data()
-                .type_condition_position
-                .clone()?
-            {
-                CompositeTypeDefinitionPosition::Interface(i) => Some(AbstractType::Interface(i)),
-                CompositeTypeDefinitionPosition::Union(u) => Some(AbstractType::Union(u)),
-                CompositeTypeDefinitionPosition::Object(_) => None,
-            }
-        }
+        CompositeTypeDefinitionPosition::Union(union_type) => Ok(Some(union_type.into())),
+        CompositeTypeDefinitionPosition::Object(_) => Ok(None),
     }
 }
 
@@ -3628,7 +3236,7 @@ impl FieldSelection {
         }))
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -3696,128 +3304,8 @@ impl FieldSelection {
         }
     }
 
-    /// Returns a field selection "equivalent" to the one represented by this object, but such that its parent type
-    /// is the one provided as argument.
-    ///
-    /// Obviously, this operation will only succeed if this selection (both the field itself and its subselections)
-    /// make sense from the provided parent type. If this is not the case, this method will throw.
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        if &self.field.data().schema == schema
-            && &self.field.data().field_position.parent() == parent_type
-        {
-            // we are rebasing field on the same parent within the same schema - we can just return self
-            return Ok(Some(Selection::from(self.clone())));
-        }
-
-        let Some(rebased) = self.field.rebase_on(parent_type, schema, error_handling)? else {
-            // rebasing failed but we are ignoring errors
-            return Ok(None);
-        };
-
-        let Some(selection_set) = &self.selection_set else {
-            // leaf field
-            return Ok(Some(Selection::from_field(rebased, None)));
-        };
-
-        let rebased_type_name = rebased
-            .data()
-            .field_position
-            .get(schema.schema())?
-            .ty
-            .inner_named_type();
-        let rebased_base_type: CompositeTypeDefinitionPosition =
-            schema.get_type(rebased_type_name.clone())?.try_into()?;
-
-        let selection_set_type = &selection_set.type_position;
-        if self.field.data().schema == rebased.data().schema
-            && &rebased_base_type == selection_set_type
-        {
-            // we are rebasing within the same schema and the same base type
-            return Ok(Some(Selection::from_field(
-                rebased.clone(),
-                self.selection_set.clone(),
-            )));
-        }
-
-        let rebased_selection_set =
-            selection_set.rebase_on(&rebased_base_type, named_fragments, schema, error_handling)?;
-        if rebased_selection_set.selections.is_empty() {
-            // empty selection set
-            Ok(None)
-        } else {
-            Ok(Some(Selection::from_field(
-                rebased.clone(),
-                Some(rebased_selection_set),
-            )))
-        }
-    }
-
-    fn can_add_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        if &self.field.data().schema == schema
-            && parent_type == &self.field.data().field_position.parent()
-        {
-            return true;
-        }
-
-        let Some(ty) = self.field.type_if_added_to(parent_type, schema) else {
-            return false;
-        };
-
-        if let Some(set) = &self.selection_set {
-            if set.type_position != ty {
-                return set
-                    .selections
-                    .values()
-                    .all(|sel| sel.can_add_to(parent_type, schema));
-            }
-        }
-        true
-    }
-
     pub(crate) fn has_defer(&self) -> bool {
         self.field.has_defer() || self.selection_set.as_ref().is_some_and(|s| s.has_defer())
-    }
-
-    pub(crate) fn containment(
-        &self,
-        other: &FieldSelection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        let self_field = self.field.data();
-        let other_field = other.field.data();
-        if self_field.name() != other_field.name()
-            || self_field.alias != other_field.alias
-            || !same_arguments(&self_field.arguments, &other_field.arguments)
-            || !same_directives(&self_field.directives, &other_field.directives)
-        {
-            return Containment::NotContained;
-        }
-
-        match (&self.selection_set, &other.selection_set) {
-            (None, None) => Containment::Equal,
-            (Some(self_selection), Some(other_selection)) => {
-                self_selection.containment(other_selection, options)
-            }
-            (None, Some(_)) | (Some(_), None) => {
-                debug_assert!(false, "field selections have the same element, so if one does not have a subselection, neither should the other one");
-                Containment::NotContained
-            }
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &FieldSelection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 }
 
@@ -3876,134 +3364,9 @@ impl<'a> FieldSelectionValue<'a> {
 }
 
 impl Field {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Field>, FederationError> {
-        let field_parent = self.data().field_position.parent();
-        if self.data().schema == *schema && field_parent == *parent_type {
-            // pointing to the same parent -> return self
-            return Ok(Some(self.clone()));
-        }
-
-        if self.data().name() == &TYPENAME_FIELD {
-            // TODO interface object info should be precomputed in QP constructor
-            return if schema
-                .possible_runtime_types(parent_type.clone())?
-                .iter()
-                .any(|t| is_interface_object(t, schema))
-            {
-                if let RebaseErrorHandlingOption::ThrowError = error_handling {
-                    Err(FederationError::internal(
-                        format!("Cannot add selection of field \"{}\" to selection set of parent type \"{}\" that is potentially an interface object type at runtime",
-                                self.data().field_position,
-                                parent_type
-                        )))
-                } else {
-                    Ok(None)
-                }
-            } else {
-                let mut updated_field_data = self.data().clone();
-                updated_field_data.schema = schema.clone();
-                updated_field_data.field_position = parent_type.introspection_typename_field();
-                Ok(Some(Field::new(updated_field_data)))
-            };
-        }
-
-        let field_from_parent = parent_type.field(self.data().name().clone())?;
-        return if field_from_parent.try_get(schema.schema()).is_some()
-            && self.can_rebase_on(parent_type, schema)
-        {
-            let mut updated_field_data = self.data().clone();
-            updated_field_data.schema = schema.clone();
-            updated_field_data.field_position = field_from_parent;
-            Ok(Some(Field::new(updated_field_data)))
-        } else if let RebaseErrorHandlingOption::IgnoreError = error_handling {
-            Ok(None)
-        } else {
-            Err(FederationError::internal(format!(
-                "Cannot add selection of field \"{}\" to selection set of parent type \"{}\"",
-                self.data().field_position,
-                parent_type
-            )))
-        };
-    }
-
-    /// Verifies whether given field can be rebase on following parent type.
-    ///
-    /// There are 2 valid cases we want to allow:
-    /// 1. either `parent_type` and `field_parent_type` are the same underlying type (same name) but from different underlying schema. Typically,
-    ///  happens when we're building subgraph queries but using selections from the original query which is against the supergraph API schema.
-    /// 2. or they are not the same underlying type, but the field parent type is from an interface (or an interface object, which is the same
-    ///  here), in which case we may be rebasing an interface field on one of the implementation type, which is ok. Note that we don't verify
-    ///  that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
-    ///  in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
-    ///  if the field name simply does not exist in `parent_type`.
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        let field_parent_type = self.data().field_position.parent();
-        // case 1
-        if field_parent_type.type_name() == parent_type.type_name() {
-            return true;
-        }
-        // case 2
-        let is_interface_object_type =
-            match TryInto::<ObjectTypeDefinitionPosition>::try_into(field_parent_type.clone()) {
-                Ok(ref o) => is_interface_object(o, schema),
-                Err(_) => false,
-            };
-        field_parent_type.is_interface_type() || is_interface_object_type
-    }
-
     pub(crate) fn has_defer(&self) -> bool {
         // @defer cannot be on field at the moment
         false
-    }
-
-    pub(crate) fn type_if_added_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> Option<CompositeTypeDefinitionPosition> {
-        let data = self.data();
-        if data.field_position.parent() == *parent_type && data.schema == *schema {
-            let base_ty_name = data
-                .field_position
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            return schema
-                .get_type(base_ty_name.clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
-                .ok();
-        }
-        if data.name() == &TYPENAME_FIELD {
-            let type_name = parent_type
-                .introspection_typename_field()
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            return schema.try_get_type(type_name.clone())?.try_into().ok();
-        }
-        if self.can_rebase_on(parent_type, schema) {
-            let type_name = parent_type
-                .field(data.field_position.field_name().clone())
-                .ok()?
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            schema.try_get_type(type_name.clone())?.try_into().ok()
-        } else {
-            None
-        }
     }
 
     pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
@@ -4144,7 +3507,7 @@ impl InlineFragmentSelection {
         }
     }
 
-    pub(crate) fn normalize(
+    fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -4356,93 +3719,6 @@ impl InlineFragmentSelection {
         }
     }
 
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        named_fragments: &NamedFragments,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<Selection>, FederationError> {
-        if &self.inline_fragment.data().schema == schema
-            && self.inline_fragment.data().parent_type_position == *parent_type
-        {
-            // we are rebasing inline fragment on the same parent within the same schema - we can just return self
-            return Ok(Some(Selection::from(self.clone())));
-        }
-
-        let Some(rebased_fragment) =
-            self.inline_fragment
-                .rebase_on(parent_type, schema, error_handling)?
-        else {
-            // rebasing failed but we are ignoring errors
-            return Ok(None);
-        };
-
-        let rebased_casted_type = rebased_fragment.data().casted_type();
-        if &self.inline_fragment.data().schema == schema
-            && self.inline_fragment.data().casted_type() == rebased_casted_type
-        {
-            // we are within the same schema - selection set does not have to be rebased
-            Ok(Some(
-                InlineFragmentSelection::new(rebased_fragment, self.selection_set.clone()).into(),
-            ))
-        } else {
-            let rebased_selection_set = self.selection_set.rebase_on(
-                &rebased_casted_type,
-                named_fragments,
-                schema,
-                error_handling,
-            )?;
-            if rebased_selection_set.selections.is_empty() {
-                // empty selection set
-                Ok(None)
-            } else {
-                Ok(Some(
-                    InlineFragmentSelection::new(rebased_fragment, rebased_selection_set).into(),
-                ))
-            }
-        }
-    }
-
-    pub(crate) fn can_add_to(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
-        if &self.inline_fragment.data().parent_type_position == parent_type
-            && self.inline_fragment.data().schema == *schema
-        {
-            return true;
-        }
-        let Some(ty) = self
-            .inline_fragment
-            .data()
-            .casted_type_if_add_to(parent_type, schema)
-        else {
-            return false;
-        };
-        if self.selection_set.type_position != ty {
-            for sel in self.selection_set.selections.values() {
-                if !sel.can_add_to(&ty, schema) {
-                    return false;
-                }
-            }
-            true
-        } else {
-            true
-        }
-    }
-
-    pub(crate) fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        parent_schema: &ValidFederationSchema,
-    ) -> bool {
-        self.inline_fragment
-            .can_rebase_on(parent_type, parent_schema)
-            .0
-    }
-
     pub(crate) fn casted_type(&self) -> &CompositeTypeDefinitionPosition {
         let data = self.inline_fragment.data();
         data.type_condition_position
@@ -4457,30 +3733,6 @@ impl InlineFragmentSelection {
                 .selections
                 .values()
                 .any(|s| s.has_defer())
-    }
-
-    pub(crate) fn containment(
-        &self,
-        other: &Selection,
-        options: ContainmentOptions,
-    ) -> Containment {
-        match other {
-            // Using keys here means that @defer fragments never compare equal.
-            // This is a bit odd but it is consistent: the selection set data structure would not
-            // even try to compare two @defer fragments, because their keys are different.
-            Selection::InlineFragment(other)
-                if self.inline_fragment.key() == other.inline_fragment.key() =>
-            {
-                self.selection_set
-                    .containment(&other.selection_set, options)
-            }
-            _ => Containment::NotContained,
-        }
-    }
-
-    /// Returns true if this selection is a superset of the other selection.
-    pub(crate) fn contains(&self, other: &Selection) -> bool {
-        self.containment(other, Default::default()).is_contained()
     }
 
     /// Returns true if this inline fragment selection is "unnecessary" and should be inlined.
@@ -4533,88 +3785,6 @@ impl<'a> InlineFragmentSelectionValue<'a> {
     }
 }
 
-impl InlineFragment {
-    pub(crate) fn rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<InlineFragment>, FederationError> {
-        if &self.data().parent_type_position == parent_type {
-            return Ok(Some(self.clone()));
-        }
-
-        let type_condition = self.data().type_condition_position.clone();
-        // This usually imply that the fragment is not from the same subgraph than the selection. So we need
-        // to update the source type of the fragment, but also "rebase" the condition to the selection set
-        // schema.
-        let (can_rebase, rebased_condition) = self.can_rebase_on(parent_type, schema);
-        if !can_rebase {
-            if let RebaseErrorHandlingOption::ThrowError = error_handling {
-                let printable_type_condition = self
-                    .data()
-                    .type_condition_position
-                    .clone()
-                    .map_or_else(|| "".to_string(), |t| t.to_string());
-                let printable_runtimes = type_condition.map_or_else(
-                    || "undefined".to_string(),
-                    |t| print_possible_runtimes(&t, schema),
-                );
-                let printable_parent_runtimes = print_possible_runtimes(parent_type, schema);
-                Err(FederationError::internal(
-                    format!("Cannot add fragment of condition \"{}\" (runtimes: [{}]) to parent type \"{}\" (runtimes: [{}])",
-                            printable_type_condition,
-                            printable_runtimes,
-                            parent_type,
-                            printable_parent_runtimes,
-                    ),
-                ))
-            } else {
-                Ok(None)
-            }
-        } else {
-            let mut rebased_fragment_data = self.data().clone();
-            rebased_fragment_data.type_condition_position = rebased_condition;
-            Ok(Some(InlineFragment::new(rebased_fragment_data)))
-        }
-    }
-
-    pub(crate) fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        parent_schema: &ValidFederationSchema,
-    ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
-        if self.data().type_condition_position.is_none() {
-            // can_rebase = true, condition = undefined
-            return (true, None);
-        }
-
-        if let Some(Ok(rebased_condition)) = self
-            .data()
-            .type_condition_position
-            .clone()
-            .and_then(|condition_position| {
-                parent_schema.try_get_type(condition_position.type_name().clone())
-            })
-            .map(|rebased_condition_position| {
-                CompositeTypeDefinitionPosition::try_from(rebased_condition_position)
-            })
-        {
-            // chained if let chains are not yet supported
-            // see https://github.com/rust-lang/rust/issues/53667
-            if runtime_types_intersect(parent_type, &rebased_condition, parent_schema) {
-                // can_rebase = true, condition = rebased_condition
-                (true, Some(rebased_condition))
-            } else {
-                (false, None)
-            }
-        } else {
-            // can_rebase = false, condition = undefined
-            (false, None)
-        }
-    }
-}
-
 pub(crate) fn merge_selection_sets(
     mut selection_sets: Vec<SelectionSet>,
 ) -> Result<SelectionSet, FederationError> {
@@ -4629,13 +3799,6 @@ pub(crate) fn merge_selection_sets(
     // Take ownership of the first element and discard the rest;
     // we can unwrap because `split_first_mut()` guarantees at least one element will be yielded
     Ok(selection_sets.into_iter().next().unwrap())
-}
-
-/// Options for handling rebasing errors.
-#[derive(Clone, Copy)]
-pub(crate) enum RebaseErrorHandlingOption {
-    IgnoreError,
-    ThrowError,
 }
 
 /// Options for normalizing the selection sets
@@ -4836,46 +3999,6 @@ impl NamedFragments {
         true
     }
 
-    pub(crate) fn rebase_on(
-        &self,
-        schema: &ValidFederationSchema,
-    ) -> Result<NamedFragments, FederationError> {
-        let mut rebased_fragments = NamedFragments::default();
-        for fragment in self.fragments.values() {
-            if let Ok(rebased_type) = schema
-                .get_type(fragment.type_condition_position.type_name().clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
-            {
-                if let Ok(mut rebased_selection) = fragment.selection_set.rebase_on(
-                    &rebased_type,
-                    &rebased_fragments,
-                    schema,
-                    RebaseErrorHandlingOption::IgnoreError,
-                ) {
-                    // Rebasing can leave some inefficiencies in some case (particularly when a spread has to be "expanded", see `FragmentSpreadSelection.rebaseOn`),
-                    // so we do a top-level normalization to keep things clean.
-                    rebased_selection = rebased_selection.normalize(
-                        &rebased_type,
-                        &rebased_fragments,
-                        schema,
-                        NormalizeSelectionOption::NormalizeRecursively,
-                    )?;
-                    if NamedFragments::is_selection_set_worth_using(&rebased_selection) {
-                        let fragment = Fragment {
-                            schema: schema.clone(),
-                            name: fragment.name.clone(),
-                            type_condition_position: rebased_type.clone(),
-                            directives: fragment.directives.clone(),
-                            selection_set: rebased_selection,
-                        };
-                        rebased_fragments.insert(fragment);
-                    }
-                }
-            }
-        }
-        Ok(rebased_fragments)
-    }
-
     /// - Expands all nested fragments
     /// - Applies the provided `mapper` to each selection set of the expanded fragments.
     /// - Finally, re-fragments the nested fragments.
@@ -4971,9 +4094,7 @@ impl NamedFragments {
             return Ok(self.clone());
         }
         let updated = self.map_to_expanded_selection_sets(|ss| {
-            ss.add_typename_field_for_abstract_types(
-                /*parent_type_if_abstract*/ None, /*fragments*/ &None,
-            )
+            ss.add_typename_field_for_abstract_types(/*parent_type_if_abstract*/ None)
         })?;
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
         // check the `updated` has the same set of fragments. To avoid performance hit, only the
@@ -4987,6 +4108,24 @@ impl NamedFragments {
     }
 }
 
+/// Tracks fragments from the original operation, along with versions rebased on other subgraphs.
+// XXX(@goto-bus-stop): improve/replace/reduce this structure. My notes:
+// This gets cloned only in recursive query planning. Then whenever `.for_subgraph()` ends up being
+// called, it always clones the `rebased_fragments` map. `.for_subgraph()` is called whenever the
+// plan is turned into plan nodes by the FetchDependencyGraphToQueryPlanProcessor.
+// This suggests that we can remove the Arc wrapper for `rebased_fragments` because we end up cloning the inner data anyways.
+//
+// This data structure is also used as an argument in several `crate::operation` functions. This
+// seems wrong. The only useful method on this structure is `.for_subgraph()`, which is only used
+// by the fetch dependency graph when creating plan nodes. That necessarily implies that all other
+// uses of this structure only access `.original_fragments`. In that case, we should pass around
+// the `NamedFragments` itself, not this wrapper structure.
+//
+// `.for_subgraph()` also requires a mutable reference to fill in the data. But
+// `.rebased_fragments` is really a cache, so requiring a mutable reference isn't an ideal API.
+// Conceptually you are just computing something and getting the result. Perhaps we can use a
+// concurrent map, or prepopulate the HashMap for all subgraphs, or precompute the whole thing for
+// all subgraphs (or precompute a hash map of subgraph names to OnceLocks).
 #[derive(Clone)]
 pub(crate) struct RebasedFragments {
     pub(crate) original_fragments: NamedFragments,
@@ -5305,23 +4444,6 @@ impl Display for InlineFragment {
     }
 }
 
-fn directives_with_sorted_arguments(
-    directives: &executable::DirectiveList,
-) -> executable::DirectiveList {
-    let mut directives = directives.clone();
-    for directive in &mut directives {
-        directive
-            .make_mut()
-            .arguments
-            .sort_by(|a1, a2| a1.name.cmp(&a2.name))
-    }
-    directives
-}
-
-fn is_deferred_selection(directives: &executable::DirectiveList) -> bool {
-    directives.has("defer")
-}
-
 /// Normalizes the selection set of the specified operation.
 ///
 /// This method applies the following transformations:
@@ -5366,18 +4488,6 @@ pub(crate) fn normalize_operation(
     Ok(normalized_operation)
 }
 
-// TODO remove once it is available in schema metadata
-fn is_interface_object(obj: &ObjectTypeDefinitionPosition, schema: &ValidFederationSchema) -> bool {
-    if let Ok(intf_obj_directive) = get_federation_spec_definition_from_subgraph(schema)
-        .and_then(|spec| spec.interface_object_directive(schema))
-    {
-        obj.try_get(schema.schema())
-            .is_some_and(|o| o.directives.has(&intf_obj_directive.name))
-    } else {
-        false
-    }
-}
-
 fn runtime_types_intersect(
     type1: &CompositeTypeDefinitionPosition,
     type2: &CompositeTypeDefinitionPosition,
@@ -5395,22 +4505,4 @@ fn runtime_types_intersect(
     }
 
     false
-}
-
-fn print_possible_runtimes(
-    composite_type: &CompositeTypeDefinitionPosition,
-    schema: &ValidFederationSchema,
-) -> String {
-    schema
-        .possible_runtime_types(composite_type.clone())
-        .map_or_else(
-            |_| "undefined".to_string(),
-            |runtimes| {
-                runtimes
-                    .iter()
-                    .map(|r| r.type_name.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            },
-        )
 }
