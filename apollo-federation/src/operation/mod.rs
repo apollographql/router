@@ -2832,12 +2832,12 @@ impl SelectionSet {
             {
                 match selection_or_set {
                     SelectionOrSet::Selection(normalized_selection) => {
-                        normalized_selections
-                            .merge_selections_into(std::iter::once(&normalized_selection))?;
+                        normalized_selections.add_local_selection(&normalized_selection)?;
                     }
                     SelectionOrSet::SelectionSet(normalized_set) => {
-                        normalized_selections
-                            .merge_selections_into(normalized_set.selections.values())?;
+                        // Since the `selection` has been expanded/lifted, we use
+                        // `add_selection_set` to make sure it's rebased.
+                        normalized_selections.add_selection_set(&normalized_set)?;
                     }
                 }
             }
