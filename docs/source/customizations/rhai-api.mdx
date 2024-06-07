@@ -306,6 +306,16 @@ fn supergraph_service(service) {
 }
 ```
 
+## Unix timestamp (in milliseconds)
+
+Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_ms_now();
+}
+```
+
 ## Unique IDs (UUID)
 
 Your Rhai customization can use the function `uuid_v4()` to obtain a UUIDv4 ID.
