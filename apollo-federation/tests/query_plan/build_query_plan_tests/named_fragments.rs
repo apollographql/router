@@ -252,8 +252,6 @@ fn another_mix_of_fragments_indirection_and_unions() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: https://apollographql.atlassian.net/browse/FED-248
 fn handles_fragments_with_interface_field_subtyping() {
     let planner = planner!(
         Subgraph1: r#"
