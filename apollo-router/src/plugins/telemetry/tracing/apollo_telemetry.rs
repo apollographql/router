@@ -34,9 +34,6 @@ use serde::de::DeserializeOwned;
 use thiserror::Error;
 use url::Url;
 
-use crate::plugins::authentication::AUTHENTICATION_SPAN_NAME;
-use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
-use crate::plugins::rhai::RHAI_SPAN_NAME;
 use crate::plugins::telemetry;
 use crate::plugins::telemetry::apollo::ErrorConfiguration;
 use crate::plugins::telemetry::apollo::ErrorsConfiguration;
@@ -84,10 +81,6 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
-use crate::services::http::service::HTTP_REQUEST_SPAN_NAME;
-use crate::services::layers::query_analysis::QUERY_PARSING_SPAN_NAME;
-use crate::services::QUERY_PLANNING_SPAN_NAME;
-use crate::services::SUBGRAPH_REQUEST_SPAN_NAME;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -164,33 +157,6 @@ const REPORTS_INCLUDE_SPANS: [&str; 16] = [
     EXECUTION_SPAN_NAME,
     SUBSCRIBE_SPAN_NAME,
     SUBSCRIPTION_EVENT_SPAN_NAME,
-];
-
-const OTLP_INCLUDE_SPANS: [&str; 22] = [
-    PARALLEL_SPAN_NAME,
-    SEQUENCE_SPAN_NAME,
-    FETCH_SPAN_NAME,
-    FLATTEN_SPAN_NAME,
-    SUBGRAPH_SPAN_NAME,
-    SUPERGRAPH_SPAN_NAME,
-    ROUTER_SPAN_NAME,
-    DEFER_SPAN_NAME,
-    DEFER_PRIMARY_SPAN_NAME,
-    DEFER_DEFERRED_SPAN_NAME,
-    CONDITION_SPAN_NAME,
-    CONDITION_IF_SPAN_NAME,
-    CONDITION_ELSE_SPAN_NAME,
-    EXECUTION_SPAN_NAME,
-    SUBSCRIBE_SPAN_NAME,
-    QUERY_PARSING_SPAN_NAME,
-    QUERY_PLANNING_SPAN_NAME,
-    HTTP_REQUEST_SPAN_NAME,
-    SUBGRAPH_REQUEST_SPAN_NAME,
-    RHAI_SPAN_NAME,
-    EXTERNAL_SPAN_NAME,
-    AUTHENTICATION_SPAN_NAME,
-    // Dropping subscription events for now since they are not working with protobuf anyway.
-    // SUBSCRIPTION_EVENT_SPAN_NAME
 ];
 
 #[derive(Error, Debug)]
@@ -360,7 +326,6 @@ impl Exporter {
                     apollo_graph_ref,
                     schema_id,
                     errors_configuration,
-                    HashSet::from(OTLP_INCLUDE_SPANS),
                 )?))
             } else {
                 None

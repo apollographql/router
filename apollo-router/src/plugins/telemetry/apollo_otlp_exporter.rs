@@ -1,5 +1,4 @@
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use derivative::Derivative;
@@ -35,7 +34,6 @@ use super::tracing::apollo_telemetry::extract_ftv1_trace_with_error_count;
 use super::tracing::apollo_telemetry::extract_string;
 use super::tracing::apollo_telemetry::LightSpanData;
 use super::tracing::apollo_telemetry::APOLLO_PRIVATE_FTV1;
-use super::tracing::apollo_telemetry::APOLLO_PRIVATE_REQUEST;
 use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ROUTER_REPORT_TYPE_TRACES;
@@ -58,7 +56,6 @@ pub(crate) struct ApolloOtlpExporter {
     #[derivative(Debug = "ignore")]
     otlp_exporter: Arc<Mutex<opentelemetry_otlp::SpanExporter>>,
     errors_configuration: ErrorsConfiguration,
-    include_span_names: HashSet<&'static str>,
 }
 
 impl ApolloOtlpExporter {
@@ -71,7 +68,6 @@ impl ApolloOtlpExporter {
         apollo_graph_ref: &str,
         schema_id: &str,
         errors_configuration: &ErrorsConfiguration,
-        include_span_names: HashSet<&'static str>,
     ) -> Result<ApolloOtlpExporter, BoxError> {
         tracing::debug!(endpoint = %endpoint, "creating Apollo OTLP traces exporter");
 
@@ -150,7 +146,6 @@ impl ApolloOtlpExporter {
             ),
             otlp_exporter,
             errors_configuration: errors_configuration.clone(),
-            include_span_names,
         })
     }
 
@@ -162,32 +157,26 @@ impl ApolloOtlpExporter {
         let mut send_trace: bool = false;
 
         trace_spans.into_iter().for_each(|span| {
-            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
-                || self.include_span_names.contains(span.name.as_ref())
-            {
-                tracing::debug!("apollo otlp: preparing span '{}'", span.name);
-                match span.name.as_ref() {
-                    SUPERGRAPH_SPAN_NAME => {
-                        if span
-                            .attributes
-                            .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
-                            .is_some()
-                        {
-                            export_spans.push(self.base_prepare_span(span));
-                            // Mirrors the existing implementation in apollo_telemetry
-                            // which filters out traces that are missing the signature attribute.
-                            // In practice, this results in excluding introspection queries.
-                            send_trace = true
-                        }
+            tracing::debug!("apollo otlp: preparing span '{}'", span.name);
+            match span.name.as_ref() {
+                SUPERGRAPH_SPAN_NAME => {
+                    if span
+                        .attributes
+                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .is_some()
+                    {
+                        export_spans.push(self.base_prepare_span(span));
+                        // Mirrors the existing implementation in apollo_telemetry
+                        // which filters out traces that are missing the signature attribute.
+                        // In practice, this results in excluding introspection queries.
+                        send_trace = true
                     }
-                    SUBGRAPH_SPAN_NAME => export_spans.push(self.prepare_subgraph_span(span)),
-                    _ => export_spans.push(self.base_prepare_span(span)),
-                };
-            } else {
-                tracing::debug!("apollo otlp: dropping span '{}'", span.name);
-            }
+                }
+                SUBGRAPH_SPAN_NAME => export_spans.push(self.prepare_subgraph_span(span)),
+                _ => export_spans.push(self.base_prepare_span(span)),
+            };
         });
-        if send_trace && !export_spans.is_empty() {
+        if send_trace {
             tracing::debug!("apollo otlp: sending trace");
             Some(export_spans)
         } else {
