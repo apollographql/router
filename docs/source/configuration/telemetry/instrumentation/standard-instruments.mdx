@@ -1,12 +1,12 @@
 ---
-title: Apollo Router instruments
-subtitle: Standard metric instruments for the router's request lifecycle
-description: Reference of standard metric instruments for the Apollo Router's request lifecycle. Consumable via the router's metrics exporters. 
+title: Instruments
+subtitle: Standard metric instruments for a router's request lifecycle
+description: Reference of standard metric instruments for the Apollo GraphOS Router's request lifecycle. Consumable via the router's metrics exporters. 
 ---
 
 ## Standard metric instruments
 
-The Apollo Router provides a set of non-configurable metric instruments that expose detailed information about the router's request lifecycle.
+The GraphOS Router provides a set of non-configurable metric instruments that expose detailed information about the router's request lifecycle.
 
 These instruments can be consumed by configuring a [metrics exporter](../exporters/metrics/overview).
 
@@ -14,7 +14,7 @@ These instruments can be consumed by configuring a [metrics exporter](../exporte
 
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP router request duration
 - `apollo_router_http_request_duration_seconds_bucket` - HTTP subgraph request duration, attributes:
-  - `subgraph`: (Optional) The subgraph being queried
+  - `subgraph`: (Optional) The subgraph being queried–
 - `apollo_router_http_requests_total` - Total number of HTTP requests by HTTP status
 - `apollo_router_timeout` - Number of triggered timeouts
 - `apollo_router_http_request_retry_total` - Number of subgraph requests retried, attributes:
