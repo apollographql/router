@@ -1,7 +1,7 @@
 ---
-title: Authorization in the Apollo Router
+title: Authorization in the GraphOS Router
 subtitle: Strengthen subgraph security with a centralized governance layer
-description: Enforce authorization in the Apollo Router with the @requireScopes, @authenticated, and @policy directives.
+description: Enforce authorization in the GraphOS Router with the @requireScopes, @authenticated, and @policy directives.
 ---
 
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
@@ -16,7 +16,7 @@ Services may have their own access controls, but enforcing authorization _in the
   flowchart LR;
     clients(Client);
     subgraph Router[" "]
-      router(["<b>Apollo Router</b>"]);
+      router(["<b>GraphOS Router</b>"]);
       serviceB[Users<br/>API];
       serviceC[Posts<br/>API];
     end
@@ -30,7 +30,7 @@ Services may have their own access controls, but enforcing authorization _in the
   flowchart LR;
     clients(Client);
     subgraph Router[" "]
-      router(["<b>Apollo Router</b>"]);
+      router(["<b>GraphOS Router</b>"]);
       serviceB[Users<br/>API];
       serviceC[Posts<br/>API];
     end
@@ -49,7 +49,7 @@ Services may have their own access controls, but enforcing authorization _in the
     clients(Client);
     Level2:::padding
     subgraph Level1["<br>🔐 Router layer&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp&nbsp"]
-      router(["<b>Apollo Router</b>"]);
+      router(["<b>GraphOS Router</b>"]);
         subgraph Level2["🔐 Service layer"]
           serviceB[Users<br/>API];
           serviceC[Posts<br/>API];
@@ -76,7 +76,7 @@ To learn more about why authorization is ideal at the router layer, watch Andrew
 
 ## How access control works
 
-The Apollo Router provides access controls via **authorization directives** that define access to specific fields and types across your supergraph:
+The GraphOS Router provides access controls via **authorization directives** that define access to specific fields and types across your supergraph:
 
 - The [`@requiresScopes`](#requiresscopes) directive allows granular access control through the scopes you define.
 - The [`@authenticated`](#authenticated) directive allows access to the annotated field or type for _authenticated requests only_.
@@ -106,12 +106,12 @@ The router then enforces these directives on all incoming requests.
 
 <Note>
 
-Only the Apollo Router supports authorization directives&mdash;[`@apollo/gateway`](/federation/v1/gateway/) does _not_. Check out the [migration guide](../migrating-from-gateway/) if you'd like to use them.
+Only the GraphOS Router supports authorization directives&mdash;[`@apollo/gateway`](/federation/v1/gateway/) does _not_. Check out the [migration guide](../migrating-from-gateway/) if you'd like to use them.
 
 </Note>
 
 Before using the authorization directives in your subgraph schemas, you must:
-- Validate that your Apollo Router uses version `1.29.1` or later and is [connected to your GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features)
+- Validate that your GraphOS Router uses version `1.29.1` or later and is [connected to your GraphOS Enterprise organization](../enterprise-features/#enabling-enterprise-features)
 - Include **[claims](#configure-request-claims)** in requests made to the router (for `@authenticated` and `@requiresScopes`)
 
 ### Configure request claims
@@ -120,8 +120,8 @@ Claims are the individual details of a request's authentication and scope. They 
 
 To provide the router with the claims it needs, you must either configure JSON Web Token (JWT) authentication or add an external coprocessor that adds claims to a request's context. In some cases (explained below), you may require both.
 
-- **JWT authentication configuration**: If you configure [JWT authentication](./authn-jwt), the Apollo Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
-- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](../customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the Apollo Router's request-handling lifecycle with custom code.
+- **JWT authentication configuration**: If you configure [JWT authentication](./authn-jwt), the GraphOS Router [automatically adds a JWT token's claims](./authn-jwt#working-with-jwt-claims) to the request's context at the `apollo_authentication::JWT::claims` key.
+- **Adding claims via coprocessor**:  If you can't use JWT authentication, you can [add claims with a coprocessor](../customizations/coprocessor#adding-authorization-claims-via-coprocessor). Coprocessors let you hook into the GraphOS Router's request-handling lifecycle with custom code.
 - **Augmenting JWT claims via coprocessor**: Your authorization policies may require information beyond what your JSON web tokens provide. For example, a token's claims may include user IDs, which you then use to look up user roles. For situations like this, you can [augment the claims](./authn-jwt#claim-augmentation-via-coprocessors) from your JSON web tokens with coprocessors.
 
 ## Authorization directives
@@ -497,7 +497,7 @@ Using the `@policy` directive requires a [Supergraph plugin](../customizations/o
 
 An overview of how `@policy` is processed through the router's request lifecycle:
 
-* At the [`RouterService` level](../customizations/overview#the-request-lifecycle), the Apollo Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
+* At the [`RouterService` level](../customizations/overview#the-request-lifecycle), the GraphOS Router extracts the list of policies relevant to a request from the schema and then stores them in the request's context in `apollo_authorization::policies::required` as a map `policy -> null|true|false`.
 
 * At the `SupergraphService` level, you must provide a Rhai script or coprocessor to evaluate the map. 
 If the policy is validated, the script or coprocessor should set its value to `true` or otherwise set it to `false`. If the value is left to `null`, it will be treated as `false` by the router. Afterward, the router filters the requests' types and fields to only those where the policy is `true`.
@@ -966,4 +966,4 @@ authorization:
 
 ## Related topics
 
-* [Authenticating requests with the Apollo Router](/technotes/TN0004-router-authentication/)
+* [Authenticating requests with the GraphOS Router](/technotes/TN0004-router-authentication/)

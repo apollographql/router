@@ -1,0 +1,32 @@
+---
+title: Router performance tuning
+description: Tune the performance and scalability of the GraphOS Router
+---
+
+Learn how to improve the performance and scalability of various features of the router via configuration tuning.
+
+<MinVersion version="1.43.3">
+## Parallelize query planning with query planner pools
+</MinVersion>
+
+<ExperimentalFeature />
+
+You can improve the performance of the router's query planner by configuring parallelized query planning.
+
+By default, the query planner plans one operation at a time. It plans one operation to completion before planning the next one. This serial planning can be problematic when an operation takes a long time to plan and consequently blocks the query planner from working on other operations.
+
+To resolve such blocking scenarios, you can enable parallel query planning by configuring the router with `supergraph.query_planner.experimental_parallelism`:
+
+```yaml title="router.yaml"
+supergraph:
+  query_planner:
+    experimental_parallelism: auto # number of available cpus 
+```
+
+The value of `experimental_parallelism` is the number of query planners in the router's _query planner pool_. A query planner pool is a preallocated set of query planners from which the router can use to plan operations. The total number of pools is the maximum number of query planners that can run in parallel, and therefore the maximum number of operations that can be worked on simultaneously. 
+
+Valid values of `experimental_parallelism`:
+- Any integer starting from `1`
+- The special value `auto`, which sets the number of query planners equal to the number of available CPUs on the router's host machine
+
+In practice, you should tune your setting of `experimental_parallelism` with metrics and benchmarks of your router.

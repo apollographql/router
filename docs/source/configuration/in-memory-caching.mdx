@@ -1,10 +1,10 @@
 ---
-title: In-Memory Caching in the Apollo Router
+title: In-Memory Caching in the GraphOS Router
 subtitle: Configure caching for query plans and automatic persisted queries
-description: Configure the Apollo Router's in-memory caching for improved performance. Configure query plans and automatic persisted queries caching.
+description: Configure the GraphOS Router's in-memory caching for improved performance. Configure query plans and automatic persisted queries caching.
 ---
 
-The Apollo Router uses an in-memory LRU cache to store the following data:
+The GraphOS Router uses an in-memory LRU cache to store the following data:
 
 - [Generated query plans](#caching-query-plans)
 - [Automatic persisted queries (APQ)](#caching-automatic-persisted-queries-apq)
@@ -14,7 +14,7 @@ You can configure certain caching behaviors for generated query plans and APQ (b
 
 <Tip>
 
-If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
+If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
 
 </Tip>
 
@@ -28,7 +28,7 @@ Whenever your router receives an incoming GraphQL operation, it generates a [que
 
 By caching previously generated query plans, your router can _skip_ generating them _again_ if a client later sends the exact same operation. This improves your router's responsiveness.
 
-The Apollo Router enables query plan caching by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of query plan entries in the cache like so:
+The GraphOS Router enables query plan caching by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of query plan entries in the cache like so:
 
 ```yaml title="router.yaml"
 supergraph:
@@ -106,7 +106,7 @@ supergraph:
 
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
 
-The Apollo Router supports using APQ in its communications with both clients _and_ subgraphs:
+The GraphOS Router supports using APQ in its communications with both clients _and_ subgraphs:
 
 - **In its communications with clients,** the router acts as a GraphQL _server_, because it _receives_ queries from clients.
 - **In its communications with subgraphs,** the router acts as a GraphQL _client_, because it _sends_ queries to subgraphs.
@@ -115,7 +115,7 @@ Because the router's role differs between these two interactions, you configure 
 
 ### APQ with clients
 
-The Apollo Router enables APQ caching for client operations by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
+The GraphOS Router enables APQ caching for client operations by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
 
 ```yaml title="router.yaml"
 apq:
@@ -134,7 +134,7 @@ apq:
 
 ### APQ with subgraphs
 
-By default, the Apollo Router does _not_ use APQ when sending queries to its subgraphs.
+By default, the GraphOS Router does _not_ use APQ when sending queries to its subgraphs.
 
 In your router's [YAML config file](./overview/#yaml-config-file), you can configure this APQ support with a combination of global and per-subgraph settings:
 

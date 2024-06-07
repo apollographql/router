@@ -1,7 +1,7 @@
 ---
 title: File uploads
-subtitle: Receive files uploaded by clients with the Apollo Router
-description: Configure the Apollo Router to receive file uploads using the GraphQL multipart request spec.
+subtitle: Receive files uploaded by clients with the GraphOS Router
+description: Configure the GraphOS Router to receive file uploads using the GraphQL multipart request spec.
 minVersion: 1.41.1
 noIndex: true
 ---
@@ -12,7 +12,7 @@ This feature is in invite-only [preview](/resources/product-launch-stages/#produ
 
 </PreviewFeature>
 
-Learn how to configure the Apollo Router to receive file uploads in client requests using the [GraphQL multipart request specification](https://github.com/jaydenseric/graphql-multipart-request-spec).
+Learn how to configure the GraphOS Router to receive file uploads in client requests using the [GraphQL multipart request specification](https://github.com/jaydenseric/graphql-multipart-request-spec).
 
 ## About file uploads using multipart requests
 
@@ -73,14 +73,14 @@ The exact requirements are documented in [Client usage requirements](#client-usa
 
 ## File upload configuration and usage
 
-To enable file uploads from clients, you must both [configure support in the Apollo Router](#configure-file-upload-support-in-the-router) and [ensure client usage conforms to requirements](#client-usage-requirements).
+To enable file uploads from clients, you must both [configure support in the GraphOS Router](#configure-file-upload-support-in-the-router) and [ensure client usage conforms to requirements](#client-usage-requirements).
 
 ### Configure file upload support in the router
 
-By default, receiving client file uploads isn't enabled in the Apollo Router.
+By default, receiving client file uploads isn't enabled in the GraphOS Router.
 To enable file upload support, set the following fields in your `router.yaml` configuration file:
 
-```yaml title="router.yaml"
+```yaml title="router.yaml" showLineNumbers="false"
 preview_file_uploads:
   enabled: true
   protocols:
@@ -134,7 +134,7 @@ The following are attributes of the root [`preview_file_uploads`](#configure-fil
 <thead>
 <tr>
 <th>Attribute/ <br/> Description</th>
-<th>Default Value</th>
+<th>Default value</th>
 <th>Valid Values</th>
 </tr>
 </thead>
@@ -286,11 +286,11 @@ Custom clients can be implemented following the [spec documentation](https://git
 
 Without additional security, HTTP multipart requests can be exploited as part of [cross-site request forgery](https://owasp.org/www-community/attacks/csrf) (CSRF) attacks.
 
-The Apollo Router already has a mechanism to prevent these types of attacks, which is enabled by default. You should verify that your router hasn't disabled this mechanism before using file uploads. See [Cross-Site Request Forgery Prevention](../configuration/csrf) for details.
+The GraphOS Router already has a mechanism to prevent these types of attacks, which is enabled by default. You should verify that your router hasn't disabled this mechanism before using file uploads. See [Cross-Site Request Forgery Prevention](../configuration/csrf) for details.
 
 ## Metrics for file uploads
 
-Metrics in the Apollo Router for file uploads:
+Metrics in the GraphOS Router for file uploads:
 
 <table class="field-table metrics">
   <thead>
