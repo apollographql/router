@@ -812,10 +812,10 @@ impl SelectionSet {
                 &fragment,
                 /*directives*/ &Default::default(),
             );
-            Arc::make_mut(&mut optimized.selections).insert(fragment_selection.into());
+            optimized.add_local_selection(&fragment_selection.into())?;
         }
 
-        Arc::make_mut(&mut optimized.selections).extend_ref(&not_covered_so_far.selections);
+        optimized.add_local_selection_set(&not_covered_so_far)?;
         Ok(SelectionSet::make_selection_set(
             &self.schema,
             parent_type,

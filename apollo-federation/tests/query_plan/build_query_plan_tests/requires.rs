@@ -1,8 +1,6 @@
 mod include_skip;
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO will be fixed with selection set updates in https://apollographql.atlassian.net/browse/FED-241
 fn handles_simple_requires() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1304,8 +1302,6 @@ fn it_handes_diamond_shape_depedencies() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO will be fixed with selection set updates in https://apollographql.atlassian.net/browse/FED-241
 fn it_can_require_at_inaccessible_fields() {
     let planner = planner!(
         Subgraph1: r#"
