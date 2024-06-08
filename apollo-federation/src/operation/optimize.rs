@@ -847,7 +847,9 @@ impl Selection {
                     // Expand the fragment
                     let expanded_sub_selections =
                         fragment.selection_set.retain_fragments(fragments_to_keep)?;
-                    if *parent_type == fragment.spread.data().type_condition_position.clone() && fragment.spread.data().directives.is_empty() {
+                    if *parent_type == fragment.spread.data().type_condition_position.clone()
+                        && fragment.spread.data().directives.is_empty()
+                    {
                         // The fragment is of the same type as the parent, so we can just use
                         // the expanded sub-selections directly.
                         Ok(expanded_sub_selections.into())
@@ -994,7 +996,7 @@ impl NamedFragments {
                     &fragment.selection_set.type_position,
                     &fragments_to_keep,
                     &fragment.schema,
-                    NormalizeSelectionOption::NormalizeRecursively
+                    NormalizeSelectionOption::NormalizeRecursively,
                 )?;
         }
 
