@@ -493,6 +493,9 @@ impl<'a> QueryPlanningTraversal<'a> {
         }
         for node in nodes {
             let n = self.parameters.federated_query_graph.node_weight(*node)?;
+            if n.has_reachable_cross_subgraph_edges {
+                return Ok(false);
+            }
             let parent_ty = match &n.type_ {
                 QueryGraphNodeType::SchemaType(ty) => {
                     match CompositeTypeDefinitionPosition::try_from(ty.clone()) {
@@ -506,8 +509,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 .parameters
                 .federated_query_graph
                 .schema_by_source(&n.source)?;
-            if n.has_reachable_cross_subgraph_edges || !selection.can_rebase_on(&parent_ty, schema)
-            {
+            if !selection.can_rebase_on(&parent_ty, schema) {
                 return Ok(false);
             }
         }
