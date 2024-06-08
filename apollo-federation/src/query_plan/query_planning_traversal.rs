@@ -472,7 +472,25 @@ impl<'a> QueryPlanningTraversal<'a> {
         //   later condition is that `selection` is originally a supergraph selection, but that we're looking to apply "as-is" to a subgraph.
         //   But suppose it has a `... on I` where `I` is an interface. Then it's possible that `I` includes "more" types in the supergraph
         //   than in the subgraph, and so we might have to type-explode it. If so, we cannot use the selection "as-is".
-        let mut has_checked_inconsistent_abstract_types = false;
+        // PORT_NOTE: The JS code performs the last check lazily. Instead of that, this check is
+        // skipped if `nodes` is empty.
+        if !nodes.is_empty()
+            && selection.any_element(&mut |element| match element {
+                OpPathElement::InlineFragment(inline_fragment) => {
+                    match &inline_fragment.data().type_condition_position {
+                        Some(type_condition) => Ok(self
+                            .parameters
+                            .abstract_types_with_inconsistent_runtime_types
+                            .iter()
+                            .any(|ty| ty.type_name() == type_condition.type_name())),
+                        None => Ok(false),
+                    }
+                }
+                _ => Ok(false),
+            })?
+        {
+            return Ok(false);
+        }
         for node in nodes {
             let n = self.parameters.federated_query_graph.node_weight(*node)?;
             let parent_ty = match &n.type_ {
@@ -491,24 +509,6 @@ impl<'a> QueryPlanningTraversal<'a> {
             if n.has_reachable_cross_subgraph_edges || !selection.can_rebase_on(&parent_ty, schema)
             {
                 return Ok(false);
-            }
-            if !has_checked_inconsistent_abstract_types {
-                if selection.any_element(&mut |element| match element {
-                    OpPathElement::InlineFragment(inline_fragment) => {
-                        match &inline_fragment.data().type_condition_position {
-                            Some(type_condition) => Ok(self
-                                .parameters
-                                .abstract_types_with_inconsistent_runtime_types
-                                .iter()
-                                .any(|ty| ty.type_name() == type_condition.type_name())),
-                            None => Ok(false),
-                        }
-                    }
-                    _ => Ok(false),
-                })? {
-                    return Ok(false);
-                }
-                has_checked_inconsistent_abstract_types = true;
             }
         }
         Ok(true)
