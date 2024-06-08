@@ -472,29 +472,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         //   later condition is that `selection` is originally a supergraph selection, but that we're looking to apply "as-is" to a subgraph.
         //   But suppose it has a `... on I` where `I` is an interface. Then it's possible that `I` includes "more" types in the supergraph
         //   than in the subgraph, and so we might have to type-explode it. If so, we cannot use the selection "as-is".
-        let mut has_inconsistent_abstract_types: Option<bool> = None;
-        let mut check_has_inconsistent_runtime_types = || match has_inconsistent_abstract_types {
-            Some(has_inconsistent_abstract_types) => {
-                Ok::<bool, FederationError>(has_inconsistent_abstract_types)
-            }
-            None => {
-                let check_result = selection.any_element(&mut |element| match element {
-                    OpPathElement::InlineFragment(inline_fragment) => {
-                        match &inline_fragment.data().type_condition_position {
-                            Some(type_condition) => Ok(self
-                                .parameters
-                                .abstract_types_with_inconsistent_runtime_types
-                                .iter()
-                                .any(|ty| ty.type_name() == type_condition.type_name())),
-                            None => Ok(false),
-                        }
-                    }
-                    _ => Ok(false),
-                })?;
-                has_inconsistent_abstract_types = Some(check_result);
-                Ok(check_result)
-            }
-        };
+        let mut has_checked_inconsistent_abstract_types = false;
         for node in nodes {
             let n = self.parameters.federated_query_graph.node_weight(*node)?;
             if n.has_reachable_cross_subgraph_edges {
@@ -516,8 +494,23 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             if !selection.can_rebase_on(&parent_ty, schema)? {
                 return Ok(false);
             }
-            if check_has_inconsistent_runtime_types()? {
-                return Ok(false);
+            if !has_checked_inconsistent_abstract_types {
+                if selection.any_element(&mut |element| match element {
+                    OpPathElement::InlineFragment(inline_fragment) => {
+                        match &inline_fragment.data().type_condition_position {
+                            Some(type_condition) => Ok(self
+                                .parameters
+                                .abstract_types_with_inconsistent_runtime_types
+                                .iter()
+                                .any(|ty| ty.type_name() == type_condition.type_name())),
+                            None => Ok(false),
+                        }
+                    }
+                    _ => Ok(false),
+                })? {
+                    return Ok(false);
+                }
+                has_checked_inconsistent_abstract_types = true;
             }
         }
         Ok(true)
