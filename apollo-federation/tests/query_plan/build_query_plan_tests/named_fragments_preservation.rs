@@ -752,7 +752,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -769,7 +769,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -850,7 +850,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -867,7 +867,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -950,7 +950,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -967,7 +967,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1080,7 +1080,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1095,7 +1095,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1175,7 +1175,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1190,7 +1190,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1270,7 +1270,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1285,7 +1285,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
