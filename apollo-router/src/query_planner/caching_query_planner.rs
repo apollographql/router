@@ -85,9 +85,10 @@ fn init_query_plan_from_redis(
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
 ) -> Result<(), String> {
     if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
-        Arc::make_mut(plan)
-            .root
-            .init_parsed_operations(subgraph_schemas)
+        // Arc freshly deserialized from Redis should be unique, so this doesn’t clone:
+        let plan = Arc::make_mut(plan);
+        let root = Arc::make_mut(&mut plan.root);
+        root.init_parsed_operations(subgraph_schemas)
             .map_err(|e| format!("Invalid subgraph operation: {e}"))?
     }
     Ok(())
@@ -187,7 +188,7 @@ where
                             metadata,
                             plan_options,
                             config_mode: _,
-                            sdl: _,
+                            schema_id: _,
                             introspection: _,
                         },
                         _,
@@ -260,7 +261,7 @@ where
                 query: query.clone(),
                 operation: operation.clone(),
                 hash: doc.hash.clone(),
-                sdl: Arc::clone(&self.schema.raw_sdl),
+                schema_id: Arc::clone(&self.schema.schema_id),
                 metadata,
                 plan_options,
                 config_mode: self.config_mode.clone(),
@@ -448,7 +449,7 @@ where
             query: request.query.clone(),
             operation: request.operation_name.to_owned(),
             hash: doc.hash.clone(),
-            sdl: Arc::clone(&self.schema.raw_sdl),
+            schema_id: Arc::clone(&self.schema.schema_id),
             metadata,
             plan_options,
             config_mode: self.config_mode.clone(),
@@ -592,7 +593,7 @@ fn stats_report_key_hash(stats_report_key: &str) -> String {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct CachingQueryKey {
     pub(crate) query: String,
-    pub(crate) sdl: Arc<String>,
+    pub(crate) schema_id: Arc<String>,
     pub(crate) operation: Option<String>,
     pub(crate) hash: Arc<QueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
@@ -619,7 +620,7 @@ impl std::fmt::Display for CachingQueryKey {
         );
         hasher
             .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
-        hasher.update(&serde_json::to_vec(&self.sdl).expect("serialization should not fail"));
+        hasher.update(&*self.schema_id);
         hasher.update([self.introspection as u8]);
         let metadata = hex::encode(hasher.finalize());
 
@@ -633,7 +634,7 @@ impl std::fmt::Display for CachingQueryKey {
 
 impl Hash for CachingQueryKey {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.sdl.hash(state);
+        self.schema_id.hash(state);
         self.hash.0.hash(state);
         self.operation.hash(state);
         self.metadata.hash(state);
