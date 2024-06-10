@@ -492,6 +492,7 @@ commands:
           environment:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
+            RUST_BACKTRACE: full
           command: xtask test --workspace --locked --features ci
       - run:
           name: Delete large files from cache
