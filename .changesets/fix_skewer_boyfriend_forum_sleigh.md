@@ -2,13 +2,13 @@
 
 Updated our underlying `apollo-rs` dependency on our `apollo-compiler` crate to bring in two nice improvements:
 
-- **Fix validation performance bug
+- **Fix validation performance bug**
 
   Adds a cache in fragment spread validation, fixing a situation where validating a query
   with many fragment spreads against a schema with many interfaces could take multiple
   seconds to validate.
 
-- **Remove ariadne byte/char mapping
+- **Remove ariadne byte/char mapping**
 
   Generating JSON or CLI reports for apollo-compiler diagnostics used a translation layer
   between byte offsets and character offsets, which cost some computation and memory
