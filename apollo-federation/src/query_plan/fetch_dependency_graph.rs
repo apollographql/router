@@ -966,7 +966,7 @@ impl FetchDependencyGraph {
     /// graphs between fetch nodes will almost surely never be huge and query planning performance
     /// is not paramount so this is almost surely "good enough".
     fn reduce(&mut self) {
-        if std::mem::replace(&mut self.is_reduced, true) {
+        if self.is_reduced {
             return;
         }
 
@@ -982,6 +982,8 @@ impl FetchDependencyGraph {
             self.on_modification();
             self.graph.remove_edge(edge);
         }
+
+        self.is_reduced = true;
     }
 
     /// Reduce the graph (see `reduce`) and then do a some additional traversals to optimize for:
@@ -990,7 +992,7 @@ impl FetchDependencyGraph {
     ///     no dependents and we can just remove them.
     ///  2) fetches that are made in parallel to the same subgraph and the same path, and merge those.
     fn reduce_and_optimize(&mut self) -> Result<(), FederationError> {
-        if std::mem::replace(&mut self.is_optimized, true) {
+        if self.is_optimized {
             return Ok(());
         }
 
@@ -1004,6 +1006,7 @@ impl FetchDependencyGraph {
 
         self.merge_fetches_to_same_subgraph_and_same_inputs()?;
 
+        self.is_optimized = true;
         Ok(())
     }
 
@@ -1014,11 +1017,11 @@ impl FetchDependencyGraph {
 
     /// - Calls `on_modification` if necessary.
     fn remove_empty_nodes(&mut self) {
-        // Note: usually, empty groups are due to temporary groups created during the handling of
+        // Note: usually, empty nodes are due to temporary nodes created during the handling of
         // @require and note needed. There is a special case with @defer however whereby everything
         // in a query is deferred (not very useful in practice, but not disallowed by the spec),
-        // and in that case we will end up with an empty root group. In that case, we don't remove
-        // that group, but instead will recognize that case when processing groups later.
+        // and in that case we will end up with an empty root node. In that case, we don't remove
+        // that node, but instead will recognize that case when processing nodes later.
 
         let is_removable = |node: &FetchDependencyGraphNode| {
             node.selection_set.selection_set.selections.is_empty() && !self.is_root_node(node)
@@ -1039,44 +1042,41 @@ impl FetchDependencyGraph {
     fn remove_useless_nodes(&mut self) -> Result<(), FederationError> {
         // First, collect the nodes that are useless and can be removed.
         // At the same time, their children should be adopted by (or "relocated to") their grandparents.
-        let mut to_relocate: Vec<_> = Vec::new();
+        let mut to_relocate = vec![];
         let mut is_removable = |node_index, node: &FetchDependencyGraphNode| {
             if !self.is_useless_node(node_index, node)? {
                 return Ok::<bool, FederationError>(false); // not removable
             }
 
-            // In general, removing a group is a bit tricky because we need to deal with
-            // the fact that the group can have multiple parents, and we don't have the
+            // In general, removing a node is a bit tricky because we need to deal with
+            // the fact that the node can have multiple parents, and we don't have the
             // "path in parent" in all cases. To keep thing relatively easily, we only
             // handle the following cases (other cases will remain non-optimal, but
             // hopefully this handle all the cases we care about in practice):
-            //   1. if the group has no children. In which case we can just remove it with
+            //   1. if the node has no children. In which case we can just remove it with
             //      no ceremony.
-            //   2. if the group has only a single parent and we have a path to that
+            //   2. if the node has only a single parent and we have a path to that
             //      parent.
 
-            let children = self.children_of(node_index);
-            if children.count() == 0 {
+            let mut children_iter = self.children_of(node_index);
+            if children_iter.next().is_none() {
                 return Ok(true); // remove it
             }
 
-            // Note: `Edges` iterator doesn't seem to support `split_first`, directly.
-            let parents: Vec<_> = self.parents_relations_of(node_index).collect();
-            if let Some((
-                ParentRelation {
-                    parent_node_id,
-                    path_in_parent,
-                },
-                rest,
-            )) = parents.split_first()
+            let mut parents_iter = self.parents_relations_of(node_index);
+            if let Some(ParentRelation {
+                parent_node_id,
+                path_in_parent,
+            }) = parents_iter.next()
             {
-                if !rest.is_empty() {
-                    return Ok(false); // not removable
+                if parents_iter.next().is_some() {
+                    // More than one parents => not removable
+                    return Ok(false);
                 }
                 let Some(path_in_parent) = path_in_parent else {
                     return Ok(false); // not removable
                 };
-                to_relocate.push((node_index, *parent_node_id, path_in_parent.clone()));
+                to_relocate.push((node_index, parent_node_id, path_in_parent.clone()));
                 Ok(true) // remove it
             } else {
                 // orphan node => ignore (don't bother to remove)
@@ -1104,11 +1104,11 @@ impl FetchDependencyGraph {
         // Actually remove the nodes
         self.retain_nodes(|node_index| !to_remove.contains(node_index));
 
-        Ok(()) // Done
+        Ok(())
     }
 
-    /// If a group is such that everything is fetches is already included in the inputs, then
-    /// this group does useless fetches.
+    /// If everything fetched by a node is already part of its inputs, we already have all the data
+    /// and there is no need to do the fetch.
     // PORT_NOTE: The JS version memoize the result on the node itself.
     fn is_useless_node(
         &self,
@@ -1144,7 +1144,7 @@ impl FetchDependencyGraph {
                 .map(|schema| schema.clone())
         };
 
-        // For groups that fetches from an @interfaceObject, we can sometimes have something like
+        // For nodes that fetches from an @interfaceObject, we can sometimes have something like
         //   { ... on Book { id } } => { ... on Product { id } }
         // where `Book` is an implementation of interface `Product`.
         // And that is because while only "books" are concerned by this fetch, the `Book` type is
@@ -1340,14 +1340,14 @@ impl FetchDependencyGraph {
 
                     // We're working on a minimal graph (we've done a transitive reduction
                     // beforehand) and we need to keep the graph minimal as post-reduce steps
-                    // (the `process` method) rely on it. But merging 2 groups _can_ break
+                    // (the `process` method) rely on it. But merging 2 nodes _can_ break
                     // minimality.
                     // Say we have:
                     //   0 ------
                     //            \
                     //             4
                     //   1 -- 3 --/
-                    // and we merge groups 0 and 1 (and let's call the result "2"), then we now
+                    // and we merge nodes 0 and 1 (and let's call the result "2"), then we now
                     // have:
                     //      ------
                     //     /       \
@@ -1367,7 +1367,7 @@ impl FetchDependencyGraph {
             }
         }
 
-        // Now we recurse to the sub-groups.
+        // Now we recurse to the sub-nodes.
         for c in children_nodes {
             self.recursive_merge_child_fetches_for_same_subgraph_and_path(c)?;
         }
@@ -1386,15 +1386,15 @@ impl FetchDependencyGraph {
         // In practice, this method merges any 2 fetches that are to the same subgraph and same
         // mergeAt, and have the exact same inputs.
 
-        // To find which groups are to the same subgraph and mergeAt somewhat efficiently, we
-        // generate a simple string key from each group subgraph name and mergeAt. We do "sanitize"
+        // To find which nodes are to the same subgraph and mergeAt somewhat efficiently, we
+        // generate a simple string key from each node subgraph name and mergeAt. We do "sanitize"
         // subgraph name, but have no worries for `mergeAt` since it contains either number of
         // field names, and the later is restricted by graphQL so as to not be an issue.
         let mut by_subgraphs = MultiMap::new();
         for node_index in self.graph.node_indices() {
             let node = self.node_weight(node_index)?;
-            // We exclude groups without inputs because that's what we look for. In practice, this
-            // mostly just exclude root groups, which we don't really want to bother with anyway.
+            // We exclude nodes without inputs because that's what we look for. In practice, this
+            // mostly just exclude root nodes, which we don't really want to bother with anyway.
             let Some(key) = node.subgraph_and_merge_at_key() else {
                 continue;
             };
@@ -1987,7 +1987,7 @@ impl FetchDependencyGraph {
     /// Merges `merged_id` into `node_id`, without knowing the dependencies between those two nodes.
     /// - Both `node_id` and `merged_id` must be in the same subgraph and have the same `merge_at`.
     // Note that it is up to the caller to know if such merging is desirable. In particular, if
-    // both group have completely different inputs, merging them, which also merges their
+    // both nodes have completely different inputs, merging them, which also merges their
     // dependencies, might not be judicious for the optimality of the query plan.
     // Assumptions:
     // - node_id's defer_ref == merged_id's defer_ref
