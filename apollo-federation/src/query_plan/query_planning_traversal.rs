@@ -49,7 +49,7 @@ use crate::schema::ValidFederationSchema;
 // runtime (introducing the new field `head_must_be_root`).
 // NOTE: `head_must_be_root` can be deduced from the `head` node's type, so we might be able to
 //       remove it.
-pub(crate) struct QueryPlanningParameters {
+pub(crate) struct QueryPlanningParameters<'a> {
     /// The supergraph schema that generated the federated query graph.
     pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph used for query planning.
@@ -70,12 +70,12 @@ pub(crate) struct QueryPlanningParameters {
         Arc<IndexSet<AbstractTypeDefinitionPosition>>,
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
-    pub(crate) statistics: QueryPlanningStatistics,
+    pub(crate) statistics: &'a QueryPlanningStatistics,
 }
 
-pub(crate) struct QueryPlanningTraversal<'a> {
+pub(crate) struct QueryPlanningTraversal<'a, 'b> {
     /// The parameters given to query planning.
-    parameters: &'a QueryPlanningParameters,
+    parameters: &'a QueryPlanningParameters<'b>,
     /// The root kind of the operation.
     root_kind: SchemaRootDefinitionKind,
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
@@ -151,7 +151,7 @@ impl BestQueryPlanInfo {
     }
 }
 
-impl<'a> QueryPlanningTraversal<'a> {
+impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     pub fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
@@ -780,6 +780,14 @@ impl<'a> QueryPlanningTraversal<'a> {
 
             // debug!("Reduced plans to consider to {plan_count} plans");
         }
+
+        if self.is_top_level {
+            let evaluated = &self.parameters.statistics.evaluated_plan_count;
+            evaluated.set(evaluated.get() + plan_count);
+        } else {
+            // We're resolving a sub-plan for an edge condition,
+            // and we don't want to count those as "evaluated plans".
+        }
     }
 
     /// Removes the right-most option of the first branch and moves that branch to its new place
@@ -918,7 +926,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 .abstract_types_with_inconsistent_runtime_types
                 .clone(),
             config: self.parameters.config.clone(),
-            statistics: self.parameters.statistics.clone(),
+            statistics: self.parameters.statistics,
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
@@ -942,7 +950,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     }
 }
 
-impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
+impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'a, 'b> {
     fn add_to_plan(&mut self, plan_info: &PlanInfo, tree: Arc<OpPathTree>) -> PlanInfo {
         let mut updated_graph = plan_info.fetch_dependency_graph.clone();
         let result = self.updated_dependency_graph(&mut updated_graph, &tree);
@@ -999,7 +1007,7 @@ impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
 //            The same would be infeasible to implement in Rust due to the cyclic references.
 //            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
-impl<'a> ConditionResolver for QueryPlanningTraversal<'a> {
+impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
     fn resolve(
         &mut self,
