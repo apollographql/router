@@ -1098,6 +1098,7 @@ mod tests {
 
     use super::*;
     use crate::metrics::FutureMetricsExt as _;
+    use crate::services::subgraph;
     use crate::services::supergraph;
     use crate::spec::query::subselections::SubSelectionKey;
     use crate::spec::query::subselections::SubSelectionValue;
@@ -1653,5 +1654,58 @@ mod tests {
         assert!(response.response.status().is_success());
         let response = response.next_response().await.unwrap();
         assert!(response.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_rust_mode_subgraph_operation_serialization() {
+        let subgraph_queries = Arc::new(tokio::sync::Mutex::new(String::new()));
+        let subgraph_queries2 = Arc::clone(&subgraph_queries);
+        let mut harness = crate::TestHarness::builder()
+            // auth is not relevant here, but supergraph.graphql uses join/v0.1
+            // which is not supported by the Rust query planner
+            .schema(include_str!("../../tests/fixtures/supergraph-auth.graphql"))
+            .configuration_json(serde_json::json!({
+                "experimental_query_planner_mode": "new",
+            }))
+            .unwrap()
+            .subgraph_hook(move |_name, _default| {
+                let subgraph_queries = Arc::clone(&subgraph_queries);
+                tower::service_fn(move |request: subgraph::Request| {
+                    let subgraph_queries = Arc::clone(&subgraph_queries);
+                    async move {
+                        let query = request
+                            .subgraph_request
+                            .body()
+                            .query
+                            .as_deref()
+                            .unwrap_or_default();
+                        let mut queries = subgraph_queries.lock().await;
+                        queries.push_str(query);
+                        queries.push('\n');
+                        Ok(subgraph::Response::builder()
+                            .extensions(crate::json_ext::Object::new())
+                            .context(request.context)
+                            .build())
+                    }
+                })
+                .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("{ topProducts { name }}")
+            .build()
+            .unwrap();
+        let mut response = harness.ready().await.unwrap().call(request).await.unwrap();
+        assert!(response.response.status().is_success());
+        let response = response.next_response().await.unwrap();
+        assert!(response.errors.is_empty());
+
+        let subgraph_queries = subgraph_queries2.lock().await;
+        insta::assert_snapshot!(*subgraph_queries, @r###"
+        { topProducts { name } }
+        "###)
     }
 }
