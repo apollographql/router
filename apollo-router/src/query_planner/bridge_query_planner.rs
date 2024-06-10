@@ -802,13 +802,13 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
         let metadata = context
             .extensions()
-            .lock()
-            .get::<CacheKeyMetadata>()
-            .cloned()
-            .unwrap_or_default();
+            .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned().unwrap_or_default());
         let this = self.clone();
         let fut = async move {
-            let mut doc = match context.extensions().lock().get::<ParsedDocument>().cloned() {
+            let mut doc = match context
+                .extensions()
+                .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
+            {
                 None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
                 Some(d) => d,
             };
@@ -839,8 +839,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     });
                     context
                         .extensions()
-                        .lock()
-                        .insert::<ParsedDocument>(doc.clone());
+                        .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
                 }
             }
 
@@ -872,16 +871,17 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 Err(e) => {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {
-                            context
-                                .extensions()
-                                .lock()
-                                .insert(Arc::new(pe.usage_reporting.clone()));
+                            context.extensions().with_lock(|mut lock| {
+                                lock.insert(Arc::new(pe.usage_reporting.clone()))
+                            });
                         }
                         QueryPlannerError::SpecError(e) => {
-                            context.extensions().lock().insert(Arc::new(UsageReporting {
-                                stats_report_key: e.get_error_key().to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            }));
+                            context.extensions().with_lock(|mut lock| {
+                                lock.insert(Arc::new(UsageReporting {
+                                    stats_report_key: e.get_error_key().to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                }))
+                            });
                         }
                         _ => (),
                     }

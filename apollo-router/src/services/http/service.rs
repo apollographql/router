@@ -296,9 +296,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let signing_params = context
             .extensions()
-            .lock()
-            .get::<Arc<SigningParamsConfig>>()
-            .cloned();
+            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
 
         Box::pin(async move {
             let http_request = if let Some(signing_params) = signing_params {
