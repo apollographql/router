@@ -1597,30 +1597,6 @@ expression: "&schema"
         }
       ]
     },
-    "DemandControlConfig": {
-      "additionalProperties": false,
-      "description": "Demand control configuration",
-      "properties": {
-        "enabled": {
-          "description": "Enable demand control",
-          "type": "boolean"
-        },
-        "mode": {
-          "$ref": "#/definitions/Mode",
-          "description": "#/definitions/Mode"
-        },
-        "strategy": {
-          "$ref": "#/definitions/StrategyConfig",
-          "description": "#/definitions/StrategyConfig"
-        }
-      },
-      "required": [
-        "enabled",
-        "mode",
-        "strategy"
-      ],
-      "type": "object"
-    },
     "Directives": {
       "properties": {
         "dry_run": {
@@ -3158,13 +3134,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "Mode": {
-      "enum": [
-        "measure",
-        "enforce"
-      ],
-      "type": "string"
-    },
     "MultipartRequest": {
       "additionalProperties": false,
       "description": "Configuration for a multipart request for file uploads.\n\nThis protocol conforms to [jaydenseric's multipart spec](https://github.com/jaydenseric/graphql-multipart-request-spec)",
@@ -4495,62 +4464,6 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "StrategyConfig": {
-      "description": "Algorithm for calculating the cost of an incoming query.",
-      "oneOf": [
-        {
-          "additionalProperties": false,
-          "description": "A simple, statically-defined cost mapping for operations and types.\n\nOperation costs: - Mutation: 10 - Query: 0 - Subscription 0\n\nType costs: - Object: 1 - Interface: 1 - Union: 1 - Scalar: 0 - Enum: 0",
-          "properties": {
-            "static_estimated": {
-              "additionalProperties": false,
-              "properties": {
-                "max": {
-                  "description": "The maximum cost of a query",
-                  "format": "double",
-                  "type": "number"
-                }
-              },
-              "required": [
-                "max"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "static_estimated"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "properties": {
-            "test": {
-              "additionalProperties": false,
-              "properties": {
-                "error": {
-                  "$ref": "#/definitions/TestError",
-                  "description": "#/definitions/TestError"
-                },
-                "stage": {
-                  "$ref": "#/definitions/TestStage",
-                  "description": "#/definitions/TestStage"
-                }
-              },
-              "required": [
-                "error",
-                "stage"
-              ],
-              "type": "object"
-            }
-          },
-          "required": [
-            "test"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Subgraph": {
       "additionalProperties": false,
       "description": "Per subgraph configuration for entity caching",
@@ -5689,22 +5602,6 @@ expression: "&schema"
         }
       ]
     },
-    "TestError": {
-      "enum": [
-        "estimated_cost_too_expensive",
-        "actual_cost_too_expensive"
-      ],
-      "type": "string"
-    },
-    "TestStage": {
-      "enum": [
-        "execution_request",
-        "execution_response",
-        "subgraph_request",
-        "subgraph_response"
-      ],
-      "type": "string"
-    },
     "Tls": {
       "additionalProperties": false,
       "description": "TLS related configuration options.",
@@ -6515,10 +6412,6 @@ expression: "&schema"
     "experimental_chaos": {
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
-    },
-    "experimental_demand_control": {
-      "$ref": "#/definitions/DemandControlConfig",
-      "description": "#/definitions/DemandControlConfig"
     },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",

@@ -604,7 +604,10 @@ impl FetchNode {
         &self.operation_kind
     }
 
-    pub(crate) fn hash_subquery(&mut self, subgraph_schemas: &SubgraphSchemas)-> Result<(), ValidationErrors> {
+    pub(crate) fn hash_subquery(
+        &mut self,
+        subgraph_schemas: &SubgraphSchemas,
+    ) -> Result<(), ValidationErrors> {
         let doc = self.parsed_operation(subgraph_schemas)?;
         let schema = &subgraph_schemas[self.service_name.as_str()];
 

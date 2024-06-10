@@ -1130,48 +1130,6 @@ mod test {
     }
 
     #[test]
-    fn subgraph_static() {
-        let selector = SubgraphSelector::Static("test_static".to_string());
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::SubgraphRequest::fake_builder()
-                        .supergraph_request(Arc::new(
-                            http::Request::builder()
-                                .body(graphql::Request::builder().build())
-                                .unwrap()
-                        ))
-                        .build()
-                )
-                .unwrap(),
-            "test_static".into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
-    }
-
-    #[test]
-    fn subgraph_static_field() {
-        let selector = SubgraphSelector::StaticField {
-            r#static: "test_static".to_string().into(),
-        };
-        assert_eq!(
-            selector
-                .on_request(
-                    &crate::services::SubgraphRequest::fake_builder()
-                        .supergraph_request(Arc::new(
-                            http::Request::builder()
-                                .body(graphql::Request::builder().build())
-                                .unwrap()
-                        ))
-                        .build()
-                )
-                .unwrap(),
-            "test_static".into()
-        );
-        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
-    }
-
-    #[test]
     fn subgraph_supergraph_request_header() {
         let selector = SubgraphSelector::SupergraphRequestHeader {
             supergraph_request_header: "header_key".to_string(),

@@ -1,6 +1,0 @@
-{
-    anotherScalar
-    someObjects @include(if: false) {
-        field1
-    }
-}

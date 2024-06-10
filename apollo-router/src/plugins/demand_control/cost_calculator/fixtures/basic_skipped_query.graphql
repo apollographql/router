@@ -1,5 +1,0 @@
-{
-    someObjects @skip(if: true) {
-        field1
-    }
-}

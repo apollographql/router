@@ -1,7 +1,0 @@
-experimental_demand_control:
-  enabled: true
-  mode: enforce
-  strategy:
-    test:
-      stage: subgraph_request
-      error: estimated_cost_too_expensive

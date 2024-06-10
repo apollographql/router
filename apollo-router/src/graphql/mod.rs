@@ -24,7 +24,6 @@ use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map as JsonMap;
 use serde_json_bytes::Value;
-pub(crate) use visitor::ResponseVisitor;
 
 use crate::error::FetchError;
 use crate::json_ext::Object;

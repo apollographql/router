@@ -1,7 +1,0 @@
-{
-    someObjects {
-        innerList {
-            field2
-        }
-    }
-}
