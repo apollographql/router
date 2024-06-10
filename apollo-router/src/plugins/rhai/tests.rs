@@ -22,6 +22,7 @@ use super::process_error;
 use super::subgraph;
 use super::PathBuf;
 use super::Rhai;
+use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -580,6 +581,21 @@ fn it_can_create_unix_now() {
 }
 
 #[test]
+fn it_can_create_unix_ms_now() {
+    let engine = new_rhai_test_engine();
+    let st = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("can get system time")
+        .as_millis() as i64;
+    let unix_ms_now: i64 = engine
+        .eval(r#"unix_ms_now()"#)
+        .expect("can get unix_ms_now() timestamp");
+    // Always difficult to do timing tests. unix_ms_now() should execute within a second of st,
+    // so...
+    assert!(st <= unix_ms_now && unix_ms_now <= st + 1000);
+}
+
+#[test]
 fn it_can_generate_uuid() {
     let engine = new_rhai_test_engine();
     let uuid_v4_rhai: String = engine.eval(r#"uuid_v4()"#).expect("can get uuid");
@@ -694,7 +710,7 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
     assert_eq!(
         processed_error.body,
         Some(
-            crate::response::Response::builder()
+            graphql::Response::builder()
                 .errors(vec![{
                     Error::builder()
                         .message("I have raised a 403")
@@ -717,7 +733,7 @@ async fn it_can_process_om_subgraph_200_with_graphql_data() {
     assert_eq!(
         processed_error.body,
         Some(
-            crate::response::Response::builder()
+            graphql::Response::builder()
                 .data(serde_json::json!({ "name": "Ada Lovelace"}))
                 .build()
         )

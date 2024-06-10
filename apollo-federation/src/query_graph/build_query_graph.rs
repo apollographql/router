@@ -63,6 +63,7 @@ pub fn build_federated_query_graph(
         current_source: NodeStr::new(""),
         graph: Default::default(),
         sources: Default::default(),
+        subgraphs_by_name: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
@@ -96,6 +97,7 @@ pub fn build_query_graph(
         current_source: NodeStr::new(""),
         graph: Default::default(),
         sources: Default::default(),
+        subgraphs_by_name: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
@@ -975,6 +977,7 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn build(mut self) -> Result<QueryGraph, FederationError> {
+        self.copy_subgraphs();
         self.add_federated_root_nodes()?;
         self.copy_types_to_nodes()?;
         self.add_root_edges()?;
@@ -990,6 +993,18 @@ impl FederatedQueryGraphBuilder {
         // This method adds no nodes/edges, but just precomputes followup edge information.
         self.precompute_non_trivial_followup_edges()?;
         Ok(self.base.build())
+    }
+
+    fn copy_subgraphs(&mut self) {
+        for (source, schema) in &self.base.query_graph.sources {
+            if *source == self.base.query_graph.current_source {
+                continue;
+            }
+            self.base
+                .query_graph
+                .subgraphs_by_name
+                .insert(source.clone(), schema.clone());
+        }
     }
 
     fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {

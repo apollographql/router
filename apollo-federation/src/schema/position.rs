@@ -42,6 +42,11 @@ use crate::schema::referencer::ScalarTypeReferencers;
 use crate::schema::referencer::UnionTypeReferencers;
 use crate::schema::FederationSchema;
 
+// This is the "captures" trick for dealing with return position impl trait (RPIT), as noted in
+// https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html#the-captures-trick
+pub(crate) trait Captures<U> {}
+impl<T: ?Sized, U> Captures<U> for T {}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
@@ -807,6 +812,23 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
         }
     }
 
+    pub(crate) fn fields<'a>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<
+        Box<dyn Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition> + 'a>,
+        FederationError,
+    > {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
+                Ok(Box::new(type_.fields(schema)?.map(|field| field.into())))
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
+                Ok(Box::new(type_.fields(schema)?.map(|field| field.into())))
+            }
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -976,11 +998,7 @@ impl FieldDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Option<&'schema Component<FieldDefinition>> {
-        match self {
-            FieldDefinitionPosition::Object(field) => field.try_get(schema),
-            FieldDefinitionPosition::Interface(field) => field.try_get(schema),
-            FieldDefinitionPosition::Union(field) => field.try_get(schema),
-        }
+        self.get(schema).ok()
     }
 }
 
@@ -1042,6 +1060,13 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.get(schema),
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.get(schema),
         }
+    }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        self.get(schema).ok()
     }
 
     pub(crate) fn insert_directive(
@@ -1813,6 +1838,23 @@ impl ObjectTypeDefinitionPosition {
 
     pub(crate) fn introspection_type_field(&self) -> ObjectFieldDefinitionPosition {
         self.field(name!("__type"))
+    }
+
+    // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
+    // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
+    // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
+    pub(crate) fn fields<'a>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<
+        impl Iterator<Item = ObjectFieldDefinitionPosition> + Captures<&'a ()>,
+        FederationError,
+    > {
+        Ok(self
+            .get(schema)?
+            .fields
+            .keys()
+            .map(|name| self.field(name.clone())))
     }
 
     pub(crate) fn get<'schema>(
@@ -3128,6 +3170,23 @@ impl InterfaceTypeDefinitionPosition {
 
     pub(crate) fn introspection_typename_field(&self) -> InterfaceFieldDefinitionPosition {
         self.field(INTROSPECTION_TYPENAME_FIELD_NAME.clone())
+    }
+
+    // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
+    // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
+    // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
+    pub(crate) fn fields<'a>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<
+        impl Iterator<Item = InterfaceFieldDefinitionPosition> + Captures<&'a ()>,
+        FederationError,
+    > {
+        Ok(self
+            .get(schema)?
+            .fields
+            .keys()
+            .map(|name| self.field(name.clone())))
     }
 
     pub(crate) fn get<'schema>(

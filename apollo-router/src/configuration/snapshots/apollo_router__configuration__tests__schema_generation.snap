@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -1578,6 +1579,14 @@ expression: "&schema"
           "default": "https://usage-reporting.api.apollographql.com/",
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
           "type": "string"
+        },
+        "experimental_otlp_tracing_protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "experimental_otlp_tracing_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
         },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
@@ -5030,6 +5039,20 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "Apollo Studio operation id",
+          "properties": {
+            "studio_operation_id": {
+              "description": "Apollo Studio operation id",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "studio_operation_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A value from context.",
           "properties": {
             "default": {
@@ -6880,13 +6903,6 @@ expression: "&schema"
           "description": "Datadog trace ID, a u64.",
           "enum": [
             "datadog"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Apollo Studio trace id",
-          "enum": [
-            "apollo"
           ],
           "type": "string"
         }

@@ -1,10 +1,8 @@
 #[test]
-#[should_panic(expected = r#"Directive "@test" has not been pre-inserted"#)]
-// TODO: investigate this failure
 fn fragment_with_intersecting_parent_type_and_directive_condition() {
     let planner = planner!(
         A: r#"
-          directive @test on FRAGMENT_SPREAD
+          directive @test on INLINE_FRAGMENT
           type Query {
             i: I
           }
@@ -21,7 +19,7 @@ fn fragment_with_intersecting_parent_type_and_directive_condition() {
           }
         "#,
         B: r#"
-          directive @test on FRAGMENT_SPREAD
+          directive @test on INLINE_FRAGMENT
           type Query {
             i2s: [I2]
           }
@@ -74,12 +72,10 @@ fn fragment_with_intersecting_parent_type_and_directive_condition() {
 }
 
 #[test]
-#[should_panic(expected = r#"Directive "@test" has not been pre-inserted"#)]
-// TODO: investigate this failure
 fn nested_fragment_with_interseting_parent_type_and_directive_condition() {
     let planner = planner!(
         A: r#"
-          directive @test on FRAGMENT_SPREAD
+          directive @test on INLINE_FRAGMENT
           type Query {
             i: I
           }
@@ -96,7 +92,7 @@ fn nested_fragment_with_interseting_parent_type_and_directive_condition() {
           }
         "#,
         B: r#"
-          directive @test on FRAGMENT_SPREAD
+          directive @test on INLINE_FRAGMENT
           type Query {
             i2s: [I2]
           }
