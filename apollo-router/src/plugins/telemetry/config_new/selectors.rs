@@ -1138,7 +1138,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1146,6 +1146,29 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn subgraph_static_field() {
+        let selector = SubgraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .supergraph_request(Arc::new(
+                            http::Request::builder()
+                                .body(graphql::Request::builder().build())
+                                .unwrap()
+                        ))
+                        .build()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1162,7 +1185,7 @@ mod test {
                         .supergraph_request(Arc::new(
                             http::Request::builder()
                                 .header("header_key", "header_value")
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()

@@ -18,6 +18,7 @@ use super::schema_aware_response::SchemaAwareResponse;
 use super::schema_aware_response::TypedValue;
 use super::DemandControlError;
 use crate::graphql::Response;
+use crate::graphql::ResponseVisitor;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::DeferredNode;
