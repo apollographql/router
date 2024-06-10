@@ -918,7 +918,6 @@ type User
         )
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
-        // TODO: This is the current output, but it's wrong: it's not fetching `vendor.name` at all.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
@@ -937,76 +936,47 @@ type User
                 }
               }
             },
-            Parallel {
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Movie {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Movie {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
+            Flatten(path: "bestRatedProducts.@") {
+              Fetch(service: "products") {
+                {
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                  ... on Movie {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Book {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
+                  }
+                  ... on Movie {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
+                  }
+                }
               },
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Book {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Book {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
-                    }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
-                    }
-                  },
-                },
+            },
+            Flatten(path: "bestRatedProducts.@.vendor") {
+              Fetch(service: "accounts") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    name
+                  }
+                }
               },
             },
           },

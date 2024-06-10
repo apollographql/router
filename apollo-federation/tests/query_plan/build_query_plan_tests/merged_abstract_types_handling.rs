@@ -770,8 +770,6 @@ fn handles_case_of_key_chains_in_parallel_requires() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
     let planner = planner!(
         Subgraph1: r#"
