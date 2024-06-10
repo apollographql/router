@@ -64,7 +64,7 @@ fn it_preservers_aliased_typename() {
 }
 
 #[test]
-#[should_panic(expected = "Invalid empty selection set")]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn it_does_not_needlessly_consider_options_for_typename() {
     let planner = planner!(

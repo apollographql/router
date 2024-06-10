@@ -5,17 +5,17 @@ fn handles_mix_of_fragments_indirection_and_unions() {
           type Query {
             parent: Parent
           }
-  
+
           union CatOrPerson = Cat | Parent | Child
-  
+
           type Parent {
             childs: [Child]
           }
-  
+
           type Child {
             id: ID!
           }
-  
+
           type Cat {
             name: String
           }
@@ -29,15 +29,15 @@ fn handles_mix_of_fragments_indirection_and_unions() {
               ...F_indirection1_parent
             }
           }
-  
+
           fragment F_indirection1_parent on Parent {
             ...F_indirection2_catOrPerson
           }
-  
+
           fragment F_indirection2_catOrPerson on CatOrPerson {
             ...F_catOrPerson
           }
-  
+
           fragment F_catOrPerson on CatOrPerson {
             __typename
             ... on Cat {
@@ -70,7 +70,7 @@ fn handles_mix_of_fragments_indirection_and_unions() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
+// #[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure
 fn another_mix_of_fragments_indirection_and_unions() {
     // This tests that the issue reported on https://github.com/apollographql/router/issues/3172 is resolved.
@@ -80,31 +80,31 @@ fn another_mix_of_fragments_indirection_and_unions() {
           type Query {
             owner: Owner!
           }
-  
+
           interface OItf {
             id: ID!
             v0: String!
           }
-  
+
           type Owner implements OItf {
             id: ID!
             v0: String!
             u: [U]
           }
-  
+
           union U = T1 | T2
-  
+
           interface I {
             id1: ID!
             id2: ID!
           }
-  
+
           type T1 implements I {
             id1: ID!
             id2: ID!
             owner: Owner!
           }
-  
+
           type T2 implements I {
             id1: ID!
             id2: ID!
@@ -126,7 +126,7 @@ fn another_mix_of_fragments_indirection_and_unions() {
               }
             }
           }
-  
+
           fragment Fragment1 on T1 {
             owner {
               ... on Owner {
@@ -134,16 +134,16 @@ fn another_mix_of_fragments_indirection_and_unions() {
               }
             }
           }
-  
+
           fragment Fragment2 on T2 {
             ...Fragment4
             id1
           }
-  
+
           fragment Fragment3 on OItf {
             v0
           }
-  
+
           fragment Fragment4 on I {
             id1
             id2
@@ -169,7 +169,7 @@ fn another_mix_of_fragments_indirection_and_unions() {
                 }
               }
             }
-            
+
             fragment Fragment4 on I {
               __typename
               id1
@@ -195,7 +195,7 @@ fn another_mix_of_fragments_indirection_and_unions() {
               }
             }
           }
-  
+
           fragment Fragment1 on T1 {
             owner {
               ... on Owner {
@@ -203,16 +203,16 @@ fn another_mix_of_fragments_indirection_and_unions() {
               }
             }
           }
-  
+
           fragment Fragment2 on T2 {
             ...Fragment4
             id1
           }
-  
+
           fragment Fragment3 on OItf {
             v0
           }
-  
+
           fragment Fragment4 on I {
             id1
             id2
@@ -240,7 +240,7 @@ fn another_mix_of_fragments_indirection_and_unions() {
                 }
               }
             }
-            
+
             fragment Fragment4 on I {
               id1
               id2
@@ -252,9 +252,6 @@ fn another_mix_of_fragments_indirection_and_unions() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "T1.id" to selection set of parent type "I""#
-)]
 // TODO: investigate this failure
 fn handles_fragments_with_interface_field_subtyping() {
     let planner = planner!(
@@ -262,17 +259,17 @@ fn handles_fragments_with_interface_field_subtyping() {
           type Query {
             t1: T1!
           }
-  
+
           interface I {
             id: ID!
             other: I!
           }
-  
+
           type T1 implements I {
             id: ID!
             other: T1!
           }
-  
+
           type T2 implements I {
             id: ID!
             other: T2!
@@ -287,7 +284,7 @@ fn handles_fragments_with_interface_field_subtyping() {
               ...Fragment1
             }
           }
-  
+
           fragment Fragment1 on I {
             other {
               ... on T1 {
@@ -317,8 +314,6 @@ fn handles_fragments_with_interface_field_subtyping() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch() {
     let planner = planner!(
         Subgraph1: r#"
@@ -326,7 +321,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch
             t1: T
             t2: T
           }
-  
+
           type T @key(fields: "id") {
             id: ID!
             v0: Int
@@ -352,7 +347,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch
               ...allTFields
             }
           }
-  
+
           fragment allTFields on T {
             v0
             v1
@@ -376,7 +371,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch
                   id
                 }
               }
-              
+
               fragment allTFields on T {
                 v0
                 v1
@@ -384,7 +379,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch
               }
             },
             Parallel {
-              Flatten(path: "t1") {
+              Flatten(path: "t2") {
                 Fetch(service: "Subgraph2") {
                   {
                     ... on T {
@@ -399,7 +394,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch
                   }
                 },
               },
-              Flatten(path: "t2") {
+              Flatten(path: "t1") {
                 Fetch(service: "Subgraph2") {
                   {
                     ... on T {
@@ -422,15 +417,13 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_root_fetch
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_entity_fetch() {
     let planner = planner!(
         Subgraph1: r#"
           type Query {
             t: T
           }
-  
+
           type T @key(fields: "id") {
             id: ID!
           }
@@ -441,7 +434,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_entity_fet
             u1: U
             u2: U
           }
-  
+
           type U @key(fields: "id") {
             id: ID!
             v0: Int
@@ -470,7 +463,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_entity_fet
               }
             }
           }
-  
+
           fragment allUFields on U {
             v0
             v1
@@ -511,7 +504,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_entity_fet
                     }
                   }
                 }
-                
+
                 fragment allUFields on U {
                   v0
                   v1
@@ -519,7 +512,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_entity_fet
               },
             },
             Parallel {
-              Flatten(path: "t.u1") {
+              Flatten(path: "t.u2") {
                 Fetch(service: "Subgraph3") {
                   {
                     ... on U {
@@ -535,7 +528,7 @@ fn can_reuse_fragments_in_subgraph_where_they_only_partially_apply_in_entity_fet
                   }
                 },
               },
-              Flatten(path: "t.u2") {
+              Flatten(path: "t.u1") {
                 Fetch(service: "Subgraph3") {
                   {
                     ... on U {
