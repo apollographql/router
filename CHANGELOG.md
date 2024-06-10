@@ -4,6 +4,59 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.48.1] - 2024-06-10
+
+## 🐛 Fixes
+
+### Improve error message produced when a subgraph response doesn't include an expected `content-type` header value ([Issue #5359](https://github.com/apollographql/router/issues/5359))
+
+To improve a common debuggability challenge when a subgraph response doesn't contain an expected `content-type` header value, the error message produced will include additional details about the error.
+
+Some examples of the improved error message:
+
+   * ```
+     HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value "application/json,application/json"; expected content-type: application/json or content-type: application/graphql-response+json
+     ```
+   * ```
+     HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json
+     ```
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5223
+
+### Update `apollo-compiler` for two small improvements ([PR #5347](https://github.com/apollographql/router/pull/5347))
+
+Updated our underlying `apollo-rs` dependency on our `apollo-compiler` crate to bring in two nice improvements:
+
+- _Fix validation performance bug_
+
+  Adds a cache in fragment spread validation, fixing a situation where validating a query with many fragment spreads against a schema with many interfaces could take multiple seconds to validate.
+
+- _Remove ariadne byte/char mapping_
+
+  Generating JSON or CLI reports for apollo-compiler diagnostics used a translation layer between byte offsets and character offsets, which cost some computation and memory proportional to the size of the source text. The latest version of `ariadne` allows us to remove this translation.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/5347
+
+## 📃 Configuration
+
+### Rename the telemetry selector which obtains the GraphOS operation id ([PR #5337](https://github.com/apollographql/router/pull/5337))
+
+Renames a misnamed `trace_id` selector introduced in [v1.48.0](https://github.com/apollographql/router/releases/tag/v1.48.0) to the value which it actually represents which is an Apollo GraphOS operation ID, rather than a trace ID.  Apologies for the confusion!  Unfortunately, we aren't able to produce an Apollo GraphOS trace ID at this time.
+
+If you want to access this operation ID selector, here is an example of how to apply it to your tracing spans:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        "studio.operation.id":
+            studio_operation_id: true
+```
+
+This can be useful for more easily locating the operation in [GraphOS' Insights](https://www.apollographql.com/docs/graphos/metrics/operations) feature and finding applicable traces in Studio.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5337
+
 # [1.48.0] - 2024-05-29
 
 ## 🚀 Features
