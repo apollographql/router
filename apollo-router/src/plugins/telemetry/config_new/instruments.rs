@@ -1186,13 +1186,13 @@ where
         }
 
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
+            let value = match selected_value {
+                opentelemetry::Value::I64(i) => Some(i),
+                _ => None,
+            };
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(value),
+                Increment::Custom(None) => Increment::Custom(value),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1291,13 +1291,13 @@ where
             .as_ref()
             .and_then(|s| s.on_response_event(response, ctx))
         {
+            let value = match selected_value {
+                opentelemetry::Value::I64(i) => Some(i),
+                _ => None,
+            };
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(value),
+                Increment::Custom(None) => Increment::EventCustom(value),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1394,13 +1394,13 @@ where
             .as_ref()
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
+            let value = match selected_value {
+                opentelemetry::Value::I64(i) => Some(i),
+                _ => None,
+            };
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(value),
+                Increment::Custom(None) => Increment::FieldCustom(value),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
@@ -1598,16 +1598,14 @@ where
             inner.attributes = selectors.on_request(request).into_iter().collect();
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
+            let value = match selected_value {
+                opentelemetry::Value::I64(i) => Some(i),
+                _ => None,
+            };
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(value),
+                Increment::FieldCustom(None) => Increment::FieldCustom(value),
+                Increment::Custom(None) => Increment::Custom(value),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1643,16 +1641,14 @@ where
             .as_ref()
             .and_then(|s| s.on_response(response))
         {
+            let value = match selected_value {
+                opentelemetry::Value::I64(i) => Some(i),
+                _ => None,
+            };
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(value),
+                Increment::FieldCustom(None) => Increment::FieldCustom(value),
+                Increment::Custom(None) => Increment::Custom(value),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1703,13 +1699,13 @@ where
             .as_ref()
             .and_then(|s| s.on_response_event(response, ctx))
         {
+            let value = match selected_value {
+                opentelemetry::Value::I64(i) => Some(i),
+                _ => None,
+            };
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(value),
+                Increment::Custom(None) => Increment::EventCustom(value),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1802,13 +1798,13 @@ where
             .as_ref()
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
+            let value = match selected_value {
+                opentelemetry::Value::I64(i) => Some(i),
+                _ => None,
+            };
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(value),
+                Increment::Custom(None) => Increment::FieldCustom(value),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
