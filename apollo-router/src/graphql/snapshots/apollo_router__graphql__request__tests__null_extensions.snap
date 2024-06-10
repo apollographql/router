@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/request.rs
+source: apollo-router/src/graphql/request.rs
 expression: expected_result
 ---
 query: "{ topProducts { upc name reviews { id product { name } author { id name } } } }"

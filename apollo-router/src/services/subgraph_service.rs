@@ -74,6 +74,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
+pub(crate) const SUBGRAPH_REQUEST_SPAN_NAME: &str = "subgraph_request";
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
 const PERSISTED_QUERY_NOT_FOUND_MESSAGE: &str = "PersistedQueryNotFound";
@@ -528,9 +529,7 @@ async fn call_websocket(
 
     let signing_params = context
         .extensions()
-        .lock()
-        .get::<Arc<SigningParamsConfig>>()
-        .cloned();
+        .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
 
     let request = if let Some(signing_params) = signing_params {
         signing_params
@@ -542,9 +541,7 @@ async fn call_websocket(
 
     let subgraph_request_event = context
         .extensions()
-        .lock()
-        .get::<SubgraphEventRequestLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
     if let Some(level) = subgraph_request_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -594,7 +591,7 @@ async fn call_websocket(
         }
     });
 
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -785,7 +782,7 @@ pub(crate) async fn process_batch(
 
     // We can't provide a single operation name in the span (since we may be processing multiple
     // operations). Product decision, use the hard coded value "batch".
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -839,9 +836,7 @@ pub(crate) async fn process_batch(
 
     let subgraph_response_event = batch_context
         .extensions()
-        .lock()
-        .get::<SubgraphEventResponseLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
     if let Some(level) = subgraph_response_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -1104,17 +1099,12 @@ async fn call_http(
     // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
     // we have the context extensions lock held. That would be very bad...
     // We grab the (potential) BatchQuery and then operate on it later
-    let opt_batch_query = {
-        let extensions_guard = context.extensions().lock();
-
-        // We need to make sure to remove the BatchQuery from the context as it holds a sender to
-        // the owning batch
-        extensions_guard
-            .get::<Batching>()
+    let opt_batch_query = context.extensions().with_lock(|lock| {
+        lock.get::<Batching>()
             .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
-            .and_then(|_| extensions_guard.get::<BatchQuery>().cloned())
+            .and_then(|_| lock.get::<BatchQuery>().cloned())
             .and_then(|bq| (!bq.finished()).then_some(bq))
-    };
+    });
 
     // If we have a batch query, then it's time for batching
     if let Some(query) = opt_batch_query {
@@ -1169,7 +1159,7 @@ pub(crate) async fn call_single_http(
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
 
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -1201,9 +1191,7 @@ pub(crate) async fn call_single_http(
 
     let subgraph_request_event = context
         .extensions()
-        .lock()
-        .get::<SubgraphEventRequestLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
     if let Some(level) = subgraph_request_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -1240,9 +1228,7 @@ pub(crate) async fn call_single_http(
 
     let subgraph_response_event = context
         .extensions()
-        .lock()
-        .get::<SubgraphEventResponseLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
     if let Some(level) = subgraph_response_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
