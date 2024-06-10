@@ -10,7 +10,7 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ### Improve error message produced when a subgraph response doesn't include an expected `content-type` header value ([Issue #5359](https://github.com/apollographql/router/issues/5359))
 
-To improve a common debugability challenge when a subgraph response doesn't contain an expected `content-type` header value, the error message produced will include additional details about the error.
+To improve a common debuggability challenge when a subgraph response doesn't contain an expected `content-type` header value, the error message produced will include additional details about the error.
 
 Some examples of the improved error message:
 
@@ -53,7 +53,7 @@ telemetry:
             studio_operation_id: true
 ```
 
-This can be useful for more easily locating the operation in GraphOS' Insights feature and finding applicable traces in Studio.
+This can be useful for more easily locating the operation in [GraphOS' Insights](https://www.apollographql.com/docs/graphos/metrics/operations) feature and finding applicable traces in Studio.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5337
 
