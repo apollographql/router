@@ -150,7 +150,7 @@ fn it_does_not_needlessly_consider_options_for_typename() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 1);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 
     // Almost the same test, but we artificially create a case where the result set
     // for `s` has a __typename alongside just an inline fragments. This should
@@ -208,5 +208,5 @@ fn it_does_not_needlessly_consider_options_for_typename() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 1);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 }

@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -170,9 +171,9 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct QueryPlanningStatistics {
-    pub evaluated_plan_count: usize,
+    pub evaluated_plan_count: Cell<usize>,
 }
 
 impl QueryPlannerConfig {
@@ -332,9 +333,7 @@ impl QueryPlanner {
 
         let is_subscription = operation.is_subscription();
 
-        let statistics = QueryPlanningStatistics {
-            evaluated_plan_count: 0,
-        };
+        let statistics = QueryPlanningStatistics::default();
 
         if self.config.debug.bypass_planner_for_single_subgraph {
             // A federated query graph always have 1 more sources than there is subgraph, because the root vertices
@@ -442,7 +441,7 @@ impl QueryPlanner {
             // PORT_NOTE(@goto-bus-stop): In JS, `root` is a `RootVertex`, which is dynamically
             // checked at various points in query planning. This is our Rust equivalent of that.
             head_must_be_root: true,
-            statistics,
+            statistics: &statistics,
             abstract_types_with_inconsistent_runtime_types: self
                 .abstract_types_with_inconsistent_runtime_types
                 .clone()
@@ -501,7 +500,7 @@ impl QueryPlanner {
 
         Ok(QueryPlan {
             node: root_node,
-            statistics: parameters.statistics,
+            statistics,
         })
     }
 
