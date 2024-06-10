@@ -1,14 +1,14 @@
 ---
 title: Upgrading from Versions Prior to 1.0
-subtitle: Migrate from version 0.x to 1.x of the Apollo Router
-description: Learn how to migrate a federated graph from pre-1.0 versions to Apollo Router 1.x for enhanced performance and streamlined configuration.
+subtitle: Migrate from version 0.x to 1.x of the Apollo Router Core
+description: Learn how to migrate a federated graph from pre-1.0 versions to Apollo Router Core 1.x for enhanced performance and streamlined configuration.
 ---
 
-If you were using versions of Apollo Router prior to the 1.0 release, thank you for being an early adopter!  This article describes how to migrate from various pre-1.0 releases to the 1.x version.  We recommend upgrading to 1.x versions and away from pre-release versions prior to 1.0 since bug-fixes and improvements will no longer be shipped to pre-1.0 versions once the 1.x version is released.
+If you were using versions of Apollo Router Core prior to the 1.0 release, thank you for being an early adopter!  This article describes how to migrate from various pre-1.0 releases to the 1.x version.  We recommend upgrading to 1.x versions and away from pre-release versions prior to 1.0 since bug-fixes and improvements will no longer be shipped to pre-1.0 versions once the 1.x version is released.
 
 ## What's different?
 
-Our pre-1.0 versions of the Router had highly iterative development lifecycles and had regular, notable changes.  You'll need to look at changes to:
+Our pre-1.0 versions of the router had highly iterative development lifecycles and had regular, notable changes.  You'll need to look at changes to:
 
 - Environment variables
 - Supported configuration
@@ -46,15 +46,15 @@ In addition, the following command line flags have changed:
 
 Removed --apollo-graph-key and --apollo-graph-ref
 
-Unlike `@apollo/gateway`, the Apollo Router is packaged as a _static, standalone binary_. To customize its behavior, you pass it a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup. If you start the router with the `--hot-reload` flag (or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`), you can even modify that configuration without a restart.
+Unlike `@apollo/gateway`, the Apollo Router Core is packaged as a _static, standalone binary_. To customize its behavior, you pass it a [YAML configuration file](./configuration/overview/#yaml-config-file) at startup. If you start the router with the `--hot-reload` flag (or set the `APOLLO_ROUTER_HOT_RELOAD` environment variable to `true`), you can even modify that configuration without a restart.
 
-You _can_ download the Apollo Router source and use it as a library in a larger project. However, our goal is to remove the need to write custom code in your graph router (which is always necessary with `@apollo/gateway`). Instead, the Apollo Router exposes the most common critical features via declarative configuration.
+You _can_ download the router source and use it as a library in a larger project. However, our goal is to remove the need to write custom code in your graph router (which is always necessary with `@apollo/gateway`). Instead, the router exposes the most common critical features via declarative configuration.
 
 ## Take inventory of your gateway configuration
 
-The `@apollo/gateway` library is an extension to the [Apollo Server](/apollo-server/) library, and you need to consider your existing configuration of _both_ libraries when moving to the Apollo Router. For example, you might be customizing which HTTP headers your subgraphs receive from client requests, or passing specific headers _back_ to the client from specific subgraphs.
+The `@apollo/gateway` library is an extension to the [Apollo Server](/apollo-server/) library, and you need to consider your existing configuration of _both_ libraries when moving to the Apollo Router Core. For example, you might be customizing which HTTP headers your subgraphs receive from client requests, or passing specific headers _back_ to the client from specific subgraphs.
 
-Because the Apollo Router uses an entirely different configuration mechanism, you should make a checklist of your gateway's custom behaviors to make sure those behaviors all remain when your migration is complete.
+Because the router uses an entirely different configuration mechanism, you should make a checklist of your gateway's custom behaviors to make sure those behaviors all remain when your migration is complete.
 
 Start by looking for configuration and customizations in these places:
 
@@ -73,12 +73,12 @@ Many Apollo tools use environment variables prefixed with `APOLLO_` to set certa
 
 Make sure to note any environment variables you set in your existing gateway's environment, _especially_ those prefixed with `APOLLO_`
 
-The Apollo Router supports the following environment variables used by `@apollo/gateway`:
+The router supports the following environment variables used by `@apollo/gateway`:
 
 * `APOLLO_KEY`
 * `APOLLO_GRAPH_REF`
 
-The Apollo Router **renames** the following environment variables used by `@apollo/gateway`:
+The router **renames** the following environment variables used by `@apollo/gateway`:
 
 * [`APOLLO_SCHEMA_CONFIG_DELIVERY_ENDPOINT`](/federation/managed-federation/uplink/#environment-variable) → `APOLLO_UPLINK_ENDPOINTS`
     * This argument supports providing a comma-separated list of URLs.
@@ -93,8 +93,8 @@ The [`supergraphSdl` option](/apollo-server/using-federation/api/apollo-gateway/
 
 You can achieve this option's effect with the Apollo Router in one of the following ways:
 
-* [Move to managed federation](/federation/managed-federation/setup/) with your move to the Apollo Router.
-* Provide the `--supergraph` command-line argument to the Apollo Router on startup:
+* [Move to managed federation](/federation/managed-federation/setup/) with your move to the router.
+* Provide the `--supergraph` command-line argument to the router on startup:
 
     ```
     ./router --supergraph supergraph-schema.graphql
@@ -104,9 +104,9 @@ You can achieve this option's effect with the Apollo Router in one of the follow
 
 ### `serviceList` / `IntrospectAndCompose`
 
-If you provide one of these constructor options, your gateway performs its _own_ supergraph schema composition on startup. **The Apollo Router does not support this in-process composition.**
+If you provide one of these constructor options, your gateway performs its _own_ supergraph schema composition on startup. **The Apollo Router Core doesn't support this in-process composition.**
 
-Instead, you need to perform composition using [managed federation](/federation/managed-federation/setup/) or the [Rover CLI](/rover/commands/supergraphs/). With either of these methods, the Apollo Router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
+Instead, you need to perform composition using [managed federation](/federation/managed-federation/setup/) or the [Rover CLI](/rover/commands/supergraphs/). With either of these methods, the router can hot-reload its supergraph schema without restarting, and you avoid the possibility of a composition failure that results in downtime.
 
 ### `buildService`
 
@@ -115,21 +115,21 @@ The [`buildService` function](/apollo-server/using-federation/api/apollo-gateway
 Common use cases include:
 
 * Overriding subgraph URLs at runtime
-    * In the Apollo Router, you can use the [`override_subgraph_urls` option](./configuration/overview#subgraph-routing-urls).
+    * In the router, you can use the [`override_subgraph_urls` option](./configuration/overview#subgraph-routing-urls).
 * Propagating headers to subgraphs via `RemoteGraphQLDataSource`
-    * In the Apollo Router, you can use the [`headers` option](./configuration/header-propagation).
+    * In the router, you can use the [`headers` option](./configuration/header-propagation).
 
 ### `logger`
 
 The [`logger` constructor option](/apollo-server/using-federation/api/apollo-gateway/#logger) enables you to specify a different logger for messages that are produced by the `ApolloGateway`. By default, it inherits from the `logger` used by your `ApolloServer` instance.  This option is also useful for changing logging verbosity.
 
-In the Apollo Router, logging is JSON-structured in production environments by default, and you can adjust the verbosity. More advanced logging can be enabled through the use of [plugins](#plugins).
+In the router, logging is JSON-structured in production environments by default, and you can adjust the verbosity. More advanced logging can be enabled through the use of [plugins](#plugins).
 
-For more information, see [Logging in the Apollo Router](./configuration/logging/).
+For more information, see [Logging in the GraphOS Router](./configuration/logging/).
 
 ## `ApolloServer` constructor options
 
-The `ApolloServer` constructor supports a large variety of options, but for the purposes of moving to the Apollo Router, we'll focus on the following:
+The `ApolloServer` constructor supports a large variety of options, but for the purposes of moving to the router, we'll focus on the following:
 
 - `context`
 - `plugins`
@@ -143,25 +143,26 @@ This constructor option is an object that enables you to propagate information a
 * Authentication information
 * Header propagation
 
-The Apollo Router provides [similar functionality](./customizations/rhai-api/#requestcontext).
+The router provides [similar functionality](./customizations/rhai-api/#requestcontext).
 
 ### `plugins`
 
 This constructor option is an array of built-in or custom `plugins` that extend Apollo Server's functionality. If you provide `plugins` to your `ApolloServer` instance, take note of each plugin's functionality and add it to your migration checklist.
 
-Before you attempt to replicate a plugin's functionality via an Apollo Router [customization](#supported-customizations), check whether any router [configuration options](./configuration/overview/) provide that same functionality. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
+Before you attempt to replicate a plugin's functionality via a router [customization](#supported-customizations), check whether any router [configuration options](./configuration/overview/) provide that same functionality. For example, the router supports options for propagating HTTP headers to subgraphs and enabling OpenTelemetry instrumentation.
 
-> If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the Router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the Apollo Router _should_ provide out of the box, and we can help discuss the design.
+> If one of your `@apollo/gateway` plugins _does_ require a corresponding router customization, we encourage you to describe your use case in the router repo's [GitHub discussions](https://github.com/apollographql/router/discussions/). It might represent core functionality that the router _should_ provide out of the box, and we can help discuss the design.
 >
-> For less common use cases, we also want to help build an ecosystem of shared customizations for the Apollo Router, enabling teams to more quickly add the functionality they need before native support is available.
+> For less common use cases, we also want to help build an ecosystem of shared customizations for the router, enabling teams to more quickly add the functionality they need before native support is available.
 
 #### Supported customizations
 
-The Apollo Router currently supports two types of customizations that hook into the request-handling pipeline:
+The router currently supports two types of customizations that hook into the request-handling pipeline:
 
 * [Rhai scripts](./customizations/rhai/)
     * Rhai is a scripting language designed for use with Rust applications.
-* [External coprocessing](./customizations/coprocessor/)
+* [External coprocessing](./customizations/coprocessor/). 
+    * Requires a [GraphOS Router with an Enterprise plan](./enterprise-features).
 
 Examples for each are provided in their respective documentation, and in the [Router repo](https://github.com/apollographql/router/tree/main/examples).
 

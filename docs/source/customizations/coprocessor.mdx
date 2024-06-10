@@ -1059,7 +1059,7 @@ If you return a successful response, make sure the structure of the `data` prope
 
 ### Failed responses
 
-If a request to a coprocessor results in a **failed response**, which is seperate from a **control break**, the Router will return an error to the client making the supergraph request. The router considers all of the following scenarios to be a **failed response** from your coprocessor:
+If a request to a coprocessor results in a **failed response**, which is seperate from a **control break**, the router will return an error to the client making the supergraph request. The router considers all of the following scenarios to be a **failed response** from your coprocessor:
 
 - Your coprocessor doesn't respond within the amount of time specified by the `timeout` key in your [configuration](#typical-configuration) (default one second).
 - Your coprocessor responds with a non-`2xx` HTTP code.

@@ -169,13 +169,13 @@ traffic_shaping:
 
 ### Variable deduplication
 
-When subgraphs are sent entity requests by the Router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
+When subgraphs are sent entity requests by the router using the `_entities` field, it is often the case that the same entity (identified by a unique `@key` constraint) is requested multiple times within the execution of a single federated query.  For example, an author's name might need to be fetched multiple times when accessing a list of a reviews for a product for which the author has written multiple reviews.
 
 To reduce the size of subgraph requests and the amount of work they might perform, the list of entities sent can be deduplicated. This is always active.
 
 ### Query deduplication
 
-If the Router is simultaneously processing similar queries, it may result in producing multiple identical requests to a subgraph.  With the `deduplicate_query` functionality enabled (by default, it is disabled), the Router can avoid sending the same query multiple times and instead buffer one or more of the dependent queries pending the result of the first, and reuse that result to fulfill all of the initial queries.  This will reduce the overall traffic to the subgraph and the overall client request latency.  To meet the criteria for deduplication, the feature must be enabled and the subgraph queries must have have the same HTTP path, headers and body:
+If the router is simultaneously processing similar queries, it may result in producing multiple identical requests to a subgraph.  With the `deduplicate_query` functionality enabled (by default, it is disabled), the router can avoid sending the same query multiple times and instead buffer one or more of the dependent queries pending the result of the first, and reuse that result to fulfill all of the initial queries.  This will reduce the overall traffic to the subgraph and the overall client request latency.  To meet the criteria for deduplication, the feature must be enabled and the subgraph queries must have have the same HTTP path, headers and body:
 
 ```yaml title="router.yaml"
 traffic_shaping:

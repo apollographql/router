@@ -20,7 +20,7 @@ If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _di
 
 ## Performance improvements vs stability
 
-The Router is a highly scalable and low-latency runtime. Even with all caching **disabled**, the time to process operations and query plans will be very minimal (nanoseconds to milliseconds) when compared to the overall supergraph request, except in the edge cases of extremely large operations and supergraphs. Caching offers stability to those running a large graph so that your overhead for given operations stays consistent, not that it dramatically improves. If you would like to validate the performance wins of operation caching, check out the [traces and metrics in the Router](/router/configuration/telemetry/instrumentation/standard-instruments#performance) to take measurements before and after. In extremely large edge cases though, we have seen the cache save 2-10x time to create the query plan, which is still a small part of the overall request.
+The Router is a highly scalable and low-latency runtime. Even with all caching **disabled**, the time to process operations and query plans will be very minimal (nanoseconds to milliseconds) when compared to the overall supergraph request, except in the edge cases of extremely large operations and supergraphs. Caching offers stability to those running a large graph so that your overhead for given operations stays consistent, not that it dramatically improves. If you would like to validate the performance wins of operation caching, check out the [traces and metrics in the router](/router/configuration/telemetry/instrumentation/standard-instruments#performance) to take measurements before and after. In extremely large edge cases though, we have seen the cache save 2-10x time to create the query plan, which is still a small part of the overall request.
 
 ## Caching query plans
 
@@ -54,13 +54,13 @@ supergraph:
 
 When loading a new schema, a query plan might change for some queries, so cached query plans cannot be reused. 
 
-To prevent increased latency upon query plan cache invalidation, the Router precomputes query plans for:
+To prevent increased latency upon query plan cache invalidation, the router precomputes query plans for:
 * The most used queries from the cache.
 * The entire list of persisted queries.
 
-Precomputed plans will be cached before the Router switches traffic over to the new schema.
+Precomputed plans will be cached before the router switches traffic over to the new schema.
 
-By default, the Router warms up the cache with 30% of the queries already in cache, but it can be configured as follows:
+By default, the router warms up the cache with 30% of the queries already in cache, but it can be configured as follows:
 
 ```yaml title="router.yaml"
 supergraph:
@@ -87,7 +87,7 @@ then look at `apollo_router_schema_loading_time` and `apollo.router.query_planni
 
 #### Cache warm-up with distributed caching
 
-If the Router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
+If the router is using distributed caching for query plans, the warm-up phase will also store the new query plans in Redis. Since all Router instances might have the same distributions of queries in their in-memory cache, the list of queries is shuffled before warm-up, so each Router instance can plan queries in a different order and share their results through the cache.
 
 #### Schema aware query hashing
 
