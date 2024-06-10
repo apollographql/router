@@ -369,7 +369,7 @@ impl Report {
                 .insert(key.clone(), traces_and_stats.clone().into());
         }
 
-        println!("report: {:?}", report);
+        // println!("report: {:?}", report);
 
         report
     }

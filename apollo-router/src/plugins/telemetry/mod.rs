@@ -458,16 +458,14 @@ impl Plugin for Telemetry {
                                 }
                             }
 
-                            /* todo
-                            if let Some(mystats) = response
+                            if let Some(temp_stats) = response
                                 .context
                                 .extensions()
                                 .lock()
                                 .get::<ExtendedReferenceStats>()
                             {
-                                println!("ExtendedReferenceStats: {:?}", mystats);
+                                println!("ExtendedReferenceStats: {:?}", temp_stats);
                             }
-                            */
 
                             if response
                                 .context
