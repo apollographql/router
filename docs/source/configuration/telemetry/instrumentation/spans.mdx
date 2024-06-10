@@ -159,6 +159,9 @@ If it's in error then `otel.status_code` = `error`, if not it will be `ok`.
 
 ## Naming
 
+By default, we will use a span naming convention that aligns with the current [semantinc conventions for GraphQL server in OpenTelemetry](https://opentelemetry.io/docs/specs/semconv/graphql/graphql-spans/) which means the root span name 
+must be of format `<graphql.operation.type> <graphql.operation.name>` provided that `graphql.operation.type` and `graphql.operation.name` are available. 
+
 If you want to change the name of spans we're creating for each services you can override this value by setting the `otel.name` attribute using any selectors you want.
 
 Here is an example if you want to mark the `router` and `supergraph` span in error if you have a graphql error in the payload and you want to enforce the `router` span name to be `graphql_router`.
