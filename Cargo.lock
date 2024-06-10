@@ -291,6 +291,7 @@ dependencies = [
  "console",
  "console-subscriber",
  "cookie",
+ "crossbeam-channel",
  "dashmap",
  "derivative",
  "derive_more",

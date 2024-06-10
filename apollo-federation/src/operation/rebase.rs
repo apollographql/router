@@ -458,7 +458,7 @@ impl InlineFragment {
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
     ) -> Result<Option<InlineFragment>, FederationError> {
-        if &self.data().parent_type_position == parent_type {
+        if self.data().schema == *schema && self.data().parent_type_position == *parent_type {
             return Ok(Some(self.clone()));
         }
 
@@ -493,6 +493,7 @@ impl InlineFragment {
         } else {
             let mut rebased_fragment_data = self.data().clone();
             rebased_fragment_data.type_condition_position = rebased_condition;
+            rebased_fragment_data.schema = schema.clone();
             Ok(Some(InlineFragment::new(rebased_fragment_data)))
         }
     }
@@ -647,12 +648,16 @@ impl SelectionSet {
         ))
     }
 
-    /// Returns true if the selection set would select cleanly from the given type in the
-    /// current schema.
-    pub fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
+    /// Returns true if the selection set would select cleanly from the given type in the given
+    /// schema.
+    pub fn can_rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> bool {
         self.selections
             .values()
-            .all(|sel| sel.can_add_to(parent_type, &self.schema))
+            .all(|sel| sel.can_add_to(parent_type, schema))
     }
 }
 

@@ -307,6 +307,7 @@ fn it_works_on_unions() {
         Fetch(service: "Subgraph1") {
           {
             noProvides {
+              __typename
               ... on T1 {
                 __typename
                 id
@@ -376,6 +377,7 @@ fn it_works_on_unions() {
       Fetch(service: "Subgraph1") {
         {
           withProvidesForT1 {
+            __typename
             ... on T1 {
               a
             }

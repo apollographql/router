@@ -321,7 +321,7 @@ async fn defer() {
                         })),
                     }))),
                 }],
-            },
+            }.into(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
@@ -437,7 +437,7 @@ async fn defer_if_condition() {
             .unwrap();
     let schema = planner.schema();
 
-    let root: PlanNode =
+    let root: Arc<PlanNode> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
 
     let query_plan = QueryPlan {
@@ -1812,7 +1812,8 @@ fn broken_plan_does_not_panic() {
             context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        }),
+        })
+        .into(),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
@@ -1824,8 +1825,7 @@ fn broken_plan_does_not_panic() {
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::new();
     subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
-    let result = plan
-        .root
+    let result = Arc::make_mut(&mut plan.root)
         .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
     assert_eq!(
         result.unwrap_err().to_string(),
