@@ -1289,6 +1289,23 @@ expression: aggregated_metrics
                   }
                 }
               }
+            },
+            "limits_stats": {
+              "strategy": "test",
+              "cost_estimated": [
+                10,
+                10
+              ],
+              "max_cost_estimated": 10,
+              "cost_actual": [
+                7,
+                7
+              ],
+              "max_cost_actual": 7,
+              "depth": 2,
+              "height": 4,
+              "alias_count": 0,
+              "root_field_count": 1
             }
           }
         ]

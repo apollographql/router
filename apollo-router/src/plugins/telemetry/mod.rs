@@ -19,6 +19,7 @@ use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
+use metrics::apollo::studio::SingleLimitsStats;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
@@ -86,6 +87,7 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -1400,6 +1402,28 @@ impl Telemetry {
                 let traces = Self::subgraph_ftv1_traces(context);
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
+                let limits_stats = {
+                    let guard = context.extensions().lock();
+                    let strategy = guard.get::<demand_control::strategy::Strategy>();
+                    let cost_ctx = guard.get::<demand_control::CostContext>();
+                    SingleLimitsStats {
+                        // TODO: Determine how we handle `None` for these, as logging 0 is probably wrong
+                        strategy: strategy
+                            .and_then(|s| serde_json::to_string(&s.mode).ok())
+                            .unwrap_or_default(),
+                        cost_estimated: cost_ctx
+                            .map(|ctx| ctx.estimated.round() as i64)
+                            .unwrap_or_default(),
+                        cost_actual: cost_ctx
+                            .map(|ctx| ctx.actual.round() as i64)
+                            .unwrap_or_default(),
+                        // TODO: These are limits but unrelated to demand control. How should we populate them?
+                        depth: 0,
+                        height: 0,
+                        alias_count: 0,
+                        root_field_count: 0,
+                    }
+                };
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1437,6 +1461,7 @@ impl Telemetry {
                                         .map(|op| op.to_string())
                                         .unwrap_or_default(),
                                 },
+                                limits_stats,
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
                                     has_errors,

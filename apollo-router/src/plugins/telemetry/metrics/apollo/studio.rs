@@ -33,6 +33,7 @@ pub(crate) struct Stats {
 pub(crate) struct SingleContextualizedStats {
     pub(crate) context: StatsContext,
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
+    pub(crate) limits_stats: SingleLimitsStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
 }
 // TODO Make some of these fields bool
@@ -81,12 +82,18 @@ pub(crate) struct ContextualizedStats {
     context: StatsContext,
     query_latency_stats: QueryLatencyStats,
     per_type_stat: HashMap<String, TypeStat>,
+    limits_stats: Option<LimitsStats>,
 }
 
 impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
     fn add_assign(&mut self, stats: SingleContextualizedStats) {
         self.context = stats.context;
         self.query_latency_stats += stats.query_latency_stats;
+        if let Some(limits_stats) = &mut self.limits_stats {
+            *limits_stats += stats.limits_stats;
+        } else {
+            self.limits_stats = Some(stats.limits_stats.into());
+        }
         for (k, v) in stats.per_type_stat {
             *self.per_type_stat.entry(k).or_default() += v;
         }
@@ -195,7 +202,7 @@ impl From<ContextualizedStats>
             query_latency_stats: Some(stats.query_latency_stats.into()),
             context: Some(stats.context),
             extended_references: None,
-            limits_stats: None,
+            limits_stats: stats.limits_stats.map(|ls| ls.into()),
             local_per_type_stat: HashMap::new(),
             operation_count: 0,
         }
@@ -265,6 +272,76 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
             latency_count: stat.latency.buckets_to_i64(),
         }
     }
+}
+
+#[derive(Clone, Default, Debug, Serialize)]
+
+pub(crate) struct LimitsStats {
+    strategy: String,
+    cost_estimated: Vec<i64>,
+    max_cost_estimated: u64,
+    cost_actual: Vec<i64>,
+    max_cost_actual: u64,
+    depth: u64,
+    height: u64,
+    alias_count: u64,
+    root_field_count: u64,
+}
+
+impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::reports::LimitsStats {
+    fn from(value: LimitsStats) -> Self {
+        Self {
+            strategy: value.strategy,
+            cost_estimated: value.cost_estimated,
+            max_cost_estimated: value.max_cost_estimated,
+            cost_actual: value.cost_actual,
+            max_cost_actual: value.max_cost_actual,
+            depth: value.depth,
+            height: value.height,
+            alias_count: value.alias_count,
+            root_field_count: value.root_field_count,
+        }
+    }
+}
+
+impl AddAssign<SingleLimitsStats> for LimitsStats {
+    fn add_assign(&mut self, rhs: SingleLimitsStats) {
+        self.cost_estimated.push(rhs.cost_estimated);
+        self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated as u64);
+
+        self.cost_actual.push(rhs.cost_actual);
+        self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual as u64);
+
+        // TODO: depth, height, alias_count, root_field_count?
+    }
+}
+
+impl From<SingleLimitsStats> for LimitsStats {
+    fn from(value: SingleLimitsStats) -> Self {
+        Self {
+            strategy: value.strategy,
+            cost_estimated: vec![value.cost_estimated],
+            max_cost_estimated: value.cost_estimated as u64,
+            cost_actual: vec![value.cost_actual],
+            max_cost_actual: value.cost_actual as u64,
+            depth: value.depth,
+            height: value.height,
+            alias_count: value.alias_count,
+            root_field_count: value.root_field_count,
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug, Serialize)]
+
+pub(crate) struct SingleLimitsStats {
+    pub(crate) strategy: String,
+    pub(crate) cost_estimated: i64,
+    pub(crate) cost_actual: i64,
+    pub(crate) depth: u64,
+    pub(crate) height: u64,
+    pub(crate) alias_count: u64,
+    pub(crate) root_field_count: u64,
 }
 
 #[cfg(test)]
@@ -369,6 +446,15 @@ mod test {
                             registered_operation: true,
                             forbidden_operation: true,
                             without_field_instrumentation: true,
+                        },
+                        limits_stats: SingleLimitsStats {
+                            strategy: "test".to_string(),
+                            cost_estimated: 10,
+                            cost_actual: 7,
+                            depth: 2,
+                            height: 4,
+                            alias_count: 0,
+                            root_field_count: 1,
                         },
                         per_type_stat: HashMap::from([
                             (
