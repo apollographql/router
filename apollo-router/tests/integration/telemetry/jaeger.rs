@@ -414,7 +414,7 @@ fn verify_router_span_fields(
         );
         assert_eq!(
             router_span
-                .select_path("$.tags[?(@.key == 'studio.trace.id')].value")?
+                .select_path("$.tags[?(@.key == 'studio.operation.id')].value")?
                 .first(),
             Some(&&Value::String(
                 "f60e643d7f52ecda23216f86409d7e2e5c3aa68c".to_string()
