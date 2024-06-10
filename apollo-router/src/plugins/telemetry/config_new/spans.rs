@@ -547,6 +547,16 @@ mod test {
                 value: Arc::new(Default::default()),
             },
         );
+        spans.attributes.custom.insert(
+            "otel.name".to_string(),
+            Conditional {
+                selector: RouterSelector::StaticField {
+                    r#static: String::from("new_name").into(),
+                },
+                condition: None,
+                value: Arc::new(Default::default()),
+            },
+        );
         let values = spans.attributes.on_response(
             &router::Response::fake_builder()
                 .header("my-header", "test_val")
@@ -556,6 +566,10 @@ mod test {
         assert!(values
             .iter()
             .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+
+        assert!(values.iter().any(|key_val| key_val.key
+            == opentelemetry::Key::from_static_str("otel.name")
+            && key_val.value == opentelemetry::Value::String(String::from("new_name").into())));
     }
 
     #[test]

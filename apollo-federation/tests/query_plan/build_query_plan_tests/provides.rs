@@ -690,8 +690,6 @@ fn it_allow_providing_fields_for_only_some_subtype() {
 }
 
 #[test]
-#[should_panic(expected = "Subgraph unexpectedly does not use federation spec")]
-// TODO: investigate this failure
 fn it_works_with_type_condition_even_for_types_only_reachable_by_the_at_provides() {
     let planner = planner!(
         Subgraph1: r#"

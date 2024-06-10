@@ -70,8 +70,6 @@ mod orbiter;
 mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
-mod request;
-mod response;
 mod router;
 mod router_factory;
 pub mod services;

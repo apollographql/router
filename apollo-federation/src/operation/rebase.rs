@@ -334,9 +334,6 @@ impl FragmentSpreadSelection {
             return Ok(Some(Selection::FragmentSpread(Arc::new(self.clone()))));
         }
 
-        // If we're rebasing on a _different_ schema, then we *must* have fragments, since reusing
-        // `self.fragments` would be incorrect. If we're on the same schema though, we're happy to default
-        // to `self.fragments`.
         let rebase_on_same_schema = self.spread.data().schema == *schema;
         let Some(named_fragment) = named_fragments.get(&self.spread.data().fragment_name) else {
             // If we're rebasing on another schema (think a subgraph), then named fragments will have been rebased on that, and some
@@ -648,12 +645,16 @@ impl SelectionSet {
         ))
     }
 
-    /// Returns true if the selection set would select cleanly from the given type in the
-    /// current schema.
-    pub fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
+    /// Returns true if the selection set would select cleanly from the given type in the given
+    /// schema.
+    pub fn can_rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> bool {
         self.selections
             .values()
-            .all(|sel| sel.can_add_to(parent_type, &self.schema))
+            .all(|sel| sel.can_add_to(parent_type, schema))
     }
 }
 
