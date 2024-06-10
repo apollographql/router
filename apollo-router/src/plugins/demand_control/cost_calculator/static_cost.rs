@@ -17,13 +17,13 @@ use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::DemandControlError;
 use crate::graphql::Response;
+use crate::graphql::ResponseVisitor;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
-use crate::response::ResponseVisitor;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
