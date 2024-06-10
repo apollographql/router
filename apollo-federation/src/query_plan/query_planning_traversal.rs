@@ -5,6 +5,9 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
 use crate::error::FederationError;
+use crate::operation::Operation;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolutionCacheResult;
 use crate::query_graph::condition_resolver::ConditionResolver;
@@ -30,9 +33,6 @@ use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToC
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
-use crate::query_plan::operation::Operation;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
 use crate::query_plan::query_planner::QueryPlannerConfig;
 use crate::query_plan::query_planner::QueryPlanningStatistics;
@@ -49,7 +49,7 @@ use crate::schema::ValidFederationSchema;
 // runtime (introducing the new field `head_must_be_root`).
 // NOTE: `head_must_be_root` can be deduced from the `head` node's type, so we might be able to
 //       remove it.
-pub(crate) struct QueryPlanningParameters {
+pub(crate) struct QueryPlanningParameters<'a> {
     /// The supergraph schema that generated the federated query graph.
     pub(crate) supergraph_schema: ValidFederationSchema,
     /// The federated query graph used for query planning.
@@ -70,12 +70,12 @@ pub(crate) struct QueryPlanningParameters {
         Arc<IndexSet<AbstractTypeDefinitionPosition>>,
     /// The configuration for the query planner.
     pub(crate) config: QueryPlannerConfig,
-    pub(crate) statistics: QueryPlanningStatistics,
+    pub(crate) statistics: &'a QueryPlanningStatistics,
 }
 
-pub(crate) struct QueryPlanningTraversal<'a> {
+pub(crate) struct QueryPlanningTraversal<'a, 'b> {
     /// The parameters given to query planning.
-    parameters: &'a QueryPlanningParameters,
+    parameters: &'a QueryPlanningParameters<'b>,
     /// The root kind of the operation.
     root_kind: SchemaRootDefinitionKind,
     /// True if query planner `@defer` support is enabled and the operation contains some `@defer`
@@ -151,7 +151,7 @@ impl BestQueryPlanInfo {
     }
 }
 
-impl<'a> QueryPlanningTraversal<'a> {
+impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
     pub fn new(
         // TODO(@goto-bus-stop): This probably needs a mutable reference for some of the
         // yet-unimplemented methods, and storing a mutable ref in `Self` here smells bad.
@@ -414,7 +414,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 let new_selection_set = Arc::new(
                     selection_set
                         .add_back_typename_in_attachments()?
-                        .add_typename_field_for_abstract_types(None, &None)?,
+                        .add_typename_field_for_abstract_types(None)?,
                 );
                 self.record_closed_branch(ClosedBranch(
                     new_options
@@ -472,27 +472,34 @@ impl<'a> QueryPlanningTraversal<'a> {
         //   later condition is that `selection` is originally a supergraph selection, but that we're looking to apply "as-is" to a subgraph.
         //   But suppose it has a `... on I` where `I` is an interface. Then it's possible that `I` includes "more" types in the supergraph
         //   than in the subgraph, and so we might have to type-explode it. If so, we cannot use the selection "as-is".
-        // PORT_NOTE: The JS code performs the last check lazily. Instead of that, this check is
-        // skipped if `nodes` is empty.
-        if !nodes.is_empty()
-            && selection.selections.values().any(|val| match val {
-                Selection::InlineFragment(fragment) => {
-                    match &fragment.inline_fragment.data().type_condition_position {
-                        Some(type_condition) => self
-                            .parameters
-                            .abstract_types_with_inconsistent_runtime_types
-                            .iter()
-                            .any(|ty| ty.type_name() == type_condition.type_name()),
-                        None => false,
+        let mut has_inconsistent_abstract_types: Option<bool> = None;
+        let mut check_has_inconsistent_runtime_types = || match has_inconsistent_abstract_types {
+            Some(has_inconsistent_abstract_types) => {
+                Ok::<bool, FederationError>(has_inconsistent_abstract_types)
+            }
+            None => {
+                let check_result = selection.any_element(&mut |element| match element {
+                    OpPathElement::InlineFragment(inline_fragment) => {
+                        match &inline_fragment.data().type_condition_position {
+                            Some(type_condition) => Ok(self
+                                .parameters
+                                .abstract_types_with_inconsistent_runtime_types
+                                .iter()
+                                .any(|ty| ty.type_name() == type_condition.type_name())),
+                            None => Ok(false),
+                        }
                     }
-                }
-                _ => false,
-            })
-        {
-            return Ok(false);
-        }
+                    _ => Ok(false),
+                })?;
+                has_inconsistent_abstract_types = Some(check_result);
+                Ok(check_result)
+            }
+        };
         for node in nodes {
             let n = self.parameters.federated_query_graph.node_weight(*node)?;
+            if n.has_reachable_cross_subgraph_edges {
+                return Ok(false);
+            }
             let parent_ty = match &n.type_ {
                 QueryGraphNodeType::SchemaType(ty) => {
                     match CompositeTypeDefinitionPosition::try_from(ty.clone()) {
@@ -502,7 +509,14 @@ impl<'a> QueryPlanningTraversal<'a> {
                 }
                 QueryGraphNodeType::FederatedRootType(_) => return Ok(false),
             };
-            if n.has_reachable_cross_subgraph_edges || !selection.can_rebase_on(&parent_ty) {
+            let schema = self
+                .parameters
+                .federated_query_graph
+                .schema_by_source(&n.source)?;
+            if !selection.can_rebase_on(&parent_ty, schema) {
+                return Ok(false);
+            }
+            if check_has_inconsistent_runtime_types()? {
                 return Ok(false);
             }
         }
@@ -512,7 +526,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn cost(
         &mut self,
         dependency_graph: &mut FetchDependencyGraph,
-    ) -> Result<i64, FederationError> {
+    ) -> Result<QueryPlanCost, FederationError> {
         let (main, deferred) = dependency_graph.process(self.cost_processor, self.root_kind)?;
         if deferred.is_empty() {
             Ok(main)
@@ -766,6 +780,14 @@ impl<'a> QueryPlanningTraversal<'a> {
 
             // debug!("Reduced plans to consider to {plan_count} plans");
         }
+
+        if self.is_top_level {
+            let evaluated = &self.parameters.statistics.evaluated_plan_count;
+            evaluated.set(evaluated.get() + plan_count);
+        } else {
+            // We're resolving a sub-plan for an edge condition,
+            // and we don't want to count those as "evaluated plans".
+        }
     }
 
     /// Removes the right-most option of the first branch and moves that branch to its new place
@@ -876,8 +898,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     fn resolve_condition_plan(
         &self,
         edge: EdgeIndex,
-        // PORT_NOTE: The following parameters are not currently used.
-        _context: &OpGraphPathContext,
+        context: &OpGraphPathContext,
         excluded_destinations: &ExcludedDestinations,
         excluded_conditions: &ExcludedConditions,
     ) -> Result<ConditionResolution, FederationError> {
@@ -905,7 +926,7 @@ impl<'a> QueryPlanningTraversal<'a> {
                 .abstract_types_with_inconsistent_runtime_types
                 .clone(),
             config: self.parameters.config.clone(),
-            statistics: self.parameters.statistics.clone(),
+            statistics: self.parameters.statistics,
         };
         let best_plan_opt = QueryPlanningTraversal::new_inner(
             &parameters,
@@ -914,7 +935,7 @@ impl<'a> QueryPlanningTraversal<'a> {
             self.has_defers,
             self.root_kind,
             self.cost_processor,
-            Default::default(),
+            context.clone(),
             excluded_destinations.clone(),
             excluded_conditions.add_item(edge_conditions),
         )?
@@ -929,7 +950,7 @@ impl<'a> QueryPlanningTraversal<'a> {
     }
 }
 
-impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
+impl<'a: 'b, 'b> PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'a, 'b> {
     fn add_to_plan(&mut self, plan_info: &PlanInfo, tree: Arc<OpPathTree>) -> PlanInfo {
         let mut updated_graph = plan_info.fetch_dependency_graph.clone();
         let result = self.updated_dependency_graph(&mut updated_graph, &tree);
@@ -986,7 +1007,7 @@ impl PlanBuilder<PlanInfo, Arc<OpPathTree>> for QueryPlanningTraversal<'_> {
 //            The same would be infeasible to implement in Rust due to the cyclic references.
 //            Thus, instead of `condition_resolver` field, QueryPlanningTraversal was made to
 //            implement `ConditionResolver` trait along with `resolver_cache` field.
-impl<'a> ConditionResolver for QueryPlanningTraversal<'a> {
+impl<'a> ConditionResolver for QueryPlanningTraversal<'a, '_> {
     /// A query plan resolver for edge conditions that caches the outcome per edge.
     fn resolve(
         &mut self,
