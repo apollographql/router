@@ -455,17 +455,14 @@ impl Plugin for Telemetry {
                                 }
                             }
 
-                            if response
-                                .context
-                                .extensions()
-                                .lock()
-                                .get::<Arc<UsageReporting>>()
-                                .map(|u| {
-                                    u.stats_report_key == "## GraphQLValidationFailure\n"
-                                        || u.stats_report_key == "## GraphQLParseFailure\n"
-                                })
-                                .unwrap_or(false)
-                            {
+                            if response.context.extensions().with_lock(|lock| {
+                                lock.get::<Arc<UsageReporting>>()
+                                    .map(|u| {
+                                        u.stats_report_key == "## GraphQLValidationFailure\n"
+                                            || u.stats_report_key == "## GraphQLParseFailure\n"
+                                    })
+                                    .unwrap_or(false)
+                            }) {
                                 Self::update_apollo_metrics(
                                     &response.context,
                                     field_level_instrumentation_ratio,
@@ -516,12 +513,7 @@ impl Plugin for Telemetry {
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) = {
-                    let extensions = resp.context.extensions().lock();
-                    let urp = extensions.get::<Arc<UsageReporting>>();
-                    urp.cloned()
-                }
-                {
+                if let Some(usage_reporting) = resp.context.extensions().with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned()) {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
@@ -921,21 +913,17 @@ impl Telemetry {
         result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
     ) -> Result<SupergraphResponse, BoxError> {
-        let mut metric_attrs = {
-            context
-                .extensions()
-                .lock()
-                .get::<MetricsAttributes>()
-                .cloned()
-        }
-        .map(|attrs| {
-            attrs
-                .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                .collect::<Vec<KeyValue>>()
-        })
-        .unwrap_or_default();
+        let mut metric_attrs = context
+            .extensions()
+            .with_lock(|lock| lock.get::<MetricsAttributes>().cloned())
+            .map(|attrs| {
+                attrs
+                    .0
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
@@ -1037,10 +1025,11 @@ impl Telemetry {
 
         let _ = context
             .extensions()
-            .lock()
-            .insert(MetricsAttributes(attributes));
+            .with_lock(|mut lock| lock.insert(MetricsAttributes(attributes)));
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
-            context.extensions().lock().insert(EnableSubgraphFtv1);
+            context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
         }
     }
 
@@ -1098,8 +1087,8 @@ impl Telemetry {
         sub_request
             .context
             .extensions()
-            .lock()
-            .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
+            .with_lock(|mut lock| lock.insert(SubgraphMetricsAttributes(attributes)));
+        //.unwrap();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1110,21 +1099,17 @@ impl Telemetry {
         now: Instant,
         result: &Result<Response, BoxError>,
     ) {
-        let mut metric_attrs = {
-            context
-                .extensions()
-                .lock()
-                .get::<SubgraphMetricsAttributes>()
-                .cloned()
-        }
-        .map(|attrs| {
-            attrs
-                .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                .collect::<Vec<KeyValue>>()
-        })
-        .unwrap_or_default();
+        let mut metric_attrs = context
+            .extensions()
+            .with_lock(|lock| lock.get::<SubgraphMetricsAttributes>().cloned())
+            .map(|attrs| {
+                attrs
+                    .0
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         metric_attrs.push(subgraph_attribute);
         // Fill attributes from context
         metric_attrs.extend(
@@ -1324,11 +1309,10 @@ impl Telemetry {
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
     ) {
-        let metrics = if let Some(usage_reporting) = {
-            let lock = context.extensions().lock();
-            let urp = lock.get::<Arc<UsageReporting>>();
-            urp.cloned()
-        } {
+        let metrics = if let Some(usage_reporting) = context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+        {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
@@ -1787,8 +1771,7 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     if req
         .context
         .extensions()
-        .lock()
-        .contains_key::<EnableSubgraphFtv1>()
+        .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
         && Span::current().context().span().span_context().is_sampled()
     {
         req.subgraph_request
@@ -1803,8 +1786,7 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
     if resp
         .context
         .extensions()
-        .lock()
-        .contains_key::<EnableSubgraphFtv1>()
+        .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
     {
         if let Some(serde_json_bytes::Value::String(ftv1)) =
             resp.response.body().extensions.get("ftv1")

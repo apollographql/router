@@ -390,7 +390,8 @@ mod tests {
             .unwrap();
 
         let ctx = Context::new();
-        ctx.extensions().lock().insert::<ParsedDocument>(query);
+        ctx.extensions()
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query));
 
         let planner_res = planner
             .call(QueryPlannerRequest::new(query_str.to_string(), None, ctx))

@@ -256,9 +256,7 @@ impl Context {
     #[doc(hidden)]
     pub fn unsupported_executable_document(&self) -> Option<Arc<Valid<ExecutableDocument>>> {
         self.extensions()
-            .lock()
-            .get::<ParsedDocument>()
-            .map(|d| d.executable.clone())
+            .with_lock(|lock| lock.get::<ParsedDocument>().map(|d| d.executable.clone()))
     }
 }
 
@@ -406,10 +404,11 @@ mod test {
     fn context_extensions() {
         // This is mostly tested in the extensions module.
         let c = Context::new();
-        let mut extensions = c.extensions().lock();
-        extensions.insert(1usize);
-        let v = extensions.get::<usize>();
-        assert_eq!(v, Some(&1usize));
+        c.extensions().with_lock(|mut lock| lock.insert(1usize));
+        let v = c
+            .extensions()
+            .with_lock(|lock| lock.get::<usize>().cloned());
+        assert_eq!(v, Some(1usize));
     }
 
     #[test]
@@ -440,7 +439,7 @@ mod test {
         let document =
             Query::parse_document("{ me }", None, &schema, &Configuration::default()).unwrap();
         assert!(c.unsupported_executable_document().is_none());
-        c.extensions().lock().insert(document);
+        c.extensions().with_lock(|mut lock| lock.insert(document));
         assert!(c.unsupported_executable_document().is_some());
     }
 }

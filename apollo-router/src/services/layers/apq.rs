@@ -544,9 +544,11 @@ mod apq_tests {
 
     fn new_context() -> Context {
         let context = Context::new();
-        context.extensions().lock().insert(ClientRequestAccepts {
-            json: true,
-            ..Default::default()
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(ClientRequestAccepts {
+                json: true,
+                ..Default::default()
+            })
         });
 
         context

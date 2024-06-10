@@ -282,9 +282,10 @@ where
                     query = modified_query.to_string();
                 }
 
-                context.extensions().lock().insert::<ParsedDocument>(doc);
-
-                context.extensions().lock().insert(caching_key.metadata);
+                context.extensions().with_lock(|mut lock| {
+                    lock.insert::<ParsedDocument>(doc);
+                    lock.insert(caching_key.metadata)
+                });
 
                 let request = QueryPlannerRequest {
                     query,
@@ -356,11 +357,10 @@ where
         Box::pin(async move {
             let context = request.context.clone();
             qp.plan(request).await.map(|response| {
-                if let Some(usage_reporting) = {
-                    let lock = context.extensions().lock();
-                    let urp = lock.get::<Arc<UsageReporting>>();
-                    urp.cloned()
-                } {
+                if let Some(usage_reporting) = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+                {
                     let _ = response.context.insert(
                         "apollo_operation_id",
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
@@ -403,7 +403,11 @@ where
                 .unwrap_or_default(),
         };
 
-        let doc = match request.context.extensions().lock().get::<ParsedDocument>() {
+        let doc = match request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
+        {
             None => {
                 return Err(CacheResolverError::RetrievalError(Arc::new(
                     // TODO: dedicated error variant?
@@ -415,11 +419,11 @@ where
             Some(d) => d.clone(),
         };
 
-        let metadata = {
-            let lock = request.context.extensions().lock();
-            let ckm = lock.get::<CacheKeyMetadata>().cloned();
-            ckm.unwrap_or_default()
-        };
+        let metadata = request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned())
+            .unwrap_or_default();
 
         let caching_key = CachingQueryKey {
             query: request.query.clone(),
@@ -474,10 +478,9 @@ where
 
                             // This will be overridden when running in ApolloMetricsGenerationMode::New mode
                             if let Some(QueryPlannerContent::Plan { plan, .. }) = &content {
-                                context
-                                    .extensions()
-                                    .lock()
-                                    .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
+                                context.extensions().with_lock(|mut lock| {
+                                    lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
+                                });
                             }
                             Ok(QueryPlannerResponse {
                                 content,
@@ -512,10 +515,9 @@ where
             match res {
                 Ok(content) => {
                     if let QueryPlannerContent::Plan { plan, .. } = &content {
-                        context
-                            .extensions()
-                            .lock()
-                            .insert::<Arc<UsageReporting>>(plan.usage_reporting.clone());
+                        context.extensions().with_lock(|mut lock| {
+                            lock.insert::<Arc<UsageReporting>>(plan.usage_reporting.clone())
+                        });
                     }
 
                     Ok(QueryPlannerResponse::builder()
@@ -526,23 +528,19 @@ where
                 Err(error) => {
                     match error.deref() {
                         QueryPlannerError::PlanningErrors(pe) => {
-                            request
-                                .context
-                                .extensions()
-                                .lock()
-                                .insert::<Arc<UsageReporting>>(Arc::new(
+                            request.context.extensions().with_lock(|mut lock| {
+                                lock.insert::<Arc<UsageReporting>>(Arc::new(
                                     pe.usage_reporting.clone(),
-                                ));
+                                ))
+                            });
                         }
                         QueryPlannerError::SpecError(e) => {
-                            request
-                                .context
-                                .extensions()
-                                .lock()
-                                .insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
+                            request.context.extensions().with_lock(|mut lock| {
+                                lock.insert::<Arc<UsageReporting>>(Arc::new(UsageReporting {
                                     stats_report_key: e.get_error_key().to_string(),
                                     referenced_fields_by_type: HashMap::new(),
-                                }));
+                                }))
+                            });
                         }
                         _ => {}
                     }
@@ -713,7 +711,9 @@ mod tests {
         .unwrap();
 
         let context = Context::new();
-        context.extensions().lock().insert::<ParsedDocument>(doc1);
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc1));
 
         for _ in 0..5 {
             assert!(planner
@@ -734,7 +734,9 @@ mod tests {
         .unwrap();
 
         let context = Context::new();
-        context.extensions().lock().insert::<ParsedDocument>(doc2);
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc2));
 
         assert!(planner
             .call(query_planner::CachingRequest::new(
@@ -799,7 +801,9 @@ mod tests {
                 .unwrap();
 
         let context = Context::new();
-        context.extensions().lock().insert::<ParsedDocument>(doc);
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
 
         for _ in 0..5 {
             assert!(planner
@@ -812,8 +816,7 @@ mod tests {
                 .unwrap()
                 .context
                 .extensions()
-                .lock()
-                .contains_key::<Arc<UsageReporting>>());
+                .with_lock(|lock| lock.contains_key::<Arc<UsageReporting>>()));
         }
     }
 

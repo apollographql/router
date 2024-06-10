@@ -227,9 +227,7 @@ impl PlanNode {
                     if parameters
                         .context
                         .extensions()
-                        .lock()
-                        .get::<CanceledRequest>()
-                        .is_some()
+                        .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
                     {
                         value = Value::Object(Object::default());
                         errors = Vec::new();

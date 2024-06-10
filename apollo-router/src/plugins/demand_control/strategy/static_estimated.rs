@@ -19,11 +19,20 @@ impl StrategyImpl for StaticEstimated {
         self.cost_calculator
             .planned(&request.query_plan)
             .and_then(|cost| {
-                if cost > self.max {
-                    Err(DemandControlError::EstimatedCostTooExpensive)
-                } else {
-                    Ok(())
-                }
+                request.context.extensions().with_lock(|mut lock| {
+                    let cost_result = lock.get_or_default_mut::<CostContext>();
+                    cost_result.estimated = cost;
+                    if cost > self.max {
+                        Err(
+                            cost_result.result(DemandControlError::EstimatedCostTooExpensive {
+                                estimated_cost: cost,
+                                max_cost: self.max,
+                            }),
+                        )
+                    } else {
+                        Ok(())
+                    }
+                })
             })
     }
 
@@ -45,8 +54,10 @@ impl StrategyImpl for StaticEstimated {
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
         if response.data.is_some() {
-            let _cost = self.cost_calculator.actual(request, response)?;
-            // Todo metrics
+            let cost = self.cost_calculator.actual(request, response)?;
+            context
+                .extensions()
+                .with_lock(|mut lock| lock.get_or_default_mut::<CostContext>().actual = cost);
         }
         Ok(())
     }
