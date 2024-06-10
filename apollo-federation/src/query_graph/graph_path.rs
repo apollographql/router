@@ -440,20 +440,25 @@ impl OpPathElement {
         }
     }
 
-    pub(crate) fn rebase_on(
+    pub(crate) fn rebase_on_or_error(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
-    ) -> Result<Option<OpPathElement>, FederationError> {
-        match self {
+    ) -> Result<OpPathElement, FederationError> {
+        let result: Option<OpPathElement> = match self {
             OpPathElement::Field(field) => field
-                .rebase_on(parent_type, schema, error_handling)
+                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
                 .map(|val| val.map(Into::into)),
             OpPathElement::InlineFragment(inline) => inline
-                .rebase_on(parent_type, schema, error_handling)
+                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
                 .map(|val| val.map(Into::into)),
-        }
+        }?;
+        result.ok_or_else(|| {
+            FederationError::internal(format!(
+                "Cannot rebase operation element {} on {}",
+                self, parent_type
+            ))
+        })
     }
 }
 

@@ -1233,6 +1233,14 @@ mod router_plugin {
             .map(|x| x.as_secs() as i64)
     }
 
+    #[rhai_fn(return_raw)]
+    pub(crate) fn unix_ms_now() -> Result<i64, Box<EvalAltResult>> {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| e.to_string().into())
+            .map(|x| x.as_millis() as i64)
+    }
+
     // Add query plan getter to execution request
     #[rhai_fn(get = "query_plan")]
     pub(crate) fn execution_request_query_plan_get(
