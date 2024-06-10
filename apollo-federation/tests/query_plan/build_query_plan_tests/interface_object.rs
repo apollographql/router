@@ -144,9 +144,6 @@ fn can_use_a_key_on_an_interface_object_from_an_interface_object_type() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"I.y\" to selection set of parent type \"I\""
-)]
 fn only_uses_an_interface_object_if_it_can() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -177,7 +174,9 @@ fn only_uses_an_interface_object_if_it_can() {
 }
 
 #[test]
-#[should_panic(expected = "Interface type referencers unexpectedly missing type")]
+#[should_panic(
+    expected = "Cannot add selection of field \"I.__typename\" to selection set of parent type \"I\" that is potentially an interface object type at runtime"
+)]
 fn does_not_rely_on_an_interface_object_directly_for_typename() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -298,9 +297,7 @@ fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"I.y\" to selection set of parent type \"I\""
-)]
+#[should_panic(expected = "assertion `left == right` failed\n  left: 0\n right: 1")]
 fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -522,9 +519,7 @@ fn it_avoids_buffering_interface_object_results_that_may_have_to_be_filtered_wit
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"I.x\" to selection set of parent type \"I\""
-)]
+#[should_panic(expected = "snapshot assertion")]
 fn it_handles_requires_on_concrete_type_of_field_provided_by_interface_object() {
     let planner = planner!(
         S1: r#"

@@ -279,7 +279,7 @@ impl QueryPlanner {
             let Some(expected_runtimes) = sources.next() else {
                 return false;
             };
-            sources.all(|runtimes| runtimes == expected_runtimes)
+            !sources.all(|runtimes| runtimes == expected_runtimes)
         };
 
         let abstract_types_with_inconsistent_runtime_types = supergraph
@@ -692,7 +692,11 @@ fn compute_plan_internal(
             deferred.extend(local_deferred);
             let new_selection = dependency_graph.defer_tracking.primary_selection;
             match primary_selection.as_mut() {
-                Some(selection) => selection.merge_into(new_selection.iter())?,
+                Some(selection) => {
+                    if let Some(new_selection) = new_selection {
+                        selection.add_local_selection_set(&new_selection)?
+                    }
+                }
                 None => primary_selection = new_selection,
             }
         }
