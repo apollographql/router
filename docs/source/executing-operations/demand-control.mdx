@@ -1,9 +1,11 @@
 ---
 title: Demand Control
-subtitle: Configure your router with operation cost limits to reject high cost operations sent by malicious or demanding clients
-description: Protect your Apollo Router from malicious or demanding clients by configuring demand control to reject high cost operations.
+subtitle: Protect your graph from high cost GraphQL operations
+description: Protect your graph from malicious or demanding clients with Apollo GraphOS Router's demand control features. Estimate, calculate, observe, and reject high cost GraphQL operations.
 minVersion: 1.48.0
 ---
+
+Protect your graph from malicious or demanding clients with GraphOS Router's demand control features. Estimate, calculate, observe, and reject high cost GraphQL operations.
 
 <EnterpriseFeature />
 
@@ -21,9 +23,9 @@ We welcome your feedback during the preview, especially feedback about the follo
 
 ## About demand control
 
-Applications with misconfigured or malicious clients can send complex operations through your router that can overload the infrastructure of your supergraph. When a client makes a request to the router, the router makes requests to your subgraphs to gather data for the final response. A client however may mistakenly or maliciously send a complex operation (query, mutation, or subscription) that is deeply nested or has many results. Too many complex operations might overload your subgraphs and degrade the responsiveness and latency of your supergraph.
+Applications clients can send complex operations through your router that can overload the infrastructure of your supergraph. The clients may be unintentionally or maliciously overloading your supergraph. When a client makes a request to the router, the router makes requests to your subgraphs to gather data for the final response. A client however may send an operation (query, mutation, or subscription) that's too complex for the your subgraphs to process without impacting performance. Complex operations include operations that are deeply nested or has many results. Too many complex operations might overload your subgraphs and degrade the responsiveness and latency of your supergraph.
 
-To prevent complex operations from degrading supergraph performance, the Apollo Router supports analysis and rejection of requests based on operation complexity. The router computes a complexity value, or _cost_, per operation. You can collect telemetry and metrics to determine the range of costs of operations served by router. You can then configure a maximum cost limit per operation, above which an operation is rejected.  
+To prevent complex operations from degrading supergraph performance, the Apollo Router supports analysis and rejection of requests based on operation complexity. Like [safelisting operations with persisted query lists (PQL)](/graphos/operations/persisted-queries), demand control enables you to reject operations that you don't want to be served by your graph. The router computes a complexity value, or _cost_, per operation. You can collect telemetry and metrics to determine the range of costs of operations served by router. You can then configure a maximum cost limit per operation, above which an operation is rejected.  
 
 ## Calculating operation cost
 
@@ -106,6 +108,8 @@ preview_demand_control:
       list_size: 10 
       max: 1000 
 ```
+
+When `preview_demand_control` is enabled, the router measures the cost of each operation and can enforce operation cost limits, based on additional configuration.  
 
 Customize `preview_demand_control` with the following settings:
 
