@@ -1,16 +1,15 @@
 ---
-title: Configuring the Apollo Router
-subtitle: With environment variables, command-line options, and YAML file configuration
-description: Learn how to configure the Apollo Router with environment variables, command-line options and commands, and YAML configuration files.
+title: Configuring the GraphOS Router
+description: Command arguments and YAML config
 ---
 
 import RedisTLS from '../../shared/redis-tls.mdx'
 
-Learn how to customize the behavior of your Apollo Router with environment variables, command-line commands and options, and YAML file configuration.
+Learn how to customize the behavior of your GraphOS Router with environment variables, command-line commands and options, and YAML file configuration.
 
 ## Environment variables
 
-If you're using the Apollo Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
+If you're using the GraphOS Router with [managed federation](/federation/managed-federation/overview/) and GraphOS, set these environment variables in the startup command:
 
 ```bash
 APOLLO_KEY="..." APOLLO_GRAPH_REF="..." ./router
@@ -61,7 +60,7 @@ The [graph API key](/graphos/api-keys/#graph-api-keys) that the router should us
 
 ## Command-line options
 
-After [installing the Apollo Router](../quickstart/) in your current working directory, you can run the Apollo Router with the following example command:
+After [installing the Apollo Router Core](../quickstart/) in your current working directory, you can run the router with the following example command:
 
 ```bash
 ./router --config router.yaml --supergraph supergraph-schema.graphql
@@ -89,7 +88,7 @@ This reference lists and describes the options supported by the `router` binary.
 </td>
 <td>
 
-The Apollo Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema). Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
+The GraphOS Router's [supergraph schema](/federation/federated-types/overview/#supergraph-schema). Specified by absolute or relative path (`-s` / `--supergraph <supergraph_path>`, or `APOLLO_ROUTER_SUPERGRAPH_PATH`), or a comma-separated list of URLs (`APOLLO_ROUTER_SUPERGRAPH_URLS`).
 
 > &#x1F4A1; Avoid embedding tokens in `APOLLO_ROUTER_SUPERGRAPH_URLS` because the URLs may appear in log messages. 
 
@@ -127,7 +126,7 @@ The absolute or relative path to the router's optional [YAML configuration file]
 
 ⚠️ **Do not set this option in production!**
 
-If set, the Apollo Router runs in dev mode to help with local development.
+If set, the GraphOS Router runs in dev mode to help with local development.
 
 [Learn more about dev mode.](#dev-mode-defaults)
 
@@ -327,7 +326,7 @@ plugins:
 
 ## `config` subcommands
 
-The Apollo Router provides a set of subcommands for interacting with its configuration. You run these subcommands with the following syntax:
+The GraphOS Router provides a set of subcommands for interacting with its configuration. You run these subcommands with the following syntax:
 
 ```
 ./router config schema
@@ -367,7 +366,7 @@ Use this schema to enable [configuration awareness in your text editor](#configu
 </td>
 <td>
 
-Takes a config file created for a _previous_ version of the Apollo Router and outputs the corresponding configuration for the _current_ version.
+Takes a config file created for a _previous_ version of the GraphOS Router and outputs the corresponding configuration for the _current_ version.
 
 For details, see [Upgrading your router configuration](#upgrading-your-router-configuration).
 
@@ -379,7 +378,7 @@ For details, see [Upgrading your router configuration](#upgrading-your-router-co
 
 ## YAML config file
 
-The Apollo Router takes an optional YAML configuration file as input via the [`--config`](#-c----config) option:
+The GraphOS Router takes an optional YAML configuration file as input via the [`--config`](#-c----config) option:
 
 ```bash
 ./router --config router.yaml
@@ -397,7 +396,7 @@ Enable your text editor to validate the format and content of your router YAML c
 
 ### Listen address
 
-By default, the Apollo Router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen`:
+By default, the GraphOS Router starts an HTTP server that listens on `127.0.0.1:4000`. You can specify a different address by setting `supergraph.listen`:
 
 #### IPv4
 
@@ -469,13 +468,13 @@ supergraph:
 
 ### Debugging
 
-- To configure logging, see [Logging in the Apollo Router](./telemetry/exporters/logging/overview).
+- To configure logging, see [Logging in the GraphOS Router](./telemetry/exporters/logging/overview).
 
 - To configure the inclusion of subgraph errors, see [Subgraph error inclusion](./subgraph-error-inclusion).
 
 ### Landing pages
 
-The Apollo Router can serve any of the following landing pages to browsers that visit its [endpoint path](#endpoint-path):
+The GraphOS Router can serve any of the following landing pages to browsers that visit its [endpoint path](#endpoint-path):
 
 - A basic landing page that displays an example query `curl` command (default)
 
@@ -517,7 +516,7 @@ The Apollo Router can serve any of the following landing pages to browsers that 
 
 ### Subgraph routing URLs
 
-By default, the Apollo Router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
+By default, the GraphOS Router obtains the routing URL for each of your subgraphs from the composed supergraph schema you provide it. In most cases, no additional configuration is required. The URL can use HTTP and HTTPS for network access to subgraph, or have the following shape for Unix sockets usage: `unix:///path/to/subgraph.sock`
 
 However, if you _do_ need to override a particular subgraph's routing URL (for example, to handle changing network topography), you can do so with the `override_subgraph_url` option:
 
@@ -535,17 +534,17 @@ If you need to override the subgraph URL at runtime on a per-request basis, you 
 
 ### Caching
 
-By default, the Apollo Router stores the following data in its in-memory cache to improve performance:
+By default, the GraphOS Router stores the following data in its in-memory cache to improve performance:
 
 - Generated query plans
 - Automatic persisted queries (APQ)
 - Introspection responses
 
-You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-memory caching in the Apollo Router](./in-memory-caching/).
+You can configure certain caching behaviors for generated query plans and APQ (but not introspection responses). For details, see [In-memory caching in the GraphOS Router](./in-memory-caching/).
 
 **If you have a GraphOS Enterprise plan:** 
-- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the Apollo Router](./distributed-caching/).
-- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the Apollo Router](./entity-caching/).
+- You can configure a Redis-backed _distributed_ cache that enables multiple router instances to share cached values. For details, see [Distributed caching in the GraphOS Router](./distributed-caching/).
+- You can configure a Redis-backed _entity_ cache that enables a client query to retrieve cached entity data split between subgraph reponses. For details, see [Subgraph entity caching in the GraphOS Router](./entity-caching/).
 
 <MinVersion version="1.44.0">
 
@@ -591,23 +590,23 @@ See [Sending HTTP headers to subgraphs](./header-propagation/).
 
 ### Traffic shaping
 
-To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the Apollo Router](./traffic-shaping).
+To configure the shape of traffic between clients, routers, and subgraphs, see [Traffic shaping in the GraphOS Router](./traffic-shaping).
 
 ### Cross-Origin Resource Sharing (CORS)
 
-See [Configuring CORS in the Apollo Router](./cors).
+See [Configuring CORS in the GraphOS Router](./cors).
 
 ### Defer support
 
-See [Apollo Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
+See [GraphOS Router support for `@defer`](../executing-operations/defer-support/#disabling-defer).
 
 ### Query batching support
 
-See [Apollo Router's _experimental_ support for query batching](../executing-operations/query-batching).
+See [GraphOS Router's _experimental_ support for query batching](../executing-operations/query-batching).
 
 ### Subscription support
 
-See [GraphQL subscriptions in the Apollo Router](../executing-operations/subscription-support/#router-setup).
+See [GraphQL subscriptions in the GraphOS Router](../executing-operations/subscription-support/#router-setup).
 
 ### Authorization support
 
@@ -617,11 +616,11 @@ See [GraphQL subscriptions in the Apollo Router](../executing-operations/subscri
 
 ### JWT authentication
 
-To enable and configure JWT authentication, see [JWT authentication in the Apollo Router](./authn-jwt).
+To enable and configure JWT authentication, see [JWT authentication in the GraphOS Router](./authn-jwt).
 
 ### Cross-site request forgery (CSRF) prevention
 
-To configure CSRF prevention, see [CSRF prevention in the Apollo Router](./csrf).
+To configure CSRF prevention, see [CSRF prevention in the GraphOS Router](./csrf).
 
 ### Subgraph authentication
 
@@ -629,17 +628,17 @@ To configure subgraph authentication with AWS SigV4, see a [configuration exampl
 
 ### External coprocessing
 
-See [External coprocessing in the Apollo Router](../customizations/coprocessor/).
+See [External coprocessing in the GraphOS Router](../customizations/coprocessor/).
 
 ### Telemetry and monitoring
 
-The Apollo Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
+The GraphOS Router supports standard and custom instrumentation to collect telemetry data from its request and response processing pipeline to produce logs, metrics and traces to export.
 
-See the [Apollo Router telemetry overview](./telemetry/overview).
+See the [GraphOS Router telemetry overview](./telemetry/overview).
 
 ### TLS
 
-The Apollo Router supports TLS to authenticate and encrypt communications, both on the client side and the subgraph side. It works automatically on the subgraph side if the subgraph URL starts with `https://`.
+The GraphOS Router supports TLS to authenticate and encrypt communications, both on the client side and the subgraph side. It works automatically on the subgraph side if the subgraph URL starts with `https://`.
 
 TLS support is configured in the `tls` section, under the `supergraph` key for the client side, and the `subgraph` key for the subgraph side, with configuration possible for all subgraphs and overriding per subgraph.
 
@@ -753,7 +752,7 @@ tls:
 
 ### Request limits
 
-The Apollo Router supports enforcing three types of request limits for enhanced security:
+The GraphOS Router supports enforcing three types of request limits for enhanced security:
 
 - Network-based limits
 - Lexical, parser-based limits
@@ -833,13 +832,17 @@ Note that the router calculates the recursion depth for each operation and fragm
 
 <Note>
 
-In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
+In versions of the GraphOS Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
 
 </Note>
 
+### Demand control
+
+See [Demand Control](../executing-operations/demand-control) to learn how to analyze the cost of queries and how to reject requests with queries that exceed customizable cost limits. 
+
 ### Early cancel
 
-Up until [Apollo Router 1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the Router introduced a new behaviour in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
+Up until [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the router introduced a new behavior in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
 To go back to the previous behaviour of immediately cancelling the request, the following configuration can be used:
 
 ```yaml
@@ -847,7 +850,7 @@ supergraph:
   early_cancel: true
 ```
 
-Additionally, since 1.43.1, the Apollo Router can show a log when it detects that the client canceled the request. This log can be activated with:
+Additionally, since v1.43.1, the Apollo Router Core can show a log when it detects that the client canceled the request. This log can be activated with:
 
 ```yaml title="router.yaml"
 supergraph:
@@ -857,7 +860,7 @@ supergraph:
 
 ### Plugins
 
-You can customize the Apollo Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
+You can customize the GraphOS Router's behavior with [plugins](../customizations/overview). Each plugin can have its own section in the configuration file with arbitrary values:
 
 ```yaml {4,8} title="example-plugin-router.yaml"
 plugins:
@@ -870,7 +873,7 @@ plugins:
 
 You can reference variables directly in your YAML config file. This is useful for referencing secrets without including them in the file.
 
-Currently, the Apollo Router supports expansion of environment variables and file paths. Corresponding variables are prefixed with `env.` and `file.`, respectively.
+Currently, the GraphOS Router supports expansion of environment variables and file paths. Corresponding variables are prefixed with `env.` and `file.`, respectively.
 
 The router uses Unix-style expansion. Here are some examples:
 
@@ -891,14 +894,14 @@ example:
 
 ### Fragment reuse and generation
 
-By default, the Apollo Router will attempt to reuse fragments from the original query while forming subgraph requests. This behavior can be disabled by setting the option to `false`:
+By default, the GraphOS Router will attempt to reuse fragments from the original query while forming subgraph requests. This behavior can be disabled by setting the option to `false`:
 
 ```yaml
 supergraph:
   experimental_reuse_query_fragments: false
 ```
 
-Alternatively, the Apollo Router can be configured to _generate_ fragments for subgraph requests. When set to `true`, the Apollo Router will extract _inline fragments only_ into fragment definitions before sending queries to subgraphs. This can significantly reduce the size of the query sent to subgraphs, but may increase the time it takes for planning. Note that this option and `experimental_reuse_query_fragments` are mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments` will take precedence.
+Alternatively, the GraphOS Router can be configured to _generate_ fragments for subgraph requests. When set to `true`, the GraphOS Router will extract _inline fragments only_ into fragment definitions before sending queries to subgraphs. This can significantly reduce the size of the query sent to subgraphs, but may increase the time it takes for planning. Note that this option and `experimental_reuse_query_fragments` are mutually exclusive; if both are explicitly set to `true`, `generate_query_fragments` will take precedence.
 
 ```yaml
 supergraph:
@@ -926,7 +929,7 @@ Here, the `name` and `value` entries under `&insert_custom_header` are reused un
 
 ## Configuration awareness in your text editor
 
-The Apollo Router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
+The GraphOS Router can generate a JSON schema for config validation in your text editor. This schema helps you format the YAML file correctly and also provides content assist.
 
 Generate the schema with the following command:
 
@@ -944,7 +947,7 @@ After you generate the schema, configure your text editor. Here are the instruct
 
 ## Upgrading your router configuration
 
-New releases of the Apollo Router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
+New releases of the GraphOS Router might introduce breaking changes to the [YAML config file's](#yaml-config-file) expected format, usually to extend existing functionality or improve usability.
 
 **If you run a new version of your router with a configuration file that it no longer supports:**
 

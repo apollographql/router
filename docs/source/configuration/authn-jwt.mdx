@@ -1,12 +1,12 @@
 ---
-title: JWT Authentication in the Apollo Router
+title: JWT Authentication in the GraphOS Router
 subtitle: Restrict access to credentialed users and systems
-description:  Protect sensitive data by enabling JWT authentication in the Apollo Router. Restrict access to credentialed users and systems.
+description:  Protect sensitive data by enabling JWT authentication in the GraphOS Router. Restrict access to credentialed users and systems.
 ---
 
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
-Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The Apollo Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
+Authentication is crucial to prevent illegitimate access and protect sensitive data in your graph. The GraphOS Router supports request authentication and key rotation via the [JSON Web Token](https://www.rfc-editor.org/rfc/rfc7519) (**JWT**) and [JSON Web Key](https://www.rfc-editor.org/rfc/rfc7517) (**JWK**) standards. This support is compatible with popular identity providers (**IdPs**) like Okta and Auth0.
 
 By enabling JWT authentication, you can block malicious traffic at the _edge_ of your graph instead of relying on [header forwarding](./header-propagation/) to propagate tokens to your subgraphs.
 
@@ -18,7 +18,7 @@ Your subgraphs should always be accessible _only_ via the router—not directly 
 
 ## How JWT authentication works
 
-These are the high-level steps of JWT-based authentication with the Apollo Router:
+These are the high-level steps of JWT-based authentication with the GraphOS Router:
 
 1. Whenever a client authenticates with your system, your IdP issues that client a valid JSON Web Token (JWT).
 2. In its subsequent requests to your router, the authenticated client provides its JWT in a designated HTTP header.
@@ -194,7 +194,7 @@ The default value is `false`.
 
 ## Working with JWT claims
 
-After the Apollo Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo_authentication::JWT::claims`
+After the GraphOS Router validates a client request's JWT, it adds that token's **claims** to the request's context at this key: `apollo_authentication::JWT::claims`
 
 > - If no JWT is present for a client request, this context value is the empty tuple, `()`.
 > - If a JWT _is_ present but validation of the JWT fails, the router _rejects_ the request.
@@ -208,7 +208,7 @@ authorization:
 
 **Claims** are the individual details of a JWT's scope. They might include details like the ID of the associated user, any roles assigned to that user, and the JWT's expiration time. [See the spec.](https://www.rfc-editor.org/rfc/rfc7519#section-4)
 
-Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic within a Rhai script or external coprocessor at the supergraph service level (for more on these options, see [Customizations for the Apollo Router](../customizations/overview/)).
+Because claims are added to the context, you can define custom logic for handling each request based on the details of its claims. You can define this logic within a Rhai script or external coprocessor at the supergraph service level (for more on these options, see [Router Customizations](../customizations/overview/)).
 
 Below are 2 example [Rhai script](../customizations/rhai/) customizations that demonstrate actions the router can perform based on a request's claims.
 
@@ -413,11 +413,11 @@ For more information, refer to [the coprocessor documentation](../customizations
 <Note>
 
 - **Most third-party IdP services create and host a JSON Web Key Set (JWKS) for you.** Read this section only if you use a _custom_ IdP that doesn't publish its JWKS at a router-accessible URL.
-- To be compatible with JWT authentication supported by Apollo Router, your IdP (or whatever service issues JWTs to authenticated clients) must use one of the [signature algorithms](https://crates.io/crates/jsonwebtoken#algorithms) supported by the router.
+- To be compatible with JWT authentication supported by GraphOS Router, your IdP (or whatever service issues JWTs to authenticated clients) must use one of the [signature algorithms](https://crates.io/crates/jsonwebtoken#algorithms) supported by the router.
 
 </Note>
 
-The Apollo Router obtains each JSON Web Key (JWK) that it uses from the URLs that you specify via the [`jwks`](#jwks) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a JWK Set (or **JWKS**).
+The GraphOS Router obtains each JSON Web Key (JWK) that it uses from the URLs that you specify via the [`jwks`](#jwks) configuration option. Each URL must provide a set of valid JWKs in a single JSON object called a JWK Set (or **JWKS**).
 
 Consult your IdP's documentation to obtain the [JWKS URL](#jwks) to pass to your router.
 
@@ -730,9 +730,9 @@ This matching strategy is necessary because some identity providers (IdPs) don't
 
 ## Forwarding JWTs to subgraphs
 
-Because the Apollo Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs-as-headers) to enable fine-grained access control.
+Because the GraphOS Router handles validating incoming JWTs, you rarely need to pass those JWTs to individual subgraphs in their entirety. Instead, you usually want to [pass JWT _claims_ to subgraphs](#example-forwarding-claims-to-subgraphs-as-headers) to enable fine-grained access control.
 
-If you _do_ need to pass entire JWTs to subgraphs, you can do so via the Apollo Router's general-purpose [HTTP header propagation settings](./header-propagation).
+If you _do_ need to pass entire JWTs to subgraphs, you can do so via the GraphOS Router's general-purpose [HTTP header propagation settings](./header-propagation).
 
 ## Observability
 

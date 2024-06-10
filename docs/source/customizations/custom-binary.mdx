@@ -1,13 +1,13 @@
 ---
-title: Creating a Custom Apollo Router Binary
+title: Creating a Custom Apollo Router Core Binary
 subtitle: Compile a custom router binary from source
-description: Compile a custom Apollo Router binary from source. Learn to create native Rust plugins.
+description: Compile a custom Apollo Router Core binary from source. Learn to create native Rust plugins.
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 import NativePluginNotice from '../../shared/native-plugin-notice.mdx';
 
-Learn how to compile a custom Apollo Router binary from source, which is required to create custom native Rust plugins for the router.
+Learn how to compile a custom binary from Apollo Router Core source, which is required to create custom native Rust plugins for the router.
 
 <NativePluginNotice />
 
@@ -15,7 +15,7 @@ Learn how to compile a custom Apollo Router binary from source, which is require
 
 ## Prerequisites
 
-To compile the Apollo Router, you need to have the following installed:
+To compile the router, you need to have the following installed:
 
 <!-- renovate-automation: rustc version -->
 * [Rust 1.76.0 or later](https://www.rust-lang.org/tools/install)
@@ -62,11 +62,11 @@ starstuff
         └── main.rs
 ```
 
-The Apollo Router uses an auto-discovery mechanism for plugins, so any plugins you add via dependency are automatically available to the Router at runtime.
+The router uses an auto-discovery mechanism for plugins, so any plugins you add via dependency are automatically available to the Router at runtime.
 
 ## 2. Compile the router
 
-Create a debug build of the Apollo Router with the following command:
+Create a debug build of the router with the following command:
 
 ```bash
 cargo build
@@ -211,4 +211,4 @@ ENTRYPOINT ["/dist/router", "-s", "/dist/supergraph.graphql"]
 
 ## Related topics
 
-* [Optimizing Custom Apollo Router Builds](/technotes/TN0030-optimizing-router-builds/)
+* [Optimizing Custom GraphOS Router Builds](/technotes/TN0030-optimizing-router-builds/)

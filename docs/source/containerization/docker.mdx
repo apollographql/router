@@ -1,13 +1,13 @@
 ---
 title: Run in Docker
-subtitle: Run the Apollo Router container image in Docker
-description: Run the Apollo Router container image in Docker with examples covering basic setup, configuration overrides, debugging, and building custom Docker images.
+subtitle: Run the Apollo Router Core container image in Docker
+description: Run the Apollo Router Core container image in Docker with examples covering basic setup, configuration overrides, debugging, and building custom Docker images.
 ---
 
 import { Link } from "gatsby";
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 
-This guide provides the following examples of running an Apollo Router container image in Docker:
+This guide provides the following examples of running an Apollo Router Core container image in Docker:
 
 * Running a basic example with default configuration.
 * Customizing your configuration to override the default configuration.
@@ -37,7 +37,7 @@ docker run -p 4000:4000 \
 
 This command downloads your supergraph schema from Apollo and uses a default configuration that listens for connections on port `4000`.
 
-For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Configuring the Apollo Router](../configuration/overview/).
+For more complex configurations, such as overriding subgraph URLs or propagating headers, see [Configuring the GraphOS Router](../configuration/overview/).
 
 ## Override the configuration
 
