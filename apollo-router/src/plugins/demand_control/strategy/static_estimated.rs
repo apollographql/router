@@ -20,19 +20,20 @@ impl StrategyImpl for StaticEstimated {
         self.cost_calculator
             .planned(&request.query_plan)
             .and_then(|cost| {
-                let mut extensions = request.context.extensions().lock();
-                let cost_result = extensions.get_or_default_mut::<CostContext>();
-                cost_result.estimated = cost;
-                if cost > self.max {
-                    Err(
-                        cost_result.result(DemandControlError::EstimatedCostTooExpensive {
-                            estimated_cost: cost,
-                            max_cost: self.max,
-                        }),
-                    )
-                } else {
-                    Ok(())
-                }
+                request.context.extensions().with_lock(|mut lock| {
+                    let cost_result = lock.get_or_default_mut::<CostContext>();
+                    cost_result.estimated = cost;
+                    if cost > self.max {
+                        Err(
+                            cost_result.result(DemandControlError::EstimatedCostTooExpensive {
+                                estimated_cost: cost,
+                                max_cost: self.max,
+                            }),
+                        )
+                    } else {
+                        Ok(())
+                    }
+                })
             })
     }
 
@@ -56,9 +57,9 @@ impl StrategyImpl for StaticEstimated {
     ) -> Result<(), DemandControlError> {
         if response.data.is_some() {
             let cost = self.cost_calculator.actual(request, response)?;
-            let mut extensions = context.extensions().lock();
-            let cost_result = extensions.get_or_default_mut::<CostContext>();
-            cost_result.actual = cost;
+            context
+                .extensions()
+                .with_lock(|mut lock| lock.get_or_default_mut::<CostContext>().actual = cost);
         }
         Ok(())
     }
