@@ -4,6 +4,64 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.48.1] - 2024-06-10
+
+## 🐛 Fixes
+
+### Improve error message produced when subgraphs responses don't include an expected `content-type` header value ([Issue #5359](https://github.com/apollographql/router/issues/5359))
+
+To improve a common debuggability challenge when a subgraph response doesn't contain an expected `content-type` header value, the error message produced will include additional details about the error.
+
+Examples:
+
+   * ```
+     HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json
+      ```
+   * ```
+     HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json
+      ```
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5223
+
+### Update `apollo-compiler` for two small improvements ([PR #5347](https://github.com/apollographql/router/pull/5347))
+
+Updated our underlying `apollo-rs` dependency on our `apollo-compiler` crate to bring in two nice improvements:
+
+- **Fix validation performance bug**
+
+  Adds a cache in fragment spread validation, fixing a situation where validating a query
+  with many fragment spreads against a schema with many interfaces could take multiple
+  seconds to validate.
+
+- **Remove ariadne byte/char mapping**
+
+  Generating JSON or CLI reports for apollo-compiler diagnostics used a translation layer
+  between byte offsets and character offsets, which cost some computation and memory
+  proportional to the size of the source text. The latest version of `ariadne` allows us to
+  remove this translation.
+
+By [@goto-bus-stop](https://github.com/goto-bus-stop) in https://github.com/apollographql/router/pull/5347
+
+## 📃 Configuration
+
+### Rename the telemetry selector to get studio operation id ([PR #5337](https://github.com/apollographql/router/pull/5337))
+
+We introduced a new `trace_id` selector format in `1.48.0` which was misnamed. It's not a trace id, it's the Apollo Studio Operation ID. We've fixed this naming problem in this release.
+
+If you want to access this selector, here is an example:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        "studio.operation.id":
+            studio_operation_id: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5337
+
+
+
 # [1.48.0] - 2024-05-29
 
 ## 🚀 Features
