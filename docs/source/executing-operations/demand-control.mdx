@@ -29,7 +29,7 @@ To prevent complex operations from degrading supergraph performance, the Apollo 
 
 When your router receives a request, its query planner generates and sends a series of sub-requests to subgraphs. 
 
-To calculate the total cost of an operation, the router assigns a cost or weight for each sub-request, based on fixed costs for each sub-request's operation kind and the types of GraphQL elements of its fields.
+To calculate the total cost of an operation, the router sums the total costs or weights based on sub-request's operation kind and the types of GraphQL elements of its fields.
 
 The cost of each operation kind:
 
@@ -164,7 +164,7 @@ telemetry
     instruments:
       supergraph:
         cost.estimated: true
-	   attributes:
+	  attributes:
             cost.result: true
             graphql.operation.name: string
 ```
