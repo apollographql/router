@@ -17,7 +17,6 @@ use super::SelectionId;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use crate::error::FederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
