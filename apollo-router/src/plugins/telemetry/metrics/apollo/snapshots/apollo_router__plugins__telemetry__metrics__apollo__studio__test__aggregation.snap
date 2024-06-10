@@ -810,7 +810,11 @@ expression: aggregated_metrics
                         2.0
                       ],
                       "total": 2.0
-                    }
+                    },
+                    "length": [
+                      1,
+                      1
+                    ]
                   },
                   "field2": {
                     "return_type": "String",
@@ -967,7 +971,11 @@ expression: aggregated_metrics
                         2.0
                       ],
                       "total": 2.0
-                    }
+                    },
+                    "length": [
+                      1,
+                      1
+                    ]
                   }
                 }
               },
@@ -1128,7 +1136,11 @@ expression: aggregated_metrics
                         2.0
                       ],
                       "total": 2.0
-                    }
+                    },
+                    "length": [
+                      1,
+                      1
+                    ]
                   },
                   "field2": {
                     "return_type": "String",
@@ -1285,7 +1297,11 @@ expression: aggregated_metrics
                         2.0
                       ],
                       "total": 2.0
-                    }
+                    },
+                    "length": [
+                      1,
+                      1
+                    ]
                   }
                 }
               }

@@ -75,6 +75,8 @@ pub(crate) struct SingleFieldStat {
     // a number of requests.
     pub(crate) observed_execution_count: u64,
     pub(crate) latency: DurationHistogram<f64>,
+    // TODO: Make this a histogram
+    pub(crate) length: Vec<usize>,
 }
 
 #[derive(Clone, Default, Debug, Serialize)]
@@ -177,6 +179,8 @@ pub(crate) struct FieldStat {
     // rounded to integers when converting to Protobuf after aggregating
     // a number of requests.
     latency: DurationHistogram<f64>,
+    // TODO: Make this a histogram
+    length: Vec<usize>,
 }
 
 impl AddAssign<SingleFieldStat> for FieldStat {
@@ -186,6 +190,7 @@ impl AddAssign<SingleFieldStat> for FieldStat {
         self.observed_execution_count += stat.observed_execution_count;
         self.errors_count += stat.errors_count;
         self.return_type = stat.return_type;
+        self.length.extend(stat.length);
     }
 }
 
@@ -498,6 +503,7 @@ mod test {
             observed_execution_count: count.inc_u64(),
             requests_with_errors_count: count.inc_u64(),
             latency,
+            length: vec![1],
         }
     }
 

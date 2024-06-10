@@ -20,6 +20,7 @@ use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
 use metrics::apollo::studio::SingleLimitsStats;
+use metrics::field_length::FieldLengthRecorder;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
@@ -115,6 +116,7 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
+use crate::response::ResponseVisitor;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -479,6 +481,7 @@ impl Plugin for Telemetry {
                                     // the query is invalid, we did not parse the operation kind
                                     OperationKind::Query,
                                     None,
+                                    &Default::default(),
                                 );
                             }
 
@@ -1258,6 +1261,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         operation_subtype,
+                        &Default::default(),
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1297,6 +1301,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
+                        &Default::default(),
                     );
                 }
                 Ok(router_response.map(move |response_stream| {
@@ -1322,6 +1327,7 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
+                                                &Default::default(),
                                             );
                                         }
                                     } else {
@@ -1337,9 +1343,17 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
+                                            &Default::default(),
                                         );
                                     }
                                 } else {
+                                    let mut field_lengths = FieldLengthRecorder::new();
+                                    field_lengths.visit(
+                                        &ctx.unsupported_executable_document()
+                                            .expect("query document exists"),
+                                        &response,
+                                    );
+
                                     // If it's the last response
                                     if !response.has_next.unwrap_or(false) {
                                         Self::update_apollo_metrics(
@@ -1350,6 +1364,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
+                                            &field_lengths.field_lengths, // TODO: I think we need to submit these on all the responses
                                         );
                                     }
                                 }
@@ -1371,6 +1386,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
+        field_lengths: &HashMap<String, HashMap<String, Vec<usize>>>,
     ) {
         let metrics = if let Some(usage_reporting) = {
             let lock = context.extensions().lock();
@@ -1400,7 +1416,8 @@ impl Telemetry {
                 }
             } else {
                 let traces = Self::subgraph_ftv1_traces(context);
-                let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
+                let per_type_stat =
+                    Self::per_type_stat(&traces, field_level_instrumentation_ratio, field_lengths);
                 let root_error_stats = Self::per_path_error_stats(&traces);
                 let limits_stats = {
                     let guard = context.extensions().lock();
@@ -1517,14 +1534,16 @@ impl Telemetry {
     fn per_type_stat(
         traces: &[(ByteString, proto::reports::Trace)],
         field_level_instrumentation_ratio: f64,
+        field_lengths: &HashMap<String, HashMap<String, Vec<usize>>>,
     ) -> HashMap<String, SingleTypeStat> {
         fn recur(
             per_type: &mut HashMap<String, SingleTypeStat>,
             field_execution_weight: f64,
             node: &proto::reports::trace::Node,
+            field_lengths: &HashMap<String, HashMap<String, Vec<usize>>>,
         ) {
             for child in &node.child {
-                recur(per_type, field_execution_weight, child)
+                recur(per_type, field_execution_weight, child, field_lengths)
             }
             let response_name = if let Some(ResponseName(response_name)) = &node.id {
                 response_name
@@ -1555,6 +1574,7 @@ impl Telemetry {
                     latency: Default::default(),
                     observed_execution_count: 0,
                     requests_with_errors_count: 0,
+                    length: Default::default(),
                 });
             let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
             field_stat
@@ -1562,6 +1582,14 @@ impl Telemetry {
                 .increment_duration(Some(latency), field_execution_weight);
             field_stat.observed_execution_count += 1;
             field_stat.errors_count += node.error.len() as u64;
+
+            if let Some(histogram) = field_lengths
+                .get(&node.parent_type)
+                .and_then(|entry| entry.get(field_name))
+            {
+                field_stat.length.extend(histogram);
+            }
+
             if !node.error.is_empty() {
                 field_stat.requests_with_errors_count += 1;
             }
@@ -1577,7 +1605,7 @@ impl Telemetry {
         let mut per_type = HashMap::new();
         for (_subgraph_name, trace) in traces {
             if let Some(node) = &trace.root {
-                recur(&mut per_type, field_execution_weight, node)
+                recur(&mut per_type, field_execution_weight, node, field_lengths)
             }
         }
         per_type
