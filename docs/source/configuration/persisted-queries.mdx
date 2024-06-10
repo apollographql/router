@@ -66,6 +66,18 @@ persisted_queries:
 
 If used with the [`safelist`](#safelist) option, the router logs unregistered and rejected operations. With [`safelist.required_id`](#require_id) off, the only rejected operations are unregistered ones. If [`safelist.required_id`](#require_id) is turned on, operations can be rejected even when registered because they use operation IDs rather than operation strings.
 
+#### `experimental_prewarm_query_plan_cache`
+
+<ExperimentalFeature />
+
+Adding `experimental_prewarm_query_plan_cache: true` to `persisted_queries` configures the router to prewarm the query plan cache on startup using the persisted query list. All subsequent requests benefit from the warmed cache, reducing latency and enhancing performance.
+
+```yaml title="router.yaml"
+persisted_queries:
+  enabled: true
+  experimental_prewarm_query_plan_cache: true
+```
+
 #### `safelist`
 
 Adding `safelist: true` to `persisted_queries` causes the router to reject any operations that haven't been registered to your PQL.

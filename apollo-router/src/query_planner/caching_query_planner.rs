@@ -156,6 +156,7 @@ where
         previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
+        experimental_pql_prewarm: bool,
     ) {
         let _timer = Timer::new(|duration| {
             ::tracing::info!(
@@ -211,13 +212,19 @@ where
 
         cache_keys.shuffle(&mut thread_rng());
 
+        let should_warm_with_pqs =
+            (experimental_pql_prewarm && previous_cache.is_none()) || previous_cache.is_some();
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
-        let capacity = cache_keys.len()
-            + persisted_queries_operations
-                .as_ref()
-                .map(|ops| ops.len())
-                .unwrap_or(0);
+        let capacity = if should_warm_with_pqs {
+            cache_keys.len()
+                + persisted_queries_operations
+                    .as_ref()
+                    .map(|ops| ops.len())
+                    .unwrap_or(0)
+        } else {
+            cache_keys.len()
+        };
         tracing::info!(
             "warming up the query plan cache with {} queries, this might take a while",
             capacity
@@ -225,18 +232,20 @@ where
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
-        let mut all_cache_keys = Vec::with_capacity(capacity);
-        if let Some(queries) = persisted_queries_operations {
-            for query in queries {
-                all_cache_keys.push(WarmUpCachingQueryKey {
-                    query,
-                    operation: None,
-                    hash: None,
-                    metadata: CacheKeyMetadata::default(),
-                    plan_options: PlanOptions::default(),
-                    config_mode: self.config_mode.clone(),
-                    introspection: self.introspection,
-                });
+        let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
+        if should_warm_with_pqs {
+            if let Some(queries) = persisted_queries_operations {
+                for query in queries {
+                    all_cache_keys.push(WarmUpCachingQueryKey {
+                        query,
+                        operation: None,
+                        hash: None,
+                        metadata: CacheKeyMetadata::default(),
+                        plan_options: PlanOptions::default(),
+                        config_mode: self.config_mode.clone(),
+                        introspection: self.introspection,
+                    });
+                }
             }
         }
 

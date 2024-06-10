@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -4139,6 +4138,11 @@ expression: "&schema"
         "enabled": {
           "default": false,
           "description": "Activates Persisted Queries (disabled by default)",
+          "type": "boolean"
+        },
+        "experimental_prewarm_query_plan_cache": {
+          "default": false,
+          "description": "Experimental feature to prewarm the query plan cache with persisted queries",
           "type": "boolean"
         },
         "log_unknown": {
