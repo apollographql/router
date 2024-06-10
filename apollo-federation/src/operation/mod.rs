@@ -3356,11 +3356,12 @@ impl FieldSelection {
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
-        let field_position = if self.field.parent_type_position() == *parent_type {
-            self.field.data().field_position.clone()
-        } else {
-            parent_type.field(self.field.data().name().clone())?
-        };
+        let field_position =
+            if self.field.schema() == schema && self.field.parent_type_position() == *parent_type {
+                self.field.data().field_position.clone()
+            } else {
+                parent_type.field(self.field.data().name().clone())?
+            };
 
         let field_element = if self.field.data().field_position == field_position {
             self.field.data().clone()
