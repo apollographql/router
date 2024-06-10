@@ -157,7 +157,7 @@ The `mode` option will be defaulted to `spec_compliant` in a future release, and
 By default spans are marked in error only if the http status code is different than 200. If you want to mark a span in error for other reason you can override the `otel.status_code` attribute which is responsible to mark a span in error or not.
 If it's in error then `otel.status_code` = `error`, if not it will be `ok`.
 
-## Span name
+## Naming
 
 If you want to change the name of spans we're creating for each services you can override this value by setting the `otel.name` attribute using any selectors you want.
 
