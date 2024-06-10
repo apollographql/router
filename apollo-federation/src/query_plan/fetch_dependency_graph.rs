@@ -1205,7 +1205,7 @@ impl FetchDependencyGraph {
                     else {
                         return false;
                     };
-                    type_in_parent.is_interface_object_type(p_subgraph_schema.schema())
+                    type_in_parent.is_interface_object_type(&p_subgraph_schema)
                 }))
             } else {
                 Ok(false)
@@ -3553,7 +3553,7 @@ fn compute_input_rewrites_on_key_fetch(
     // have a __typename that is the concrete implementation type of the object, and we need to
     // rewrite it.
     if dest_type.is_interface_type()
-        || dest_type.is_interface_object_type(supergraph_schema.schema())
+        || dest_type.is_interface_object_type(&supergraph_schema)
     {
         // rewrite path: [ ... on <input_type_name>, __typename ]
         let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());

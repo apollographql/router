@@ -22,19 +22,6 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 
-// TODO(@goto-bus-stop): this is precomputed in the QueryPlanner constructor. Can we expose that
-// here? Or can we move it onto the FederationSchema instance?
-fn is_interface_object(obj: &ObjectTypeDefinitionPosition, schema: &ValidFederationSchema) -> bool {
-    if let Ok(intf_obj_directive) = get_federation_spec_definition_from_subgraph(schema)
-        .and_then(|spec| spec.interface_object_directive(schema))
-    {
-        obj.try_get(schema.schema())
-            .is_some_and(|o| o.directives.has(&intf_obj_directive.name))
-    } else {
-        false
-    }
-}
-
 fn print_possible_runtimes(
     composite_type: &CompositeTypeDefinitionPosition,
     schema: &ValidFederationSchema,
@@ -112,7 +99,7 @@ impl Field {
             return if schema
                 .possible_runtime_types(parent_type.clone())?
                 .iter()
-                .any(|t| is_interface_object(t, schema))
+                .any(|t| t.is_interface_object_type(schema))
             {
                 if let RebaseErrorHandlingOption::ThrowError = error_handling {
                     Err(FederationError::internal(
@@ -173,7 +160,7 @@ impl Field {
         // case 2
         let is_interface_object_type =
             match ObjectTypeDefinitionPosition::try_from(field_parent_type.clone()) {
-                Ok(ref o) => is_interface_object(o, schema),
+                Ok(ref o) => o.is_interface_object_type(schema),
                 Err(_) => false,
             };
         field_parent_type.is_interface_type() || is_interface_object_type
