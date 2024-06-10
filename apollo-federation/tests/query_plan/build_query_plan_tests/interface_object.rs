@@ -304,7 +304,7 @@ fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed\n  left: 0\n right: 1")]
+#[should_panic(expected = "snapshot assertion")]
 fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation() {
     let planner = planner!(
         S1: SUBGRAPH1,

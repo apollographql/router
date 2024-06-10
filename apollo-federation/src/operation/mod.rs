@@ -3070,6 +3070,10 @@ impl SelectionSet {
         }
     }
 
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Selection> {
+        self.selections.values()
+    }
+
     /// Returns true if any elements in this selection set or its descendants returns true for the
     /// given predicate. Note that fragment spread selections are converted to inline fragment
     /// elements, and their fragment selection sets are recursed into.
