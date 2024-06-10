@@ -18,6 +18,7 @@ use super::OperationKind;
 use super::PlanNode;
 use super::Primary;
 use super::QueryPlan;
+use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugin;
@@ -26,7 +27,6 @@ use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::BridgeQueryPlanner;
-use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::services::SubgraphResponse;
@@ -492,7 +492,7 @@ async fn defer_if_condition() {
             &Arc::new(
                 http::Request::builder()
                     .body(
-                        request::Request::fake_builder()
+                        graphql::Request::fake_builder()
                             .variables(json!({ "shouldDefer": true }).as_object().unwrap().clone())
                             .build(),
                     )
@@ -547,7 +547,7 @@ async fn defer_if_condition() {
             &Arc::new(
                 http::Request::builder()
                     .body(
-                        request::Request::fake_builder()
+                        graphql::Request::fake_builder()
                             .variables(json!({ "shouldDefer": false }).as_object().unwrap().clone())
                             .build(),
                     )

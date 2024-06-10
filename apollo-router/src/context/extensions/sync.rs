@@ -24,13 +24,28 @@ impl ExtensionsMutex {
     /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.
     /// Doing so may cause performance degradation or even deadlocks.
     ///
+    /// DEPRECATED: prefer with_lock()
+    ///
     /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
+    #[deprecated]
     pub fn lock(&self) -> ExtensionsGuard {
         ExtensionsGuard {
             #[cfg(debug_assertions)]
             start: Instant::now(),
             guard: self.extensions.lock(),
         }
+    }
+
+    /// Locks the extensions for interaction.
+    ///
+    /// The lock will be dropped once the closure completes.
+    pub fn with_lock<'a, T, F: FnOnce(ExtensionsGuard<'a>) -> T>(&'a self, func: F) -> T {
+        let locked = ExtensionsGuard {
+            #[cfg(debug_assertions)]
+            start: Instant::now(),
+            guard: self.extensions.lock(),
+        };
+        func(locked)
     }
 }
 
