@@ -131,6 +131,7 @@ use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
+pub(crate) mod apollo_otlp_exporter;
 pub(crate) mod config;
 pub(crate) mod config_new;
 pub(crate) mod dynamic_attribute;
@@ -648,13 +649,20 @@ impl Plugin for Telemetry {
                     .map(|op| *op.kind());
 
                 match operation_kind {
-                    Some(operation_kind) => {
-                        info_span!(
+                    Some(operation_kind) => match operation_kind {
+                        OperationKind::Subscription => info_span!(
                             EXECUTION_SPAN_NAME,
                             "otel.kind" = "INTERNAL",
-                            "graphql.operation.type" = operation_kind.as_apollo_operation_type()
-                        )
-                    }
+                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                            "apollo_private.operation.subtype" =
+                                OperationSubType::SubscriptionRequest.as_str(),
+                        ),
+                        _ => info_span!(
+                            EXECUTION_SPAN_NAME,
+                            "otel.kind" = "INTERNAL",
+                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                        ),
+                    },
                     None => {
                         info_span!(EXECUTION_SPAN_NAME, "otel.kind" = "INTERNAL",)
                     }

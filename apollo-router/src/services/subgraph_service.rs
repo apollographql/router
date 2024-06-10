@@ -74,6 +74,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
+pub(crate) const SUBGRAPH_REQUEST_SPAN_NAME: &str = "subgraph_request";
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
 const PERSISTED_QUERY_NOT_FOUND_MESSAGE: &str = "PersistedQueryNotFound";
@@ -594,7 +595,7 @@ async fn call_websocket(
         }
     });
 
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -785,7 +786,7 @@ pub(crate) async fn process_batch(
 
     // We can't provide a single operation name in the span (since we may be processing multiple
     // operations). Product decision, use the hard coded value "batch".
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -1169,7 +1170,7 @@ pub(crate) async fn call_single_http(
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
 
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
