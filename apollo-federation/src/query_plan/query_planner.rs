@@ -337,8 +337,6 @@ impl QueryPlanner {
         };
 
         if self.config.debug.bypass_planner_for_single_subgraph {
-            // A federated query graph always have 1 more sources than there is subgraph, because the root vertices
-            // belong to no subgraphs and use a special source named '_'. So we skip that "fake" source.
             let mut subgraphs = self.federated_query_graph.subgraphs();
             if let (Some((subgraph_name, _subgraph_schema)), None) =
                 (subgraphs.next(), subgraphs.next())
