@@ -226,12 +226,12 @@ pub(crate) enum ApiSchemaMode {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsGenerationMode {
     /// Use the new Rust-based implementation.
+    #[default]
     New,
     /// Use the old JavaScript-based implementation.
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
-    #[default]
     Both,
 }
 

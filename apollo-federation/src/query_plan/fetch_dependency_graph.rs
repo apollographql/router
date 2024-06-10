@@ -33,9 +33,7 @@ use crate::operation::FieldData;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
 use crate::operation::InlineFragmentSelection;
-use crate::operation::NamedFragments;
 use crate::operation::Operation;
-use crate::operation::RebaseErrorHandlingOption;
 use crate::operation::RebasedFragments;
 use crate::operation::Selection;
 use crate::operation::SelectionId;
@@ -1479,7 +1477,7 @@ impl FetchDependencyGraph {
         if path.is_empty() {
             mutable_node
                 .selection_set
-                .merge_selections(&merged.selection_set.selection_set)?;
+                .add_selections(&merged.selection_set.selection_set)?;
         } else {
             // The merged nodes might have some @include/@skip at top-level that are already part of the path. If so,
             // we clean things up a bit.
@@ -1579,19 +1577,21 @@ impl FetchDependencyGraph {
         };
         let type_at_path = self.type_at_path(
             &parent.selection_set.selection_set.type_position,
+            &parent.selection_set.selection_set.schema,
             parent_op_path,
         )?;
         let new_node_is_unneeded = parent_relation.path_in_parent.is_some()
             && node
                 .selection_set
                 .selection_set
-                .can_rebase_on(&type_at_path);
+                .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema);
         Ok(new_node_is_unneeded)
     }
 
     fn type_at_path(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
         path: &Arc<OpPath>,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
         let mut type_ = parent_type.clone();
@@ -1599,11 +1599,9 @@ impl FetchDependencyGraph {
             match &**element {
                 OpPathElement::Field(field) => {
                     let field_position = type_.field(field.data().name().clone())?;
-                    let field_definition = field_position.get(field.data().schema.schema())?;
+                    let field_definition = field_position.get(schema.schema())?;
                     let field_type = field_definition.ty.inner_named_type();
-                    type_ = field
-                        .data()
-                        .schema
+                    type_ = schema
                         .get_type(field_type.clone())?
                         .try_into()
                         .map_or_else(
@@ -1619,14 +1617,25 @@ impl FetchDependencyGraph {
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition_position) = &fragment.data().type_condition_position
                     {
-                        type_ = type_condition_position.clone();
+                        type_ = schema
+                            .get_type(type_condition_position.type_name().clone())?
+                            .try_into()
+                            .map_or_else(
+                                |_| {
+                                    Err(FederationError::internal(format!(
+                                        "Invalid call from {} starting at {}: {} is not composite",
+                                        path, parent_type, type_condition_position
+                                    )))
+                                },
+                                Ok,
+                            )?;
                     } else {
                         continue;
                     }
                 }
             }
         }
-        Ok(type_.clone())
+        Ok(type_)
     }
 }
 
@@ -2126,19 +2135,8 @@ impl FetchSelectionSet {
         Ok(())
     }
 
-    // JS PORT NOTE: Since we are doing selection set modifications in place we are actually merging
-    // the selections and not adding them to the updates.
-    fn merge_selections(
-        &mut self,
-        selection_set: &Arc<SelectionSet>,
-    ) -> Result<(), FederationError> {
-        let rebased_selections = selection_set.rebase_on(
-            &self.selection_set.type_position,
-            &NamedFragments::default(),
-            &self.selection_set.schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
-        Arc::make_mut(&mut self.selection_set).merge_into(iter::once(&rebased_selections))?;
+    fn add_selections(&mut self, selection_set: &Arc<SelectionSet>) -> Result<(), FederationError> {
+        Arc::make_mut(&mut self.selection_set).add_selection_set(selection_set)?;
         Ok(())
     }
 }
@@ -2165,7 +2163,7 @@ impl FetchInputs {
                     selection.type_position.clone(),
                 ))
             });
-        Arc::make_mut(type_selections).merge_into(std::iter::once(selection))
+        Arc::make_mut(type_selections).add_local_selection_set(selection)
         // PORT_NOTE: `onUpdateCallback` call is moved to `FetchDependencyGraphNode::on_inputs_updated`.
     }
 
@@ -2562,15 +2560,7 @@ fn compute_nodes_for_key_resolution<'a>(
             "missing expected edge conditions",
         ));
     };
-    let edge_conditions = edge_conditions.rebase_on(
-        &input_type,
-        // Conditions do not use named fragments
-        &Default::default(),
-        &dependency_graph.supergraph_schema,
-        crate::operation::RebaseErrorHandlingOption::ThrowError,
-    )?;
-
-    input_selections.merge_into(std::iter::once(&edge_conditions))?;
+    input_selections.add_selection_set(edge_conditions)?;
 
     let new_node = FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, new_node_id)?;
     new_node.add_inputs(
@@ -3505,13 +3495,7 @@ fn inputs_for_require(
     // elements before they can be merged. This is different from JS implementation which relied on
     // selection set "updates" to capture changes and apply them all at once (with rebasing) when
     // generating final selection set.
-    let rebased_conditions = edge_conditions.rebase_on(
-        &input_type,
-        &NamedFragments::default(),
-        &fetch_dependency_graph.supergraph_schema,
-        RebaseErrorHandlingOption::ThrowError,
-    )?;
-    full_selection_set.merge_into(iter::once(&rebased_conditions))?;
+    full_selection_set.add_selection_set(edge_conditions)?;
     if include_key_inputs {
         let Some(key_condition) = fetch_dependency_graph
             .federated_query_graph
@@ -3538,32 +3522,9 @@ fn inputs_for_require(
                     entity_type_position.type_name
                 )));
             };
-
-            // Note: we are rebasing on another schema below, but we also know that we're working on a full expanded
-            // selection set (no spread), so passing empty fragments is actually correct.
-            let target_subgraph_name = fetch_dependency_graph
-                .federated_query_graph
-                .edge_head_weight(query_graph_edge_id)?
-                .source
-                .clone();
-            let target_subgraph = fetch_dependency_graph
-                .federated_query_graph
-                .schema_by_source(&target_subgraph_name)?;
-            let key_condition_as_input = key_condition.rebase_on(
-                &supergraph_intf_type,
-                &NamedFragments::default(),
-                target_subgraph,
-                RebaseErrorHandlingOption::ThrowError,
-            )?;
-            full_selection_set.merge_into(iter::once(&key_condition_as_input))?;
+            full_selection_set.add_selection_set(&key_condition)?;
         } else {
-            let rebased_key_condition = key_condition.rebase_on(
-                &input_type,
-                &NamedFragments::default(),
-                &fetch_dependency_graph.supergraph_schema,
-                RebaseErrorHandlingOption::ThrowError,
-            )?;
-            full_selection_set.merge_into(iter::once(&rebased_key_condition))?;
+            full_selection_set.add_selection_set(&key_condition)?;
         }
 
         // Note that `key_inputs` are used to ensure those input are fetch on the original group, the one having `edge`. In
@@ -3572,7 +3533,7 @@ fn inputs_for_require(
         // subgraph does not know in that particular case.
         let mut key_inputs =
             SelectionSet::for_composite_type(edge_conditions.schema.clone(), input_type.clone());
-        key_inputs.merge_into(iter::once(&key_condition))?;
+        key_inputs.add_selection_set(&key_condition)?;
 
         Ok((
             wrap_input_selections(

@@ -287,8 +287,13 @@ impl UsageGenerator<'_> {
                         if field_names.is_empty() {
                             None
                         } else {
+                            // These fields don't strictly need to be sorted, but doing it here means we don't have to
+                            // update all our tests and snapshots to compare the sorted version of the data.
+                            let mut sorted_field_names =
+                                field_names.iter().cloned().collect::<Vec<_>>();
+                            sorted_field_names.sort();
                             let refs = ReferencedFieldsForType {
-                                field_names: field_names.iter().cloned().collect(),
+                                field_names: sorted_field_names,
                                 is_interface: *self
                                     .fields_by_interface
                                     .get(type_name)
