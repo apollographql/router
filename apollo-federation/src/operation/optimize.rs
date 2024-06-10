@@ -847,7 +847,7 @@ impl Selection {
                     // Expand the fragment
                     let expanded_sub_selections =
                         fragment.selection_set.retain_fragments(fragments_to_keep)?;
-                    if *parent_type == fragment.spread.data().type_condition_position.clone()
+                    if *parent_type == fragment.spread.data().type_condition_position
                         && fragment.spread.data().directives.is_empty()
                     {
                         // The fragment is of the same type as the parent, so we can just use
