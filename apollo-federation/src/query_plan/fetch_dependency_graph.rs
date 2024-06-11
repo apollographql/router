@@ -1099,7 +1099,7 @@ impl FetchDependencyGraph {
             };
             (parent_node_id, path_in_parent.clone())
         };
-        self.remove_useless_child(parent_node_id, node_index, &path_in_parent)?;
+        self.remove_useless_child(parent_node_id, node_index, &path_in_parent);
         Ok(())
     }
 
@@ -1110,12 +1110,11 @@ impl FetchDependencyGraph {
         node_id: NodeIndex,
         child_id: NodeIndex,
         child_path: &Arc<OpPath>,
-    ) -> Result<(), FederationError> {
+    ) {
         self.on_modification();
         // Removing the child means attaching all of its children to its parent.
         self.relocate_children_on_merged_in(node_id, child_id, child_path);
         self.remove_node(child_id);
-        Ok(())
     }
 
     /// If everything fetched by a node is already part of its inputs, we already have all the data
