@@ -1,7 +1,7 @@
 ---
 title: Demand Control
-subtitle: Protect your graph from high cost GraphQL operations
-description: Protect your graph from malicious or demanding clients with Apollo GraphOS Router's demand control features. Estimate, calculate, observe, and reject high cost GraphQL operations.
+subtitle: Protect your graph from high-cost GraphQL operations
+description: Protect your graph from malicious or demanding clients with Apollo GraphOS Router's demand control features. Estimate, calculate, observe, and reject high-cost GraphQL operations.
 minVersion: 1.48.0
 ---
 
@@ -23,9 +23,15 @@ We welcome your feedback during the preview, especially feedback about the follo
 
 ## About demand control
 
-Applications clients can send complex operations through your router that can overload the infrastructure of your supergraph. The clients may be unintentionally or maliciously overloading your supergraph. When a client makes a request to the router, the router makes requests to your subgraphs to gather data for the final response. A client however may send an operation (query, mutation, or subscription) that's too complex for the your subgraphs to process without impacting performance. Complex operations include operations that are deeply nested or has many results. Too many complex operations might overload your subgraphs and degrade the responsiveness and latency of your supergraph.
+Applications clients can send complex operations through your router that can overload your supergraph's infrastructure. The clients may be unintentionally or maliciously overloading your supergraph.
 
-To prevent complex operations from degrading supergraph performance, the Apollo Router supports analysis and rejection of requests based on operation complexity. Like [safelisting operations with persisted query lists (PQL)](/graphos/operations/persisted-queries), demand control enables you to reject operations that you don't want to be served by your graph. The router computes a complexity value, or _cost_, per operation. You can collect telemetry and metrics to determine the range of costs of operations served by router. You can then configure a maximum cost limit per operation, above which an operation is rejected.  
+When a client makes a request to the router, the router makes requests to your subgraphs to gather data for the final response. A client, however, may send an operation that's too complex for your subgraphs to process without degrading performance.
+
+Complex operations include operations that are deeply nested or have many results. Too many complex operations might overload your subgraphs and degrade the responsiveness and latency of your supergraph.
+
+To prevent complex operations from degrading performance, the GraphOS Router supports analyzing and rejecting requests based on operation complexity. Like [safelisting operations with persisted query lists (PQL)](/graphos/operations/persisted-queries), demand control enables you to reject operations that you don't want to be served by your graph.
+
+With demand control configured, the router computes a complexity value, or _cost_, per operation. You can collect telemetry and metrics to determine the range of costs of operations served by the router. You can then configure a maximum cost limit per operation, above which the router rejects the operation.
 
 ## Calculating operation cost
 
@@ -65,35 +71,40 @@ query ExampleQuery {
 }
 ```
 
-Assuming each review having exactly one author, the total cost of the query is 26.
+Assuming each review has exactly one author, the total cost of the query is 26.
 
 <ExpansionPanel title="Example query's cost calculation">
 
 ```text disableCopy=true showLineNumbers=false
-1 Query (0 cost) + 6 product objects (6) + 6 name scalars (0) + 10 review objects (10) + 10 author objects (10) + 10 name scalars (0) = 26 total cost
-```
+     1 Query (0 cost)
+ + 6 product objects (6)
+ + 6 name scalars (0)
+ + 10 review objects (10)
+ + 10 author objects (10)
+ + 10 name scalars (0)
+ = total cost (26)
 
 </ExpansionPanel>
 
 ### Estimated and actual costs
 
-For an operation with list fields, the router must run the operation to get the actual number of items in its lists. Without actual list sizes, the cost of an operation can only be estimated before it's executed, where you assume the size of lists. 
+For an operation with list fields, the router must run the operation to get the actual number of items in its lists. Without actual list sizes, the router can only estimate the operation cost before it's executed by assuming list sizes. 
 
-After an operation is executed, the actual cost per operation can be calculated with the actual list sizes.
+After an operation is executed, the router can calculate the actual cost per operation with the actual list sizes.
 
 <Note>
 
-The difference between estimated and actual operation cost calculations is due only to the difference between assumed and actual sizes of list fields.
+The difference between estimated and actual operation costs is due only to the difference between assumed and actual sizes of list fields.
 
 </Note>
 
 ### Measurement and enforcement modes
 
-When rolling out demand control, you first need to gather information about the queries that are already being executed against your graph so you can decide when to reject requests.
+When implementing demand control, you must first gather information about the operations being executed against your graph. With this information, you can accurately decide when to reject requests.
 
-The router's demand control supports a measurement mode that enables you to gather this information without impacting your running services. You can define telemetry instruments to monitor your operations and decide on their maximum cost threshold.  
+The router's demand control supports a _measurement_ mode that enables you to gather this information without impacting your running services. You can define telemetry instruments to monitor your operations and decide on their maximum cost threshold.  
 
-After gathering enough data, you can then configure your router with maximum cost and list size limits and set demand control to enforcement mode, where it rejects operations with costs exceeding the limit.
+After gathering enough data, you can then configure your router with maximum cost and list size limits and set demand control to _enforcement_ mode, where it rejects operations with costs exceeding the limit.
 
 ## Configuring demand control
 
@@ -109,7 +120,7 @@ preview_demand_control:
       max: 1000 
 ```
 
-When `preview_demand_control` is enabled, the router measures the cost of each operation and can enforce operation cost limits, based on additional configuration.  
+When `preview_demand_control` is enabled, the router measures the cost of each operation and can enforce operation cost limits based on additional configuration.  
 
 Customize `preview_demand_control` with the following settings:
 
@@ -128,7 +139,7 @@ You can define router telemetry to gather cost information and gain insights int
 
 - Generate histograms of operation costs by operation name, where the estimated cost is greater than an arbitrary value.
 - Attach cost information to spans.
-- Generate log messages whenever the cost delta between estimated and actual is greater than an arbitrary value.
+- Generate log messages whenever the delta between estimated and actual cost is greater than an arbitrary value.
 
 ### Instruments
 
@@ -206,7 +217,7 @@ telemetry
 
 ## Demand control workflow
 
-Follow the steps of the following workflow to configure and tune demand control for your router:
+Follow this workflow to configure and tune demand control for your router:
 
 1. Measure the cost of your existing operations.
 2. Improve the cost estimation model.
@@ -272,7 +283,7 @@ telemetry:
 
 <Tip>
 
-When analyzing the costs of operations, if your histograms are not granular enough or don't cover sufficient range, you can modify the views in your telemetry configuration:
+When analyzing the costs of operations, if your histograms are not granular enough or don't cover a sufficient range, you can modify the views in your telemetry configuration:
 
 ```yaml
 telemetry:
@@ -372,11 +383,11 @@ telemetry:
               - cost: result
               - "COST_ESTIMATED_TOO_EXPENSIVE"
           attributes:
-            graphql.operation.name: true                             # Graphql operation name is added as an attribute
+            graphql.operation.name: true                             # GraphQL operation name is added as an attribute
 
 ```
 
-This custom instrument may not be suitable for users where there are many operation names, such as a public internet-facing API. You can add conditions to reduce the number of returned operations. For example, use a condition that outputs results only when the cost delta is greater than a threshold:
+This custom instrument may not be suitable when you have many operation names, such as a public internet-facing API. You can add conditions to reduce the number of returned operations. For example, use a condition that outputs results only when the cost delta is greater than a threshold:
 
 ```yaml title="Example condition for cost delta threshold"
 telemetry:
@@ -417,7 +428,7 @@ Also, the value of the `cost.delta` metric—the difference between the actual a
 
 You should iteratively improve your cost estimation model. Accurate cost estimation is critical to identifying and preventing queries that could harm your subgraphs.
 
-1. The previous step identified a noticeable difference between actual and estimated costs with the example operations. You can better understand the difference—and consequently tune the configured list size—by adding telemetry instruments for fields in your GraphQL schema.
+The previous step identified a noticeable difference between actual and estimated costs with the example operations. You can better understand the difference—and consequently tune the configured list size—by adding telemetry instruments for fields in your GraphQL schema.
 
 For example, you can generate a histogram for every field in your GraphQL schema: 
 
@@ -529,16 +540,15 @@ From the previous step, you can set the maximum cost to a value that allows all 
 ```yaml title="Example enforcing max cost"
 preview_demand_control:
   enabled: true
-  mode: enforce               # Change measure->enforce 
+  mode: enforce               # Change mode from measure to enforce 
   strategy:
     static_estimated:
       list_size: 100 
       max: 50000              # Updated max cost allows all operations except ExtractAll
 ```
 
-### Next steps
+## Next steps
 
-#### Continue monitoring 
 
 Continue to monitor the costs of operations and take action if the estimation model becomes inaccurate. For example, update the estimation model if the maximum number of list items changes. 
 
