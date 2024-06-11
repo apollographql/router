@@ -58,10 +58,3 @@ name = "federation"
 path = "fuzz_targets/federation.rs"
 test = false
 doc = false
-
-[[bin]]
-name = "apollo_router_studio_interop"
-path = "fuzz_targets/apollo_router_studio_interop.rs"
-test = false
-doc = false
-bench = false

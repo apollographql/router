@@ -28,7 +28,6 @@ use tower::Service;
 use super::PlanNode;
 use super::QueryKey;
 use crate::apollo_studio_interop::generate_usage_reporting;
-use crate::apollo_studio_interop::SignatureNormalizationAlgorithm;
 use crate::apollo_studio_interop::UsageReportingComparisonResult;
 use crate::configuration::ApolloMetricsGenerationMode;
 use crate::configuration::QueryPlannerMode;
@@ -669,18 +668,16 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let signature_normalization_mode: SignatureNormalizationAlgorithm = self
+                    let signature_normalization_mode = &self
                         .configuration
-                        .experimental_apollo_signature_normalization_algorithm
-                        .clone()
-                        .into();
+                        .experimental_apollo_signature_normalization_algorithm;
 
                     let generated_usage_reporting = generate_usage_reporting(
                         &signature_doc.executable,
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
-                        &signature_normalization_mode,
+                        signature_normalization_mode,
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where

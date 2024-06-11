@@ -42,7 +42,6 @@ pub(crate) use self::experimental::Discussed;
 pub(crate) use self::schema::generate_config_schema;
 pub(crate) use self::schema::generate_upgrade;
 use self::subgraph::SubgraphConfiguration;
-use crate::apollo_studio_interop::SignatureNormalizationAlgorithm;
 use crate::cache::DEFAULT_CACHE_CAPACITY;
 use crate::configuration::schema::Mode;
 use crate::graphql;
@@ -263,21 +262,6 @@ pub(crate) enum ApolloSignatureNormalizationAlgorithm {
     /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
     /// edge cases from the JS implementation that affected normalization.
     Enhanced,
-}
-
-// We need to define this here instead of in apollo_studio_interop module because that module can't import anything from this module.
-// See comment on SignatureNormalizationAlgorithm for more information about why.
-impl From<ApolloSignatureNormalizationAlgorithm> for SignatureNormalizationAlgorithm {
-    fn from(config_type: ApolloSignatureNormalizationAlgorithm) -> SignatureNormalizationAlgorithm {
-        match config_type {
-            ApolloSignatureNormalizationAlgorithm::Legacy => {
-                SignatureNormalizationAlgorithm::Legacy
-            }
-            ApolloSignatureNormalizationAlgorithm::Enhanced => {
-                SignatureNormalizationAlgorithm::Enhanced
-            }
-        }
-    }
 }
 
 impl<'de> serde::Deserialize<'de> for Configuration {

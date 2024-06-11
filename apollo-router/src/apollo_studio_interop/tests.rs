@@ -5,6 +5,7 @@ use router_bridge::planner::QueryPlannerConfig;
 use test_log::test;
 
 use super::*;
+use crate::configuration::ApolloSignatureNormalizationAlgorithm;
 
 macro_rules! assert_generated_report {
     ($actual:expr) => {
@@ -61,7 +62,7 @@ fn generate_legacy(
         doc,
         operation_name,
         schema,
-        &SignatureNormalizationAlgorithm::Legacy,
+        &ApolloSignatureNormalizationAlgorithm::Legacy,
     )
 }
 
@@ -76,7 +77,7 @@ fn generate_enhanced(
         doc,
         operation_name,
         schema,
-        &SignatureNormalizationAlgorithm::Enhanced,
+        &ApolloSignatureNormalizationAlgorithm::Enhanced,
     )
 }
 

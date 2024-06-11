@@ -26,16 +26,7 @@ use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 
-/// This is a parallel enum to Configuration::ApolloSignatureNormalizationAlgorithm.
-// We need to use this because of the import method that the fuzzer uses. The fuzzer can't have apollo-router as
-// a direct dependency because that means the build crashes, so we use a dev dependency and do a path hack. This
-// means that the fuzzer can't import from the Configuration namespace and has to import this instead.
-// Because of this, the enum is detected as dead code and we need the clippy hint here.
-#[allow(dead_code)]
-pub(crate) enum SignatureNormalizationAlgorithm {
-    Legacy,
-    Enhanced,
-}
+use crate::configuration::ApolloSignatureNormalizationAlgorithm;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
@@ -111,7 +102,7 @@ pub(crate) fn generate_usage_reporting(
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
 ) -> ComparableUsageReporting {
     let mut generator = UsageReportingGenerator {
         signature_doc,
@@ -133,7 +124,7 @@ struct UsageReportingGenerator<'a> {
     references_doc: &'a ExecutableDocument,
     operation_name: &'a Option<String>,
     schema: &'a Valid<Schema>,
-    normalization_algorithm: &'a SignatureNormalizationAlgorithm,
+    normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,
@@ -321,7 +312,7 @@ enum ApolloReportingSignatureFormatter<'a> {
 
 struct SignatureFormatterWithAlgorithm<'a> {
     formatter: &'a ApolloReportingSignatureFormatter<'a>,
-    normalization_algorithm: &'a SignatureNormalizationAlgorithm,
+    normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
 }
 
 impl<'a> fmt::Display for SignatureFormatterWithAlgorithm<'a> {
@@ -343,16 +334,16 @@ impl<'a> fmt::Display for SignatureFormatterWithAlgorithm<'a> {
     }
 }
 
-fn is_enhanced(normalization_algorithm: &SignatureNormalizationAlgorithm) -> bool {
+fn is_enhanced(normalization_algorithm: &ApolloSignatureNormalizationAlgorithm) -> bool {
     matches!(
         normalization_algorithm,
-        SignatureNormalizationAlgorithm::Enhanced
+        ApolloSignatureNormalizationAlgorithm::Enhanced
     )
 }
 
 fn format_operation(
     operation: &Node<Operation>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     let shorthand = operation.operation_type == OperationType::Query
@@ -389,7 +380,7 @@ fn format_operation(
 
 fn format_selection_set(
     selection_set: &SelectionSet,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     // print selection set sorted by name with fields followed by named fragments followed by inline fragments
@@ -475,7 +466,7 @@ fn format_selection_set(
 
 fn format_variable(
     arg: &Node<VariableDefinition>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     write!(f, "${}:{}", arg.name, arg.ty)?;
@@ -490,7 +481,7 @@ fn format_variable(
 
 fn format_argument(
     arg: &Node<Argument>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     write!(f, "{}:", arg.name)?;
@@ -499,7 +490,7 @@ fn format_argument(
 
 fn format_field(
     field: &Node<Field>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     if is_enhanced(normalization_algorithm) {
@@ -554,7 +545,7 @@ fn format_field(
 
 fn format_inline_fragment(
     inline_fragment: &Node<InlineFragment>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     if let Some(type_name) = &inline_fragment.type_condition {
@@ -574,7 +565,7 @@ fn format_inline_fragment(
 
 fn format_fragment(
     fragment: &Node<Fragment>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     write!(
@@ -590,7 +581,7 @@ fn format_fragment(
 fn format_directives(
     directives: &DirectiveList,
     sorted: bool,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     let mut sorted_directives = directives.clone();
@@ -629,7 +620,7 @@ fn format_directives(
 
 fn format_value(
     value: &Value,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     match value {
@@ -659,7 +650,7 @@ fn format_value(
 fn get_arg_separator(
     field_name: &Name,
     arg_strings: &[String],
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
 ) -> char {
     // In enhanced mode, we just always use a comma
     if is_enhanced(normalization_algorithm) {
@@ -692,7 +683,7 @@ fn get_arg_separator(
 
 fn format_fragment_spread(
     fragment_spread: &Node<FragmentSpread>,
-    normalization_algorithm: &SignatureNormalizationAlgorithm,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     write!(f, "...{}", fragment_spread.fragment_name)?;
