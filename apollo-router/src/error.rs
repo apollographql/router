@@ -530,16 +530,21 @@ impl std::fmt::Display for PlanErrors {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_fmt(format_args!(
             "query validation errors: {}",
-            self.errors
-                .iter()
-                .map(|e| e
-                    .message
-                    .clone()
-                    .unwrap_or_else(|| "UNKNWON ERROR".to_string()))
-                .collect::<Vec<String>>()
-                .join(", ")
+            format_bridge_errors(&self.errors)
         ))
     }
+}
+
+pub(crate) fn format_bridge_errors(errors: &[router_bridge::planner::PlanError]) -> String {
+    errors
+        .iter()
+        .map(|e| {
+            e.message
+                .clone()
+                .unwrap_or_else(|| "UNKNWON ERROR".to_string())
+        })
+        .collect::<Vec<String>>()
+        .join(", ")
 }
 
 /// Error in the schema.

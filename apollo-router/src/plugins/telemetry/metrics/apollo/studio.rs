@@ -194,6 +194,7 @@ impl From<ContextualizedStats>
                 .collect(),
             query_latency_stats: Some(stats.query_latency_stats.into()),
             context: Some(stats.context),
+            extended_references: None,
             limits_stats: None,
             local_per_type_stat: HashMap::new(),
             operation_count: 0,

@@ -15,6 +15,7 @@ use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -30,6 +31,9 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
+use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
@@ -59,6 +63,9 @@ pub(crate) struct InstrumentsConfig {
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
     pub(crate) subgraph:
         Extendable<SubgraphInstrumentsConfig, Instrument<SubgraphAttributes, SubgraphSelector>>,
+    /// GraphQL response field instruments.
+    pub(crate) graphql:
+        Extendable<GraphQLInstrumentsConfig, Instrument<GraphQLAttributes, GraphQLSelector>>,
 }
 
 impl InstrumentsConfig {
@@ -70,6 +77,8 @@ impl InstrumentsConfig {
         self.supergraph
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
         self.subgraph
+            .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
+        self.graphql
             .defaults_for_levels(self.default_requirement_level, TelemetryDataKind::Metrics);
     }
 
@@ -464,10 +473,10 @@ where
         }
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
         match self {
             Self::Bool(_) | Self::Unset => Vec::with_capacity(0),
-            Self::Extendable { attributes } => attributes.on_error(error),
+            Self::Extendable { attributes } => attributes.on_error(error, ctx),
         }
     }
 
@@ -585,8 +594,8 @@ where
         self.attributes.on_response_event(response, ctx)
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
-        self.attributes.on_error(error)
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+        self.attributes.on_error(error, ctx)
     }
 }
 
@@ -609,6 +618,7 @@ pub(crate) enum InstrumentType {
 pub(crate) enum InstrumentValue<T> {
     Standard(Standard),
     Chunked(Event<T>),
+    Field(Field<T>),
     Custom(T),
 }
 
@@ -634,6 +644,16 @@ pub(crate) enum Event<T> {
     Custom(T),
 }
 
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum Field<T> {
+    #[serde(rename = "field_unit")]
+    Unit,
+    /// For every field
+    #[serde(rename = "field_custom")]
+    Custom(T),
+}
+
 pub(crate) trait Instrumented {
     type Request;
     type Response;
@@ -642,6 +662,14 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
+    fn on_response_field(
+        &self,
+        _type: &apollo_compiler::executable::NamedType,
+        _field: &apollo_compiler::executable::Field,
+        _value: &Value,
+        _ctx: &Context,
+    ) {
+    }
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
@@ -670,6 +698,16 @@ where
         self.attributes.on_response_event(response, ctx);
     }
 
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
+        self.attributes.on_response_field(ty, field, value, ctx);
+    }
+
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         self.attributes.on_error(error, ctx);
     }
@@ -696,10 +734,10 @@ impl Selectors for SubgraphInstrumentsConfig {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<opentelemetry_api::KeyValue> {
-        let mut attrs = self.http_client_request_body_size.on_error(error);
-        attrs.extend(self.http_client_request_duration.on_error(error));
-        attrs.extend(self.http_client_response_body_size.on_error(error));
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<opentelemetry_api::KeyValue> {
+        let mut attrs = self.http_client_request_body_size.on_error(error, ctx);
+        attrs.extend(self.http_client_request_duration.on_error(error, ctx));
+        attrs.extend(self.http_client_response_body_size.on_error(error, ctx));
 
         attrs
     }
@@ -712,6 +750,16 @@ where
 {
     counters: Vec<CustomCounter<Request, Response, Attributes, Select>>,
     histograms: Vec<CustomHistogram<Request, Response, Attributes, Select>>,
+}
+
+impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
+where
+    Attributes: Selectors<Request = Request, Response = Response> + Default,
+    Select: Selector<Request = Request, Response = Response> + Debug,
+{
+    pub(crate) fn is_empty(&self) -> bool {
+        self.counters.is_empty() && self.histograms.is_empty()
+    }
 }
 
 impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
@@ -746,6 +794,13 @@ where
                                 Increment::EventCustom(None),
                             ),
                         },
+                        InstrumentValue::Field(incr) => match incr {
+                            Field::Unit => (None, Increment::FieldUnit),
+                            Field::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::FieldCustom(None),
+                            ),
+                        },
                     };
                     let counter = CustomCounterInner {
                         increment,
@@ -759,7 +814,7 @@ where
                         ),
                         attributes: Vec::new(),
                         selector,
-                        selectors: instrument.attributes.clone(),
+                        selectors: Some(instrument.attributes.clone()),
                         incremented: false,
                     };
 
@@ -785,6 +840,13 @@ where
                             Event::Custom(selector) => (
                                 Some(Arc::new(selector.clone())),
                                 Increment::EventCustom(None),
+                            ),
+                        },
+                        InstrumentValue::Field(incr) => match incr {
+                            Field::Unit => (None, Increment::FieldUnit),
+                            Field::Custom(selector) => (
+                                Some(Arc::new(selector.clone())),
+                                Increment::FieldCustom(None),
                             ),
                         },
                     };
@@ -862,6 +924,21 @@ where
         }
         for histogram in &self.histograms {
             histogram.on_response_event(response, ctx);
+        }
+    }
+
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
+        for counter in &self.counters {
+            counter.on_response_field(ty, field, value, ctx);
+        }
+        for histogram in &self.histograms {
+            histogram.on_response_field(ty, field, value, ctx);
         }
     }
 }
@@ -1056,33 +1133,35 @@ pub(crate) type SubgraphCustomInstruments =
 pub(crate) enum Increment {
     Unit,
     EventUnit,
+    FieldUnit,
     Duration(Instant),
     EventDuration(Instant),
     Custom(Option<i64>),
     EventCustom(Option<i64>),
+    FieldCustom(Option<i64>),
 }
 
-struct CustomCounter<Request, Response, A, T>
+pub(crate) struct CustomCounter<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
+    pub(crate) inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
 }
 
-struct CustomCounterInner<Request, Response, A, T>
+pub(crate) struct CustomCounterInner<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
     T: Selector<Request = Request, Response = Response> + Debug,
 {
-    increment: Increment,
-    selector: Option<Arc<T>>,
-    selectors: Arc<Extendable<A, T>>,
-    counter: Option<Counter<f64>>,
-    condition: Condition<T>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    pub(crate) increment: Increment,
+    pub(crate) selector: Option<Arc<T>>,
+    pub(crate) selectors: Option<Arc<Extendable<A, T>>>,
+    pub(crate) counter: Option<Counter<f64>>,
+    pub(crate) condition: Condition<T>,
+    pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
-    incremented: bool,
+    pub(crate) incremented: bool,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
@@ -1102,7 +1181,10 @@ where
             let _ = inner.counter.take();
             return;
         }
-        inner.attributes = inner.selectors.on_request(request).into_iter().collect();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            inner.attributes = selectors.on_request(request).into_iter().collect();
+        }
+
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
                 Increment::EventCustom(None) => {
@@ -1125,13 +1207,22 @@ where
         if !inner.condition.evaluate_response(response) {
             if !matches!(
                 &inner.increment,
-                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+                Increment::EventCustom(_)
+                    | Increment::EventDuration(_)
+                    | Increment::EventUnit
+                    | Increment::FieldCustom(_)
+                    | Increment::FieldUnit
             ) {
                 let _ = inner.counter.take();
             }
             return;
         }
-        let attrs: Vec<KeyValue> = inner.selectors.on_response(response).into_iter().collect();
+
+        let attrs: Vec<KeyValue> = inner
+            .selectors
+            .as_ref()
+            .map(|s| s.on_response(response).into_iter().collect())
+            .unwrap_or_default();
         inner.attributes.extend(attrs);
 
         if let Some(selected_value) = inner
@@ -1161,8 +1252,12 @@ where
                 Some(incr) => incr as f64,
                 None => 0f64,
             },
-            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
-                // Nothing to do because we're incrementing on events
+            Increment::EventUnit
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::FieldUnit
+            | Increment::FieldCustom(_) => {
+                // Nothing to do because we're incrementing on events or fields
                 return;
             }
         };
@@ -1180,12 +1275,16 @@ where
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
-        let attrs: Vec<KeyValue> = inner
-            .selectors
-            .on_response_event(response, ctx)
-            .into_iter()
-            .collect();
-        inner.attributes.extend(attrs);
+        // Response event may be called multiple times so we don't extend inner.attributes
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_event(response, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
 
         if let Some(selected_value) = inner
             .selector
@@ -1229,27 +1328,107 @@ where
 
         inner.incremented = true;
         if let Some(counter) = &inner.counter {
-            counter.add(increment, &inner.attributes);
+            counter.add(increment, &attrs);
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
-        let mut attrs: Vec<KeyValue> = inner.selectors.on_error(error).into_iter().collect();
-        attrs.append(&mut inner.attributes);
+
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_error(error, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
 
         let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit => 1f64,
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => 1f64,
             Increment::Duration(instant) | Increment::EventDuration(instant) => {
                 instant.elapsed().as_secs_f64()
             }
-            Increment::Custom(val) | Increment::EventCustom(val) => match val {
-                Some(incr) => incr as f64,
-                None => 0f64,
-            },
+            Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
+                match val {
+                    Some(incr) => incr as f64,
+                    None => 0f64,
+                }
+            }
         };
 
         if let Some(counter) = inner.counter.take() {
+            counter.add(increment, &attrs);
+        }
+    }
+
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
+        let mut inner = self.inner.lock();
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
+            return;
+        }
+
+        // Response field may be called multiple times so we don't extend inner.attributes
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_field(ty, field, value, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
+        {
+            let new_incr = match &inner.increment {
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment: Option<f64> = match &mut inner.increment {
+            Increment::FieldUnit => Some(1f64),
+            Increment::FieldCustom(val) => {
+                let incr = val.map(|incr| incr as f64);
+                // Set it to None again
+                *val = None;
+                incr
+            }
+            Increment::Unit
+            | Increment::Duration(_)
+            | Increment::Custom(_)
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::EventUnit => {
+                // Nothing to do because we're incrementing on fields
+                return;
+            }
+        };
+
+        if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
             counter.add(increment, &attrs);
         }
     }
@@ -1264,7 +1443,8 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
-            if inner.incremented {
+            // If the condition is false or indeterminate then we don't increment the counter
+            if inner.incremented || matches!(inner.condition.evaluate_drop(), Some(false) | None) {
                 return;
             }
             if let Some(counter) = inner.counter.take() {
@@ -1277,6 +1457,13 @@ where
                         Some(incr) => *incr as f64,
                         None => 0f64,
                     },
+                    Increment::FieldUnit | Increment::FieldCustom(_) => {
+                        // Dropping a metric on a field will never increment.
+                        // We can't increment graphql metrics unless we actually process the result.
+                        // It's not like we're counting the number of requests, where we want to increment
+                        // with the data that we know so far if the request stops.
+                        return;
+                    }
                 };
                 counter.add(incr, &inner.attributes);
             }
@@ -1415,6 +1602,9 @@ where
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
@@ -1432,7 +1622,11 @@ where
         if !inner.condition.evaluate_response(response) {
             if !matches!(
                 &inner.increment,
-                Increment::EventCustom(_) | Increment::EventDuration(_) | Increment::EventUnit
+                Increment::EventCustom(_)
+                    | Increment::EventDuration(_)
+                    | Increment::EventUnit
+                    | Increment::FieldCustom(_)
+                    | Increment::FieldUnit
             ) {
                 let _ = inner.histogram.take();
             }
@@ -1453,6 +1647,9 @@ where
                 Increment::EventCustom(None) => {
                     Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
                 }
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
                 Increment::Custom(None) => {
                     Increment::Custom(selected_value.as_str().parse::<i64>().ok())
                 }
@@ -1468,14 +1665,19 @@ where
             Increment::Unit => Some(1f64),
             Increment::Duration(instant) => Some(instant.elapsed().as_secs_f64()),
             Increment::Custom(val) => val.map(|incr| incr as f64),
-            Increment::EventUnit | Increment::EventDuration(_) | Increment::EventCustom(_) => {
-                // Nothing to do because we're incrementing on events
+            Increment::EventUnit
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::FieldUnit
+            | Increment::FieldCustom(_) => {
+                // Nothing to do because we're incrementing on events or fields
                 return;
             }
         };
 
-        if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &inner.attributes);
+            inner.updated = true;
         }
     }
 
@@ -1484,12 +1686,18 @@ where
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
-        let mut attrs: Vec<KeyValue> = inner
-            .selectors
-            .as_ref()
-            .map(|s| s.on_response_event(response, ctx).into_iter().collect())
-            .unwrap_or_default();
-        attrs.extend(inner.attributes.clone());
+
+        // Response event may be called multiple times so we don't extend inner.attributes
+        let mut attrs: Vec<KeyValue> = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_event(response, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
+
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -1524,35 +1732,111 @@ where
                 *val = None;
                 incr
             }
-            Increment::Unit | Increment::Duration(_) | Increment::Custom(_) => {
+            Increment::Unit
+            | Increment::Duration(_)
+            | Increment::Custom(_)
+            | Increment::FieldUnit
+            | Increment::FieldCustom(_) => {
                 // Nothing to do because we're incrementing on events
                 return;
             }
         };
-        inner.updated = true;
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &attrs);
+            inner.updated = true;
         }
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
         let mut attrs: Vec<KeyValue> = inner
             .selectors
             .as_ref()
-            .map(|s| s.on_error(error).into_iter().collect())
+            .map(|s| s.on_error(error, ctx).into_iter().collect())
             .unwrap_or_default();
         attrs.append(&mut inner.attributes);
 
         let increment = match inner.increment {
-            Increment::Unit | Increment::EventUnit => Some(1f64),
+            Increment::Unit | Increment::EventUnit | Increment::FieldUnit => Some(1f64),
             Increment::Duration(instant) | Increment::EventDuration(instant) => {
                 Some(instant.elapsed().as_secs_f64())
             }
-            Increment::Custom(val) | Increment::EventCustom(val) => val.map(|incr| incr as f64),
+            Increment::Custom(val) | Increment::EventCustom(val) | Increment::FieldCustom(val) => {
+                val.map(|incr| incr as f64)
+            }
         };
 
         if let (Some(histogram), Some(increment)) = (inner.histogram.take(), increment) {
+            histogram.record(increment, &attrs);
+        }
+    }
+
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
+        let mut inner = self.inner.lock();
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
+            return;
+        }
+
+        // Response field may be called multiple times so we don't extend inner.attributes
+        let mut attrs = inner.attributes.clone();
+        if let Some(selectors) = inner.selectors.as_ref() {
+            attrs.extend(
+                selectors
+                    .on_response_field(ty, field, value, ctx)
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+            );
+        }
+
+        if let Some(selected_value) = inner
+            .selector
+            .as_ref()
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
+        {
+            let new_incr = match &inner.increment {
+                Increment::FieldCustom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                Increment::Custom(None) => {
+                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
+                }
+                other => {
+                    failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
+                    return;
+                }
+            };
+            inner.increment = new_incr;
+        }
+
+        let increment: Option<f64> = match &mut inner.increment {
+            Increment::FieldUnit => Some(1f64),
+            Increment::FieldCustom(val) => {
+                let incr = val.map(|incr| incr as f64);
+                // Set it to None again
+                *val = None;
+                incr
+            }
+            Increment::Unit
+            | Increment::Duration(_)
+            | Increment::Custom(_)
+            | Increment::EventDuration(_)
+            | Increment::EventCustom(_)
+            | Increment::EventUnit => {
+                // Nothing to do because we're incrementing on fields
+                return;
+            }
+        };
+
+        if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
             histogram.record(increment, &attrs);
         }
     }
@@ -1567,7 +1851,7 @@ where
         // TODO add attribute error broken pipe ? cf https://github.com/apollographql/router/issues/4866
         let inner = self.inner.try_lock();
         if let Some(mut inner) = inner {
-            if inner.updated {
+            if inner.updated || matches!(inner.condition.evaluate_drop(), Some(false) | None) {
                 return;
             }
             if let Some(histogram) = inner.histogram.take() {
@@ -1578,6 +1862,13 @@ where
                     }
                     Increment::Custom(val) | Increment::EventCustom(val) => {
                         val.map(|incr| incr as f64)
+                    }
+                    Increment::FieldUnit | Increment::FieldCustom(_) => {
+                        // Dropping a metric on a field will never increment.
+                        // We can't increment graphql metrics unless we actually process the result.
+                        // It's not like we're counting the number of requests, where we want to increment
+                        // with the data that we know so far if the request stops.
+                        return;
                     }
                 };
 
@@ -1591,18 +1882,600 @@ where
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::io::Write;
+    use std::path::PathBuf;
+    use std::str::FromStr;
+
+    use apollo_compiler::ast::Name;
+    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::execution::JsonMap;
+    use http::HeaderMap;
+    use http::HeaderName;
+    use http::Method;
     use http::StatusCode;
+    use http::Uri;
+    use multimap::MultiMap;
+    use rust_embed::RustEmbed;
+    use schemars::gen::SchemaGenerator;
+    use serde::Deserialize;
     use serde_json::json;
+    use serde_json_bytes::Value;
 
     use super::*;
+    use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::context::OPERATION_KIND;
+    use crate::error::Error;
     use crate::graphql;
+    use crate::http_ext::TryIntoHeaderName;
+    use crate::http_ext::TryIntoHeaderValue;
+    use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+    use crate::plugins::telemetry::config_new::instruments::Instrumented;
+    use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::Context;
+
+    #[derive(RustEmbed)]
+    #[folder = "src/plugins/telemetry/config_new/fixtures"]
+    struct Asset;
+
+    #[derive(Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    enum Event {
+        Context {
+            map: serde_json::Map<String, serde_json::Value>,
+        },
+        RouterRequest {
+            method: String,
+            uri: String,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: String,
+        },
+        RouterResponse {
+            status: u16,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            body: String,
+        },
+        RouterError {
+            error: String,
+        },
+        SupergraphRequest {
+            query: String,
+            method: String,
+            uri: String,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+        },
+        SupergraphResponse {
+            status: u16,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+            label: Option<String>,
+            #[schemars(with = "Option<serde_json::Value>")]
+            data: Option<Value>,
+            #[schemars(with = "Option<String>")]
+            path: Option<Path>,
+            #[serde(default)]
+            #[schemars(with = "Vec<serde_json::Value>")]
+            errors: Vec<Error>,
+            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
+        },
+        SubgraphRequest {
+            subgraph_name: String,
+            operation_kind: Option<OperationKind>,
+            query: String,
+            operation_name: Option<String>,
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            variables: JsonMap,
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+        },
+        SupergraphError {
+            error: String,
+        },
+        SubgraphResponse {
+            status: u16,
+            data: Option<serde_json::Value>,
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
+            #[serde(default)]
+            #[schemars(with = "Vec<serde_json::Value>")]
+            errors: Vec<Error>,
+            #[serde(default)]
+            headers: HashMap<String, String>,
+        },
+        /// Note that this MUST not be used without first using supergraph request event
+        GraphqlResponse {
+            #[schemars(with = "Option<serde_json::Value>")]
+            data: Option<Value>,
+            #[schemars(with = "Option<String>")]
+            path: Option<Path>,
+            #[serde(default)]
+            #[schemars(with = "Vec<serde_json::Value>")]
+            errors: Vec<Error>,
+            // Skip the `Object` type alias in order to use buildstructor’s map special-casing
+            #[serde(default)]
+            #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
+            extensions: JsonMap,
+        },
+        /// Note that this MUST not be used without first using supergraph request event
+        ResponseField {
+            typed_value: TypedValueMirror,
+        },
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    #[serde(rename_all = "snake_case", deny_unknown_fields)]
+    enum TypedValueMirror {
+        Null,
+        Bool {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            value: bool,
+        },
+        Number {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            value: serde_json::Number,
+        },
+        String {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            value: String,
+        },
+        List {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            values: Vec<TypedValueMirror>,
+        },
+        Object {
+            type_name: String,
+            field_name: String,
+            field_type: String,
+            values: HashMap<String, TypedValueMirror>,
+        },
+        Root {
+            values: HashMap<String, TypedValueMirror>,
+        },
+    }
+
+    impl TypedValueMirror {
+        fn field(&self) -> Option<apollo_compiler::executable::Field> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Number {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::String {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::List {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Object {
+                    field_name,
+                    field_type,
+                    ..
+                } => Some(Self::create_field(field_type.clone(), field_name.clone())),
+            }
+        }
+
+        fn ty(&self) -> Option<NamedType> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool { type_name, .. }
+                | TypedValueMirror::Number { type_name, .. }
+                | TypedValueMirror::String { type_name, .. }
+                | TypedValueMirror::List { type_name, .. }
+                | TypedValueMirror::Object { type_name, .. } => {
+                    Some(Self::create_type_name(type_name.clone()))
+                }
+            }
+        }
+
+        fn value(&self) -> Option<Value> {
+            match self {
+                TypedValueMirror::Null => Some(Value::Null),
+                TypedValueMirror::Bool { value, .. } => Some(serde_json_bytes::json!(*value)),
+                TypedValueMirror::Number { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::String { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::List { values, .. } => {
+                    let values = values.iter().filter_map(|v| v.value()).collect();
+                    Some(Value::Array(values))
+                }
+                TypedValueMirror::Object { values, .. } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+                TypedValueMirror::Root { values } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+            }
+        }
+
+        fn create_field(
+            field_type: String,
+            field_name: String,
+        ) -> apollo_compiler::executable::Field {
+            apollo_compiler::executable::Field {
+                definition: apollo_compiler::schema::FieldDefinition {
+                    description: None,
+                    name: NamedType::new(field_name.clone()).expect("valid field name"),
+                    arguments: vec![],
+                    ty: apollo_compiler::schema::Type::Named(
+                        NamedType::new(field_type.clone()).expect("valid type name"),
+                    ),
+                    directives: Default::default(),
+                }
+                .into(),
+                alias: None,
+                name: NamedType::new(field_name.clone()).expect("valid field name"),
+                arguments: vec![],
+                directives: Default::default(),
+                selection_set: SelectionSet::new(
+                    NamedType::new(field_name).expect("valid field name"),
+                ),
+            }
+        }
+
+        fn create_type_name(type_name: String) -> Name {
+            NamedType::new(type_name).expect("valid type name")
+        }
+    }
+
+    #[derive(Deserialize, JsonSchema)]
+    #[serde(deny_unknown_fields, rename_all = "snake_case")]
+    struct TestDefinition {
+        description: String,
+        events: Vec<Vec<Event>>,
+    }
+
+    #[tokio::test]
+    async fn test_instruments() {
+        // This test is data driven.
+        // It reads a list of fixtures from the fixtures directory and runs a test for each fixture.
+        // Each fixture is a yaml file that contains a list of events and a router config for the instruments.
+
+        for fixture in Asset::iter() {
+            // There's no async in this test, but introducing an async block allows us to separate metrics for each fixture.
+            async move {
+                if fixture.ends_with("test.yaml") {
+                    println!("Running test for fixture: {}", fixture);
+                    let path = PathBuf::from_str(&fixture).unwrap();
+                    let fixture_name = path
+                        .parent()
+                        .expect("fixture path")
+                        .file_name()
+                        .expect("fixture name");
+                    let test_definition_file = Asset::get(&fixture).expect("failed to get fixture");
+                    let test_definition: TestDefinition =
+                        serde_yaml::from_slice(&test_definition_file.data)
+                            .expect("failed to parse fixture");
+
+                    let router_config_file =
+                        Asset::get(&fixture.replace("test.yaml", "router.yaml"))
+                            .expect("failed to get fixture router config");
+
+                    let mut config = load_config(&router_config_file.data);
+                    config.update_defaults();
+
+                    for request in test_definition.events {
+                        // each array of actions is a separate request
+                        let mut router_instruments = None;
+                        let mut supergraph_instruments = None;
+                        let mut subgraph_instruments = None;
+                        let graphql_instruments: GraphQLInstruments = (&config).into();
+                        let context = Context::new();
+                        for event in request {
+                            match event {
+                                Event::RouterRequest {
+                                    method,
+                                    uri,
+                                    headers,
+                                    body,
+                                } => {
+                                    let router_req = RouterRequest::fake_builder()
+                                        .context(context.clone())
+                                        .method(Method::from_str(&method).expect("method"))
+                                        .uri(Uri::from_str(&uri).expect("uri"))
+                                        .headers(convert_headers(headers))
+                                        .body(body)
+                                        .build()
+                                        .unwrap();
+                                    router_instruments = Some(config.new_router_instruments());
+                                    router_instruments
+                                        .as_mut()
+                                        .expect("router instruments")
+                                        .on_request(&router_req);
+                                }
+                                Event::RouterResponse {
+                                    status,
+                                    headers,
+                                    body,
+                                } => {
+                                    let router_resp = RouterResponse::fake_builder()
+                                        .context(context.clone())
+                                        .status_code(StatusCode::from_u16(status).expect("status"))
+                                        .headers(convert_headers(headers))
+                                        .data(body)
+                                        .build()
+                                        .unwrap();
+                                    router_instruments
+                                        .take()
+                                        .expect("router instruments")
+                                        .on_response(&router_resp);
+                                }
+                                Event::RouterError { error } => {
+                                    router_instruments
+                                        .take()
+                                        .expect("router request must have been made first")
+                                        .on_error(&BoxError::from(error), &context);
+                                }
+                                Event::SupergraphRequest {
+                                    query,
+                                    method,
+                                    uri,
+                                    headers,
+                                } => {
+                                    supergraph_instruments =
+                                        Some(config.new_supergraph_instruments());
+
+                                    let mut request = supergraph::Request::fake_builder()
+                                        .context(context.clone())
+                                        .method(Method::from_str(&method).expect("method"))
+                                        .headers(convert_headers(headers))
+                                        .query(query)
+                                        .build()
+                                        .unwrap();
+                                    *request.supergraph_request.uri_mut() =
+                                        Uri::from_str(&uri).expect("uri");
+
+                                    supergraph_instruments
+                                        .as_mut()
+                                        .unwrap()
+                                        .on_request(&request);
+                                }
+                                Event::SupergraphResponse {
+                                    status,
+                                    label,
+                                    data,
+                                    path,
+                                    errors,
+                                    extensions,
+                                    headers,
+                                } => {
+                                    let response = supergraph::Response::fake_builder()
+                                        .context(context.clone())
+                                        .status_code(StatusCode::from_u16(status).expect("status"))
+                                        .and_label(label)
+                                        .and_path(path)
+                                        .errors(errors)
+                                        .extensions(extensions)
+                                        .and_data(data)
+                                        .headers(convert_headers(headers))
+                                        .build()
+                                        .unwrap();
+
+                                    supergraph_instruments
+                                        .take()
+                                        .unwrap()
+                                        .on_response(&response);
+                                }
+                                Event::SubgraphRequest {
+                                    subgraph_name,
+                                    operation_kind,
+                                    query,
+                                    operation_name,
+                                    variables,
+                                    extensions,
+                                    headers,
+                                } => {
+                                    subgraph_instruments = Some(config.new_subgraph_instruments());
+                                    let graphql_request = graphql::Request::fake_builder()
+                                        .query(query)
+                                        .and_operation_name(operation_name)
+                                        .variables(variables)
+                                        .extensions(extensions)
+                                        .build();
+                                    let mut http_request = http::Request::new(graphql_request);
+                                    *http_request.headers_mut() = convert_http_headers(headers);
+
+                                    let request = subgraph::Request::fake_builder()
+                                        .context(context.clone())
+                                        .subgraph_name(subgraph_name)
+                                        .and_operation_kind(operation_kind)
+                                        .subgraph_request(http_request)
+                                        .build();
+
+                                    subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                }
+                                Event::SubgraphResponse {
+                                    status,
+                                    data,
+                                    extensions,
+                                    errors,
+                                    headers,
+                                } => {
+                                    let response = subgraph::Response::fake2_builder()
+                                        .context(context.clone())
+                                        .status_code(StatusCode::from_u16(status).expect("status"))
+                                        .and_data(data)
+                                        .errors(errors)
+                                        .extensions(extensions)
+                                        .headers(convert_headers(headers))
+                                        .build()
+                                        .unwrap();
+                                    subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
+                                }
+                                Event::SupergraphError { error } => {
+                                    supergraph_instruments
+                                        .take()
+                                        .expect("supergraph request must have been made first")
+                                        .on_error(&BoxError::from(error), &context);
+                                }
+                                Event::GraphqlResponse {
+                                    data,
+                                    path,
+                                    errors,
+                                    extensions,
+                                } => {
+                                    let response = graphql::Response::builder()
+                                        .and_data(data)
+                                        .and_path(path)
+                                        .errors(errors)
+                                        .extensions(extensions)
+                                        .build();
+                                    supergraph_instruments
+                                        .as_mut()
+                                        .expect(
+                                            "supergraph request event should have happened first",
+                                        )
+                                        .on_response_event(&response, &context);
+                                }
+                                Event::ResponseField { typed_value } => {
+                                    graphql_instruments.on_response_field(
+                                        &typed_value.ty().expect("type should exist"),
+                                        &typed_value.field().expect("field should exist"),
+                                        &typed_value.value().expect("value should exist"),
+                                        &context,
+                                    );
+                                }
+                                Event::Context { map } => {
+                                    for (key, value) in map {
+                                        context.insert(key, value).expect("insert context");
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    let mut snapshot_path = PathBuf::new();
+                    snapshot_path.push("fixtures");
+                    path.iter().for_each(|p| snapshot_path.push(p));
+                    snapshot_path.pop();
+                    let description = test_definition.description;
+                    let info: serde_yaml::Value = serde_yaml::from_slice(&router_config_file.data)
+                        .expect("failed to parse fixture");
+
+                    insta::with_settings!({sort_maps => true,
+                        snapshot_path=>snapshot_path,
+                        input_file=>fixture_name,
+                        prepend_module_to_snapshot=>false,
+                        description=>description,
+                        info=>&info
+                    }, {
+                        let metrics = crate::metrics::collect_metrics();
+                        insta::assert_yaml_snapshot!("metrics", &metrics.all());
+                    });
+                }
+            }
+            .with_metrics()
+            .await;
+        }
+    }
+
+    fn convert_http_headers(headers: HashMap<String, String>) -> HeaderMap {
+        let mut converted_headers = HeaderMap::new();
+        for (name, value) in headers {
+            converted_headers.insert::<HeaderName>(
+                name.try_into().expect("expected header name"),
+                value.try_into().expect("expected header value"),
+            );
+        }
+        converted_headers
+    }
+
+    fn convert_headers(
+        headers: HashMap<String, String>,
+    ) -> MultiMap<TryIntoHeaderName, TryIntoHeaderValue> {
+        let mut converted_headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> =
+            MultiMap::new();
+        for (name, value) in headers {
+            converted_headers.insert(name.into(), value.into());
+        }
+        converted_headers
+    }
+
+    fn load_config(config: &[u8]) -> InstrumentsConfig {
+        let val: serde_json::Value = serde_yaml::from_slice(config).unwrap();
+        let instruments = val
+            .as_object()
+            .unwrap()
+            .get("telemetry")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("instrumentation")
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .get("instruments")
+            .unwrap();
+        serde_json::from_value(instruments.clone()).unwrap()
+    }
+
+    #[test]
+    fn write_schema() {
+        // Write a json schema for the above test
+        let mut schema_gen = SchemaGenerator::default();
+        let schema = schema_gen.root_schema_for::<TestDefinition>();
+        let schema = serde_json::to_string_pretty(&schema);
+        let mut path = PathBuf::from_str(env!("CARGO_MANIFEST_DIR")).expect("manifest dir");
+        path.push("src");
+        path.push("plugins");
+        path.push("telemetry");
+        path.push("config_new");
+        path.push("fixtures");
+        path.push("schema.json");
+        let mut file = File::create(path).unwrap();
+        file.write_all(schema.unwrap().as_bytes())
+            .expect("write schema");
+    }
 
     #[tokio::test]
     async fn test_router_instruments() {
+        // Please don't add further logic to this test, it's already testing multiple things.
+        // Instead, add a data driven test via test_instruments test.
         async {
             let config: InstrumentsConfig = serde_json::from_str(
                 json!({
@@ -1815,6 +2688,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_supergraph_instruments() {
+        // Please don't add further logic to this test, it's already testing multiple things.
+        // Instead, add a data driven test via test_instruments test.
         async {
             let config: InstrumentsConfig = serde_json::from_str(
                 json!({
@@ -1838,6 +2713,44 @@ mod tests {
                         "acme.request.on_graphql_error": {
                             "value": "event_unit",
                             "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    "NOPE",
+                                    {
+                                        "response_errors": "$.[0].extensions.code"
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error_selector": {
+                            "value": "event_unit",
+                            "type": "counter",
+                            "unit": "error",
+                            "description": "my description",
+                            "condition": {
+                                "eq": [
+                                    true,
+                                    {
+                                        "on_graphql_error": true
+                                    }
+                                ]
+                            },
+                            "attributes": {
+                                "response_errors": {
+                                    "response_errors": "$.*"
+                                }
+                            }
+                        },
+                        "acme.request.on_graphql_error_histo": {
+                            "value": "event_unit",
+                            "type": "histogram",
                             "unit": "error",
                             "description": "my description",
                             "condition": {
@@ -1895,7 +2808,14 @@ mod tests {
 
             let custom_instruments = SupergraphCustomInstruments::new(&config.supergraph.custom);
             let context = crate::context::Context::new();
-            let _ = context.insert(OPERATION_KIND, "query".to_string());
+            let _ = context.insert(OPERATION_KIND, "query".to_string()).unwrap();
+            let context_with_error = crate::context::Context::new();
+            let _ = context_with_error
+                .insert(OPERATION_KIND, "query".to_string())
+                .unwrap();
+            let _ = context_with_error
+                .insert(CONTAINS_GRAPHQL_ERROR, true)
+                .unwrap();
             let supergraph_req = supergraph::Request::fake_builder()
                 .header("conditional-custom", "X")
                 .header("x-my-header-count", "55")
@@ -1929,13 +2849,23 @@ mod tests {
                         .extension_code("NOPE")
                         .build()])
                     .build(),
-                &supergraph_req.context.clone(),
+                &context_with_error,
             );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 1.0);
             assert_counter!(
                 "acme.request.on_graphql_error",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                1.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
                 1.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
@@ -1973,13 +2903,23 @@ mod tests {
                         .extension_code("NOPE")
                         .build()])
                     .build(),
-                &supergraph_req.context.clone(),
+                &context_with_error,
             );
 
             assert_counter!("acme.query", 1.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
             assert_counter!(
                 "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );
@@ -2007,13 +2947,23 @@ mod tests {
                 &graphql::Response::builder()
                     .data(serde_json_bytes::json!({"foo": "bar"}))
                     .build(),
-                &supergraph_req.context.clone(),
+                &supergraph_req.context,
             );
 
             assert_counter!("acme.query", 2.0, query = "{me{name}}");
             assert_counter!("acme.request.on_error", 2.0);
             assert_counter!(
                 "acme.request.on_graphql_error",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_counter!(
+                "acme.request.on_graphql_error_selector",
+                2.0,
+                response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
+            );
+            assert_histogram_sum!(
+                "acme.request.on_graphql_error_histo",
                 2.0,
                 response_errors = "{\"message\":\"nope\",\"extensions\":{\"code\":\"NOPE\"}}"
             );

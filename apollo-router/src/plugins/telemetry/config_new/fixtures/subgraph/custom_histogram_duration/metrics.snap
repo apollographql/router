@@ -1,0 +1,24 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom histogram duration
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration: false
+          custom.histogram.duration:
+            description: histogram of requests
+            type: histogram
+            unit: unit
+            value: duration
+---
+- name: custom.histogram.duration
+  description: histogram of requests
+  unit: unit
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes: {}

@@ -10,12 +10,11 @@ use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
+use serde_json_bytes::Value;
 
 use super::directives::IncludeDirective;
 use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
-use super::schema_aware_response::SchemaAwareResponse;
-use super::schema_aware_response::TypedValue;
 use super::DemandControlError;
 use crate::graphql::Response;
 use crate::query_planner::fetch::SubgraphOperation;
@@ -24,6 +23,7 @@ use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
+use crate::response::ResponseVisitor;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
@@ -62,6 +62,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         if StaticCostCalculator::skipped_by_directives(field) {
             return Ok(0.0);
@@ -94,19 +95,26 @@ impl StaticCostCalculator {
             field.ty().inner_named_type(),
             schema,
             executable,
+            should_estimate_requires,
         )?;
 
-        // If the field is marked with `@requires`, the required selection may not be included
-        // in the query's selection. Adding that requirement's cost to the field ensures it's
-        // accounted for.
-        let requirements =
-            RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
-        let requirements_cost = match requirements {
-            Some(selection_set) => {
-                self.score_selection_set(&selection_set, parent_type, schema, executable)?
+        let mut requirements_cost = 0.0;
+        if should_estimate_requires {
+            // If the field is marked with `@requires`, the required selection may not be included
+            // in the query's selection. Adding that requirement's cost to the field ensures it's
+            // accounted for.
+            let requirements =
+                RequiresDirective::from_field(field, parent_type, schema)?.map(|d| d.fields);
+            if let Some(selection_set) = requirements {
+                requirements_cost = self.score_selection_set(
+                    &selection_set,
+                    parent_type,
+                    schema,
+                    executable,
+                    should_estimate_requires,
+                )?;
             }
-            None => 0.0,
-        };
+        }
 
         let cost = instance_count * type_cost + requirements_cost;
         tracing::debug!(
@@ -127,6 +135,7 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let fragment = fragment_spread.fragment_def(executable).ok_or(
             DemandControlError::QueryParseFailure(format!(
@@ -134,7 +143,13 @@ impl StaticCostCalculator {
                 fragment_spread.fragment_name
             )),
         )?;
-        self.score_selection_set(&fragment.selection_set, parent_type, schema, executable)
+        self.score_selection_set(
+            &fragment.selection_set,
+            parent_type,
+            schema,
+            executable,
+            should_estimate_requires,
+        )
     }
 
     fn score_inline_fragment(
@@ -143,12 +158,14 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         self.score_selection_set(
             &inline_fragment.selection_set,
             parent_type,
             schema,
             executable,
+            should_estimate_requires,
         )
     }
 
@@ -157,6 +174,7 @@ impl StaticCostCalculator {
         operation: &Operation,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = if operation.is_mutation() { 10.0 } else { 0.0 };
 
@@ -167,8 +185,13 @@ impl StaticCostCalculator {
             )));
         };
 
-        cost +=
-            self.score_selection_set(&operation.selection_set, root_type_name, schema, executable)?;
+        cost += self.score_selection_set(
+            &operation.selection_set,
+            root_type_name,
+            schema,
+            executable,
+            should_estimate_requires,
+        )?;
 
         Ok(cost)
     }
@@ -179,17 +202,25 @@ impl StaticCostCalculator {
         parent_type: &NamedType,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         match selection {
-            Selection::Field(f) => self.score_field(f, parent_type, schema, executable),
-            Selection::FragmentSpread(s) => {
-                self.score_fragment_spread(s, parent_type, schema, executable)
+            Selection::Field(f) => {
+                self.score_field(f, parent_type, schema, executable, should_estimate_requires)
             }
+            Selection::FragmentSpread(s) => self.score_fragment_spread(
+                s,
+                parent_type,
+                schema,
+                executable,
+                should_estimate_requires,
+            ),
             Selection::InlineFragment(i) => self.score_inline_fragment(
                 i,
                 i.type_condition.as_ref().unwrap_or(parent_type),
                 schema,
                 executable,
+                should_estimate_requires,
             ),
         }
     }
@@ -200,10 +231,17 @@ impl StaticCostCalculator {
         parent_type_name: &NamedType,
         schema: &Valid<Schema>,
         executable: &ExecutableDocument,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         for selection in selection_set.selections.iter() {
-            cost += self.score_selection(selection, parent_type_name, schema, executable)?;
+            cost += self.score_selection(
+                selection,
+                parent_type_name,
+                schema,
+                executable,
+                should_estimate_requires,
+            )?;
         }
         Ok(cost)
     }
@@ -261,7 +299,7 @@ impl StaticCostCalculator {
         let operation = operation
             .as_parsed()
             .map_err(DemandControlError::SubgraphOperationNotInitialized)?;
-        self.estimated(operation, schema)
+        self.estimated(operation, schema, false)
     }
 
     fn max_score_of_nodes(
@@ -306,42 +344,18 @@ impl StaticCostCalculator {
         Ok(sum)
     }
 
-    fn score_json(value: &TypedValue) -> Result<f64, DemandControlError> {
-        match value {
-            TypedValue::Null => Ok(0.0),
-            TypedValue::Bool(_, _) => Ok(0.0),
-            TypedValue::Number(_, _) => Ok(0.0),
-            TypedValue::String(_, _) => Ok(0.0),
-            TypedValue::Array(_, items) => Self::summed_score_of_values(items),
-            TypedValue::Object(_, children) => {
-                let cost_of_children = Self::summed_score_of_values(children.values())?;
-                Ok(1.0 + cost_of_children)
-            }
-            TypedValue::Root(children) => Self::summed_score_of_values(children.values()),
-        }
-    }
-
-    fn summed_score_of_values<'a, I: IntoIterator<Item = &'a TypedValue<'a>>>(
-        values: I,
-    ) -> Result<f64, DemandControlError> {
-        let mut score = 0.0;
-        for value in values {
-            score += Self::score_json(value)?;
-        }
-        Ok(score)
-    }
-
     pub(crate) fn estimated(
         &self,
         query: &ExecutableDocument,
         schema: &Valid<Schema>,
+        should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
         if let Some(op) = &query.anonymous_operation {
-            cost += self.score_operation(op, schema, query)?;
+            cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
         for (_name, op) in query.named_operations.iter() {
-            cost += self.score_operation(op, schema, query)?;
+            cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
         Ok(cost)
     }
@@ -355,8 +369,42 @@ impl StaticCostCalculator {
         request: &ExecutableDocument,
         response: &Response,
     ) -> Result<f64, DemandControlError> {
-        let schema_aware_response = SchemaAwareResponse::new(request, response)?;
-        Self::score_json(&schema_aware_response.value)
+        let mut visitor = ResponseCostCalculator::new();
+        visitor.visit(request, response);
+        Ok(visitor.cost)
+    }
+}
+
+pub(crate) struct ResponseCostCalculator {
+    pub(crate) cost: f64,
+}
+
+impl ResponseCostCalculator {
+    pub(crate) fn new() -> Self {
+        Self { cost: 0.0 }
+    }
+}
+
+impl ResponseVisitor for ResponseCostCalculator {
+    fn visit_field(
+        &mut self,
+        request: &ExecutableDocument,
+        _ty: &NamedType,
+        field: &Field,
+        value: &Value,
+    ) {
+        match value {
+            Value::Null | Value::Bool(_) | Value::Number(_) | Value::String(_) => {}
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_field(request, field.ty().inner_named_type(), field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.cost += 1.0;
+                self.visit_selections(request, &field.selection_set, children);
+            }
+        }
     }
 }
 
@@ -393,7 +441,7 @@ mod tests {
         let (schema, query) =
             parse_schema_and_operation(schema_str, query_str, &Default::default());
         StaticCostCalculator::new(Default::default(), 100)
-            .estimated(&query.executable, schema.supergraph_schema())
+            .estimated(&query.executable, schema.supergraph_schema(), true)
             .unwrap()
     }
 
@@ -408,7 +456,7 @@ mod tests {
         )
         .unwrap();
         StaticCostCalculator::new(Default::default(), 100)
-            .estimated(&query, &schema)
+            .estimated(&query, &schema, true)
             .unwrap()
     }
 
@@ -590,10 +638,10 @@ mod tests {
         let (schema, query) = parse_schema_and_operation(schema, query, &Default::default());
 
         let conservative_estimate = StaticCostCalculator::new(Default::default(), 100)
-            .estimated(&query.executable, schema.supergraph_schema())
+            .estimated(&query.executable, schema.supergraph_schema(), true)
             .unwrap();
         let narrow_estimate = StaticCostCalculator::new(Default::default(), 5)
-            .estimated(&query.executable, schema.supergraph_schema())
+            .estimated(&query.executable, schema.supergraph_schema(), true)
             .unwrap();
 
         assert_eq!(conservative_estimate, 10200.0);

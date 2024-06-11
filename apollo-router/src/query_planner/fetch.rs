@@ -52,6 +52,7 @@ use crate::spec::Schema;
 #[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 #[non_exhaustive]
+#[cfg_attr(test, derive(schemars::JsonSchema))]
 pub enum OperationKind {
     #[default]
     Query,
@@ -849,7 +850,8 @@ impl FetchNode {
             {
                 Ok(mut plan) => {
                     if let Some(node) = plan.data.query_plan.node.as_mut() {
-                        node.update_connector_plan(&self.service_name.to_string(), connectors);
+                        Arc::make_mut(node)
+                            .update_connector_plan(&self.service_name.to_string(), connectors);
                     }
 
                     return Ok(Some((plan, rest_protocol_wrapper)));

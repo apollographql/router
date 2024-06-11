@@ -1,0 +1,9 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: false
+        http.server.request.duration:
+          attributes:
+            my_attribute:
+              request_method: true

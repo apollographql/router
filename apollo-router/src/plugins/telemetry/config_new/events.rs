@@ -555,13 +555,13 @@ where
         inner.send_event();
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
         if inner.event_on != EventOn::Error {
             return;
         }
         if let Some(selectors) = &inner.selectors {
-            let mut new_attributes = selectors.on_error(error);
+            let mut new_attributes = selectors.on_error(error, ctx);
             inner.attributes.append(&mut new_attributes);
         }
 

@@ -52,6 +52,7 @@ use crate::Context;
 pub(crate) type Plugins = IndexMap<String, Box<dyn QueryPlannerPlugin>>;
 pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
+pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
 pub(crate) enum ConfigMode {
@@ -84,9 +85,10 @@ fn init_query_plan_from_redis(
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
 ) -> Result<(), String> {
     if let Ok(QueryPlannerContent::Plan { plan, .. }) = cache_entry {
-        Arc::make_mut(plan)
-            .root
-            .init_parsed_operations(subgraph_schemas)
+        // Arc freshly deserialized from Redis should be unique, so this doesn’t clone:
+        let plan = Arc::make_mut(plan);
+        let root = Arc::make_mut(&mut plan.root);
+        root.init_parsed_operations(subgraph_schemas)
             .map_err(|e| format!("Invalid subgraph operation: {e}"))?
     }
     Ok(())
@@ -129,9 +131,6 @@ where
             }
             crate::configuration::QueryPlannerMode::Both => {
                 ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
-            }
-            crate::configuration::QueryPlannerMode::NewNew => {
-                ConfigMode::Rust(Arc::new(configuration.js_query_planner_config()))
             }
         };
         Ok(Self {
@@ -387,7 +386,7 @@ where
                     urp.cloned()
                 } {
                     let _ = response.context.insert(
-                        "apollo_operation_id",
+                        APOLLO_OPERATION_ID,
                         stats_report_key_hash(usage_reporting.stats_report_key.as_str()),
                     );
                     let _ = response.context.insert(

@@ -1,0 +1,20 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        default_requirement_level: none
+        router:
+          http.server.request.duration:
+            attributes:
+              error.type: true
+---
+- name: http.server.request.duration
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes:
+          error.type: Internal Server Error

@@ -6,6 +6,12 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
+use super::otel::layer::str_to_span_kind;
+use super::otel::layer::str_to_status;
+use super::otel::layer::SPAN_KIND_FIELD;
+use super::otel::layer::SPAN_NAME_FIELD;
+use super::otel::layer::SPAN_STATUS_CODE_FIELD;
+use super::otel::layer::SPAN_STATUS_MESSAGE_FIELD;
 use super::otel::OtelData;
 use super::reload::IsSampled;
 use super::tracing::APOLLO_PRIVATE_PREFIX;
@@ -73,6 +79,7 @@ impl SpanDynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
+                                    update_otel_data(otel_data, &key, &value);
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
                                             Some([(key, value)].into_iter().collect());
@@ -128,8 +135,23 @@ impl SpanDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
                                     if otel_data.builder.attributes.is_none() {
-                                        otel_data.builder.attributes = Some(attributes.collect());
+                                        otel_data.builder.attributes = Some(
+                                            attributes
+                                                .inspect(|attr| {
+                                                    update_otel_data(
+                                                        otel_data,
+                                                        &attr.key,
+                                                        &attr.value,
+                                                    )
+                                                })
+                                                .collect(),
+                                        );
                                     } else {
+                                        let attributes: Vec<KeyValue> = attributes
+                                            .inspect(|attr| {
+                                                update_otel_data(otel_data, &attr.key, &attr.value)
+                                            })
+                                            .collect();
                                         otel_data
                                             .builder
                                             .attributes
@@ -167,6 +189,19 @@ impl SpanDynAttribute for ::tracing::Span {
                 ::tracing::error!("no Registry, this is a bug");
             }
         });
+    }
+}
+
+fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::Value) {
+    match key.as_str() {
+        SPAN_NAME_FIELD => otel_data.builder.name = format!("{:?}", value).into(),
+        SPAN_KIND_FIELD => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
+        SPAN_STATUS_CODE_FIELD => otel_data.forced_status = str_to_status(&value.as_str()).into(),
+        SPAN_STATUS_MESSAGE_FIELD => {
+            otel_data.builder.status =
+                opentelemetry::trace::Status::error(value.as_str().to_string())
+        }
+        _ => {}
     }
 }
 

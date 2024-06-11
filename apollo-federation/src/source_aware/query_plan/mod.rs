@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Name;
@@ -7,11 +9,9 @@ use indexmap::IndexSet;
 
 use crate::sources::source;
 
-mod display;
 mod query_planner;
-pub use query_planner::QueryPlanner;
 
-pub type QueryPlanCost = i64;
+pub type QueryPlanCost = f64;
 
 #[derive(Debug, Default)]
 pub struct QueryPlan {
@@ -29,14 +29,12 @@ impl QueryPlan {
 #[derive(Debug, derive_more::From)]
 pub enum TopLevelPlanNode {
     Subscription(SubscriptionNode),
-    #[from(types(FetchNode))]
-    Fetch(Box<FetchNode>),
+    Fetch(FetchNode),
     Sequence(SequenceNode),
     Parallel(ParallelNode),
     Flatten(FlattenNode),
     Defer(DeferNode),
-    #[from(types(ConditionNode))]
-    Condition(Box<ConditionNode>),
+    Condition(ConditionNode),
 }
 
 #[derive(Debug)]
@@ -45,39 +43,37 @@ pub struct SubscriptionNode {
     pub rest: Option<PlanNode>,
 }
 
-#[derive(Clone, Debug, derive_more::From)]
+#[derive(Clone, Debug)]
 pub enum PlanNode {
-    #[from(types(FetchNode))]
-    Fetch(Box<FetchNode>),
-    Sequence(SequenceNode),
-    Parallel(ParallelNode),
-    Flatten(FlattenNode),
-    Defer(DeferNode),
-    #[from(types(ConditionNode))]
-    Condition(Box<ConditionNode>),
+    Fetch(Arc<FetchNode>),
+    Sequence(Arc<SequenceNode>),
+    Parallel(Arc<ParallelNode>),
+    Flatten(Arc<FlattenNode>),
+    Defer(Arc<DeferNode>),
+    Condition(Arc<ConditionNode>),
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FetchNode {
     pub operation_variables: IndexSet<Name>,
     pub input_conditions: SelectionSet,
     pub source_data: source::query_plan::FetchNode,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct SequenceNode {
     pub nodes: Vec<PlanNode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ParallelNode {
     pub nodes: Vec<PlanNode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct FlattenNode {
     pub path: Vec<FetchDataPathElement>,
-    pub node: Box<PlanNode>,
+    pub node: PlanNode,
 }
 
 /// A `DeferNode` corresponds to one or more `@defer` applications at the same level of "nestedness"
@@ -96,7 +92,7 @@ pub struct FlattenNode {
 /// we implement more advanced server-side heuristics to decide if deferring is judicious or not.
 /// This allows the executor of the plan to consistently send a defer-abiding multipart response to
 /// the client.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct DeferNode {
     /// The "primary" part of a defer, that is the non-deferred part (though could be deferred
     /// itself for a nested defer).
@@ -104,11 +100,11 @@ pub struct DeferNode {
     /// The "deferred" parts of the defer (note that it's a vector). Each of those deferred elements
     /// will correspond to a different chunk of the response to the client (after the initial
     /// on-deferred one that is).
-    pub deferred: Vec<Box<DeferredDeferBlock>>,
+    pub deferred: Vec<DeferredDeferBlock>,
 }
 
 /// The primary block of a `DeferNode`.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct PrimaryDeferBlock {
     /// The part of the original query that "selects" the data to send in that primary response
     /// once the plan in `node` completes). Note that if the parent `DeferNode` is nested, then it
@@ -120,11 +116,11 @@ pub struct PrimaryDeferBlock {
     /// The plan to get all the data for the primary block. Same notes as for subselection: usually
     /// defined, but can be undefined in some corner cases where nothing is to be done in the
     /// primary block.
-    pub node: Option<Box<PlanNode>>,
+    pub node: Option<PlanNode>,
 }
 
 /// A deferred block of a `DeferNode`.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct DeferredDeferBlock {
     /// References one or more fetch node(s) (by `id`) within `DeferNode.primary.node`. The plan of
     /// this deferred part should not be started until all such fetches return.
@@ -146,17 +142,17 @@ pub struct DeferredDeferBlock {
     pub node: Option<PlanNode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct DeferredDependency {
     /// A `FetchNode` ID.
     pub id: NodeStr,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct ConditionNode {
     pub condition_variable: Name,
-    pub if_clause: Option<Box<PlanNode>>,
-    pub else_clause: Option<Box<PlanNode>>,
+    pub if_clause: Option<PlanNode>,
+    pub else_clause: Option<PlanNode>,
 }
 
 /// Vectors of this element match path(s) to a value in fetch data. Each element is (1) a key in

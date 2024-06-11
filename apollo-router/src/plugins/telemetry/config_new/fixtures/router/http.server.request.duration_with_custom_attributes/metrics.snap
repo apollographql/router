@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Server duration metrics
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        router:
+          http.server.active_requests: false
+          http.server.request.duration:
+            attributes:
+              my_attribute:
+                request_method: true
+---
+- name: http.server.request.duration
+  data:
+    datapoints:
+      - sum: 0.1
+        attributes:
+          http.request.method: GET
+          http.response.status_code: 200
+          my_attribute: GET

@@ -46,9 +46,9 @@ pub(crate) struct QueryKey {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub(crate) usage_reporting: Arc<UsageReporting>,
-    pub(crate) root: PlanNode,
+    pub(crate) root: Arc<PlanNode>,
     /// String representation of the query plan (not a json representation)
-    pub(crate) formatted_query_plan: Option<String>,
+    pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) query: Arc<Query>,
 }
 
@@ -68,10 +68,10 @@ impl QueryPlan {
                     referenced_fields_by_type: Default::default(),
                 })
                 .into(),
-            root: root.unwrap_or_else(|| PlanNode::Sequence {
+            root: Arc::new(root.unwrap_or_else(|| PlanNode::Sequence {
                 nodes: Vec::new(),
                 connector: None,
-            }),
+            })),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
         }
@@ -594,7 +594,7 @@ impl PlanNode {
                             if let PlanNode::Fetch(mut fetch_node) = std::mem::replace(
                                 self,
                                 PlanNode::Sequence {
-                                    nodes: vec![connector_node],
+                                    nodes: vec![(*connector_node).clone()],
                                     connector: None,
                                 },
                             ) {

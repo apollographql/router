@@ -192,9 +192,9 @@ checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.16"
+version = "1.0.0-beta.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "175659cea0232b38bfacd1505aed00221cc4028d848699ce9e3422c6bf87d90a"
+checksum = "a46c3a5e9a23a39089af6bada6fe0976369458434095bd9c26ce94c56f219842"
 dependencies = [
  "apollo-parser",
  "ariadne",
@@ -220,7 +220,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.47.0"
+version = "1.48.0"
 dependencies = [
  "apollo-compiler",
  "derive_more",
@@ -267,7 +267,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.47.0"
+version = "1.48.0"
 dependencies = [
  "access-json",
  "anyhow",
@@ -296,6 +296,7 @@ dependencies = [
  "console",
  "console-subscriber",
  "cookie",
+ "crossbeam-channel",
  "dashmap",
  "derivative",
  "derive_more",
@@ -430,7 +431,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.47.0"
+version = "1.48.0"
 dependencies = [
  "apollo-parser",
  "apollo-router",
@@ -446,7 +447,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.47.0"
+version = "1.48.0"
 dependencies = [
  "anyhow",
  "cargo-scaffold",
@@ -506,9 +507,9 @@ checksum = "bddcadddf5e9015d310179a59bb28c4d4b9920ad0f11e8e14dbadf654890c9a6"
 
 [[package]]
 name = "ariadne"
-version = "0.4.0"
+version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd002a6223f12c7a95cdd4b1cb3a0149d22d37f7a9ecdb2cb691a071fe236c29"
+checksum = "44055e597c674aef7cb903b2b9f6e4cba1277ed0d2d61dae7cd52d7ffa81f8e2"
 dependencies = [
  "concolor",
  "unicode-width",
@@ -1416,9 +1417,9 @@ dependencies = [
 
 [[package]]
 name = "cargo-scaffold"
-version = "0.11.0"
+version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4ca5674d1f48a1788aae6124e87949474ab1560efb1a02a0f63a0ce9e845f0a"
+checksum = "ad9211604c79bf86afd55f798b3c105607f87bd08a9edbf71b22785b0d53f851"
 dependencies = [
  "anyhow",
  "auth-git2",
@@ -5793,9 +5794,9 @@ dependencies = [
 
 [[package]]
 name = "router-bridge"
-version = "0.5.24+v2.8.0-alpha.1"
+version = "0.5.25+v2.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a4b92a40b68c797d2d624716d5671e80de578f00c5012af37f19c74b175566b"
+checksum = "9ecf6c55973979655b1aa34bbc0e62766f937c1f95c4eb3fa07d16f50cb4d63c"
 dependencies = [
  "anyhow",
  "async-channel 1.9.0",
@@ -5917,6 +5918,7 @@ version = "8.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8cb0a25bfbb2d4b4402179c2cf030387d9990857ce08a32592c6238db9fa8665"
 dependencies = [
+ "globset",
  "sha2",
  "walkdir",
 ]
@@ -6053,9 +6055,9 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.8.16"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45a28f4c49489add4ce10783f7911893516f15afe45d015608d41faca6bc4d29"
+checksum = "09c024468a378b7e36765cd36702b7a90cc3cba11654f6685c8f233408e89e92"
 dependencies = [
  "dyn-clone",
  "schemars_derive",
@@ -6066,14 +6068,14 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "0.8.16"
+version = "0.8.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c767fd6fa65d9ccf9cf026122c1b555f2ef9a4f0cea69da4d7dbc3e258d30967"
+checksum = "b1eee588578aff73f856ab961cd2f79e36bc45d7ded33a7562adba4667aecc0e"
 dependencies = [
  "proc-macro2 1.0.76",
  "quote 1.0.35",
  "serde_derive_internals",
- "syn 1.0.109",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -6207,13 +6209,13 @@ dependencies = [
 
 [[package]]
 name = "serde_derive_internals"
-version = "0.26.0"
+version = "0.29.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "85bf8229e7920a9f636479437026331ce11aa132b4dde37d121944a44d6e5f3c"
+checksum = "18d26a20a969b9e3fdf2fc2d9f21eda6c40e2de84c9408bb5d3b05d499aae711"
 dependencies = [
  "proc-macro2 1.0.76",
  "quote 1.0.35",
- "syn 1.0.109",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -7389,11 +7391,10 @@ dependencies = [
 
 [[package]]
 name = "tracing-test"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a2c0ff408fe918a94c428a3f2ad04e4afd5c95bbc08fcf868eff750c15728a4"
+checksum = "557b891436fe0d5e0e363427fc7f217abf9ccd510d5136549847bdcbcd011d68"
 dependencies = [
- "lazy_static",
  "tracing-core",
  "tracing-subscriber",
  "tracing-test-macro",
@@ -7401,13 +7402,12 @@ dependencies = [
 
 [[package]]
 name = "tracing-test-macro"
-version = "0.2.4"
+version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "258bc1c4f8e2e73a977812ab339d503e6feeb92700f6d07a6de4d321522d5c08"
+checksum = "04659ddb06c87d233c566112c1c9c5b9e98256d9af50ec3bc9c8327f873a7568"
 dependencies = [
- "lazy_static",
  "quote 1.0.35",
- "syn 1.0.109",
+ "syn 2.0.48",
 ]
 
 [[package]]
@@ -8245,9 +8245,9 @@ dependencies = [
 
 [[package]]
 name = "yansi"
-version = "0.5.1"
+version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09041cd90cf85f7f8b2df60c646f853b7f535ce68f85244eb6731cf89fa498ec"
+checksum = "cfe53a6657fd280eaa890a3bc59152892ffa3e30101319d168b781ed6529b049"
 
 [[package]]
 name = "zerocopy"

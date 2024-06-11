@@ -29,6 +29,15 @@ use crate::link::graphql_definition::BooleanOrVariable;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::link::graphql_definition::OperationConditional;
 use crate::link::graphql_definition::OperationConditionalKind;
+use crate::operation::Field;
+use crate::operation::FieldData;
+use crate::operation::HasSelectionKey;
+use crate::operation::InlineFragment;
+use crate::operation::InlineFragmentData;
+use crate::operation::RebaseErrorHandlingOption;
+use crate::operation::SelectionId;
+use crate::operation::SelectionKey;
+use crate::operation::SelectionSet;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
@@ -36,15 +45,6 @@ use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::operation::Field;
-use crate::query_plan::operation::FieldData;
-use crate::query_plan::operation::HasSelectionKey;
-use crate::query_plan::operation::InlineFragment;
-use crate::query_plan::operation::InlineFragmentData;
-use crate::query_plan::operation::RebaseErrorHandlingOption;
-use crate::query_plan::operation::SelectionId;
-use crate::query_plan::operation::SelectionKey;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::QueryPathElement;
 use crate::query_plan::QueryPlanCost;
@@ -485,7 +485,7 @@ pub(crate) struct OpGraphPathContext {
     /// A list of conditionals (e.g. `[{ kind: Include, value: true}, { kind: Skip, value: $foo }]`)
     /// in the reverse order in which they were applied (so the first element is the inner-most
     /// applied include/skip).
-    conditionals: Arc<Vec<Arc<OperationConditional>>>,
+    conditionals: Arc<Vec<OperationConditional>>,
 }
 
 impl OpGraphPathContext {
@@ -500,8 +500,7 @@ impl OpGraphPathContext {
 
         let new_conditionals = operation_element.extract_operation_conditionals()?;
         if !new_conditionals.is_empty() {
-            Arc::make_mut(&mut new_context.conditionals)
-                .extend(new_conditionals.into_iter().map(Arc::new));
+            Arc::make_mut(&mut new_context.conditionals).extend(new_conditionals);
         }
         Ok(new_context)
     }
@@ -511,7 +510,7 @@ impl OpGraphPathContext {
     }
 
     pub(crate) fn iter(&self) -> impl Iterator<Item = &OperationConditional> {
-        self.conditionals.iter().map(|x| x.as_ref())
+        self.conditionals.iter()
     }
 }
 
@@ -1484,7 +1483,7 @@ where
                 if let Some(prev_for_source) = prev_for_source {
                     if (prev_for_source.0.edges.len() < to_advance.edges.len() + 1)
                         || (prev_for_source.0.edges.len() == to_advance.edges.len() + 1
-                            && prev_for_source.1 <= 1)
+                            && prev_for_source.1 <= 1.0)
                     {
                         // We've already found another path that gets us to the same subgraph rather
                         // than the edge we're about to check. If that previous path is strictly
@@ -1643,7 +1642,7 @@ where
                                 let direct_key_edge_max_cost = last_subgraph_entering_edge_info
                                     .conditions_cost
                                     + if is_edge_to_previous_subgraph {
-                                        0
+                                        0.0
                                     } else {
                                         cost
                                     };
@@ -2528,13 +2527,13 @@ impl OpGraphPath {
                                 &operation_field.data().field_position.parent()
                             else {
                                 return Err(FederationError::internal(
-                                    format!(
-                                        "{} requested on {}, but field's parent {} is not an object type",
-                                        operation_field.data().field_position,
-                                        tail_type_pos,
-                                        operation_field.data().field_position.type_name()
-                                    )
-                                ));
+                                        format!(
+                                            "{} requested on {}, but field's parent {} is not an object type",
+                                            operation_field.data().field_position,
+                                            tail_type_pos,
+                                            operation_field.data().field_position.type_name()
+                                        )
+                                    ));
                             };
                             if !self.runtime_types_of_tail.contains(field_parent_pos) {
                                 return Err(FederationError::internal(
@@ -3518,6 +3517,57 @@ impl OpPath {
         new.push(element);
         Self(new)
     }
+
+    pub(crate) fn conditional_directives(&self) -> DirectiveList {
+        DirectiveList(
+            self.0
+                .iter()
+                .flat_map(|path_element| {
+                    path_element
+                        .directives()
+                        .iter()
+                        .filter(|d| d.name == "include" || d.name == "skip")
+                })
+                .cloned()
+                .collect(),
+        )
+    }
+
+    /// Filter any fragment element in the provided path whose type condition does not exist in the provided schema.
+    /// Not that if the fragment element should be filtered but it has applied directives, then we preserve those applications by
+    /// replacing with a fragment with no condition (but if there are no directive, we simply remove the fragment from the path).
+    // JS PORT NOTE: this method was called filterOperationPath in JS codebase
+    pub(crate) fn filter_on_schema(&self, schema: &ValidFederationSchema) -> OpPath {
+        let mut filtered: Vec<Arc<OpPathElement>> = vec![];
+        for element in &self.0 {
+            match element.as_ref() {
+                OpPathElement::InlineFragment(fragment) => {
+                    if let Some(type_condition) = &fragment.data().type_condition_position {
+                        if schema.get_type(type_condition.type_name().clone()).is_ok() {
+                            let updated_fragment = fragment.with_updated_type_condition(None);
+                            filtered
+                                .push(Arc::new(OpPathElement::InlineFragment(updated_fragment)));
+                        } else {
+                            continue;
+                        }
+                    } else {
+                        filtered.push(element.clone());
+                    }
+                }
+                _ => {
+                    filtered.push(element.clone());
+                }
+            }
+        }
+        OpPath(filtered)
+    }
+
+    pub(crate) fn has_only_fragments(&self) -> bool {
+        // JS PORT NOTE: this was checking for FragmentElement which was used for both inline fragments and spreads
+        self.0
+            .iter()
+            .all(|p| matches!(p.as_ref(), OpPathElement::InlineFragment(_)))
+    }
 }
 
 impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
@@ -3539,6 +3589,87 @@ impl TryFrom<&'_ OpPath> for Vec<QueryPathElement> {
     }
 }
 
+pub(crate) fn concat_paths_in_parents(
+    first: &Option<Arc<OpPath>>,
+    second: &Option<Arc<OpPath>>,
+) -> Option<Arc<OpPath>> {
+    if let (Some(first), Some(second)) = (first, second) {
+        Some(Arc::new(concat_op_paths(first.deref(), second.deref())))
+    } else {
+        None
+    }
+}
+
+pub(crate) fn concat_op_paths(head: &OpPath, tail: &OpPath) -> OpPath {
+    // While this is mainly a simple array concatenation, we optimize slightly by recognizing if the
+    // tail path starts by a fragment selection that is useless given the end of the head path
+    let Some(last_of_head) = head.last() else {
+        return tail.clone();
+    };
+    let mut result = head.clone();
+    if tail.is_empty() {
+        return result;
+    }
+    let conditionals = head.conditional_directives();
+    let tail_path = tail.0.clone();
+
+    // Note that in practice, we may be able to eliminate a few elements at the beginning of the path
+    // due do conditionals ('@skip' and '@include'). Indeed, a (tail) path crossing multiple conditions
+    // may start with: [ ... on X @include(if: $c1), ... on X @skip(if: $c2), (...)], but if `head`
+    // already ends on type `X` _and_ both the conditions on `$c1` and `$c2` are already found on `head`,
+    // then we can remove both fragments in `tail`.
+    let mut tail_iter = tail_path.iter();
+    for tail_node in &mut tail_iter {
+        if !is_useless_followup_element(last_of_head, tail_node, &conditionals)
+            .is_ok_and(|is_useless| is_useless)
+        {
+            result.0.push(tail_node.clone());
+            break;
+        }
+    }
+    result.0.extend(tail_iter.cloned());
+    result
+}
+
+fn is_useless_followup_element(
+    first: &OpPathElement,
+    followup: &OpPathElement,
+    conditionals: &DirectiveList,
+) -> Result<bool, FederationError> {
+    let type_of_first: Option<CompositeTypeDefinitionPosition> = match first {
+        OpPathElement::Field(field) => Some(field.data().output_base_type()?.try_into()?),
+        OpPathElement::InlineFragment(fragment) => fragment.data().type_condition_position.clone(),
+    };
+
+    let Some(type_of_first) = type_of_first else {
+        return Ok(false);
+    };
+
+    // The followup is useless if it's a fragment (with no directives we would want to preserve) whose type
+    // is already that of the first element (or a supertype).
+    return match followup {
+        OpPathElement::Field(_) => Ok(false),
+        OpPathElement::InlineFragment(fragment) => {
+            let Some(type_of_second) = fragment.data().type_condition_position.clone() else {
+                return Ok(false);
+            };
+
+            let are_useless_directives = fragment.data().directives.is_empty()
+                || fragment
+                    .data()
+                    .directives
+                    .iter()
+                    .any(|d| !conditionals.contains(d));
+            let is_same_type = type_of_first.type_name() == type_of_second.type_name();
+            let is_subtype = first
+                .schema()
+                .schema()
+                .is_subtype(type_of_first.type_name(), type_of_second.type_name());
+            Ok(are_useless_directives && (is_same_type || is_subtype))
+        }
+    };
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -3550,13 +3681,13 @@ mod tests {
     use petgraph::stable_graph::EdgeIndex;
     use petgraph::stable_graph::NodeIndex;
 
+    use crate::operation::Field;
+    use crate::operation::FieldData;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::OpGraphPath;
     use crate::query_graph::graph_path::OpGraphPathTrigger;
     use crate::query_graph::graph_path::OpPathElement;
-    use crate::query_plan::operation::Field;
-    use crate::query_plan::operation::FieldData;
     use crate::schema::position::FieldDefinitionPosition;
     use crate::schema::position::ObjectFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
@@ -3599,7 +3730,7 @@ mod tests {
                 trigger,
                 Some(EdgeIndex::new(3)),
                 ConditionResolution::Satisfied {
-                    cost: 0,
+                    cost: 0.0,
                     path_tree: None,
                 },
                 None,
@@ -3624,7 +3755,7 @@ mod tests {
                 trigger,
                 Some(EdgeIndex::new(1)),
                 ConditionResolution::Satisfied {
-                    cost: 0,
+                    cost: 0.0,
                     path_tree: None,
                 },
                 None,

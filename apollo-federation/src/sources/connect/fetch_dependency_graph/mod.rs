@@ -747,8 +747,8 @@ mod tests {
         use petgraph::graph::DiGraph;
         use petgraph::prelude::EdgeIndex;
 
-        use crate::query_plan::operation::Field;
-        use crate::query_plan::operation::FieldData;
+        use crate::operation::Field;
+        use crate::operation::FieldData;
         use crate::schema::position::FieldDefinitionPosition;
         use crate::schema::position::ObjectFieldDefinitionPosition;
         use crate::schema::position::ObjectOrInterfaceFieldDefinitionPosition;
@@ -1662,8 +1662,8 @@ mod tests {
         use petgraph::prelude::EdgeIndex;
         use petgraph::prelude::NodeIndex;
 
-        use crate::query_plan::operation::Field;
-        use crate::query_plan::operation::FieldData;
+        use crate::operation::Field;
+        use crate::operation::FieldData;
         use crate::schema::position::EnumTypeDefinitionPosition;
         use crate::schema::position::FieldDefinitionPosition;
         use crate::schema::position::ObjectFieldDefinitionPosition;

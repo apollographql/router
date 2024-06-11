@@ -1,0 +1,9 @@
+description: Custom histogram should not be incremented as the condition is not true on drop.
+events:
+  - - router_request:
+        uri: "/hello"
+        method: GET
+        body: |
+          hello
+        headers:
+          always-true: "true"

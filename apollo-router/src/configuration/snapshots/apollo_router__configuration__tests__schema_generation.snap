@@ -1,5 +1,6 @@
 ---
 source: apollo-router/src/configuration/tests.rs
+assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -588,6 +589,143 @@ expression: "&schema"
           "description": "identity",
           "enum": [
             "identity"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Condition_for_GraphQLSelector": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a value.",
+          "properties": {
+            "eq": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_GraphQLSelector",
+                "description": "#/definitions/SelectorOrValue_for_GraphQLSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "eq"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be greater than the second selection.",
+          "properties": {
+            "gt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_GraphQLSelector",
+                "description": "#/definitions/SelectorOrValue_for_GraphQLSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "gt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The first selection must be less than the second selection.",
+          "properties": {
+            "lt": {
+              "items": {
+                "$ref": "#/definitions/SelectorOrValue_for_GraphQLSelector",
+                "description": "#/definitions/SelectorOrValue_for_GraphQLSelector"
+              },
+              "maxItems": 2,
+              "minItems": 2,
+              "type": "array"
+            }
+          },
+          "required": [
+            "lt"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "A condition to check a selection against a selector.",
+          "properties": {
+            "exists": {
+              "$ref": "#/definitions/GraphQLSelector",
+              "description": "#/definitions/GraphQLSelector"
+            }
+          },
+          "required": [
+            "exists"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "All sub-conditions must be true.",
+          "properties": {
+            "all": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_GraphQLSelector",
+                "description": "#/definitions/Condition_for_GraphQLSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "all"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "At least one sub-conditions must be true.",
+          "properties": {
+            "any": {
+              "items": {
+                "$ref": "#/definitions/Condition_for_GraphQLSelector",
+                "description": "#/definitions/Condition_for_GraphQLSelector"
+              },
+              "type": "array"
+            }
+          },
+          "required": [
+            "any"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The sub-condition must not be true",
+          "properties": {
+            "not": {
+              "$ref": "#/definitions/Condition_for_GraphQLSelector",
+              "description": "#/definitions/Condition_for_GraphQLSelector"
+            }
+          },
+          "required": [
+            "not"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Static true condition",
+          "enum": [
+            "true"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Static false condition",
+          "enum": [
+            "false"
           ],
           "type": "string"
         }
@@ -1785,6 +1923,29 @@ expression: "&schema"
         }
       ]
     },
+    "DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "boolean"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attributes": {
+              "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+              "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+            }
+          },
+          "required": [
+            "attributes"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "DemandControlConfig": {
       "additionalProperties": false,
       "description": "Demand control configuration",
@@ -1980,6 +2141,38 @@ expression: "&schema"
             "error"
           ],
           "type": "string"
+        }
+      ]
+    },
+    "Event_for_GraphQLSelector": {
+      "oneOf": [
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_duration"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "enum": [
+            "event_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every supergraph response payload (including subscription events and defer events)",
+          "properties": {
+            "event_custom": {
+              "$ref": "#/definitions/GraphQLSelector",
+              "description": "#/definitions/GraphQLSelector"
+            }
+          },
+          "required": [
+            "event_custom"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -2316,6 +2509,131 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "FieldName": {
+      "oneOf": [
+        {
+          "description": "The GraphQL field name",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "FieldType": {
+      "oneOf": [
+        {
+          "description": "The GraphQL field name",
+          "enum": [
+            "name"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The GraphQL field type - `bool` - `number` - `scalar` - `object` - `list`",
+          "enum": [
+            "type"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "Field_for_GraphQLSelector": {
+      "oneOf": [
+        {
+          "enum": [
+            "field_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every field",
+          "properties": {
+            "field_custom": {
+              "$ref": "#/definitions/GraphQLSelector",
+              "description": "#/definitions/GraphQLSelector"
+            }
+          },
+          "required": [
+            "field_custom"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Field_for_RouterSelector": {
+      "oneOf": [
+        {
+          "enum": [
+            "field_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every field",
+          "properties": {
+            "field_custom": {
+              "$ref": "#/definitions/RouterSelector",
+              "description": "#/definitions/RouterSelector"
+            }
+          },
+          "required": [
+            "field_custom"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Field_for_SubgraphSelector": {
+      "oneOf": [
+        {
+          "enum": [
+            "field_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every field",
+          "properties": {
+            "field_custom": {
+              "$ref": "#/definitions/SubgraphSelector",
+              "description": "#/definitions/SubgraphSelector"
+            }
+          },
+          "required": [
+            "field_custom"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Field_for_SupergraphSelector": {
+      "oneOf": [
+        {
+          "enum": [
+            "field_unit"
+          ],
+          "type": "string"
+        },
+        {
+          "additionalProperties": false,
+          "description": "For every field",
+          "properties": {
+            "field_custom": {
+              "$ref": "#/definitions/SupergraphSelector",
+              "description": "#/definitions/SupergraphSelector"
+            }
+          },
+          "required": [
+            "field_custom"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "FileUploadProtocols": {
       "additionalProperties": false,
       "description": "Configuration for the various protocols supported by the file upload plugin",
@@ -2477,6 +2795,147 @@ expression: "&schema"
           },
           "required": [
             "except"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "GraphQLAttributes": {
+      "additionalProperties": false,
+      "properties": {
+        "graphql.field.name": {
+          "default": null,
+          "description": "The GraphQL field name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.field.type": {
+          "default": null,
+          "description": "The GraphQL field type",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.list.length": {
+          "default": null,
+          "description": "If the field is a list, the length of the list",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.operation.name": {
+          "default": null,
+          "description": "The GraphQL operation name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.type.name": {
+          "default": null,
+          "description": "The GraphQL type name",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
+    "GraphQLInstrumentsConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "field.execution": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        },
+        "list.length": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        }
+      },
+      "type": "object"
+    },
+    "GraphQLSelector": {
+      "anyOf": [
+        {
+          "additionalProperties": false,
+          "description": "If the field is a list, the length of the list",
+          "properties": {
+            "list_length": {
+              "$ref": "#/definitions/ListLength",
+              "description": "#/definitions/ListLength"
+            }
+          },
+          "required": [
+            "list_length"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The GraphQL field name",
+          "properties": {
+            "field_name": {
+              "$ref": "#/definitions/FieldName",
+              "description": "#/definitions/FieldName"
+            }
+          },
+          "required": [
+            "field_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The GraphQL field type",
+          "properties": {
+            "field_type": {
+              "$ref": "#/definitions/FieldType",
+              "description": "#/definitions/FieldType"
+            }
+          },
+          "required": [
+            "field_type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The GraphQL type name",
+          "properties": {
+            "type_name": {
+              "$ref": "#/definitions/TypeName",
+              "description": "#/definitions/TypeName"
+            }
+          },
+          "required": [
+            "type_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "operation_name"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "static": {
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
+            }
+          },
+          "required": [
+            "static"
           ],
           "type": "object"
         }
@@ -2885,6 +3344,26 @@ expression: "&schema"
         }
       ]
     },
+    "InstrumentValue_for_GraphQLSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/Event_for_GraphQLSelector",
+          "description": "#/definitions/Event_for_GraphQLSelector"
+        },
+        {
+          "$ref": "#/definitions/Field_for_GraphQLSelector",
+          "description": "#/definitions/Field_for_GraphQLSelector"
+        },
+        {
+          "$ref": "#/definitions/GraphQLSelector",
+          "description": "#/definitions/GraphQLSelector"
+        }
+      ]
+    },
     "InstrumentValue_for_RouterSelector": {
       "anyOf": [
         {
@@ -2894,6 +3373,10 @@ expression: "&schema"
         {
           "$ref": "#/definitions/Event_for_RouterSelector",
           "description": "#/definitions/Event_for_RouterSelector"
+        },
+        {
+          "$ref": "#/definitions/Field_for_RouterSelector",
+          "description": "#/definitions/Field_for_RouterSelector"
         },
         {
           "$ref": "#/definitions/RouterSelector",
@@ -2912,6 +3395,10 @@ expression: "&schema"
           "description": "#/definitions/Event_for_SubgraphSelector"
         },
         {
+          "$ref": "#/definitions/Field_for_SubgraphSelector",
+          "description": "#/definitions/Field_for_SubgraphSelector"
+        },
+        {
           "$ref": "#/definitions/SubgraphSelector",
           "description": "#/definitions/SubgraphSelector"
         }
@@ -2928,10 +3415,50 @@ expression: "&schema"
           "description": "#/definitions/Event_for_SupergraphSelector"
         },
         {
+          "$ref": "#/definitions/Field_for_SupergraphSelector",
+          "description": "#/definitions/Field_for_SupergraphSelector"
+        },
+        {
           "$ref": "#/definitions/SupergraphSelector",
           "description": "#/definitions/SupergraphSelector"
         }
       ]
+    },
+    "Instrument_for_GraphQLAttributes_and_GraphQLSelector": {
+      "additionalProperties": false,
+      "properties": {
+        "attributes": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_GraphQLSelector",
+          "description": "#/definitions/Condition_for_GraphQLSelector"
+        },
+        "description": {
+          "description": "The description of the instrument.",
+          "type": "string"
+        },
+        "type": {
+          "$ref": "#/definitions/InstrumentType",
+          "description": "#/definitions/InstrumentType"
+        },
+        "unit": {
+          "description": "The units of the instrument, e.g. \"ms\", \"bytes\", \"requests\".",
+          "type": "string"
+        },
+        "value": {
+          "$ref": "#/definitions/InstrumentValue_for_GraphQLSelector",
+          "description": "#/definitions/InstrumentValue_for_GraphQLSelector"
+        }
+      },
+      "required": [
+        "description",
+        "type",
+        "unit",
+        "value"
+      ],
+      "type": "object"
     },
     "Instrument_for_RouterAttributes_and_RouterSelector": {
       "additionalProperties": false,
@@ -3066,6 +3593,10 @@ expression: "&schema"
         "default_requirement_level": {
           "$ref": "#/definitions/DefaultAttributeRequirementLevel",
           "description": "#/definitions/DefaultAttributeRequirementLevel"
+        },
+        "graphql": {
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector>"
         },
         "router": {
           "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
@@ -3229,6 +3760,17 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "ListLength": {
+      "oneOf": [
+        {
+          "description": "The length of the list",
+          "enum": [
+            "value"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "ListenAddr": {
       "anyOf": [
@@ -3880,13 +4422,6 @@ expression: "&schema"
             "both"
           ],
           "type": "string"
-        },
-        {
-          "description": "Source-aware query planner for connectors - TODO this is not really a name we'll expose to customers",
-          "enum": [
-            "newnew"
-          ],
-          "type": "string"
         }
       ]
     },
@@ -4515,6 +5050,20 @@ expression: "&schema"
         },
         {
           "additionalProperties": false,
+          "description": "Apollo Studio operation id",
+          "properties": {
+            "studio_operation_id": {
+              "description": "Apollo Studio operation id",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "studio_operation_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
           "description": "A value from context.",
           "properties": {
             "default": {
@@ -4571,14 +5120,15 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
@@ -4695,6 +5245,18 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "SelectorOrValue_for_GraphQLSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/AttributeValue",
+          "description": "#/definitions/AttributeValue"
+        },
+        {
+          "$ref": "#/definitions/GraphQLSelector",
+          "description": "#/definitions/GraphQLSelector"
+        }
+      ]
     },
     "SelectorOrValue_for_RouterSelector": {
       "anyOf": [
@@ -5553,14 +6115,15 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
@@ -6137,18 +6700,32 @@ expression: "&schema"
           "type": "object"
         },
         {
+          "description": "Deprecated, should not be used anymore, use static field instead",
           "type": "string"
         },
         {
           "additionalProperties": false,
           "properties": {
             "static": {
-              "description": "A static string value",
-              "type": "string"
+              "$ref": "#/definitions/AttributeValue",
+              "description": "#/definitions/AttributeValue"
             }
           },
           "required": [
             "static"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "on_graphql_error": {
+              "description": "Boolean set to true if the response body contains graphql error",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "on_graphql_error"
           ],
           "type": "object"
         },
@@ -6465,6 +7042,17 @@ expression: "&schema"
     "Ttl": {
       "description": "Per subgraph configuration for entity caching",
       "type": "string"
+    },
+    "TypeName": {
+      "oneOf": [
+        {
+          "description": "The GraphQL type name",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "UriEndpoint": {
       "type": "string"
@@ -7074,6 +7662,62 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector>": {
+      "additionalProperties": {
+        "$ref": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector",
+        "description": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector"
+      },
+      "properties": {
+        "field.execution": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        },
+        "list.length": {
+          "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector",
+          "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector"
+        }
+      },
+      "type": "object"
+    },
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector": {
+      "additionalProperties": {
+        "$ref": "#/definitions/GraphQLSelector",
+        "description": "#/definitions/GraphQLSelector"
+      },
+      "properties": {
+        "graphql.field.name": {
+          "default": null,
+          "description": "The GraphQL field name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.field.type": {
+          "default": null,
+          "description": "The GraphQL field type",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.list.length": {
+          "default": null,
+          "description": "If the field is a list, the length of the list",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.operation.name": {
+          "default": null,
+          "description": "The GraphQL operation name",
+          "nullable": true,
+          "type": "boolean"
+        },
+        "graphql.type.name": {
+          "default": null,
+          "description": "The GraphQL type name",
+          "nullable": true,
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>": {
       "additionalProperties": {
         "$ref": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector",
@@ -7369,10 +8013,6 @@ expression: "&schema"
       "$ref": "#/definitions/Chaos",
       "description": "#/definitions/Chaos"
     },
-    "experimental_demand_control": {
-      "$ref": "#/definitions/DemandControlConfig",
-      "description": "#/definitions/DemandControlConfig"
-    },
     "experimental_query_planner_mode": {
       "$ref": "#/definitions/QueryPlannerMode",
       "description": "#/definitions/QueryPlannerMode"
@@ -7421,6 +8061,10 @@ expression: "&schema"
     "preview_connectors": {
       "$ref": "#/definitions/Connectors",
       "description": "#/definitions/Connectors"
+    },
+    "preview_demand_control": {
+      "$ref": "#/definitions/DemandControlConfig",
+      "description": "#/definitions/DemandControlConfig"
     },
     "preview_entity_cache": {
       "$ref": "#/definitions/Config6",
