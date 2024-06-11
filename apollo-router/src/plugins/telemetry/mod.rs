@@ -465,19 +465,7 @@ impl Plugin for Telemetry {
                                 .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
                             {
                                 // todo store in report somewhere instead of logging out.
-                                // todo probs need to sort there too.
-                                let mut sorted_keys: Vec<_> = temp_stats.referenced_enums.keys().collect();
-                                sorted_keys.sort();
-
-                                let mut sorted_vecs: Vec<(String, Vec<String>)> = Vec::new();
-                                for &key in sorted_keys.iter() {
-                                    let vals = temp_stats.referenced_enums.get(key).unwrap();
-                                    let mut sorted_vals: Vec<String> = vals.iter().cloned().collect();
-                                    sorted_vals.sort();
-                                    sorted_vecs.push((key.to_string(), sorted_vals));
-                                }
-
-                                println!("ExtendedReferenceStats: {:?}", sorted_vecs);
+                                println!("ExtendedReferenceStats: {:?}", temp_stats);
                             }
 
                             if response.context.extensions().with_lock(|lock| {

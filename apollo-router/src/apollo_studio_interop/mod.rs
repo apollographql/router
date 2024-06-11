@@ -135,6 +135,7 @@ pub(crate) fn generate_usage_reporting(
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
         enums_by_name: HashMap::new(),
+        input_field_references: HashMap::new(),
         fragment_spread_set: HashSet::new(),
     };
 
@@ -148,19 +149,6 @@ pub(crate) fn generate_extended_references(
     schema: &Valid<Schema>,
     variables: &Object,
 ) -> ExtendedReferenceStats {
-    /*
-    ExtendedReferenceStats {
-        referenced_input_fields: HashMap::from([
-            ("Test1".into(), HashMap::from([
-                ("Test2".into(), InputObjectFieldStats { referenced: true, null_reference: false, undefined_reference: false })
-            ])),
-        ]),
-        referenced_enums: HashMap::from([
-            ("TestEnum".into(), HashSet::from(["TestVal".into()])),
-        ]),
-    }
-    */
-
     let mut generator = UsageGenerator {
         signature_doc: &doc,
         references_doc: &doc,
@@ -171,15 +159,11 @@ pub(crate) fn generate_extended_references(
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
         enums_by_name: HashMap::new(),
+        input_field_references: HashMap::new(),
         fragment_spread_set: HashSet::new(),
     };
 
-    let referenced_enums = generator.generate_extended_references();
-
-    ExtendedReferenceStats {
-        referenced_input_fields: HashMap::new(),
-        referenced_enums,
-    }
+    generator.generate_extended_references()
 }
 
 struct UsageGenerator<'a> {
@@ -192,6 +176,7 @@ struct UsageGenerator<'a> {
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,
     enums_by_name: HashMap<String, HashSet<String>>,
+    input_field_references: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     fragment_spread_set: HashSet<Name>,
 }
 
@@ -358,9 +343,10 @@ impl UsageGenerator<'_> {
         }
     }
 
-    fn generate_extended_references(&mut self) -> HashMap<String, HashSet<String>> {
+    fn generate_extended_references(&mut self) -> ExtendedReferenceStats {
         self.fragment_spread_set.clear();
         self.enums_by_name.clear();
+        self.input_field_references.clear();
 
         if let Ok(operation) = self
             .references_doc
@@ -369,7 +355,22 @@ impl UsageGenerator<'_> {
             self.process_extended_refs_for_selection_set(&operation.selection_set);
         }
 
-        self.enums_by_name.clone() // temp - should return or store this and input type stats
+        /*
+        let mut sorted_keys: Vec<_> = temp_stats.referenced_enums.keys().collect();
+        sorted_keys.sort();
+
+        let mut sorted_vecs: Vec<(String, Vec<String>)> = Vec::new();
+        for &key in sorted_keys.iter() {
+            let vals = temp_stats.referenced_enums.get(key).unwrap();
+            let mut sorted_vals: Vec<String> = vals.iter().cloned().collect();
+            sorted_vals.sort();
+            sorted_vecs.push((key.to_string(), sorted_vals));
+        }
+        */
+        ExtendedReferenceStats {
+            referenced_input_fields: self.input_field_references.clone(),
+            referenced_enums: self.enums_by_name.clone(),
+        }
     }
 
     fn add_enum_reference(&mut self, enum_name: String, enum_value: String) {
@@ -377,6 +378,37 @@ impl UsageGenerator<'_> {
             .entry(enum_name)
             .or_default()
             .insert(enum_value.to_string());
+    }
+
+    fn add_input_object_reference(
+        &mut self,
+        type_name: String,
+        field_name: String,
+        is_referenced: bool,
+        is_null_reference: bool,
+    ) {
+        match self
+            .input_field_references
+            .entry(type_name)
+            .or_default()
+            .entry(field_name)
+        {
+            Entry::Occupied(mut entry) => {
+                // The input object field stats are additive in that it represents whether the field was referenced/null/undefined
+                // at least once within this operation.
+                let stats: &mut InputObjectFieldStats = entry.get_mut();
+                stats.referenced = stats.referenced || is_referenced;
+                stats.null_reference = stats.null_reference || is_null_reference;
+                stats.undefined_reference = stats.undefined_reference || !is_referenced;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(InputObjectFieldStats {
+                    referenced: is_referenced,
+                    null_reference: is_null_reference,
+                    undefined_reference: !is_referenced,
+                });
+            }
+        }
     }
 
     fn process_extended_refs_for_selection_set(&mut self, selection_set: &SelectionSet) {
@@ -440,15 +472,24 @@ impl UsageGenerator<'_> {
         if let Some(ExtendedType::InputObject(input_object_type)) =
             self.schema.types.get(type_name.to_string().as_str())
         {
-            // todo input object stuff (ref/null/undefined)
-
             let obj_value_map: HashMap<String, &Node<Value>> = obj_value
                 .iter()
                 .map(|(name, val)| (name.to_string(), val))
                 .collect();
             for (field_name, field_def) in &input_object_type.fields {
                 let field_type = field_def.ty.inner_named_type().to_string();
-                if let Some(field_val) = obj_value_map.get(&field_name.to_string()) {
+                let maybe_field_val = obj_value_map.get(&field_name.to_string());
+
+                let is_referenced = maybe_field_val.is_some();
+                let is_null = maybe_field_val.is_some_and(|v| v.is_null());
+                self.add_input_object_reference(
+                    type_name.to_string(),
+                    field_name.to_string(),
+                    maybe_field_val.is_some(),
+                    maybe_field_val.is_some_and(|v| v.is_null()),
+                );
+
+                if let Some(field_val) = maybe_field_val {
                     self.process_extended_refs_for_value(field_type, field_val);
                 }
             }
@@ -462,11 +503,10 @@ impl UsageGenerator<'_> {
     ) {
         match self.schema.types.get(type_name.to_string().as_str()) {
             Some(ExtendedType::InputObject(input_object_type)) => {
-                
                 // todo input object stuff (ref/null/undefined)
 
                 match var_value {
-                    // For input objects, we process each of the field variables
+                    // For input objects, we store input object references and process each of the field variables
                     Some(JsonValue::Object(json_obj)) => {
                         let var_value_map: HashMap<String, &JsonValue> = json_obj
                             .iter()
@@ -475,37 +515,50 @@ impl UsageGenerator<'_> {
 
                         for (field_name, field_def) in &input_object_type.fields {
                             let field_type = field_def.ty.inner_named_type().to_string();
-                            if let Some(&field_val) = var_value_map.get(&field_name.to_string()) {
-                                self.process_extended_refs_for_variable(field_type, Some(field_val));
+                            let maybe_field_val = var_value_map.get(&field_name.to_string());
+
+                            self.add_input_object_reference(
+                                type_name.to_string(),
+                                field_name.to_string(),
+                                maybe_field_val.is_some(),
+                                maybe_field_val.is_some_and(|v| v.is_null()),
+                            );
+
+                            if let Some(&field_val) = maybe_field_val {
+                                self.process_extended_refs_for_variable(
+                                    field_type,
+                                    Some(field_val),
+                                );
                             }
                         }
-                    },
+                    }
                     // For arrays of objects, we process each array value separately
                     Some(JsonValue::Array(json_array)) => {
                         for array_val in json_array {
-                            self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
+                            self.process_extended_refs_for_variable(
+                                type_name.clone(),
+                                Some(array_val),
+                            );
                         }
-                    },
-                    _ => {},
-                }
-            }
-            Some(ExtendedType::Enum(enum_type)) => {
-                match var_value {
-                    Some(JsonValue::String(enum_value)) => {
-                        self.add_enum_reference(
-                            enum_type.name.to_string(),
-                            enum_value.as_str().to_string(),
-                        );
-                    },
-                    Some(JsonValue::Array(array_values)) => {
-                        for array_val in array_values {
-                            self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
-                        }
-                    },
+                    }
                     _ => {}
                 }
             }
-            _ => {},
+            Some(ExtendedType::Enum(enum_type)) => match var_value {
+                Some(JsonValue::String(enum_value)) => {
+                    self.add_enum_reference(
+                        enum_type.name.to_string(),
+                        enum_value.as_str().to_string(),
+                    );
+                }
+                Some(JsonValue::Array(array_values)) => {
+                    for array_val in array_values {
+                        self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
         };
     }
 }
