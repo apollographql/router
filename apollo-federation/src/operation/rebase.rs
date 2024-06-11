@@ -312,7 +312,8 @@ impl FieldSelection {
 
 impl FragmentSpread {
     /// - `named_fragments`: named fragment definitions that are rebased for the subgraph.
-    // Note: This method is used during operation optimization.
+    // Note: Unlike other `rebase_on`, this method should only be used during fetch operation
+    //       optimization. Thus, it's rebasing within the same subgraph schema.
     pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -330,8 +331,15 @@ impl FragmentSpread {
                 Ok(None)
             };
         };
-        debug_assert_eq!(*schema, self.data().schema);
-        debug_assert_eq!(*schema, named_fragment.schema);
+        debug_assert_eq!(
+            *schema,
+            self.data().schema,
+            "Fragment spread should only be rebased within the same subgraph"
+        );
+        debug_assert_eq!(
+            *schema, named_fragment.schema,
+            "Referenced named fragment should've been rebased for the subgraph"
+        );
         if !runtime_types_intersect(
             parent_type,
             &named_fragment.type_condition_position,
