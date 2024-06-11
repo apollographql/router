@@ -66,8 +66,6 @@ fn handles_simple_requires() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
 fn it_handles_multiple_requires_within_the_same_entity_fetch() {
     let planner = planner!(
         Subgraph1: r#"

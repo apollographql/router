@@ -109,6 +109,14 @@ impl TypeDefinitionPosition {
     ) -> Option<&'schema ExtendedType> {
         self.get(schema).ok()
     }
+
+    pub(crate) fn is_interface_object_type(&self, schema: &Schema) -> bool {
+        match self {
+            TypeDefinitionPosition::Object(obj) => obj.is_interface_object_type(schema),
+
+            _ => false,
+        }
+    }
 }
 
 impl TryFrom<TypeDefinitionPosition> for ScalarTypeDefinitionPosition {
@@ -503,12 +511,11 @@ impl CompositeTypeDefinitionPosition {
     }
 
     pub(crate) fn is_interface_object_type(&self, schema: &Schema) -> bool {
-        let Ok(ExtendedType::Object(obj_type_def)) = self.get(schema) else {
-            return false;
-        };
-        obj_type_def
-            .directives
-            .has(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC.as_str())
+        match self {
+            CompositeTypeDefinitionPosition::Object(obj) => obj.is_interface_object_type(schema),
+
+            _ => false,
+        }
     }
 }
 
@@ -1880,6 +1887,15 @@ impl ObjectTypeDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema Node<ObjectType>> {
         self.get(schema).ok()
+    }
+
+    pub(crate) fn is_interface_object_type(&self, schema: &Schema) -> bool {
+        let Ok(obj_type_def) = self.get(schema) else {
+            return false;
+        };
+        obj_type_def
+            .directives
+            .has(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC.as_str())
     }
 
     fn make_mut<'schema>(
