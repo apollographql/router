@@ -42,7 +42,7 @@ const SUBGRAPH2: &str = r#"
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (fetch node for `iFromS1.y` is missing)
 fn can_use_a_key_on_an_interface_object_type() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -304,6 +304,7 @@ fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure (fetch node for `iFromS1.y` is missing)
 fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -529,6 +530,7 @@ fn it_avoids_buffering_interface_object_results_that_may_have_to_be_filtered_wit
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
+// TODO: investigate this failure (missing fetch nodes for i.x and i.y)
 fn it_handles_requires_on_concrete_type_of_field_provided_by_interface_object() {
     let planner = planner!(
         S1: r#"
@@ -624,7 +626,7 @@ fn it_handles_requires_on_concrete_type_of_field_provided_by_interface_object() 
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (missing fetch node for `i.t.relatedIs.id`)
 fn it_handles_interface_object_in_nested_entity() {
     let planner = planner!(
         S1: r#"

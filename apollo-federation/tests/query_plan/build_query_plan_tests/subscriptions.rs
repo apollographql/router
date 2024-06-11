@@ -141,6 +141,7 @@ fn basic_subscription_with_single_subgraph() {
 // subscriptions".
 #[test]
 #[should_panic(expected = "snapshot assertion")]
+// TODO: Subscription handling
 fn trying_to_use_defer_with_a_subcription_results_in_an_error() {
     let config = QueryPlannerConfig {
         incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
