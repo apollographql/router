@@ -5,8 +5,6 @@ description: Protect your graph from malicious or demanding clients with Apollo 
 minVersion: 1.48.0
 ---
 
-Protect your graph from malicious or demanding clients with GraphOS Router's demand control features. Estimate, calculate, observe, and reject high cost GraphQL operations.
-
 <EnterpriseFeature />
 
 <PreviewFeature>
@@ -15,11 +13,17 @@ The Demand Control feature is in [preview](/resources/product-launch-stages/#pro
 
 We welcome your feedback during the preview, especially feedback about the following:
 
+<br/>
+
 - Whether the available tools are sufficient to enable you to understand how users are querying your supergraph.
+
 - Whether the demand control workflow is easy to follow and implement.
+
 - Whether any features are missing that preclude you from using demand control in production.
 
 </PreviewFeature>
+
+Protect your graph from malicious or demanding clients with GraphOS Router's demand control features. Estimate, calculate, observe, and reject high cost GraphQL operations.
 
 ## About demand control
 
@@ -31,189 +35,7 @@ Complex operations include operations that are deeply nested or have many result
 
 To prevent complex operations from degrading performance, the GraphOS Router supports analyzing and rejecting requests based on operation complexity. Like [safelisting operations with persisted query lists (PQL)](/graphos/operations/persisted-queries), demand control enables you to reject operations that you don't want to be served by your graph.
 
-With demand control configured, the router computes a complexity value, or _cost_, per operation. You can collect telemetry and metrics to determine the range of costs of operations served by the router. You can then configure a maximum cost limit per operation, above which the router rejects the operation.
-
-## Calculating operation cost
-
-When your router receives a request, its query planner generates and sends a series of sub-requests to subgraphs. 
-
-To calculate the total cost of an operation, the router sums the total costs or weights based on sub-request's operation kind and the types of GraphQL elements of its fields.
-
-The cost of each operation kind:
-
-|           | Mutation | Query | Subscription |
-| --------- | -------- | ----- | ------------ |
-| kind      | 10       | 0     | 0            |
-
-
-The cost of each GraphQL element type, per operation kind:
-
-|           | Mutation | Query | Subscription |
-| --------- | -------- | ----- | ------------ |
-| Object    | 1        | 1     | 1            |
-| Interface | 1        | 1     | 1            |
-| Union     | 1        | 1     | 1            |
-| Scalar    | 0        | 0     | 0            |
-| Enum      | 0        | 0     | 0            |
-
-For example, assume the following query gets a response with six products and ten reviews:
-
-```graphql
-query ExampleQuery {
-  topProducts {
-    name
-    reviews {
-      author {
-        name
-      }
-    }
-  }
-}
-```
-
-Assuming each review has exactly one author, the total cost of the query is 26.
-
-<ExpansionPanel title="Example query's cost calculation">
-
-```text disableCopy=true showLineNumbers=false
-     1 Query (0 cost)
- + 6 product objects (6)
- + 6 name scalars (0)
- + 10 review objects (10)
- + 10 author objects (10)
- + 10 name scalars (0)
- = total cost (26)
-
-</ExpansionPanel>
-
-### Estimated and actual costs
-
-For an operation with list fields, the router must run the operation to get the actual number of items in its lists. Without actual list sizes, the router can only estimate the operation cost before it's executed by assuming list sizes. 
-
-After an operation is executed, the router can calculate the actual cost per operation with the actual list sizes.
-
-<Note>
-
-The difference between estimated and actual operation costs is due only to the difference between assumed and actual sizes of list fields.
-
-</Note>
-
-### Measurement and enforcement modes
-
-When implementing demand control, you must first gather information about the operations being executed against your graph. With this information, you can accurately decide when to reject requests.
-
-The router's demand control supports a _measurement_ mode that enables you to gather this information without impacting your running services. You can define telemetry instruments to monitor your operations and decide on their maximum cost threshold.  
-
-After gathering enough data, you can then configure your router with maximum cost and list size limits and set demand control to _enforcement_ mode, where it rejects operations with costs exceeding the limit.
-
-## Configuring demand control
-
-To enable demand control in the router, configure the `preview_demand_control` option in `router.yaml`:
-
-```yaml title="Example demand control configuration"
-preview_demand_control:
-  enabled: true
-  mode: measure
-  strategy:
-    static_estimated:
-      list_size: 10 
-      max: 1000 
-```
-
-When `preview_demand_control` is enabled, the router measures the cost of each operation and can enforce operation cost limits based on additional configuration.  
-
-Customize `preview_demand_control` with the following settings:
-
-| Option              | Valid values            | Default value | Description                                                                                          |
-| ------------------- | ----------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
-| enabled             | boolean                 | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                              |
-| mode                | `measure`, `enforce`    |               | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
-| strategy            | `static_estimated`      |               | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                 |
-| static_estimated.list_size  | integer                 |               | The assumed maximum size of a list for fields that return lists.                                      |
-| static_estimated.max        | integer                 |               | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected. |
-
-
-## Telemetry for demand control
-
-You can define router telemetry to gather cost information and gain insights into the cost of operations sent to your router:
-
-- Generate histograms of operation costs by operation name, where the estimated cost is greater than an arbitrary value.
-- Attach cost information to spans.
-- Generate log messages whenever the delta between estimated and actual cost is greater than an arbitrary value.
-
-### Instruments
-
-| Instrument      | Value | Default | Description                                                |
-| --------------- | ----- | ------- | ---------------------------------------------------------- |
-| cost.actual     |       |         | The actual cost of an operation, measured after execution.  |
-| cost.estimated  |       |         | The estimated cost of an operation before execution.        |
-| cost.delta      |       |         | The difference between the actual and estimated cost.       |
-
-### Attributes
-
-Attributes for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
-
-| Attribute      | Value | Default | Description                                                |
-| --------------- | ----- | ------- | ---------------------------------------------------------- |
-| cost.actual     | boolean      |         | The actual cost of an operation, measured after execution.  | 
-| cost.estimated  | boolean       |         | The estimated cost of an operation before execution.        |
-| cost.delta      | boolean      |         | The difference between the actual and estimated cost.       |
-| cost.result      | boolean      |         | The return code of the cost calculation. `COST_OK` or an [error code](../errors/#demand-control)      |
-
-### Selectors
-
-Selectors for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
-
-| Key  | Value      | Default | Description                                        |
-| ---- | ---------- | ------- | -------------------------------------------------- |
-| cost | estimated, actual, delta, result |         | The estimated, actual, or delta cost values, or the result string |
-
-
-#### Examples
-
-- Enable a `cost.estimated` instrument with the `cost.result` attribute:
-
-```yaml
-telemetry
-  instrumentation:
-    instruments:
-      supergraph:
-        cost.estimated: true
-	  attributes:
-            cost.result: true
-            graphql.operation.name: string
-```
-
-- Enable the `cost.estimated` attribute on `supergraph` spans:
-
-```yaml
-telemetry
-  instrumentation:
-    spans: 
-      supergraph: 
-        attributes:
-          cost.estimated: true
-```
-
-- Log an error when `cost.delta` is greater than 1000:
-
-```yaml
-telemetry
-  instrumentation:
-    events: 
-      supergraph:
-        COST_DELTA_TOO_HIGH:
-          message: "cost delta high"
-          on: response
-          level: error
-          condition: 
-            gt:
-              - cost: delta
-              - 1000
-          attributes:
-            graphql.operation.name: true
-            cost.delta: true
-```
+With demand control configured, the router computes a complexity value, or _cost_, per operation. You can collect telemetry and metrics to determine the range of costs of operations served by the router. You can then configure a maximum cost limit per operation, above which the router rejects the operation. 
 
 ## Demand control workflow
 
@@ -375,15 +197,17 @@ telemetry:
         cost.rejected.operations:
           type: histogram
           value:
-            cost: estimated                                          # Estimated cost is used to populate the histogram
+            # Estimated cost is used to populate the histogram
+            cost: estimated                                         
           description: "Estimated cost per rejected operation."
           unit: delta
           condition:
-            eq:                                                      # Only show rejected operations.
+            eq:    
+              # Only show rejected operations.                                                  
               - cost: result
               - "COST_ESTIMATED_TOO_EXPENSIVE"
           attributes:
-            graphql.operation.name: true                             # GraphQL operation name is added as an attribute
+            graphql.operation.name: true                             # Graphql operation name is added as an attribute
 
 ```
 
@@ -414,11 +238,11 @@ For example, the following table has the estimated cost of operations:
 
 | Operation name      | Estimated cost |
 |---------------------|----------------|
-| ExtractAll          | 9020           |
-| GetAllProducts      | 1435           |
-| GetLatestProducts   | 120            |
-| GetRecentlyUpdated  | 99             |
-| FindProductByName   | 87             |
+| `ExtractAll`          | 9020           |
+| `GetAllProducts`    | 1435           |
+| `GetLatestProducts`   | 120            |
+| `GetRecentlyUpdated`  | 99             |
+| `FindProductByName`   | 87             |
 
 The `ExtractAll` operation has a very large estimated cost, so it's a good candidate to be rejected.
 
@@ -523,11 +347,11 @@ Looking at the top N operations, you may see that the estimated costs have been 
 
 | Operation name      | Estimated cost |
 |---------------------|----------------|
-| ExtractAll          | 390200         |
-| GetAllProducts      | 44350          |
-| GetLatestProducts   | 11200          |
-| GetRecentlyUpdated  | 4990           |
-| FindProductByName   | 1870           |
+| `ExtractAll`         | 390200         |
+| `GetAllProducts`      | 44350          |
+| `GetLatestProducts`   | 11200          |
+| `GetRecentlyUpdated`  | 4990           |
+| `FindProductByName`   | 1870           |
 
 All operations except `ExtractAll` are in a range of acceptable costs.
 
@@ -562,3 +386,192 @@ You can set alerts in your APM for events that may require changing your demand 
 Using paging APIs can help avoid situations where a list field returns an arbitrarily large number of elements. 
 
 </Tip>
+
+## Calculating operation cost
+
+When your router receives a request, its query planner generates and sends a series of sub-requests to subgraphs. 
+
+To calculate the total cost of an operation, the router sums the total costs based on sub-request's operation type and the types of GraphQL elements of its fields.
+
+The cost of each operation type:
+
+|           | Mutation | Query | Subscription |
+| --------- | -------- | ----- | ------------ |
+| type      | 10       | 0     | 0            |
+
+
+The cost of each GraphQL element type, per operation type:
+
+|           | Mutation | Query | Subscription |
+| --------- | -------- | ----- | ------------ |
+| Object    | 1        | 1     | 1            |
+| Interface | 1        | 1     | 1            |
+| Union     | 1        | 1     | 1            |
+| Scalar    | 0        | 0     | 0            |
+| Enum      | 0        | 0     | 0            |
+
+For example, assume the following query gets a response with six products and ten reviews:
+
+```graphql
+query ExampleQuery {
+  topProducts {
+    name
+    reviews {
+      author {
+        name
+      }
+    }
+  }
+}
+```
+
+Assuming each review having exactly one author, the total cost of the query is 26.
+
+<ExpansionPanel title="Example query's cost calculation">
+
+```text disableCopy=true showLineNumbers=false
+1 Query (0 cost) + 6 product objects (6) + 6 name scalars (0) + 10 review objects (10) + 10 author objects (10) + 10 name scalars (0) = 26 total cost
+```
+
+</ExpansionPanel>
+
+### Estimated and actual costs
+
+For an operation with list fields, the router must run the operation to get the actual number of items in its lists. Without actual list sizes, the cost of an operation can only be estimated before it's executed, where you assume the size of lists. 
+
+After an operation is executed, the actual cost per operation can be calculated with the actual list sizes.
+
+<Note>
+
+The difference between estimated and actual operation cost calculations is due only to the difference between assumed and actual sizes of list fields.
+
+</Note>
+
+### Measurement and enforcement modes
+
+When rolling out demand control, you first need to gather information about the queries that are already being executed against your graph so you can decide when to reject requests.
+
+The router's demand control features support a measurement mode that enables you to gather this information without impacting your running services. You can define telemetry instruments to monitor your operations and decide on their maximum cost threshold.  
+
+After gathering enough data, you can then configure your router with maximum cost and list size limits and set demand control to enforcement mode, where it rejects operations with costs exceeding the limit.
+
+## Configuring demand control
+
+To enable demand control in the router, configure the `preview_demand_control` option in `router.yaml`:
+
+```yaml title="Example demand control configuration"
+preview_demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 10 
+      max: 1000 
+```
+
+When `preview_demand_control` is enabled, the router measures the cost of each operation and can enforce operation cost limits, based on additional configuration.  
+
+Customize `preview_demand_control` with the following settings:
+
+| Option              | Valid values            | Default value | Description                                                                                          |
+| ------------------- | ----------------------- | ------------- | ---------------------------------------------------------------------------------------------------- |
+| `enabled`             | boolean                 | `false`       | Set `true` to measure operation costs or enforce operation cost limits.                              |
+| `mode`                | `measure`, `enforce`    |     --          | - `measure` collects information about the cost of operations.<br/>- `enforce` rejects operations exceeding configured cost limits |
+| `strategy`            | `static_estimated`      |     --          | `static_estimated` estimates the cost of an operation before it is sent to a subgraph                 |
+| `static_estimated.list_size`  | integer                 |     --          | The assumed maximum size of a list for fields that return lists.                                      |
+| `static_estimated.max`        | integer                 |     --          | The maximum cost of an accepted operation. An operation with a higher cost than this is rejected. |
+
+
+## Telemetry for demand control
+
+<Tip>
+
+New to router telemetry? See [Router Telemetry](../configuration/telemetry/overview).
+
+</Tip>
+
+You can define router telemetry to gather cost information and gain insights into the cost of operations sent to your router:
+
+- Generate histograms of operation costs by operation name, where the estimated cost is greater than an arbitrary value.
+- Attach cost information to spans.
+- Generate log messages whenever the cost delta between estimated and actual is greater than an arbitrary value.
+
+### Instruments
+
+| Instrument       | Description                                                |
+| ---------------- | ---------------------------------------------------------- |
+| `cost.actual`    | The actual cost of an operation, measured after execution.  |
+| `cost.estimated` | The estimated cost of an operation before execution.        |
+| `cost.delta`     | The difference between the actual and estimated cost.       |
+
+### Attributes
+
+Attributes for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
+
+| Attribute      | Value  | Description                                                |
+| --------------- | ----- | ---------------------------------------------------------- |
+| `cost.actual`     | boolean      | The actual cost of an operation, measured after execution.  | 
+| `cost.estimated`  | boolean      | The estimated cost of an operation before execution.        |
+| `cost.delta`      | boolean      | The difference between the actual and estimated cost.       |
+| `cost.result`     | boolean      | The return code of the cost calculation. `COST_OK` or an [error code](../errors/#demand-control)      |
+
+### Selectors
+
+Selectors for `cost` can be applied to instruments, spans, and events—anywhere `supergraph` attributes are used.
+
+| Key  | Value      | Default | Description                                        |
+| ---- | ---------- | ------- | -------------------------------------------------- |
+| `cost` | `estimated`, `actual`, `delta`, `result` |         | The estimated, actual, or delta cost values, or the result string |
+
+
+### Examples
+
+#### Example instrument
+
+Enable a `cost.estimated` instrument with the `cost.result` attribute:
+
+```yaml
+telemetry
+  instrumentation:
+    instruments:
+      supergraph:
+        cost.estimated: true
+	  attributes:
+            cost.result: true
+            graphql.operation.name: string
+```
+
+#### Example span
+
+Enable the `cost.estimated` attribute on `supergraph` spans:
+
+```yaml
+telemetry
+  instrumentation:
+    spans: 
+      supergraph: 
+        attributes:
+          cost.estimated: true
+```
+
+#### Example event
+
+Log an error when `cost.delta` is greater than 1000:
+
+```yaml
+telemetry
+  instrumentation:
+    events: 
+      supergraph:
+        COST_DELTA_TOO_HIGH:
+          message: "cost delta high"
+          on: response
+          level: error
+          condition: 
+            gt:
+              - cost: delta
+              - 1000
+          attributes:
+            graphql.operation.name: true
+            cost.delta: true
+```
