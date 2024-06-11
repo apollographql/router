@@ -513,7 +513,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 .parameters
                 .federated_query_graph
                 .schema_by_source(&n.source)?;
-            if !selection.can_rebase_on(&parent_ty, schema) {
+            if !selection.can_rebase_on(&parent_ty, schema)? {
                 return Ok(false);
             }
             if check_has_inconsistent_runtime_types()? {
