@@ -1378,17 +1378,6 @@ where
             return;
         }
 
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(ty, field, value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
-        }
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -1428,8 +1417,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.counter.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
-            counter.add(increment, &attrs);
+            counter.add(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }
@@ -1786,17 +1790,6 @@ where
             return;
         }
 
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(ty, field, value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
-        }
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
@@ -1836,8 +1829,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.histogram.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &attrs);
+            histogram.record(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }
