@@ -16,6 +16,7 @@ use crate::error::Error;
 use crate::graphql::Request as GraphQLRequest;
 use crate::json_ext::Path;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::fetch::Variables;
 use crate::Context;
 
 pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError>;
@@ -23,13 +24,12 @@ pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError
 // pub type ServiceResult = Result<Response, BoxError>;
 // pub(crate) type BoxGqlStream = Pin<Box<dyn Stream<Item = graphql::Response> + Send + Sync>>;
 
-#[derive(Clone)]
 #[non_exhaustive]
 pub(crate) struct Request {
     pub(crate) context: Context,
     pub(crate) fetch_node: FetchNode,
     pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
-    pub(crate) data: Value,
+    pub(crate) variables: Variables,
     pub(crate) current_dir: Path,
     pub(crate) deferred_fetches: HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
 }
@@ -46,7 +46,7 @@ impl Request {
         context: Context,
         fetch_node: FetchNode,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
-        data: Value,
+        variables: Variables,
         current_dir: Path,
         deferred_fetches: HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> Self {
@@ -54,7 +54,7 @@ impl Request {
             context,
             fetch_node,
             supergraph_request,
-            data,
+            variables,
             current_dir,
             deferred_fetches,
         }
