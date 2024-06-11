@@ -19,7 +19,6 @@ use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Node;
@@ -374,11 +373,6 @@ impl UsageGenerator<'_> {
     }
 
     fn add_enum_reference(&mut self, enum_name: String, enum_value: String) {
-        println!(
-            "add_enum_reference {}.{}",
-            enum_name.clone(),
-            enum_value.clone()
-        );
         self.enums_by_name
             .entry(enum_name)
             .or_default()
@@ -437,21 +431,6 @@ impl UsageGenerator<'_> {
         }
     }
 
-    fn process_extended_refs_for_json_value(&mut self, type_name: String, value: &JsonValue) {
-        match value {
-            JsonValue::String(enum_val) => {
-                self.add_enum_reference(type_name.clone(), enum_val.as_str().to_string());
-            },
-            JsonValue::Array(array_vals) => {
-                for array_val in array_vals {
-                    self.process_extended_refs_for_json_value(type_name.clone(), array_val);
-                }
-            },
-            // todo object?
-            _ => {}
-        };
-    }
-
     fn process_extended_refs_for_object(
         &mut self,
         type_name: String,
@@ -461,10 +440,6 @@ impl UsageGenerator<'_> {
         if let Some(ExtendedType::InputObject(input_object_type)) =
             self.schema.types.get(type_name.to_string().as_str())
         {
-            println!(
-                "process_extended_refs_for_object found input object {}: {:?}",
-                input_object_type.name, obj_value
-            );
             // todo input object stuff (ref/null/undefined)
 
             let obj_value_map: HashMap<String, &Node<Value>> = obj_value
@@ -487,49 +462,51 @@ impl UsageGenerator<'_> {
     ) {
         match self.schema.types.get(type_name.to_string().as_str()) {
             Some(ExtendedType::InputObject(input_object_type)) => {
-                println!(
-                    "process_extended_refs_for_variable found input object {}: {:?}",
-                    input_object_type.name, var_value
-                );
+                
                 // todo input object stuff (ref/null/undefined)
 
-                let var_value_map: HashMap<String, &JsonValue> = match var_value {
+                match var_value {
+                    // For input objects, we process each of the field variables
                     Some(JsonValue::Object(json_obj)) => {
-                        json_obj
+                        let var_value_map: HashMap<String, &JsonValue> = json_obj
                             .iter()
                             .map(|(name, val)| (name.as_str().to_string(), val))
-                            .collect()
-                    },
-                    _ => HashMap::new()
-                };
-                // todo better structure/comments
-                for (field_name, field_def) in &input_object_type.fields {
-                    let field_type = field_def.ty.inner_named_type().to_string();
-                    if let Some(field_val) = var_value_map.get(&field_name.to_string()) {
+                            .collect();
 
-                        match self.schema.types.get(field_type.as_str()) {
-                            Some(ExtendedType::Enum(enum_type)) => {
-                                self.process_extended_refs_for_json_value(enum_type.name.to_string(), field_val);
-                            },
-                            Some(ExtendedType::InputObject(input_object_type)) => {
-                                // todo
-                                println!("temp {:?}", input_object_type);
-                            },
-                            _ => {}
+                        for (field_name, field_def) in &input_object_type.fields {
+                            let field_type = field_def.ty.inner_named_type().to_string();
+                            if let Some(&field_val) = var_value_map.get(&field_name.to_string()) {
+                                self.process_extended_refs_for_variable(field_type, Some(field_val));
+                            }
                         }
-                    }
+                    },
+                    // For arrays of objects, we process each array value separately
+                    Some(JsonValue::Array(json_array)) => {
+                        for array_val in json_array {
+                            self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
+                        }
+                    },
+                    _ => {},
                 }
             }
             Some(ExtendedType::Enum(enum_type)) => {
-                if let Some(JsonValue::String(enum_value)) = var_value {
-                    self.add_enum_reference(
-                        enum_type.name.to_string(),
-                        enum_value.as_str().to_string(),
-                    );
+                match var_value {
+                    Some(JsonValue::String(enum_value)) => {
+                        self.add_enum_reference(
+                            enum_type.name.to_string(),
+                            enum_value.as_str().to_string(),
+                        );
+                    },
+                    Some(JsonValue::Array(array_values)) => {
+                        for array_val in array_values {
+                            self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
+                        }
+                    },
+                    _ => {}
                 }
             }
-            _ => (),
-        }
+            _ => {},
+        };
     }
 }
 
