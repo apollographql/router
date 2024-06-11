@@ -40,7 +40,11 @@ You can specify which headers to propagate based on a matching [regex pattern](h
     matching: .*
 ```
 
-> **Note:** The GraphOS Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
+<Note>
+
+The GraphOS Router _never_ propagates so-called [hop-by-hop headers](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers#hop-by-hop_headers) (such as `Content-Length`) when propagating by pattern.
+
+</Note>
 
 Alternatively, you can provide a static string via the `named` option. These `named` configurations have additional flexibility, because they support the following options:
 
