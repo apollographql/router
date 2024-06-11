@@ -84,8 +84,6 @@ fn handles_non_matching_value_types_under_interface_field() {
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure (`evaluated_plan_count` is 0, when it's expected to be 1.)
 fn skip_type_explosion_early_if_unnecessary() {
     let planner = planner!(
         Subgraph1: r#"
@@ -153,5 +151,5 @@ fn skip_type_explosion_early_if_unnecessary() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 1);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 }

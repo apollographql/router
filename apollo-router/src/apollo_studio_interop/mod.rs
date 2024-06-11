@@ -30,7 +30,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
 
 /// The stats for an input object field.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct InputObjectFieldStats {
     /// True if the input object field was referenced.
     pub(crate) referenced: bool,
@@ -42,7 +42,7 @@ pub(crate) struct InputObjectFieldStats {
 
 /// The result of the generate_extended_references function which contains input object field and
 /// enum value stats.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) struct ExtendedReferenceStats {
     /// A map of parent type to a map of field name to stats
     pub(crate) referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,

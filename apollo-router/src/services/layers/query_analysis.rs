@@ -31,6 +31,8 @@ use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
+pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query";
+
 /// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -120,7 +122,7 @@ impl QueryAnalysisLayer {
 
         let res = match entry {
             None => {
-                let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
+                let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
                 match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
                     Err(errors) => {
                         (*self.cache.lock().await).put(
@@ -192,8 +194,7 @@ impl QueryAnalysisLayer {
                 request
                     .context
                     .extensions()
-                    .lock()
-                    .insert::<ParsedDocument>(doc.clone());
+                    .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
 
                 if self
                     .configuration
@@ -209,8 +210,7 @@ impl QueryAnalysisLayer {
                     request
                         .context
                         .extensions()
-                        .lock()
-                        .insert::<ExtendedReferenceStats>(extended_reference_stats);
+                        .with_lock(|mut lock| lock.insert::<ExtendedReferenceStats>(extended_reference_stats));
                 }
 
                 Ok(SupergraphRequest {
@@ -219,14 +219,12 @@ impl QueryAnalysisLayer {
                 })
             }
             Err(errors) => {
-                request
-                    .context
-                    .extensions()
-                    .lock()
-                    .insert(Arc::new(UsageReporting {
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert(Arc::new(UsageReporting {
                         stats_report_key: errors.get_error_key().to_string(),
                         referenced_fields_by_type: HashMap::new(),
-                    }));
+                    }))
+                });
                 Err(SupergraphResponse::builder()
                     .errors(errors.into_graphql_errors().unwrap_or_default())
                     .status_code(StatusCode::BAD_REQUEST)

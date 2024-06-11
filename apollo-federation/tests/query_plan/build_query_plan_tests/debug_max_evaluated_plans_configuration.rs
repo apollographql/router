@@ -26,8 +26,6 @@ const SUBGRAPH: &str = r#"
 "#;
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn works_when_unset() {
     // This test is mostly a sanity check to make sure that "by default", we do have 16 plans
     // (all combination of the 2 choices for 4 fields). It's not entirely impossible that
@@ -67,12 +65,10 @@ fn works_when_unset() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 16);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 16);
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn allows_setting_down_to_1() {
     let max_evaluated_plans = NonZeroU32::new(1).unwrap();
     let planner = planner!(
@@ -123,12 +119,10 @@ fn allows_setting_down_to_1() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 16);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn can_be_set_to_an_arbitrary_number() {
     let max_evaluated_plans = NonZeroU32::new(10).unwrap();
     let planner = planner!(
@@ -173,7 +167,7 @@ fn can_be_set_to_an_arbitrary_number() {
     // Note that in this particular example, since we have binary choices only and due to the way
     // we cut branches when we're above the max, the number of evaluated plans can only be a power
     // of 2. Here, we just want it to be the nearest power of 2 below our limit.
-    assert_eq!(plan.statistics.evaluated_plan_count, 8);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 8);
 }
 
 #[test]
@@ -396,8 +390,6 @@ fn does_not_error_on_some_complex_fetch_group_dependencies() {
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn does_not_evaluate_plans_relying_on_a_key_field_to_fetch_that_same_field() {
     let planner = planner!(
         Subgraph1: r#"
@@ -472,7 +464,7 @@ fn does_not_evaluate_plans_relying_on_a_key_field_to_fetch_that_same_field() {
     // this test ensure this is not considered anymore (considering that later plan
     // was not incorrect, but it was adding to the options to evaluate which in some
     // cases could impact query planning performance quite a bit).
-    assert_eq!(plan.statistics.evaluated_plan_count, 1);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 }
 
 #[test]
@@ -546,5 +538,5 @@ fn avoid_considering_indirect_paths_from_the_root_when_a_more_direct_one_exists(
     // As said above, we legit have 2 options for `id` and `v0`, and we cannot know which are best before we evaluate the
     // plans completely. But for the multiple `v1`, we should recognize that going through the 1st subgraph (and taking a
     // key) is never exactly a good idea.
-    assert_eq!(plan.statistics.evaluated_plan_count, 4);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 4);
 }

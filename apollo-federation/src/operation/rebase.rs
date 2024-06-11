@@ -334,9 +334,6 @@ impl FragmentSpreadSelection {
             return Ok(Some(Selection::FragmentSpread(Arc::new(self.clone()))));
         }
 
-        // If we're rebasing on a _different_ schema, then we *must* have fragments, since reusing
-        // `self.fragments` would be incorrect. If we're on the same schema though, we're happy to default
-        // to `self.fragments`.
         let rebase_on_same_schema = self.spread.data().schema == *schema;
         let Some(named_fragment) = named_fragments.get(&self.spread.data().fragment_name) else {
             // If we're rebasing on another schema (think a subgraph), then named fragments will have been rebased on that, and some
