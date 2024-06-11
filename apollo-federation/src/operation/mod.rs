@@ -3384,7 +3384,9 @@ impl FieldSelection {
                 parent_type.field(self.field.data().name().clone())?
             };
 
-        let field_element = if self.field.data().field_position == field_position {
+        let field_element = if self.field.schema() == schema
+            && self.field.data().field_position == field_position
+        {
             self.field.data().clone()
         } else {
             self.field
