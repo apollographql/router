@@ -142,6 +142,42 @@ pub(crate) trait ValueExt {
     /// function to handle `PathElement::Fragment`).
     #[track_caller]
     fn is_object_of_type(&self, schema: &Schema, maybe_type: &str) -> bool;
+
+    /// Calculates the approximate serialized size so that the value can be serialized without repeated allocations.
+    fn approximate_serialized_size(&self) -> usize;
+}
+
+// Copied from
+const STRING_OVERHEAD: usize = "\"\"".as_bytes().len();
+const MAP_ENTRY_OVERHEAD: usize = "\"\":,".as_bytes().len();
+const NULL_OVERHEAD: usize = "null".as_bytes().len();
+const BOOL_OVERHEAD: usize = "false".as_bytes().len();
+const ARRAY_OVERHEAD: usize = "[]".as_bytes().len();
+const ARRAY_ITEM_OVERHEAD: usize = ",".as_bytes().len();
+
+fn approximate_serialized_size(v: &Value) -> usize {
+    match v {
+        Value::Null => NULL_OVERHEAD,
+        Value::Bool(_) => BOOL_OVERHEAD,
+        Value::Number(_n) => 16,
+        Value::String(s) => STRING_OVERHEAD + s.as_str().as_bytes().len(),
+        Value::Array(a) => {
+            ARRAY_OVERHEAD
+                + a.iter()
+                    .map(approximate_serialized_size)
+                    .map(|size| size + ARRAY_ITEM_OVERHEAD)
+                    .sum::<usize>()
+        }
+        Value::Object(o) => o
+            .iter()
+            .map(|(k, v)| {
+                STRING_OVERHEAD
+                    + k.as_str().len()
+                    + approximate_serialized_size(v)
+                    + MAP_ENTRY_OVERHEAD
+            })
+            .sum(),
+    }
 }
 
 impl ValueExt for Value {
@@ -463,6 +499,10 @@ impl ValueExt for Value {
                 .map_or(true, |typename| {
                     typename == maybe_type || schema.is_subtype(maybe_type, typename)
                 })
+    }
+
+    fn approximate_serialized_size(&self) -> usize {
+        approximate_serialized_size(&self)
     }
 }
 
@@ -1432,5 +1472,13 @@ mod tests {
             serde_json::to_string(&path).unwrap(),
             "[\"k\",\"... on T\",\"@\",\"arr\",3]",
         );
+    }
+
+    #[test]
+    fn test_approximate_serialized_size() {
+        let json = serde_json_bytes::json!({
+            "bool": true,
+        });
+        let bytes_len = json.to_string().as_bytes().len();
     }
 }

@@ -1,0 +1,19 @@
+[env]
+APOLLO_KEY = "service:starstuff:IIRv5roF-Je2Gx5Ci2f4fw"
+TEST_APOLLO_KEY = "service:starstuff:IIRv5roF-Je2Gx5Ci2f4fw"
+APOLLO_GRAPH_REF = "starstuff@current"
+TEST_APOLLO_GRAPH_REF = "starstuff@current"
+APOLLO_TELEMETRY_DISABLED = "true"
+
+[tools]
+argo = "latest"
+gcloud = "latest"
+argocd = "latest"
+kubectl = "latest"
+helm-docs = "latest"
+helm = "latest"
+protoc = "latest"
+k3d = "latest"
+redis = "latest"
+cmake = "latest"
+

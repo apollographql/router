@@ -43,6 +43,7 @@ use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
 use crate::graphql;
 use crate::http_ext;
+use crate::json_ext::ValueExt;
 #[cfg(test)]
 use crate::plugin::test::MockSupergraphService;
 use crate::protocols::multipart::Multipart;
@@ -301,9 +302,17 @@ impl RouterService {
                         .headers
                         .insert(CONTENT_TYPE, APPLICATION_JSON_HEADER_VALUE.clone());
                     tracing::trace_span!("serialize_response").in_scope(|| {
-                        let body = serde_json::to_string(&response)?;
+                        let mut buf = Vec::with_capacity(
+                            response
+                                .data
+                                .as_ref()
+                                .map(|data| data.approximate_serialized_size())
+                                .unwrap_or_default()
+                                + 256,
+                        );
+                        serde_json::to_writer(&mut buf, &response)?;
                         Ok(router::Response {
-                            response: http::Response::from_parts(parts, Body::from(body)),
+                            response: http::Response::from_parts(parts, Body::from(buf)),
                             context,
                         })
                     })
