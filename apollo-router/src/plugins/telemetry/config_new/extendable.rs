@@ -239,19 +239,19 @@ where
 
     fn on_response_field(
         &self,
+        attrs: &mut Vec<KeyValue>,
         ty: &apollo_compiler::executable::NamedType,
         field: &apollo_compiler::executable::Field,
         value: &serde_json_bytes::Value,
         ctx: &Context,
-    ) -> Vec<KeyValue> {
-        let mut attrs = self.attributes.on_response_field(ty, field, value, ctx);
+    ) {
+        self.attributes
+            .on_response_field(attrs, ty, field, value, ctx);
         let custom_attributes = self.custom.iter().filter_map(|(key, v)| {
             v.on_response_field(ty, field, value, ctx)
                 .map(|v| KeyValue::new(key.clone(), v))
         });
         attrs.extend(custom_attributes);
-
-        attrs
     }
 }
 
