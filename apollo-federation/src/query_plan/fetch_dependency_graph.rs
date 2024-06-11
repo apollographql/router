@@ -2089,7 +2089,7 @@ impl FetchDependencyGraph {
             && node
                 .selection_set
                 .selection_set
-                .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema);
+                .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
         Ok(new_node_is_unneeded)
     }
 
