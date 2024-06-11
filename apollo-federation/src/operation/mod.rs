@@ -2138,23 +2138,7 @@ impl SelectionSet {
             type_position: self.type_position.clone(),
             selections: Arc::new(SelectionMap::new()),
         };
-        for selection in expanded_selections {
-            let selection = selection.normalize(
-                &self.type_position,
-                &NamedFragments::default(),
-                &self.schema,
-                NormalizeSelectionOption::NormalizeRecursively,
-            )?;
-            match selection {
-                Some(SelectionOrSet::Selection(selection)) => {
-                    expanded.add_selection(&selection)?;
-                }
-                Some(SelectionOrSet::SelectionSet(selection_set)) => {
-                    expanded.add_selection_set(&selection_set)?;
-                }
-                None => (),
-            }
-        }
+        expanded.merge_selections_into(expanded_selections.iter())?;
         Ok(expanded)
     }
 
@@ -2622,24 +2606,6 @@ impl SelectionSet {
             "In order to add selection set it needs to point to the same type position"
         );
         self.merge_into(std::iter::once(selection_set))
-    }
-
-    /// Rebase given `Selection` on self and then inserts it into the inner map. Should a selection
-    /// with the same key already exist in the map, the existing selection and the given selection
-    /// are merged, replacing the existing selection while keeping the same insertion index.
-    pub(crate) fn add_selection(&mut self, selection: &Selection) -> Result<(), FederationError> {
-        let Some(rebased) = selection.rebase_on(
-            &self.type_position,
-            &NamedFragments::default(),
-            &self.schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?
-        else {
-            return Err(FederationError::internal(
-                "Rebase should've thrown an error",
-            ));
-        };
-        self.add_local_selection(&rebased)
     }
 
     /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Should any sub
