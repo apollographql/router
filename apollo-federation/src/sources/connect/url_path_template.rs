@@ -30,7 +30,7 @@ pub struct URLPathTemplate {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-struct ParameterValue {
+pub struct ParameterValue {
     // The ParameterValue struct represents both path parameter values and query
     // parameter values, allowing zero or more variable expressions separated by
     // nonempty constant text.
@@ -38,13 +38,13 @@ struct ParameterValue {
 }
 
 #[derive(Debug, PartialEq, Clone)]
-enum ValuePart {
+pub enum ValuePart {
     Text(String),
     Var(VariableExpression),
 }
 
 #[derive(Debug, PartialEq, Clone, Default)]
-struct VariableExpression {
+pub struct VariableExpression {
     // Variable paths are often a single identifier, but may also consist of a
     // sequence of identifiers joined with the . character. We represent dotted
     // paths as a single string, rather than a Vec<String>, and these dotted
@@ -66,7 +66,7 @@ struct VariableExpression {
 
 impl URLPathTemplate {
     // Top-level parsing entry point for URLPathTemplate syntax.
-    pub(super) fn parse(input: &str) -> Result<URLPathTemplate, String> {
+    pub fn parse(input: &str) -> Result<URLPathTemplate, String> {
         let mut prefix_suffix = input.splitn(2, '?');
         let path_prefix = prefix_suffix.next();
         let query_suffix = prefix_suffix.next();
@@ -97,7 +97,7 @@ impl URLPathTemplate {
     // into its {...} expressions, generate a new URL path String.
     // Guaranteed to return a "/"-prefixed string to make appending to the
     // base url easier.
-    pub(super) fn generate_path(&self, vars: &JSON) -> Result<String, String> {
+    pub fn generate_path(&self, vars: &JSON) -> Result<String, String> {
         let mut path = String::new();
         if let Some(var_map) = vars.as_object() {
             for (path_position, param_value) in self.path.iter().enumerate() {
@@ -187,7 +187,7 @@ impl URLPathTemplate {
         Ok(JSON::Object(var_map))
     }
 
-    pub(super) fn required_parameters(&self) -> Vec<String> {
+    pub fn required_parameters(&self) -> Vec<String> {
         let mut parameters = HashSet::new();
         for param_value in &self.path {
             parameters.extend(param_value.required_parameters());
@@ -549,7 +549,6 @@ impl Display for VariableExpression {
 
 fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
     recognize(alt((tag("$this"), nom_parse_identifier)))(input)
-        .map(|(input, output)| (input, output))
 }
 
 fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
@@ -559,7 +558,6 @@ fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
             "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
         )),
     ))(input)
-    .map(|(input, output)| (input, output))
 }
 
 fn nom_parse_identifier_path(input: &str) -> IResult<&str, String> {
@@ -858,7 +856,7 @@ mod tests {
 
         assert_eq!(
             template.generate_path(&json!("not an object")),
-            Err("Expected object, got \"not an object\"".to_string()),
+            Err(r#"Expected object, got "not an object""#.to_string()),
         );
 
         assert_eq!(
@@ -889,12 +887,12 @@ mod tests {
 
         assert_eq!(
             template.generate_path(&json!({
-                "user_id": "123",
                 "b": "456",
                 "f.g": "abc",
+                "user_id": "123",
             })),
             Err(
-                r#"Missing required variable d in {"user_id":"123","b":"456","f.g":"abc"}"#
+                r#"Missing required variable d in {"b":"456","f.g":"abc","user_id":"123"}"#
                     .to_string()
             ),
         );
@@ -927,11 +925,11 @@ mod tests {
 
         assert_eq!(
             template_with_nested_required_var.generate_path(&json!({
-                "user.login": "user",
                 "repo.name": "repo",
+                "user.login": "user",
             })),
             Err(
-                r#"Missing required variable a.b.c in {"user.login":"user","repo.name":"repo"}"#
+                r#"Missing required variable a.b.c in {"repo.name":"repo","user.login":"user"}"#
                     .to_string()
             ),
         );
@@ -1370,7 +1368,7 @@ mod tests {
                 "y": 2,
                 "z": 3,
             })),
-            Err("Missing required variable x in {\"y\":2,\"z\":3}".to_string()),
+            Err(r#"Missing required variable x in {"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
@@ -1379,46 +1377,43 @@ mod tests {
                 "y": 2,
                 // "z": 3,
             })),
-            Err("Missing required variable z in {\"x\":1,\"y\":2}".to_string()),
+            Err(r#"Missing required variable z in {"x":1,"y":2}"#.to_string()),
         );
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 "b": 4,
                 "c": 5,
+                "x": 1,
+                "y": 2,
+                "z": 3,
                 // "d": 6,
             })),
-            Err(
-                "Missing required variable d in {\"x\":1,\"y\":2,\"z\":3,\"b\":4,\"c\":5}"
-                    .to_string()
-            ),
+            Err(r#"Missing required variable d in {"b":4,"c":5,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 "b": 4,
                 // "c": 5,
                 "d": 6,
+                "x": 1,
+                "y": 2,
+                "z": 3,
             })),
-            Err("Missing variable c for required parameter {b},{c};{d!} given variables {\"x\":1,\"y\":2,\"z\":3,\"b\":4,\"d\":6}".to_string()),
+            Err(r#"Missing variable c for required parameter {b},{c};{d!} given variables {"b":4,"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
             template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
                 // "b": 4,
                 // "c": 5,
                 "d": 6,
+                "x": 1,
+                "y": 2,
+                "z": 3,
             })),
-            Err("Missing variable b for required parameter {b},{c};{d!} given variables {\"x\":1,\"y\":2,\"z\":3,\"d\":6}".to_string()),
+            Err(r#"Missing variable b for required parameter {b},{c};{d!} given variables {"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
@@ -1552,7 +1547,7 @@ mod tests {
                 "p2.y": 5,
                 // "p2.z": 6,
             })),
-            Err("Missing required variable p2.z in {\"p1.x\":1,\"p1.y\":2,\"p1.z\":3,\"p2.x\":4,\"p2.y\":5}".to_string()),
+            Err(r#"Missing required variable p2.z in {"p1.x":1,"p1.y":2,"p1.z":3,"p2.x":4,"p2.y":5}"#.to_string()),
         );
 
         assert_eq!(
@@ -1564,7 +1559,7 @@ mod tests {
                 "p2.y": 5,
                 "p2.z": 6,
             })),
-            Err("Missing required variable p1.y in {\"p1.x\":1,\"p1.z\":3,\"p2.x\":4,\"p2.y\":5,\"p2.z\":6}".to_string()),
+            Err(r#"Missing required variable p1.y in {"p1.x":1,"p1.z":3,"p2.x":4,"p2.y":5,"p2.z":6}"#.to_string()),
         );
 
         assert_eq!(
