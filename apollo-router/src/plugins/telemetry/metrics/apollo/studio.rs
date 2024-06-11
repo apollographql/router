@@ -12,6 +12,17 @@ use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
+fn serialize_histogram<S: serde::Serializer>(
+    histogram: &Histogram<u64>,
+    s: S,
+) -> Result<S::Ok, S::Error> {
+    let mut seq = s.serialize_seq(Some(histogram.buckets() as usize))?;
+    for value in histogram.iter_linear(1) {
+        seq.serialize_element(&value.count_at_value())?;
+    }
+    seq.end()
+}
+
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {
     pub(crate) request_id: Uuid,
@@ -66,7 +77,7 @@ pub(crate) struct SingleTypeStat {
     pub(crate) per_field_stat: HashMap<String, SingleFieldStat>,
 }
 
-#[derive(Default, Debug, Serialize)]
+#[derive(Debug, Serialize)]
 pub(crate) struct SingleFieldStat {
     pub(crate) return_type: String,
     pub(crate) errors_count: u64,
@@ -77,8 +88,21 @@ pub(crate) struct SingleFieldStat {
     // a number of requests.
     pub(crate) observed_execution_count: u64,
     pub(crate) latency: DurationHistogram<f64>,
-    // TODO: Make this a histogram
-    pub(crate) length: Vec<usize>,
+    #[serde(serialize_with = "serialize_histogram")]
+    pub(crate) length: Histogram<u64>,
+}
+
+impl Default for SingleFieldStat {
+    fn default() -> Self {
+        Self {
+            return_type: Default::default(),
+            errors_count: Default::default(),
+            requests_with_errors_count: Default::default(),
+            observed_execution_count: Default::default(),
+            latency: Default::default(),
+            length: Histogram::new(1).expect("Histogram can be created"),
+        }
+    }
 }
 
 #[derive(Clone, Default, Debug, Serialize)]
@@ -171,7 +195,7 @@ impl AddAssign<SingleTypeStat> for TypeStat {
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
@@ -181,8 +205,21 @@ pub(crate) struct FieldStat {
     // rounded to integers when converting to Protobuf after aggregating
     // a number of requests.
     latency: DurationHistogram<f64>,
-    // TODO: Make this a histogram
-    length: Vec<usize>,
+    #[serde(serialize_with = "serialize_histogram")]
+    length: Histogram<u64>,
+}
+
+impl Default for FieldStat {
+    fn default() -> Self {
+        Self {
+            return_type: Default::default(),
+            errors_count: Default::default(),
+            requests_with_errors_count: Default::default(),
+            observed_execution_count: Default::default(),
+            latency: Default::default(),
+            length: Histogram::new(1).expect("Histogram can be created"),
+        }
+    }
 }
 
 impl AddAssign<SingleFieldStat> for FieldStat {
@@ -192,7 +229,7 @@ impl AddAssign<SingleFieldStat> for FieldStat {
         self.observed_execution_count += stat.observed_execution_count;
         self.errors_count += stat.errors_count;
         self.return_type = stat.return_type;
-        self.length.extend(stat.length);
+        self.length += stat.length;
     }
 }
 
@@ -285,10 +322,10 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
 
 pub(crate) struct LimitsStats {
     strategy: String,
-    #[serde(serialize_with = "LimitsStats::serialize_histogram")]
+    #[serde(serialize_with = "serialize_histogram")]
     cost_estimated: Histogram<u64>,
     max_cost_estimated: u64,
-    #[serde(serialize_with = "LimitsStats::serialize_histogram")]
+    #[serde(serialize_with = "serialize_histogram")]
     cost_actual: Histogram<u64>,
     max_cost_actual: u64,
     depth: u64,
@@ -297,18 +334,7 @@ pub(crate) struct LimitsStats {
     root_field_count: u64,
 }
 
-impl LimitsStats {
-    fn serialize_histogram<S: serde::Serializer>(
-        histogram: &Histogram<u64>,
-        s: S,
-    ) -> Result<S::Ok, S::Error> {
-        let mut seq = s.serialize_seq(Some(histogram.buckets() as usize))?;
-        for value in histogram.iter_linear(1) {
-            seq.serialize_element(&value.count_at_value())?;
-        }
-        seq.end()
-    }
-}
+impl LimitsStats {}
 
 impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::reports::LimitsStats {
     fn from(value: LimitsStats) -> Self {
@@ -351,12 +377,11 @@ impl AddAssign<SingleLimitsStats> for LimitsStats {
 
 impl From<SingleLimitsStats> for LimitsStats {
     fn from(value: SingleLimitsStats) -> Self {
-        // TODO: How do we determine the bounds?
         // TODO: Should we log a warning for these fallible calls to record?
-        let mut cost_estimated = Histogram::new_with_bounds(1, 10, 1).unwrap();
+        let mut cost_estimated = Histogram::new(1).unwrap();
         let _ = cost_estimated.record(value.cost_estimated);
 
-        let mut cost_actual = Histogram::new_with_bounds(1, 10, 1).unwrap();
+        let mut cost_actual = Histogram::new(1).unwrap();
         let _ = cost_actual.record(value.cost_actual);
 
         Self {
@@ -532,13 +557,17 @@ mod test {
     fn field_stat(count: &mut Count) -> SingleFieldStat {
         let mut latency = DurationHistogram::default();
         latency.increment_duration(Some(Duration::from_secs(1)), 1.0);
+
+        let mut length = Histogram::<u64>::new(1).unwrap();
+        length.record(1).unwrap();
+
         SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
             observed_execution_count: count.inc_u64(),
             requests_with_errors_count: count.inc_u64(),
             latency,
-            length: vec![1],
+            length,
         }
     }
 

@@ -812,8 +812,8 @@ expression: aggregated_metrics
                       "total": 2.0
                     },
                     "length": [
-                      1,
-                      1
+                      0,
+                      2
                     ]
                   },
                   "field2": {
@@ -973,8 +973,8 @@ expression: aggregated_metrics
                       "total": 2.0
                     },
                     "length": [
-                      1,
-                      1
+                      0,
+                      2
                     ]
                   }
                 }
@@ -1138,8 +1138,8 @@ expression: aggregated_metrics
                       "total": 2.0
                     },
                     "length": [
-                      1,
-                      1
+                      0,
+                      2
                     ]
                   },
                   "field2": {
@@ -1299,8 +1299,8 @@ expression: aggregated_metrics
                       "total": 2.0
                     },
                     "length": [
-                      1,
-                      1
+                      0,
+                      2
                     ]
                   }
                 }

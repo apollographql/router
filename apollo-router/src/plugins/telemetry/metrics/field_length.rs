@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
+use hdrhistogram::Histogram;
+
 use crate::response::ResponseVisitor;
 
 pub(crate) struct FieldLengthRecorder {
     // Maps type -> field -> histogram (of lengths)
-    pub(crate) field_lengths: HashMap<String, HashMap<String, Vec<usize>>>, // TODO: Vec is placeholder for a proper histogram
+    pub(crate) field_lengths: HashMap<String, HashMap<String, Histogram<u64>>>,
 }
 
 impl FieldLengthRecorder {
@@ -25,12 +27,14 @@ impl ResponseVisitor for FieldLengthRecorder {
     ) {
         match value {
             serde_json_bytes::Value::Array(items) => {
-                self.field_lengths
+                // TODO: What should we do with the fallible `record` here?
+                let _ = self
+                    .field_lengths
                     .entry(ty.to_string())
                     .or_default()
                     .entry(field.name.to_string())
-                    .or_default()
-                    .push(items.len());
+                    .or_insert_with(|| Histogram::new(1).expect("Histogram can be created"))
+                    .record(items.len() as u64);
 
                 for item in items {
                     self.visit_list_item(request, field.ty().inner_named_type(), field, item);

@@ -15,6 +15,7 @@ use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::StreamExt;
+use hdrhistogram::Histogram;
 use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
@@ -1307,6 +1308,7 @@ impl Telemetry {
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
+                    let mut field_lengths = FieldLengthRecorder::new();
 
                     response_stream
                         .enumerate()
@@ -1314,6 +1316,10 @@ impl Telemetry {
                             let has_errors = !response.errors.is_empty();
 
                             if !matches!(sender, Sender::Noop) {
+                                if let Some(query) = &ctx.unsupported_executable_document() {
+                                    field_lengths.visit(query, &response);
+                                }
+
                                 if operation_kind == OperationKind::Subscription {
                                     // The first empty response is always a heartbeat except if it's an error
                                     if idx == 0 {
@@ -1327,7 +1333,7 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
-                                                &Default::default(),
+                                                &field_lengths.field_lengths,
                                             );
                                         }
                                     } else {
@@ -1343,17 +1349,10 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
-                                            &Default::default(),
+                                            &field_lengths.field_lengths,
                                         );
                                     }
                                 } else {
-                                    let mut field_lengths = FieldLengthRecorder::new();
-                                    field_lengths.visit(
-                                        &ctx.unsupported_executable_document()
-                                            .expect("query document exists"),
-                                        &response,
-                                    );
-
                                     // If it's the last response
                                     if !response.has_next.unwrap_or(false) {
                                         Self::update_apollo_metrics(
@@ -1386,7 +1385,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
-        field_lengths: &HashMap<String, HashMap<String, Vec<usize>>>,
+        field_lengths: &HashMap<String, HashMap<String, Histogram<u64>>>,
     ) {
         let metrics = if let Some(usage_reporting) = {
             let lock = context.extensions().lock();
@@ -1534,13 +1533,13 @@ impl Telemetry {
     fn per_type_stat(
         traces: &[(ByteString, proto::reports::Trace)],
         field_level_instrumentation_ratio: f64,
-        field_lengths: &HashMap<String, HashMap<String, Vec<usize>>>,
+        field_lengths: &HashMap<String, HashMap<String, Histogram<u64>>>,
     ) -> HashMap<String, SingleTypeStat> {
         fn recur(
             per_type: &mut HashMap<String, SingleTypeStat>,
             field_execution_weight: f64,
             node: &proto::reports::trace::Node,
-            field_lengths: &HashMap<String, HashMap<String, Vec<usize>>>,
+            field_lengths: &HashMap<String, HashMap<String, Histogram<u64>>>,
         ) {
             for child in &node.child {
                 recur(per_type, field_execution_weight, child, field_lengths)
@@ -1574,7 +1573,7 @@ impl Telemetry {
                     latency: Default::default(),
                     observed_execution_count: 0,
                     requests_with_errors_count: 0,
-                    length: Default::default(),
+                    length: Histogram::new(1).expect("Histogram can be created"),
                 });
             let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
             field_stat
@@ -1587,7 +1586,7 @@ impl Telemetry {
                 .get(&node.parent_type)
                 .and_then(|entry| entry.get(field_name))
             {
-                field_stat.length.extend(histogram);
+                field_stat.length += histogram;
             }
 
             if !node.error.is_empty() {
