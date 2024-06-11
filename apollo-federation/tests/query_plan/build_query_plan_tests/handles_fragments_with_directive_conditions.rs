@@ -1,6 +1,4 @@
 #[test]
-#[should_panic(expected = "Subgraph unexpectedly does not use federation spec")]
-// TODO: investigate this failure
 fn fragment_with_intersecting_parent_type_and_directive_condition() {
     let planner = planner!(
         A: r#"
@@ -74,8 +72,6 @@ fn fragment_with_intersecting_parent_type_and_directive_condition() {
 }
 
 #[test]
-#[should_panic(expected = "Subgraph unexpectedly does not use federation spec")]
-// TODO: investigate this failure
 fn nested_fragment_with_interseting_parent_type_and_directive_condition() {
     let planner = planner!(
         A: r#"

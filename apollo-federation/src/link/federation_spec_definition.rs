@@ -331,6 +331,19 @@ impl FederationSpecDefinition {
         })
     }
 
+    pub(crate) fn shareable_directive_definition<'schema>(
+        &self,
+        schema: &'schema FederationSchema,
+    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+        self.directive_definition(schema, &FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC)?
+            .ok_or_else(|| {
+                FederationError::internal(format!(
+                    "Unexpectedly could not find federation spec's \"@{}\" directive definition",
+                    FEDERATION_SHAREABLE_DIRECTIVE_NAME_IN_SPEC
+                ))
+            })
+    }
+
     pub(crate) fn shareable_directive(
         &self,
         schema: &FederationSchema,

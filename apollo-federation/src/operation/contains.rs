@@ -244,6 +244,10 @@ impl Containment {
     pub fn is_contained(self) -> bool {
         matches!(self, Containment::StrictlyContained | Containment::Equal)
     }
+
+    pub fn is_equal(self) -> bool {
+        matches!(self, Containment::Equal)
+    }
 }
 
 impl Selection {

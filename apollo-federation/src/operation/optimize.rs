@@ -847,7 +847,9 @@ impl Selection {
                     // Expand the fragment
                     let expanded_sub_selections =
                         fragment.selection_set.retain_fragments(fragments_to_keep)?;
-                    if *parent_type == fragment.spread.data().type_condition_position {
+                    if *parent_type == fragment.spread.data().type_condition_position
+                        && fragment.spread.data().directives.is_empty()
+                    {
                         // The fragment is of the same type as the parent, so we can just use
                         // the expanded sub-selections directly.
                         Ok(expanded_sub_selections.into())
@@ -989,7 +991,13 @@ impl NamedFragments {
         for (_, fragment) in self.iter_mut() {
             Node::make_mut(fragment).selection_set = fragment
                 .selection_set
-                .retain_fragments(&fragments_to_keep)?;
+                .retain_fragments(&fragments_to_keep)?
+                .normalize(
+                    &fragment.selection_set.type_position,
+                    &fragments_to_keep,
+                    &fragment.schema,
+                    NormalizeSelectionOption::NormalizeRecursively,
+                )?;
         }
 
         // Compute the new selection set based on the new reduced set of fragments.
