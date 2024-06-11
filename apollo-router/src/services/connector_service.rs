@@ -28,6 +28,7 @@ use crate::json_ext::Value;
 use crate::plugins::connectors::http_json_transport::http_json_transport;
 use crate::plugins::connectors::http_json_transport::HttpJsonTransportError;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::query_planner::fetch::Variables;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
@@ -54,7 +55,7 @@ impl tower::Service<ConnectRequest> for ConnectorService {
     fn call(&mut self, request: ConnectRequest) -> Self::Future {
         let ConnectRequest {
             fetch_node,
-            data,
+            variables,
             current_dir,
             context,
             ..
@@ -69,7 +70,10 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             .unwrap()
             .clone();
         Box::pin(async move {
-            Ok(process_source_node(sf, fetch_node, connectors, data, current_dir, context).await)
+            Ok(
+                process_source_node(sf, fetch_node, connectors, variables, current_dir, context)
+                    .await,
+            )
         })
     }
 }
@@ -78,7 +82,7 @@ pub(crate) async fn process_source_node(
     http_client: HttpClientServiceFactory,
     source_node: FetchNode,
     connectors: Connectors,
-    data: Value,
+    variables: Variables,
     _paths: Path,
     context: Context,
 ) -> (Value, Vec<Error>) {
@@ -91,7 +95,7 @@ pub(crate) async fn process_source_node(
     };
 
     // TODO: remove unwraps
-    let requests = create_requests(connector, &data, context).unwrap();
+    let requests = create_requests(connector, variables, context).unwrap();
 
     let responses = make_requests(
         http_client,
@@ -106,24 +110,24 @@ pub(crate) async fn process_source_node(
 
 fn create_requests(
     connector: &Connector,
-    data: &Value,
+    variables: Variables,
     context: Context,
 ) -> Result<Vec<HttpRequest>, HttpJsonTransportError> {
     match &connector.transport {
         connect::Transport::HttpJson(json_transport) => {
-            Ok(create_request(json_transport, data, context.clone())?)
+            Ok(create_request(json_transport, variables, context.clone())?)
         }
     }
 }
 
 fn create_request(
     json_transport: &HttpJsonTransport,
-    data: &Value,
+    variables: Variables,
     context: Context,
 ) -> Result<Vec<HttpRequest>, HttpJsonTransportError> {
     Ok(vec![HttpRequest {
         context,
-        http_request: http_json_transport::make_request(json_transport, data.clone())?,
+        http_request: http_json_transport::make_request(json_transport, variables)?,
     }])
 }
 

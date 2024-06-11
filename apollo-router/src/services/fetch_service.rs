@@ -17,14 +17,11 @@ use super::ConnectRequest;
 use super::SubgraphRequest;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
-use crate::json_ext::Object;
-use crate::json_ext::Value;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::Protocol;
 use crate::query_planner::fetch::RestFetchNode;
-use crate::query_planner::fetch::Variables;
 use crate::services::FetchRequest;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
@@ -53,7 +50,7 @@ impl tower::Service<FetchRequest> for FetchService {
             fetch_node,
             supergraph_request,
             deferred_fetches,
-            data,
+            variables,
             current_dir,
             context,
         } = request;
@@ -64,34 +61,10 @@ impl tower::Service<FetchRequest> for FetchService {
             operation_name,
             service_name,
             requires,
-            input_rewrites,
-            context_rewrites,
-            variable_usages,
             output_rewrites,
             id,
             ..
         } = fetch_node;
-
-        let Variables {
-            variables,
-            inverted_paths: paths,
-            contextual_arguments,
-        } = match Variables::new(
-            &requires,
-            &variable_usages,
-            &data,
-            &current_dir,
-            // Needs the original request here
-            supergraph_request.body(),
-            self.schema.as_ref(),
-            &input_rewrites,
-            &context_rewrites,
-        ) {
-            Some(variables) => variables,
-            None => {
-                return Box::pin(async { Ok((Value::Object(Object::default()), Vec::new())) });
-            }
-        };
 
         let service_name_string = service_name.to_string();
 
@@ -114,7 +87,7 @@ impl tower::Service<FetchRequest> for FetchService {
             .clone();
 
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
-        let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
+        let aliased_operation = if let Some(ctx_arg) = &variables.contextual_arguments {
             if let Some(subgraph_schema) = self.subgraph_schemas.get(&service_name.to_string()) {
                 match build_operation_with_aliasing(&operation, &ctx_arg, subgraph_schema) {
                     Ok(op) => {
@@ -150,7 +123,7 @@ impl tower::Service<FetchRequest> for FetchService {
                         GraphQLRequest::builder()
                             .query(aliased_operation)
                             .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.clone())
+                            .variables(variables.variables.clone())
                             .build(),
                     )
                     .build()
@@ -187,7 +160,8 @@ impl tower::Service<FetchRequest> for FetchService {
                             .context(context)
                             .fetch_node(connect_node.clone())
                             .supergraph_request(supergraph_request)
-                            .data(data)
+                            // TODO: remove clone once it returns
+                            .variables(variables.clone())
                             .current_dir(current_dir.clone())
                             .build(),
                     )
@@ -202,11 +176,11 @@ impl tower::Service<FetchRequest> for FetchService {
                 &requires,
                 &output_rewrites,
                 &schema,
-                paths,
+                variables.inverted_paths,
                 id,
                 &deferred_fetches,
                 &aqs,
-                variables,
+                variables.variables,
             )
             .await)
         })

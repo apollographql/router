@@ -309,6 +309,7 @@ impl Display for QueryHash {
     }
 }
 
+#[derive(Default, Clone)]
 pub(crate) struct Variables {
     pub(crate) variables: Object,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
