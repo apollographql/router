@@ -89,7 +89,7 @@ impl tower::Service<FetchRequest> for FetchService {
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = &variables.contextual_arguments {
             if let Some(subgraph_schema) = self.subgraph_schemas.get(&service_name.to_string()) {
-                match build_operation_with_aliasing(&operation, &ctx_arg, subgraph_schema) {
+                match build_operation_with_aliasing(&operation, ctx_arg, subgraph_schema) {
                     Ok(op) => {
                         alias_query_string = op.serialize().no_indent().to_string();
                         alias_query_string.as_str()

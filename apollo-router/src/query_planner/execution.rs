@@ -291,8 +291,8 @@ impl PlanNode {
                         match Variables::new(
                             &fetch_node.requires,
                             &fetch_node.variable_usages,
-                            &parent_value,
-                            &current_dir,
+                            parent_value,
+                            current_dir,
                             parameters.supergraph_request.body(),
                             parameters.schema.as_ref(),
                             &fetch_node.input_rewrites,
