@@ -1468,7 +1468,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Appears to be an expansion bug.
     fn handles_fragments_using_other_fragments() {
         let schema = r#"
               type Query {
