@@ -237,7 +237,9 @@ impl From<ObjectOrInterfaceTypeDefinitionPosition> for TypeDefinitionPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(
+    Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, derive_more::IsVariant,
+)]
 pub(crate) enum OutputTypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
     Object(ObjectTypeDefinitionPosition),
@@ -267,6 +269,10 @@ impl OutputTypeDefinitionPosition {
             OutputTypeDefinitionPosition::Union(type_) => &type_.type_name,
             OutputTypeDefinitionPosition::Enum(type_) => &type_.type_name,
         }
+    }
+
+    pub(crate) fn is_abstract(&self) -> bool {
+        matches!(self, Self::Union(_) | Self::Interface(_))
     }
 
     pub(crate) fn get<'schema>(
@@ -632,7 +638,7 @@ impl AbstractTypeDefinitionPosition {
     pub(crate) fn field(
         &self,
         field_name: Name,
-    ) -> Result<FieldDefinitionPosition, FederationError> {
+    ) -> Result<AbstractFieldDefinitionPosition, FederationError> {
         match self {
             AbstractTypeDefinitionPosition::Interface(type_) => Ok(type_.field(field_name).into()),
             AbstractTypeDefinitionPosition::Union(type_) => {
@@ -1002,6 +1008,15 @@ impl FieldDefinitionPosition {
     }
 }
 
+impl From<AbstractFieldDefinitionPosition> for FieldDefinitionPosition {
+    fn from(value: AbstractFieldDefinitionPosition) -> Self {
+        match value {
+            AbstractFieldDefinitionPosition::Interface(value) => value.into(),
+            AbstractFieldDefinitionPosition::Union(value) => value.into(),
+        }
+    }
+}
+
 impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition {
     fn from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Self {
         match value {
@@ -1012,7 +1027,86 @@ impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition 
 }
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
-pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
+pub(crate) enum AbstractFieldDefinitionPosition {
+    Interface(InterfaceFieldDefinitionPosition),
+    Union(UnionTypenameFieldDefinitionPosition),
+}
+
+impl Debug for AbstractFieldDefinitionPosition {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Interface(p) => write!(f, "Interface({p})"),
+            Self::Union(p) => write!(f, "Union({p})"),
+        }
+    }
+}
+
+impl AbstractFieldDefinitionPosition {
+    pub(crate) fn type_name(&self) -> &Name {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => &field.type_name,
+            AbstractFieldDefinitionPosition::Union(field) => &field.type_name,
+        }
+    }
+
+    pub(crate) fn field_name(&self) -> &Name {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => &field.field_name,
+            AbstractFieldDefinitionPosition::Union(field) => field.field_name(),
+        }
+    }
+
+    pub(crate) fn is_introspection_typename_field(&self) -> bool {
+        *self.field_name() == *INTROSPECTION_TYPENAME_FIELD_NAME
+    }
+
+    pub(crate) fn parent(&self) -> CompositeTypeDefinitionPosition {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => field.parent().into(),
+            AbstractFieldDefinitionPosition::Union(field) => field.parent().into(),
+        }
+    }
+
+    pub(crate) fn get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+        match self {
+            AbstractFieldDefinitionPosition::Interface(field) => field.get(schema),
+            AbstractFieldDefinitionPosition::Union(field) => field.get(schema),
+        }
+    }
+}
+
+impl TryFrom<FieldDefinitionPosition> for AbstractFieldDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            FieldDefinitionPosition::Interface(value) => Ok(value.into()),
+            FieldDefinitionPosition::Union(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an abstract field"#
+            ))),
+        }
+    }
+}
+
+impl TryFrom<ObjectOrInterfaceFieldDefinitionPosition> for AbstractFieldDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            ObjectOrInterfaceFieldDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an abstract field"#
+            ))),
+        }
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+pub enum ObjectOrInterfaceFieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
 }
@@ -1112,6 +1206,26 @@ impl TryFrom<FieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPositi
             ))),
         }
     }
+}
+
+impl TryFrom<AbstractFieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
+    type Error = FederationError;
+
+    fn try_from(value: AbstractFieldDefinitionPosition) -> Result<Self, Self::Error> {
+        match value {
+            AbstractFieldDefinitionPosition::Interface(value) => Ok(value.into()),
+            _ => Err(FederationError::internal(format!(
+                r#"Type "{value}" was unexpectedly not an object/interface field"#
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ObjectOrInterfaceFieldDirectivePosition {
+    pub field: ObjectOrInterfaceFieldDefinitionPosition,
+    pub directive_name: Name,
+    pub directive_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1305,6 +1419,10 @@ pub(crate) struct SchemaRootDefinitionPosition {
 }
 
 impl SchemaRootDefinitionPosition {
+    fn new(root_kind: SchemaRootDefinitionKind) -> Self {
+        Self { root_kind }
+    }
+
     pub(crate) fn parent(&self) -> SchemaDefinitionPosition {
         SchemaDefinitionPosition
     }
@@ -1840,6 +1958,19 @@ impl ObjectTypeDefinitionPosition {
         self.field(name!("__type"))
     }
 
+    /// Attempts to construct an iterator that yields the field definition positions for this
+    /// objects's fields.
+    // TODO: The lifetime capturing rules for RTIPs will change in Rust edition 2024. When they do,
+    // the bounds on this function can be changed to have 'a be the only lifetime (and still be
+    // correct).
+    pub(crate) fn field_positions<'b, 'a: 'b>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<impl 'b + Iterator<Item = ObjectFieldDefinitionPosition>, FederationError> {
+        self.get(schema)
+            .map(|node| node.fields.keys().map(|name| self.field(name.clone())))
+    }
+
     // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
     // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
     // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
@@ -2326,9 +2457,9 @@ impl Debug for ObjectTypeDefinitionPosition {
 }
 
 #[derive(Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ObjectFieldDefinitionPosition {
-    pub(crate) type_name: Name,
-    pub(crate) field_name: Name,
+pub struct ObjectFieldDefinitionPosition {
+    pub type_name: Name,
+    pub field_name: Name,
 }
 
 impl ObjectFieldDefinitionPosition {
@@ -3580,9 +3711,9 @@ impl Display for InterfaceTypeDefinitionPosition {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct InterfaceFieldDefinitionPosition {
-    pub(crate) type_name: Name,
-    pub(crate) field_name: Name,
+pub struct InterfaceFieldDefinitionPosition {
+    pub type_name: Name,
+    pub field_name: Name,
 }
 
 impl InterfaceFieldDefinitionPosition {

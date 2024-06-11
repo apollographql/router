@@ -28,6 +28,7 @@ expression: response
       "object": {
         "kind": "QueryPlan",
         "node": {
+          "connector": null,
           "kind": "Sequence",
           "nodes": [
             {
@@ -44,6 +45,7 @@ expression: response
               "operationKind": "query",
               "operationName": "QueryLL__Subgraph1__0",
               "outputRewrites": null,
+              "protocol": "graphQL",
               "schemaAwareHash": "babf88ea82c1330e535966572a55b03a2934097cd1cf905303b86ae7c197ccaf",
               "serviceName": "Subgraph1",
               "variableUsages": []
@@ -74,6 +76,7 @@ expression: response
                 "operationKind": "query",
                 "operationName": "QueryLL__Subgraph1__1",
                 "outputRewrites": null,
+                "protocol": "graphQL",
                 "requires": [
                   {
                     "kind": "InlineFragment",

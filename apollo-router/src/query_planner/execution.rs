@@ -3,11 +3,13 @@ use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
+use apollo_federation::sources::connect::Connectors;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::BroadcastStream;
+use tower::ServiceExt;
 use tracing::Instrument;
 
 use super::log;
@@ -37,7 +39,9 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
-use crate::services::SubgraphServiceFactory;
+use crate::services::fetch_service::FetchServiceFactory;
+use crate::services::new_service::ServiceFactory;
+use crate::services::FetchRequest;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::Context;
@@ -48,7 +52,7 @@ impl QueryPlan {
     pub(crate) async fn execute<'a>(
         &self,
         context: &'a Context,
-        service_factory: &'a Arc<SubgraphServiceFactory>,
+        service_factory: &'a Arc<FetchServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
         subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
@@ -56,6 +60,7 @@ impl QueryPlan {
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
         initial_value: Option<Value>,
+        connectors: &'a Connectors,
     ) -> Response {
         let root = Path::empty();
 
@@ -75,6 +80,7 @@ impl QueryPlan {
                     root_node: &self.root,
                     subscription_handle: &subscription_handle,
                     subscription_config,
+                    connectors,
                     subgraph_schemas,
                 },
                 &root,
@@ -101,7 +107,7 @@ impl QueryPlan {
 // holds the query plan executon arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
-    pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
+    pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
@@ -110,6 +116,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
+    pub(crate) connectors: &'a Connectors,
 }
 
 impl PlanNode {
@@ -126,7 +133,50 @@ impl PlanNode {
             let mut errors;
 
             match self {
-                PlanNode::Sequence { nodes } => {
+                PlanNode::Sequence {
+                    nodes,
+                    connector: Some(connector_node),
+                } => {
+                    value = parent_value.clone();
+                    errors = Vec::new();
+
+                    debug_assert_eq!(
+                        1,
+                        nodes.len(),
+                        "connector sequence should only contain 1 node"
+                    );
+
+                    if let Some(node) = nodes.first() {
+                        match connector_node
+                            .connector_execution(
+                                parameters,
+                                current_dir,
+                                parent_value,
+                                sender,
+                                node,
+                            )
+                            .instrument(tracing::info_span!(
+                                SEQUENCE_SPAN_NAME,
+                                "otel.kind" = "INTERNAL"
+                            ))
+                            .await
+                        {
+                            Ok((v, e)) => {
+                                value = v;
+                                errors = e;
+                            }
+                            Err(err) => {
+                                failfast_error!("Fetch error: {}", err);
+                                errors = vec![err.to_graphql_error(Some(current_dir.to_owned()))];
+                                value = Value::default();
+                            }
+                        }
+                    }
+                }
+                PlanNode::Sequence {
+                    nodes,
+                    connector: None,
+                } => {
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {
@@ -235,15 +285,25 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        let (v, e) = fetch_node
-                            .fetch_node(parameters, parent_value, current_dir)
+                        let service = parameters.service_factory.create();
+                        let request = FetchRequest::builder()
+                            .context(parameters.context.clone())
+                            .fetch_node(fetch_node.clone())
+                            .supergraph_request(parameters.supergraph_request.clone())
+                            .data(parent_value.clone())
+                            .current_dir(current_dir.clone())
+                            .deferred_fetches(parameters.deferred_fetches.clone())
+                            .build();
+                        let (v, e) = service
+                            .oneshot(request)
                             .instrument(tracing::info_span!(
                                 FETCH_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
                                 "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
-                            .await;
+                            .await
+                            .unwrap();
                         value = v;
                         errors = e;
                     }
@@ -295,6 +355,7 @@ impl PlanNode {
                                         root_node: parameters.root_node,
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
+                                        connectors: parameters.connectors,
                                         subgraph_schemas: parameters.subgraph_schemas,
                                     },
                                     current_dir,
@@ -441,6 +502,8 @@ impl DeferredNode {
         let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
+        let connectors = parameters.connectors.clone();
+
         let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
         let query = parameters.query.clone();
@@ -485,6 +548,7 @@ impl DeferredNode {
                             root_node: &root_node,
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
+                            connectors: &connectors,
                             subgraph_schemas: &subgraph_schemas,
                         },
                         &Path::default(),

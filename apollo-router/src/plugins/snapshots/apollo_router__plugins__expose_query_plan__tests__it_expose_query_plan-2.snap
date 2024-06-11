@@ -74,7 +74,8 @@ expression: "serde_json::to_value(response).unwrap()"
                 "is_authenticated": false,
                 "scopes": [],
                 "policies": []
-              }
+              },
+              "protocol": "graphQL"
             },
             {
               "kind": "Flatten",
@@ -114,7 +115,8 @@ expression: "serde_json::to_value(response).unwrap()"
                   "is_authenticated": false,
                   "scopes": [],
                   "policies": []
-                }
+                },
+                "protocol": "graphQL"
               }
             },
             {
@@ -161,7 +163,8 @@ expression: "serde_json::to_value(response).unwrap()"
                       "is_authenticated": false,
                       "scopes": [],
                       "policies": []
-                    }
+                    },
+                    "protocol": "graphQL"
                   }
                 },
                 {
@@ -205,12 +208,14 @@ expression: "serde_json::to_value(response).unwrap()"
                       "is_authenticated": false,
                       "scopes": [],
                       "policies": []
-                    }
+                    },
+                    "protocol": "graphQL"
                   }
                 }
               ]
             }
-          ]
+          ],
+          "connector": null
         }
       },
       "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"products\") {\n      {\n        topProducts(first: $first) {\n          __typename\n          upc\n          name\n        }\n      }\n    },\n    Flatten(path: \"topProducts.@\") {\n      Fetch(service: \"reviews\") {\n        {\n          ... on Product {\n            __typename\n            upc\n          }\n        } =>\n        {\n          ... on Product {\n            reviews {\n              id\n              product {\n                __typename\n                upc\n              }\n              author {\n                __typename\n                id\n              }\n            }\n          }\n        }\n      },\n    },\n    Parallel {\n      Flatten(path: \"topProducts.@.reviews.@.product\") {\n        Fetch(service: \"products\") {\n          {\n            ... on Product {\n              __typename\n              upc\n            }\n          } =>\n          {\n            ... on Product {\n              name\n            }\n          }\n        },\n      },\n      Flatten(path: \"topProducts.@.reviews.@.author\") {\n        Fetch(service: \"accounts\") {\n          {\n            ... on User {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on User {\n              name\n            }\n          }\n        },\n      },\n    },\n  },\n}"

@@ -44,11 +44,11 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
+use crate::services::fetch_service::FetchServiceFactory;
 use crate::services::new_service::ServiceFactory;
 use crate::services::ExecutionRequest;
 use crate::services::ExecutionResponse;
 use crate::services::Plugins;
-use crate::services::SubgraphServiceFactory;
 use crate::spec::query::subselections::BooleanValues;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -58,7 +58,7 @@ use crate::spec::Schema;
 pub(crate) struct ExecutionService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
 }
@@ -146,7 +146,7 @@ impl ExecutionService {
             .query_plan
             .execute(
                 &context,
-                &self.subgraph_service_factory,
+                &self.fetch_service_factory,
                 &Arc::new(req.supergraph_request),
                 &self.schema,
                 &self.subgraph_schemas,
@@ -154,6 +154,7 @@ impl ExecutionService {
                 subscription_handle.clone(),
                 &self.subscription_config,
                 req.source_stream_value,
+                &req.connectors,
             )
             .await;
         let query = req.query_plan.query.clone();
@@ -599,7 +600,7 @@ pub(crate) struct ExecutionServiceFactory {
     pub(crate) schema: Arc<Schema>,
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) plugins: Arc<Plugins>,
-    pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
+    pub(crate) fetch_service_factory: Arc<FetchServiceFactory>,
 }
 
 impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
@@ -618,7 +619,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                 self.plugins.iter().rev().fold(
                     crate::services::execution::service::ExecutionService {
                         schema: self.schema.clone(),
-                        subgraph_service_factory: self.subgraph_service_factory.clone(),
+                        fetch_service_factory: self.fetch_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
                         subgraph_schemas: self.subgraph_schemas.clone(),
                     }

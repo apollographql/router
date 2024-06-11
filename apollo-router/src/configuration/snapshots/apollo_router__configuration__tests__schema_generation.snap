@@ -1639,6 +1639,25 @@ expression: "&schema"
       ],
       "type": "object"
     },
+    "Connectors": {
+      "additionalProperties": false,
+      "description": "Connectors configuration",
+      "properties": {
+        "subgraphs": {
+          "additionalProperties": {
+            "additionalProperties": {
+              "$ref": "#/definitions/SourceApiConfiguration",
+              "description": "#/definitions/SourceApiConfiguration"
+            },
+            "type": "object"
+          },
+          "default": {},
+          "description": "Per subgraph configuration",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "ContextForward": {
       "additionalProperties": false,
       "description": "Configuration to forward context values in metric attributes/labels",
@@ -5339,6 +5358,20 @@ expression: "&schema"
         }
       ]
     },
+    "SourceApiConfiguration": {
+      "additionalProperties": false,
+      "description": "Configuration for a source API",
+      "properties": {
+        "override_url": {
+          "default": null,
+          "description": "Override the base URL for the API",
+          "format": "uri",
+          "nullable": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "SpanMode": {
       "description": "Span mode to create new or deprecated spans",
       "oneOf": [
@@ -8036,6 +8069,10 @@ expression: "&schema"
     "plugins": {
       "$ref": "#/definitions/Plugins",
       "description": "#/definitions/Plugins"
+    },
+    "preview_connectors": {
+      "$ref": "#/definitions/Connectors",
+      "description": "#/definitions/Connectors"
     },
     "preview_demand_control": {
       "$ref": "#/definitions/DemandControlConfig",

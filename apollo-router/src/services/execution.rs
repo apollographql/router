@@ -2,6 +2,7 @@
 
 use std::sync::Arc;
 
+use apollo_federation::sources::connect::Connectors;
 use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tokio::sync::mpsc;
@@ -29,6 +30,9 @@ pub struct Request {
     pub query_plan: Arc<QueryPlan>,
 
     pub context: Context,
+
+    pub(crate) connectors: Connectors,
+
     /// Initial data coming from subscription event if it's a subscription
     pub(crate) source_stream_value: Option<Value>,
     /// Channel to send all parameters needed for the subscription
@@ -46,6 +50,7 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
+        connectors: Option<Connectors>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -55,6 +60,7 @@ impl Request {
             context,
             source_stream_value,
             subscription_tx,
+            connectors: connectors.unwrap_or_default(),
         }
     }
 
@@ -64,6 +70,7 @@ impl Request {
         supergraph_request: http::Request<graphql::Request>,
         query_plan: Arc<QueryPlan>,
         context: Context,
+        connectors: Option<Connectors>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -73,6 +80,7 @@ impl Request {
             context,
             source_stream_value,
             subscription_tx,
+            connectors: connectors.unwrap_or_default(),
         }
     }
 
@@ -86,6 +94,7 @@ impl Request {
         supergraph_request: Option<http::Request<graphql::Request>>,
         query_plan: Option<QueryPlan>,
         context: Option<Context>,
+        connectors: Option<Connectors>,
         source_stream_value: Option<Value>,
         subscription_tx: Option<mpsc::Sender<SubscriptionTaskParams>>,
     ) -> Request {
@@ -93,6 +102,7 @@ impl Request {
             supergraph_request.unwrap_or_default(),
             Arc::new(query_plan.unwrap_or_else(|| QueryPlan::fake_builder().build())),
             context.unwrap_or_default(),
+            connectors,
             source_stream_value,
             subscription_tx,
         )

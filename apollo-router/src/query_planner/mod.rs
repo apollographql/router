@@ -7,6 +7,7 @@ pub(crate) use bridge_query_planner_pool::*;
 pub(crate) use caching_query_planner::*;
 pub use plan::QueryPlan;
 pub(crate) use plan::*;
+pub(crate) use selection::Selection as QueryPlannerSelection;
 
 pub use self::fetch::OperationKind;
 
@@ -22,6 +23,7 @@ mod plan;
 pub(crate) mod rewrites;
 mod selection;
 mod subgraph_context;
+pub(crate) use subgraph_context::build_operation_with_aliasing;
 pub(crate) mod subscription;
 
 pub(crate) const FETCH_SPAN_NAME: &str = "fetch";
@@ -39,7 +41,7 @@ pub(crate) const CONDITION_ELSE_SPAN_NAME: &str = "condition_else";
 // The code resides in a separate submodule to allow writing a log filter activating it
 // separately from the query planner logs, as follows:
 // `router -s supergraph.graphql --log info,crate::query_planner::log=trace`
-mod log {
+pub(crate) mod log {
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Map;
     use serde_json_bytes::Value;

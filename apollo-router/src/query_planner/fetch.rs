@@ -6,26 +6,34 @@ use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
+use apollo_federation::sources;
 use indexmap::IndexSet;
+use router_bridge::planner::PlanSuccess;
+use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
+use tokio::sync::broadcast;
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
 
 use super::execution::ExecutionParameters;
 use super::rewrites;
+use super::rewrites::DataRewrite;
 use super::selection::execute_selection_set;
 use super::selection::Selection;
-use super::subgraph_context::build_operation_with_aliasing;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
+use super::PlanNode;
+use super::QueryPlanResult;
 use crate::error::Error;
 use crate::error::FetchError;
+use crate::error::QueryPlannerError;
 use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
-use crate::http_ext;
 use crate::json_ext;
 use crate::json_ext::Object;
 use crate::json_ext::Path;
@@ -33,6 +41,9 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::connectors::finder_field_for_fetch_node;
+use crate::plugins::connectors::Connector;
+use crate::services::subgraph::BoxService;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Schema;
@@ -140,6 +151,34 @@ pub(crate) struct FetchNode {
     // authorization metadata for the subgraph query
     #[serde(default)]
     pub(crate) authorization: Arc<CacheKeyMetadata>,
+    #[serde(default)]
+    pub(crate) protocol: Arc<Protocol>,
+    #[serde(default, skip)]
+    pub(crate) source_node: Option<Arc<sources::to_remove::FetchNode>>,
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum Protocol {
+    #[default]
+    GraphQL,
+    RestWrapper(RestProtocolWrapper),
+    RestFetch(RestFetchNode),
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct RestProtocolWrapper {
+    pub(crate) connector_service_name: String,
+    pub(crate) connector_graph_key: Option<Arc<String>>,
+    pub(crate) magic_finder_field: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+pub(crate) struct RestFetchNode {
+    pub(crate) connector_service_name: String,
+    pub(crate) connector_graph_key: Arc<String>,
+    pub(crate) parent_service_name: String,
 }
 
 #[derive(Clone)]
@@ -151,6 +190,12 @@ pub(crate) struct SubgraphOperation {
 }
 
 impl SubgraphOperation {
+    pub(crate) fn replace(&self, from: &str, to: &str) -> Self {
+        let serialized = self.serialized.replace(from, to);
+
+        Self::from_string(serialized)
+    }
+
     pub(crate) fn from_string(serialized: impl Into<String>) -> Self {
         Self {
             serialized: serialized.into(),
@@ -273,17 +318,16 @@ pub(crate) struct Variables {
 impl Variables {
     #[instrument(skip_all, level = "debug", name = "make_variables")]
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn new(
+    pub(crate) fn new(
         requires: &[Selection],
         variable_usages: &[NodeStr],
         data: &Value,
         current_dir: &Path,
-        request: &Arc<http::Request<Request>>,
+        body: &Request,
         schema: &Schema,
         input_rewrites: &Option<Vec<rewrites::DataRewrite>>,
         context_rewrites: &Option<Vec<rewrites::DataRewrite>>,
     ) -> Option<Variables> {
-        let body = request.body();
         let mut subgraph_context = SubgraphContext::new(data, schema, context_rewrites);
         if !requires.is_empty() {
             let mut variables = Object::with_capacity(1 + variable_usages.len());
@@ -367,108 +411,20 @@ impl Variables {
 
 impl FetchNode {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) async fn fetch_node<'a>(
-        &'a self,
-        parameters: &'a ExecutionParameters<'a>,
-        data: &'a Value,
-        current_dir: &'a Path,
+    pub(crate) async fn subgraph_fetch(
+        service: BoxService,
+        subgraph_request: SubgraphRequest,
+        service_name: &str,
+        current_dir: &Path,
+        requires: &[Selection],
+        output_rewrites: &Option<Vec<DataRewrite>>,
+        schema: &Schema,
+        paths: Vec<Vec<Path>>,
+        id: Option<NodeStr>,
+        deferred_fetches: &HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+        operation_str: &str,
+        variables: Map<ByteString, Value>,
     ) -> (Value, Vec<Error>) {
-        let FetchNode {
-            operation,
-            operation_kind,
-            operation_name,
-            service_name,
-            ..
-        } = self;
-
-        let Variables {
-            variables,
-            inverted_paths: paths,
-            contextual_arguments,
-        } = match Variables::new(
-            &self.requires,
-            &self.variable_usages,
-            data,
-            current_dir,
-            // Needs the original request here
-            parameters.supergraph_request,
-            parameters.schema,
-            &self.input_rewrites,
-            &self.context_rewrites,
-        ) {
-            Some(variables) => variables,
-            None => {
-                return (Value::Object(Object::default()), Vec::new());
-            }
-        };
-
-        let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
-        let aliased_operation = if let Some(ctx_arg) = contextual_arguments {
-            if let Some(subgraph_schema) =
-                parameters.subgraph_schemas.get(&service_name.to_string())
-            {
-                match build_operation_with_aliasing(operation, &ctx_arg, subgraph_schema) {
-                    Ok(op) => {
-                        alias_query_string = op.serialize().no_indent().to_string();
-                        alias_query_string.as_str()
-                    }
-                    Err(errors) => {
-                        tracing::debug!(
-                            "couldn't generate a valid executable document? {:?}",
-                            errors
-                        );
-                        operation.as_serialized()
-                    }
-                }
-            } else {
-                tracing::debug!(
-                    "couldn't find a subgraph schema for service {:?}",
-                    &service_name
-                );
-                operation.as_serialized()
-            }
-        } else {
-            operation.as_serialized()
-        };
-
-        let mut subgraph_request = SubgraphRequest::builder()
-            .supergraph_request(parameters.supergraph_request.clone())
-            .subgraph_request(
-                http_ext::Request::builder()
-                    .method(http::Method::POST)
-                    .uri(
-                        parameters
-                            .schema
-                            .subgraph_url(service_name)
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "schema uri for subgraph '{service_name}' should already have been checked"
-                                )
-                            })
-                            .clone(),
-                    )
-                    .body(
-                        Request::builder()
-                            .query(aliased_operation)
-                            .and_operation_name(operation_name.as_ref().map(|n| n.to_string()))
-                            .variables(variables.clone())
-                            .build(),
-                    )
-                    .build()
-                    .expect("it won't fail because the url is correct and already checked; qed"),
-            )
-            .subgraph_name(self.service_name.to_string())
-            .operation_kind(*operation_kind)
-            .context(parameters.context.clone())
-            .build();
-        subgraph_request.query_hash = self.schema_aware_hash.clone();
-        subgraph_request.authorization = self.authorization.clone();
-
-        let service = parameters
-            .service_factory
-            .create(service_name)
-            .expect("we already checked that the service exists during planning; qed");
-
         let (_parts, response) = match service
             .oneshot(subgraph_request)
             .instrument(tracing::trace_span!("subfetch_stream"))
@@ -501,12 +457,7 @@ impl FetchNode {
             Ok(res) => res.response.into_parts(),
         };
 
-        super::log::trace_subfetch(
-            service_name,
-            operation.as_serialized(),
-            &variables,
-            &response,
-        );
+        super::log::trace_subfetch(service_name, operation_str, &variables, &response);
 
         if !response.is_primary() {
             return (
@@ -518,13 +469,20 @@ impl FetchNode {
             );
         }
 
-        let (value, errors) =
-            self.response_at_path(parameters.schema, current_dir, paths, response);
-        if let Some(id) = &self.id {
-            if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+        let (value, errors) = Self::response_at_path(
+            schema,
+            current_dir,
+            paths,
+            response,
+            requires,
+            output_rewrites,
+            service_name,
+        );
+        if let Some(id) = id {
+            if let Some(sender) = deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
                 if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
-                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, id, e);
                 }
             }
         }
@@ -532,14 +490,16 @@ impl FetchNode {
     }
 
     #[instrument(skip_all, level = "debug", name = "response_insert")]
-    fn response_at_path<'a>(
-        &'a self,
+    pub(crate) fn response_at_path<'a>(
         schema: &Schema,
         current_dir: &'a Path,
         inverted_paths: Vec<Vec<Path>>,
         response: graphql::Response,
+        requires: &[Selection],
+        output_rewrites: &Option<Vec<DataRewrite>>,
+        service_name: &str,
     ) -> (Value, Vec<Error>) {
-        if !self.requires.is_empty() {
+        if !requires.is_empty() {
             let entities_path = Path(vec![json_ext::PathElement::Key(
                 "_entities".to_string(),
                 None,
@@ -597,7 +557,7 @@ impl FetchNode {
                         let mut value = Value::default();
 
                         for (index, mut entity) in array.into_iter().enumerate() {
-                            rewrites::apply_rewrites(schema, &mut entity, &self.output_rewrites);
+                            rewrites::apply_rewrites(schema, &mut entity, output_rewrites);
 
                             if let Some(paths) = inverted_paths.get(index) {
                                 if paths.len() > 1 {
@@ -623,7 +583,7 @@ impl FetchNode {
             if errors.is_empty() {
                 tracing::warn!(
                     "Subgraph response from '{}' was missing key `_entities` and had no errors. This is likely a bug in the subgraph.",
-                    self.service_name
+                    service_name
                 );
             }
 
@@ -653,14 +613,9 @@ impl FetchNode {
                 })
                 .collect();
             let mut data = response.data.unwrap_or_default();
-            rewrites::apply_rewrites(schema, &mut data, &self.output_rewrites);
+            rewrites::apply_rewrites(schema, &mut data, output_rewrites);
             (Value::from_path(current_dir, data), errors)
         }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn service_name(&self) -> &str {
-        &self.service_name
     }
 
     pub(crate) fn operation_kind(&self) -> &OperationKind {
@@ -681,7 +636,7 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let schema = &subgraph_schemas[self.service_name().as_str()];
         let doc = self.operation.init_parsed(schema)?;
 
         if let Ok(hash) = QueryHashVisitor::hash_query(
@@ -720,5 +675,200 @@ impl FetchNode {
             global_authorisation_cache_key,
             &subgraph_query_cache_key,
         ));
+    }
+
+    pub(crate) async fn connector_execution<'a>(
+        &'a self,
+        parameters: &'a ExecutionParameters<'a>,
+        current_dir: &'a Path,
+        data: &'a Value,
+        sender: tokio::sync::mpsc::Sender<graphql::Response>,
+        connector_node: &'a PlanNode,
+    ) -> Result<(Value, Vec<Error>), FetchError> {
+        let Variables {
+            variables,
+            inverted_paths: paths,
+            .. // TODO: context_rewrites
+        } = match Variables::new(
+            &self.requires,
+            self.variable_usages.as_ref(),
+            data,
+            current_dir,
+            // Needs the original request here
+            parameters.supergraph_request.body(),
+            parameters.schema,
+            &self.input_rewrites,
+            &self.context_rewrites,
+        ) {
+            Some(variables) => variables,
+            None => {
+                return Ok((Value::Object(Object::default()), Vec::new()));
+            }
+        };
+
+        let mut request = parameters.supergraph_request.body().clone();
+        request.variables = variables;
+        let mut supergraph_request = http::Request::builder()
+            .method(parameters.supergraph_request.method())
+            .uri(parameters.supergraph_request.uri())
+            .body(request)
+            .unwrap();
+        for (name, value) in parameters.supergraph_request.headers() {
+            supergraph_request
+                .headers_mut()
+                .insert(name.clone(), value.clone());
+        }
+
+        let subparameters = ExecutionParameters {
+            context: parameters.context,
+            service_factory: parameters.service_factory,
+            schema: parameters.schema,
+            deferred_fetches: parameters.deferred_fetches,
+            query: parameters.query,
+            root_node: parameters.root_node,
+            subscription_handle: parameters.subscription_handle,
+            subscription_config: parameters.subscription_config,
+            supergraph_request: &Arc::new(supergraph_request),
+            connectors: parameters.connectors,
+            subgraph_schemas: parameters.subgraph_schemas,
+        };
+
+        let path = Path::default();
+        let (mut value, errors) = connector_node
+            .execute_recursively(&subparameters, &path, data, sender)
+            .instrument(tracing::info_span!(
+                "connector",
+                "graphql.path" = %current_dir,
+                "apollo.subgraph.name" = self.service_name.as_str(),
+                "otel.kind" = "INTERNAL"
+            ))
+            .await;
+
+        let magic_finder = match self.protocol.as_ref() {
+            Protocol::RestWrapper(wrapper) => wrapper.magic_finder_field.as_ref(),
+            _ => None,
+        };
+
+        if let Some(magic_finder) = magic_finder {
+            let magic_finder = serde_json_bytes::ByteString::from(magic_finder.as_str());
+            if let Value::Object(ref mut obj) = value {
+                if let Some(v) = obj.remove(&magic_finder) {
+                    obj.insert("_entities", v);
+                }
+            }
+        }
+
+        let response = graphql::Response::builder()
+            .data(value)
+            .errors(errors)
+            .build();
+
+        let (value, errors) = Self::response_at_path(
+            parameters.schema,
+            current_dir,
+            paths,
+            response,
+            &self.requires,
+            &self.output_rewrites,
+            &self.service_name(),
+        );
+        if let Some(id) = &self.id {
+            if let Some(sender) = parameters.deferred_fetches.get(id.as_str()) {
+                tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
+                if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                    tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, self.id, e);
+                }
+            }
+        }
+
+        Ok((value, errors))
+    }
+
+    pub(crate) async fn generate_connector_plan(
+        &mut self,
+        schema: &Schema,
+        subgraph_planners: &HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
+        connectors: &Arc<HashMap<Arc<String>, Connector>>,
+    ) -> Result<Option<(PlanSuccess<QueryPlanResult>, RestProtocolWrapper)>, QueryPlannerError>
+    {
+        if let Some(planner) = subgraph_planners.get(&self.service_name.to_string()) {
+            tracing::debug!(
+                "planning for subgraph '{}' and query '{}'",
+                self.service_name,
+                self.operation
+            );
+
+            let connectors_in_subgraph = connectors
+                .iter()
+                .filter_map(|(_, connector)| {
+                    if *connector.origin_subgraph == self.service_name.as_str() {
+                        Some(connector)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let (operation, rest_protocol_wrapper) = if let Some(rest_protocol_wrapper) =
+                finder_field_for_fetch_node(
+                    schema,
+                    &connectors_in_subgraph,
+                    self.requires.as_slice(),
+                ) {
+                if let Some(mff) = &rest_protocol_wrapper.magic_finder_field {
+                    (
+                        self.operation.replace("_entities", mff),
+                        rest_protocol_wrapper,
+                    )
+                } else {
+                    (self.operation.clone(), rest_protocol_wrapper)
+                }
+            } else {
+                (
+                    self.operation.clone(),
+                    RestProtocolWrapper {
+                        connector_service_name: self.service_name.to_string(),
+                        connector_graph_key: None,
+                        magic_finder_field: None,
+                    },
+                )
+            };
+
+            tracing::debug!(
+                "replaced with operation(magic finder field={:?}): {operation}",
+                rest_protocol_wrapper.magic_finder_field.as_ref()
+            );
+            match planner
+                .plan(
+                    operation.to_string(),
+                    self.operation_name.as_ref().map(|on| on.to_string()),
+                    Default::default(),
+                )
+                .await
+                .map_err(QueryPlannerError::RouterBridgeError)?
+                .into_result()
+            {
+                Ok(mut plan) => {
+                    if let Some(node) = plan.data.query_plan.node.as_mut() {
+                        Arc::make_mut(node)
+                            .update_connector_plan(&self.service_name.to_string(), connectors);
+                    }
+
+                    return Ok(Some((plan, rest_protocol_wrapper)));
+                }
+                Err(err) => {
+                    return Err(QueryPlannerError::from(err));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub(crate) fn service_name(&self) -> NodeStr {
+        match self.protocol.as_ref() {
+            Protocol::GraphQL => self.service_name.clone(),
+            Protocol::RestWrapper(_rw) => self.service_name.clone(),
+            Protocol::RestFetch(rf) => rf.connector_graph_key.to_string().into(),
+        }
     }
 }

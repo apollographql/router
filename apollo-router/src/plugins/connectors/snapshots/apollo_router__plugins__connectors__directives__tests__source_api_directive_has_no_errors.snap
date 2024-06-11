@@ -1,0 +1,49 @@
+---
+source: apollo-router/src/plugins/connectors/directives.rs
+expression: all_source_apis
+---
+{
+  "contacts_legacy_contacts": {
+    "graph": "contacts",
+    "name": "legacy_contacts",
+    "http": {
+      "base_url": "http://localhost:4002/legacy/contacts/",
+      "default": false,
+      "headers": []
+    }
+  },
+  "contacts_rest_contacts": {
+    "graph": "contacts",
+    "name": "rest_contacts",
+    "http": {
+      "base_url": "http://localhost:4002/contacts/",
+      "default": true,
+      "headers": [
+        {
+          "name": "x-test",
+          "as": null,
+          "value": "test1234"
+        },
+        {
+          "name": "x-before-rename-test",
+          "as": "x-after-rename-test",
+          "value": null
+        },
+        {
+          "name": "x-before-rename-and-with-value-test",
+          "as": "x-after-rename-and-with-value-test",
+          "value": "test5678"
+        }
+      ]
+    }
+  },
+  "contacts_rest_notes": {
+    "graph": "contacts",
+    "name": "rest_notes",
+    "http": {
+      "base_url": "http://localhost:4002/notes/",
+      "default": false,
+      "headers": []
+    }
+  }
+}

@@ -47,6 +47,7 @@ use crate::configuration::schema::Mode;
 use crate::graphql;
 use crate::notification::Notify;
 use crate::plugin::plugins;
+use crate::plugins::connectors::configuration::Connectors;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
@@ -193,6 +194,10 @@ pub struct Configuration {
     /// Type conditioned fetching configuration.
     #[serde(default)]
     pub(crate) experimental_type_conditioned_fetching: bool,
+
+    /// Connectors configuration
+    #[serde(default)]
+    pub(crate) preview_connectors: Connectors,
 }
 
 impl PartialEq for Configuration {
@@ -274,6 +279,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             experimental_apollo_metrics_generation_mode: ApolloMetricsGenerationMode,
             experimental_api_schema_generation_mode: ApiSchemaMode,
             experimental_query_planner_mode: QueryPlannerMode,
+            preview_connectors: Connectors,
         }
         let ad_hoc: AdHocConfiguration = serde::Deserialize::deserialize(deserializer)?;
 
@@ -300,6 +306,7 @@ impl<'de> serde::Deserialize<'de> for Configuration {
             plugins: ad_hoc.plugins,
             apollo_plugins: ad_hoc.apollo_plugins,
             batching: ad_hoc.batching,
+            preview_connectors: ad_hoc.preview_connectors,
 
             // serde(skip)
             notify,
@@ -345,6 +352,7 @@ impl Configuration {
         batching: Option<Batching>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
+        preview_connectors: Option<Connectors>,
     ) -> Result<Self, ConfigurationError> {
         let notify = Self::notify(&apollo_plugins)?;
 
@@ -376,6 +384,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             notify,
+            preview_connectors: preview_connectors.unwrap_or_default(),
         };
 
         conf.validate()
@@ -468,6 +477,7 @@ impl Configuration {
         experimental_type_conditioned_fetching: Option<bool>,
         experimental_apollo_metrics_generation_mode: Option<ApolloMetricsGenerationMode>,
         experimental_query_planner_mode: Option<QueryPlannerMode>,
+        preview_connectors: Option<Connectors>,
     ) -> Result<Self, ConfigurationError> {
         let configuration = Self {
             validated_yaml: Default::default(),
@@ -497,6 +507,7 @@ impl Configuration {
             experimental_type_conditioned_fetching: experimental_type_conditioned_fetching
                 .unwrap_or_default(),
             batching: batching.unwrap_or_default(),
+            preview_connectors: preview_connectors.unwrap_or_default(),
         };
 
         configuration.validate()

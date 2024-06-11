@@ -23,6 +23,7 @@ use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
+use crate::plugins::connectors::ConnectorSupergraphError;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
 
@@ -564,6 +565,41 @@ pub(crate) enum SchemaError {
     /// Api error(s): {0}
     #[from(ignore)]
     Api(String),
+
+    /// Connector error(s): {0}
+    Connector(String),
+}
+
+#[derive(Error, Display, Debug, PartialEq)]
+pub(crate) enum ConnectorDirectiveError {
+    /// Attribute '{1}' is missing for type '{0}'
+    MissingAttributeForType(String, String),
+    /// Attribute '{1}' does not exist for type '{0}'
+    UnknownAttributeForType(String, String),
+    /// Attribute '{1}' must be of type '{0}'.
+    InvalidTypeForAttribute(String, String),
+    /// Couldn't parse type '{1}': '{0}
+    ParseError(String, String),
+    /// Exactly one argument of '{1}' must be set for type '{0}'
+    RequiresExactlyOne(String, String),
+    /// Invalid join directive: '{0}'
+    InvalidJoinDirective(String),
+    /// No source API defined
+    NoSourceAPIDefined,
+    /// Only HTTP sources are supported
+    UknownSourceAPIKind,
+    /// HTTP parameters missing
+    MissingHttp,
+    /// Invalid Base URI on API
+    InvalidBaseUri(url::ParseError),
+    /// Invalid Path for directive
+    InvalidPath(url::ParseError),
+    /// Invalid HTTP header mapping
+    InvalidHeaderMapping,
+    /// Could not generate path from inputs
+    PathGenerationError(String),
+    /// The schema is inconsistent: '{0}'
+    InconsistentSchema(ConnectorSupergraphError),
 }
 
 /// Collection of schema validation errors.
