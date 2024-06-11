@@ -312,15 +312,7 @@ fn write_operation(
     let operation = operation_document
         .get_operation(None)
         .expect("expected a single-operation document");
-    if operation.operation_type == executable::OperationType::Query {
-        write_selections(state, &operation.selection_set.selections)?
-    } else {
-        state.write(
-            operation
-                .serialize()
-                .initial_indent_level(state.indent_level()),
-        )?
-    }
+    write_selections(state, &operation.selection_set.selections)?;
     for fragment in operation_document.fragments.values() {
         state.write("\n\n")?; // new line without indentation (since `fragment` adds indentation)
         state.write(
