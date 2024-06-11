@@ -173,7 +173,7 @@ impl InstrumentsConfig {
                                 meter
                                     .f64_histogram("http.server.response.body.size")
                                     .with_unit(Unit::new("By"))
-                                    .with_description("Size of HTTP server response bodies")
+                                    .with_description("Size of HTTP server response bodies.")
                                     .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
