@@ -1141,6 +1141,16 @@ pub(crate) enum Increment {
     FieldCustom(Option<i64>),
 }
 
+fn to_i64(value: opentelemetry::Value) -> Option<i64> {
+    match value {
+        opentelemetry::Value::I64(i) => Some(i),
+        opentelemetry::Value::String(s) => s.as_str().parse::<i64>().ok(),
+        opentelemetry::Value::F64(f) => Some(f.floor() as i64),
+        opentelemetry::Value::Bool(_) => None,
+        opentelemetry::Value::Array(_) => None,
+    }
+}
+
 pub(crate) struct CustomCounter<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
@@ -1187,12 +1197,8 @@ where
 
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1231,12 +1237,8 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1292,12 +1294,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1378,29 +1376,14 @@ where
             return;
         }
 
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(ty, field, value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
-        }
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
@@ -1428,8 +1411,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.counter.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
-            counter.add(increment, &attrs);
+            counter.add(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }
@@ -1599,15 +1597,9 @@ where
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1644,15 +1636,9 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1704,12 +1690,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1786,29 +1768,14 @@ where
             return;
         }
 
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(ty, field, value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
-        }
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
@@ -1836,8 +1803,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.histogram.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &attrs);
+            histogram.record(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }

@@ -22,6 +22,7 @@ use super::process_error;
 use super::subgraph;
 use super::PathBuf;
 use super::Rhai;
+use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -709,7 +710,7 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
     assert_eq!(
         processed_error.body,
         Some(
-            crate::response::Response::builder()
+            graphql::Response::builder()
                 .errors(vec![{
                     Error::builder()
                         .message("I have raised a 403")
@@ -732,7 +733,7 @@ async fn it_can_process_om_subgraph_200_with_graphql_data() {
     assert_eq!(
         processed_error.body,
         Some(
-            crate::response::Response::builder()
+            graphql::Response::builder()
                 .data(serde_json::json!({ "name": "Ada Lovelace"}))
                 .build()
         )

@@ -835,17 +835,14 @@ impl Selector for SupergraphSelector {
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::Cost { cost } => {
-                let extensions = ctx.extensions().lock();
-                extensions
-                    .get::<CostContext>()
-                    .map(|cost_result| match cost {
-                        CostValue::Estimated => cost_result.estimated.into(),
-                        CostValue::Actual => cost_result.actual.into(),
-                        CostValue::Delta => cost_result.delta().into(),
-                        CostValue::Result => cost_result.result.into(),
-                    })
-            }
+            SupergraphSelector::Cost { cost } => ctx.extensions().with_lock(|lock| {
+                lock.get::<CostContext>().map(|cost_result| match cost {
+                    CostValue::Estimated => cost_result.estimated.into(),
+                    CostValue::Actual => cost_result.actual.into(),
+                    CostValue::Delta => cost_result.delta().into(),
+                    CostValue::Result => cost_result.result.into(),
+                })
+            }),
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
                 if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
                     == Some(serde_json_bytes::Value::Bool(true))
@@ -1417,7 +1414,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1439,7 +1436,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1464,7 +1461,7 @@ mod test {
                         .supergraph_request(Arc::new(
                             http::Request::builder()
                                 .header("header_key", "header_value")
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()

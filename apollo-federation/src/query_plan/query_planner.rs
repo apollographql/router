@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
@@ -170,9 +171,9 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Default)]
 pub struct QueryPlanningStatistics {
-    pub evaluated_plan_count: usize,
+    pub evaluated_plan_count: Cell<usize>,
 }
 
 impl QueryPlannerConfig {
@@ -238,7 +239,7 @@ impl QueryPlanner {
                 _ => None,
             })
             .filter(|position| {
-                query_graph.sources().any(|(_name, schema)| {
+                query_graph.subgraphs().any(|(_name, schema)| {
                     schema
                         .schema()
                         .types
@@ -249,7 +250,7 @@ impl QueryPlanner {
             .collect::<IndexSet<_>>();
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
-            let mut sources = query_graph.sources().filter_map(|(_name, subgraph)| {
+            let mut sources = query_graph.subgraphs().filter_map(|(_name, subgraph)| {
                 match subgraph.try_get_type(position.type_name().clone())? {
                     // This is only called for type names that are abstract in the supergraph, so it
                     // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
@@ -279,7 +280,7 @@ impl QueryPlanner {
             let Some(expected_runtimes) = sources.next() else {
                 return false;
             };
-            sources.all(|runtimes| runtimes == expected_runtimes)
+            !sources.all(|runtimes| runtimes == expected_runtimes)
         };
 
         let abstract_types_with_inconsistent_runtime_types = supergraph
@@ -308,7 +309,7 @@ impl QueryPlanner {
     }
 
     pub fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
-        &self.federated_query_graph.sources
+        self.federated_query_graph.subgraph_schemas()
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
@@ -332,17 +333,10 @@ impl QueryPlanner {
 
         let is_subscription = operation.is_subscription();
 
-        let statistics = QueryPlanningStatistics {
-            evaluated_plan_count: 0,
-        };
+        let statistics = QueryPlanningStatistics::default();
 
         if self.config.debug.bypass_planner_for_single_subgraph {
-            // A federated query graph always have 1 more sources than there is subgraph, because the root vertices
-            // belong to no subgraphs and use a special source named '_'. So we skip that "fake" source.
-            let mut subgraphs = self
-                .federated_query_graph
-                .sources()
-                .filter(|&(name, _schema)| name != "_");
+            let mut subgraphs = self.federated_query_graph.subgraphs();
             if let (Some((subgraph_name, _subgraph_schema)), None) =
                 (subgraphs.next(), subgraphs.next())
             {
@@ -442,7 +436,7 @@ impl QueryPlanner {
             // PORT_NOTE(@goto-bus-stop): In JS, `root` is a `RootVertex`, which is dynamically
             // checked at various points in query planning. This is our Rust equivalent of that.
             head_must_be_root: true,
-            statistics,
+            statistics: &statistics,
             abstract_types_with_inconsistent_runtime_types: self
                 .abstract_types_with_inconsistent_runtime_types
                 .clone()
@@ -501,7 +495,7 @@ impl QueryPlanner {
 
         Ok(QueryPlan {
             node: root_node,
-            statistics: parameters.statistics,
+            statistics,
         })
     }
 
@@ -692,7 +686,11 @@ fn compute_plan_internal(
             deferred.extend(local_deferred);
             let new_selection = dependency_graph.defer_tracking.primary_selection;
             match primary_selection.as_mut() {
-                Some(selection) => selection.merge_into(new_selection.iter())?,
+                Some(selection) => {
+                    if let Some(new_selection) = new_selection {
+                        selection.add_local_selection_set(&new_selection)?
+                    }
+                }
                 None => primary_selection = new_selection,
             }
         }
@@ -920,7 +918,6 @@ type User
         )
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
-        // TODO: This is the current output, but it's wrong: it's not fetching `vendor.name` at all.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
@@ -939,76 +936,47 @@ type User
                 }
               }
             },
-            Parallel {
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Movie {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Movie {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
+            Flatten(path: "bestRatedProducts.@") {
+              Fetch(service: "products") {
+                {
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                  ... on Movie {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Book {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
+                  }
+                  ... on Movie {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
+                  }
+                }
               },
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Book {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Book {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
-                    }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
-                    }
-                  },
-                },
+            },
+            Flatten(path: "bestRatedProducts.@.vendor") {
+              Fetch(service: "accounts") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    name
+                  }
+                }
               },
             },
           },
