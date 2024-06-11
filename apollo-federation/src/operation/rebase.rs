@@ -12,6 +12,7 @@ use super::InlineFragmentData;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::NormalizeSelectionOption;
+use super::OperationElement;
 use super::Selection;
 use super::SelectionId;
 use super::SelectionSet;
@@ -306,6 +307,41 @@ impl FieldSelection {
             }
         }
         Ok(true)
+    }
+}
+
+impl FragmentSpread {
+    /// - `named_fragments`: named fragment definitions that are rebased for the subgraph.
+    // Note: This method is used during operation optimization.
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        named_fragments: &NamedFragments,
+        error_handling: RebaseErrorHandlingOption,
+    ) -> Result<Option<FragmentSpread>, FederationError> {
+        let Some(named_fragment) = named_fragments.get(&self.data().fragment_name) else {
+            return if let RebaseErrorHandlingOption::ThrowError = error_handling {
+                Err(FederationError::internal(format!(
+                    "Cannot rebase {} fragment if it isn't part of the provided fragments",
+                    self.data().fragment_name
+                )))
+            } else {
+                Ok(None)
+            };
+        };
+        debug_assert_eq!(*schema, self.data().schema);
+        debug_assert_eq!(*schema, named_fragment.schema);
+        if !runtime_types_intersect(
+            parent_type,
+            &named_fragment.type_condition_position,
+            &self.data().schema,
+        ) {
+            return Ok(None);
+        }
+        Ok(Some(FragmentSpread::new(
+            FragmentSpreadData::from_fragment(&named_fragment, &self.data().directives),
+        )))
     }
 }
 
@@ -610,6 +646,48 @@ impl InlineFragmentSelection {
         self.inline_fragment
             .can_rebase_on(parent_type, parent_schema)
             .0
+    }
+}
+
+impl OperationElement {
+    pub(crate) fn rebase_on_or_error(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        named_fragments: &NamedFragments,
+    ) -> Result<OperationElement, FederationError> {
+        let result: Option<OperationElement> = match self {
+            OperationElement::Field(field) => field
+                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
+                .map(|val| val.map(Into::into)),
+            OperationElement::FragmentSpread(fragment) => fragment
+                .rebase_on(
+                    parent_type,
+                    schema,
+                    named_fragments,
+                    RebaseErrorHandlingOption::ThrowError,
+                )
+                .map(|val| val.map(Into::into)),
+            OperationElement::InlineFragment(inline) => inline
+                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
+                .map(|val| val.map(Into::into)),
+        }?;
+        result.ok_or_else(|| {
+            FederationError::internal(format!(
+                "Cannot rebase operation element {} on {}",
+                self, parent_type
+            ))
+        })
+    }
+
+    pub(crate) fn sub_selection_type_position(
+        &self,
+    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
+        match self {
+            OperationElement::Field(field) => Ok(field.data().output_base_type()?.try_into().ok()),
+            OperationElement::FragmentSpread(_) => Ok(None), // No sub-selection set
+            OperationElement::InlineFragment(inline) => Ok(Some(inline.data().casted_type())),
+        }
     }
 }
 

@@ -1258,6 +1258,7 @@ impl Operation {
     //            However, it's only used in tests. So, it's removed in the Rust version.
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
+    /// `fragments` - rebased fragment definitions for the operation's subgraph
     fn optimize_internal(
         &mut self,
         fragments: &NamedFragments,
@@ -1284,6 +1285,7 @@ impl Operation {
         Ok(())
     }
 
+    /// `fragments` - rebased fragment definitions for the operation's subgraph
     pub(crate) fn optimize(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
         self.optimize_internal(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
     }
@@ -1361,6 +1363,82 @@ mod tests {
             optimized.optimize(&$named_fragments).unwrap();
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    #[test]
+    fn duplicate_fragment_spreads_after_fragment_expansion() {
+        // This is a regression test for FED-290, making sure `make_select` method can handle
+        // duplicate fragment spreads.
+        // During optimization, `make_selection` may merge multiple fragment spreads with the same
+        // key. This can happen in the case below where `F1` and `F2` are expanded and generating
+        // two duplicate `F_shared` spreads in the definition of `fragment F_target`.
+        let schema_doc = r#"
+            type Query {
+                t: T
+                t2: T
+            }
+
+            type T {
+                id: ID!
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+        "#;
+
+        let query = r#"
+            fragment F_shared on T {
+                id
+                a
+            }
+            fragment F1 on T {
+                ...F_shared
+                b
+            }
+
+            fragment F2 on T {
+                ...F_shared
+                c
+            }
+
+            fragment F_target on T {
+                ...F1
+                ...F2
+            }
+
+            query {
+                t {
+                    ...F_target
+                }
+                t2 {
+                    ...F_target
+                }
+            }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema_doc), query);
+        let expanded = operation.expand_all_fragments().unwrap();
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+        fragment F_shared on T {
+          id
+          a
+        }
+
+        fragment F_target on T {
+          ...F_shared
+          b
+          c
+        }
+
+        {
+          t {
+            ...F_target
+          }
+          t2 {
+            ...F_target
+          }
+        }
+        "###);
     }
 
     #[test]
