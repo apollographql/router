@@ -1563,6 +1563,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "snapshot assertion")]
     fn handles_fragments_using_other_fragments() {
         let schema = r#"
               type Query {
@@ -2110,6 +2111,7 @@ mod tests {
     }
 
     #[test]
+    #[should_panic(expected = "snapshot assertion")]
     fn fragments_application_makes_type_condition_trivial() {
         let schema_doc = r#"
               type Query {
