@@ -68,12 +68,12 @@ impl StaticCostCalculator {
             return Ok(0.0);
         }
 
-        let ty = field
-            .inner_type_def(schema)
-            .ok_or(DemandControlError::QueryParseFailure(format!(
+        let ty = field.inner_type_def(schema).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
                 "Field {} was found in query, but its type is missing from the schema.",
                 field.name
-            )))?;
+            ))
+        })?;
 
         // Determine how many instances we're scoring. If there's no user-provided
         // information, assume lists have 100 items.
@@ -137,12 +137,12 @@ impl StaticCostCalculator {
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
-        let fragment = fragment_spread.fragment_def(executable).ok_or(
+        let fragment = fragment_spread.fragment_def(executable).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
                 "Parsed operation did not have a definition for fragment {}",
                 fragment_spread.fragment_name
-            )),
-        )?;
+            ))
+        })?;
         self.score_selection_set(
             &fragment.selection_set,
             parent_type,
