@@ -280,7 +280,7 @@ impl PathSelection {
         Ok((input, Self::Empty))
     }
 
-    fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
+    pub(crate) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
             [head, tail @ ..] => {
@@ -330,7 +330,7 @@ impl PathSelection {
 
 // SubSelection ::= "{" NakedSubSelection "}"
 
-#[derive(Debug, PartialEq, Clone, Serialize)]
+#[derive(Debug, PartialEq, Clone, Serialize, Default)]
 pub struct SubSelection {
     pub(super) selections: Vec<NamedSelection>,
     pub(super) star: Option<StarSelection>,
