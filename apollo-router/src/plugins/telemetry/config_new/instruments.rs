@@ -285,7 +285,7 @@ impl InstrumentsConfig {
                                 meter
                                     .f64_histogram("http.client.request.body.size")
                                     .with_unit(Unit::new("By"))
-                                    .with_description("	Size of HTTP client request bodies.")
+                                    .with_description("Size of HTTP client request bodies.")
                                     .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
@@ -322,7 +322,7 @@ impl InstrumentsConfig {
                                 meter
                                     .f64_histogram("http.client.response.body.size")
                                     .with_unit(Unit::new("By"))
-                                    .with_description("	Size of HTTP client response bodies.")
+                                    .with_description("Size of HTTP client response bodies.")
                                     .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
