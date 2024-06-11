@@ -787,6 +787,7 @@ mod tests {
                     Some(true),
                     Some(false),
                     Some(PersistedQueriesSafelist::default()),
+                    Some(false),
                     Some(vec![
                         "tests/fixtures/persisted-queries-manifest.json".to_string()
                     ]),
