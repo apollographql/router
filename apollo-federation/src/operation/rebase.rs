@@ -20,6 +20,7 @@ use crate::error::FederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
+use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 
 // TODO(@goto-bus-stop): this is precomputed in the QueryPlanner constructor. Can we expose that
@@ -85,10 +86,13 @@ impl Selection {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
-    ) -> bool {
+    ) -> Result<bool, FederationError> {
         match self {
             Selection::Field(field) => field.can_add_to(parent_type, schema),
-            Selection::FragmentSpread(_) => true,
+            // Since `rebaseOn` never fails, we copy the logic here and always return `true`. But as
+            // mentioned in `rebaseOn`, this leaves it a bit to the caller to know what they're
+            // doing.
+            Selection::FragmentSpread(_) => Ok(true),
             Selection::InlineFragment(inline) => inline.can_add_to(parent_type, schema),
         }
     }
@@ -133,7 +137,7 @@ impl Field {
 
         let field_from_parent = parent_type.field(self.data().name().clone())?;
         return if field_from_parent.try_get(schema.schema()).is_some()
-            && self.can_rebase_on(parent_type, schema)
+            && self.can_rebase_on(parent_type)
         {
             let mut updated_field_data = self.data().clone();
             updated_field_data.schema = schema.clone();
@@ -160,11 +164,7 @@ impl Field {
     ///  that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
     ///  in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
     ///  if the field name simply does not exist in `parent_type`.
-    fn can_rebase_on(
-        &self,
-        parent_type: &CompositeTypeDefinitionPosition,
-        schema: &ValidFederationSchema,
-    ) -> bool {
+    fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
         let field_parent_type = self.data().field_position.parent();
         // case 1
         if field_parent_type.type_name() == parent_type.type_name() {
@@ -173,7 +173,7 @@ impl Field {
         // case 2
         let is_interface_object_type =
             match ObjectTypeDefinitionPosition::try_from(field_parent_type.clone()) {
-                Ok(ref o) => is_interface_object(o, schema),
+                Ok(ref o) => is_interface_object(o, &self.data().schema),
                 Err(_) => false,
             };
         field_parent_type.is_interface_type() || is_interface_object_type
@@ -183,40 +183,40 @@ impl Field {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
-    ) -> Option<CompositeTypeDefinitionPosition> {
+    ) -> Result<Option<OutputTypeDefinitionPosition>, FederationError> {
         let data = self.data();
         if data.field_position.parent() == *parent_type && data.schema == *schema {
             let base_ty_name = data
                 .field_position
-                .get(schema.schema())
-                .ok()?
+                .get(schema.schema())?
                 .ty
                 .inner_named_type();
-            return schema
-                .get_type(base_ty_name.clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
-                .ok();
+            return Ok(Some(
+                data.schema.get_type(base_ty_name.clone())?.try_into()?,
+            ));
         }
         if data.name() == &TYPENAME_FIELD {
-            let type_name = parent_type
+            let Some(type_name) = parent_type
                 .introspection_typename_field()
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            return schema.try_get_type(type_name.clone())?.try_into().ok();
+                .try_get(schema.schema())
+                .map(|field| field.ty.inner_named_type())
+            else {
+                return Ok(None);
+            };
+            return Ok(Some(schema.get_type(type_name.clone())?.try_into()?));
         }
-        if self.can_rebase_on(parent_type, schema) {
-            let type_name = parent_type
+        if self.can_rebase_on(parent_type) {
+            let Some(type_name) = parent_type
                 .field(data.field_position.field_name().clone())
-                .ok()?
-                .get(schema.schema())
-                .ok()?
-                .ty
-                .inner_named_type();
-            schema.try_get_type(type_name.clone())?.try_into().ok()
+                .ok()
+                .and_then(|field_pos| field_pos.get(schema.schema()).ok())
+                .map(|field| field.ty.inner_named_type())
+            else {
+                return Ok(None);
+            };
+            Ok(Some(schema.get_type(type_name.clone())?.try_into()?))
         } else {
-            None
+            Ok(None)
         }
     }
 }
@@ -288,26 +288,24 @@ impl FieldSelection {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
-    ) -> bool {
-        if &self.field.data().schema == schema
-            && parent_type == &self.field.data().field_position.parent()
+    ) -> Result<bool, FederationError> {
+        if self.field.data().schema == *schema
+            && self.field.data().field_position.parent() == *parent_type
         {
-            return true;
+            return Ok(true);
         }
 
-        let Some(ty) = self.field.type_if_added_to(parent_type, schema) else {
-            return false;
+        let Some(ty) = self.field.type_if_added_to(parent_type, schema)? else {
+            return Ok(false);
         };
 
         if let Some(set) = &self.selection_set {
-            if set.type_position != ty {
-                return set
-                    .selections
-                    .values()
-                    .all(|sel| sel.can_add_to(parent_type, schema));
+            let ty: CompositeTypeDefinitionPosition = ty.try_into()?;
+            if !(set.schema == *schema && set.type_position == ty) {
+                return set.can_rebase_on(&ty, schema);
             }
         }
-        true
+        Ok(true)
     }
 }
 
@@ -334,9 +332,6 @@ impl FragmentSpreadSelection {
             return Ok(Some(Selection::FragmentSpread(Arc::new(self.clone()))));
         }
 
-        // If we're rebasing on a _different_ schema, then we *must* have fragments, since reusing
-        // `self.fragments` would be incorrect. If we're on the same schema though, we're happy to default
-        // to `self.fragments`.
         let rebase_on_same_schema = self.spread.data().schema == *schema;
         let Some(named_fragment) = named_fragments.get(&self.spread.data().fragment_name) else {
             // If we're rebasing on another schema (think a subgraph), then named fragments will have been rebased on that, and some
@@ -423,10 +418,10 @@ impl InlineFragmentData {
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Option<CompositeTypeDefinitionPosition> {
-        if &self.parent_type_position == parent_type && &self.schema == schema {
+        if self.schema == *schema && self.parent_type_position == *parent_type {
             return Some(self.casted_type());
         }
-        match self.can_rebase_on(parent_type) {
+        match self.can_rebase_on(parent_type, schema) {
             (false, _) => None,
             (true, None) => Some(parent_type.clone()),
             (true, Some(ty)) => Some(ty),
@@ -436,16 +431,16 @@ impl InlineFragmentData {
     fn can_rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
     ) -> (bool, Option<CompositeTypeDefinitionPosition>) {
         let Some(ty) = self.type_condition_position.as_ref() else {
             return (true, None);
         };
-        match self
-            .schema
+        match schema
             .get_type(ty.type_name().clone())
             .and_then(CompositeTypeDefinitionPosition::try_from)
         {
-            Ok(ty) if runtime_types_intersect(parent_type, &ty, &self.schema) => (true, Some(ty)),
+            Ok(ty) if runtime_types_intersect(parent_type, &ty, schema) => (true, Some(ty)),
             _ => (false, None),
         }
     }
@@ -458,7 +453,7 @@ impl InlineFragment {
         schema: &ValidFederationSchema,
         error_handling: RebaseErrorHandlingOption,
     ) -> Result<Option<InlineFragment>, FederationError> {
-        if &self.data().parent_type_position == parent_type {
+        if self.data().schema == *schema && self.data().parent_type_position == *parent_type {
             return Ok(Some(self.clone()));
         }
 
@@ -493,6 +488,7 @@ impl InlineFragment {
         } else {
             let mut rebased_fragment_data = self.data().clone();
             rebased_fragment_data.type_condition_position = rebased_condition;
+            rebased_fragment_data.schema = schema.clone();
             Ok(Some(InlineFragment::new(rebased_fragment_data)))
         }
     }
@@ -586,28 +582,23 @@ impl InlineFragmentSelection {
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
-    ) -> bool {
-        if &self.inline_fragment.data().parent_type_position == parent_type
-            && self.inline_fragment.data().schema == *schema
+    ) -> Result<bool, FederationError> {
+        if self.inline_fragment.data().schema == *schema
+            && self.inline_fragment.data().parent_type_position == *parent_type
         {
-            return true;
+            return Ok(true);
         }
         let Some(ty) = self
             .inline_fragment
             .data()
             .casted_type_if_add_to(parent_type, schema)
         else {
-            return false;
+            return Ok(false);
         };
-        if self.selection_set.type_position != ty {
-            for sel in self.selection_set.selections.values() {
-                if !sel.can_add_to(&ty, schema) {
-                    return false;
-                }
-            }
-            true
+        if !(self.selection_set.schema == *schema && self.selection_set.type_position == ty) {
+            self.selection_set.can_rebase_on(&ty, schema)
         } else {
-            true
+            Ok(true)
         }
     }
 
@@ -647,12 +638,19 @@ impl SelectionSet {
         ))
     }
 
-    /// Returns true if the selection set would select cleanly from the given type in the
-    /// current schema.
-    pub fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
-        self.selections
-            .values()
-            .all(|sel| sel.can_add_to(parent_type, &self.schema))
+    /// Returns true if the selection set would select cleanly from the given type in the given
+    /// schema.
+    pub fn can_rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+    ) -> Result<bool, FederationError> {
+        for selection in self.selections.values() {
+            if !selection.can_add_to(parent_type, schema)? {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 

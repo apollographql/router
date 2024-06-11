@@ -301,8 +301,7 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .lock()
-                .insert(SupergraphEventResponseLevel(self.response));
+                .with_lock(|mut lock| lock.insert(SupergraphEventResponseLevel(self.response)));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -345,15 +344,13 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .lock()
-                .insert(SubgraphEventRequestLevel(self.request));
+                .with_lock(|mut lock| lock.insert(SubgraphEventRequestLevel(self.request)));
         }
         if self.response != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .lock()
-                .insert(SubgraphEventResponseLevel(self.response));
+                .with_lock(|mut lock| lock.insert(SubgraphEventResponseLevel(self.response)));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
