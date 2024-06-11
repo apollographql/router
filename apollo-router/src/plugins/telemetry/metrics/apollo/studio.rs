@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::ops::AddAssign;
 use std::time::Duration;
 
+use hdrhistogram::Histogram;
+use serde::ser::SerializeSeq;
 use serde::Serialize;
 use uuid::Uuid;
 
@@ -279,13 +281,15 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
     }
 }
 
-#[derive(Clone, Default, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 
 pub(crate) struct LimitsStats {
     strategy: String,
-    cost_estimated: Vec<i64>,
+    #[serde(serialize_with = "LimitsStats::serialize_histogram")]
+    cost_estimated: Histogram<u64>,
     max_cost_estimated: u64,
-    cost_actual: Vec<i64>,
+    #[serde(serialize_with = "LimitsStats::serialize_histogram")]
+    cost_actual: Histogram<u64>,
     max_cost_actual: u64,
     depth: u64,
     height: u64,
@@ -293,13 +297,34 @@ pub(crate) struct LimitsStats {
     root_field_count: u64,
 }
 
+impl LimitsStats {
+    fn serialize_histogram<S: serde::Serializer>(
+        histogram: &Histogram<u64>,
+        s: S,
+    ) -> Result<S::Ok, S::Error> {
+        let mut seq = s.serialize_seq(Some(histogram.buckets() as usize))?;
+        for value in histogram.iter_linear(1) {
+            seq.serialize_element(&value.count_at_value())?;
+        }
+        seq.end()
+    }
+}
+
 impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::reports::LimitsStats {
     fn from(value: LimitsStats) -> Self {
         Self {
             strategy: value.strategy,
-            cost_estimated: value.cost_estimated,
+            cost_estimated: value
+                .cost_estimated
+                .iter_linear(1)
+                .map(|v| v.count_at_value() as i64)
+                .collect(),
             max_cost_estimated: value.max_cost_estimated,
-            cost_actual: value.cost_actual,
+            cost_actual: value
+                .cost_actual
+                .iter_linear(1)
+                .map(|v| v.count_at_value() as i64)
+                .collect(),
             max_cost_actual: value.max_cost_actual,
             depth: value.depth,
             height: value.height,
@@ -311,11 +336,14 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
 
 impl AddAssign<SingleLimitsStats> for LimitsStats {
     fn add_assign(&mut self, rhs: SingleLimitsStats) {
-        self.cost_estimated.push(rhs.cost_estimated);
-        self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated as u64);
+        // TODO: Should we log a warning for these fallible calls to record?
+        if self.cost_estimated.record(rhs.cost_estimated).is_ok() {
+            self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated as u64);
+        }
 
-        self.cost_actual.push(rhs.cost_actual);
-        self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual as u64);
+        if self.cost_actual.record(rhs.cost_actual).is_ok() {
+            self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual as u64);
+        }
 
         // TODO: depth, height, alias_count, root_field_count?
     }
@@ -323,12 +351,20 @@ impl AddAssign<SingleLimitsStats> for LimitsStats {
 
 impl From<SingleLimitsStats> for LimitsStats {
     fn from(value: SingleLimitsStats) -> Self {
+        // TODO: How do we determine the bounds?
+        // TODO: Should we log a warning for these fallible calls to record?
+        let mut cost_estimated = Histogram::new_with_bounds(1, 10, 1).unwrap();
+        let _ = cost_estimated.record(value.cost_estimated);
+
+        let mut cost_actual = Histogram::new_with_bounds(1, 10, 1).unwrap();
+        let _ = cost_actual.record(value.cost_actual);
+
         Self {
             strategy: value.strategy,
-            cost_estimated: vec![value.cost_estimated],
-            max_cost_estimated: value.cost_estimated as u64,
-            cost_actual: vec![value.cost_actual],
-            max_cost_actual: value.cost_actual as u64,
+            cost_estimated,
+            max_cost_estimated: value.cost_estimated,
+            cost_actual,
+            max_cost_actual: value.cost_actual,
             depth: value.depth,
             height: value.height,
             alias_count: value.alias_count,
@@ -338,11 +374,10 @@ impl From<SingleLimitsStats> for LimitsStats {
 }
 
 #[derive(Clone, Default, Debug, Serialize)]
-
 pub(crate) struct SingleLimitsStats {
     pub(crate) strategy: String,
-    pub(crate) cost_estimated: i64,
-    pub(crate) cost_actual: i64,
+    pub(crate) cost_estimated: u64,
+    pub(crate) cost_actual: u64,
     pub(crate) depth: u64,
     pub(crate) height: u64,
     pub(crate) alias_count: u64,

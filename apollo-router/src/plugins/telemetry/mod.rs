@@ -1429,10 +1429,10 @@ impl Telemetry {
                             .and_then(|s| serde_json::to_string(&s.mode).ok())
                             .unwrap_or_default(),
                         cost_estimated: cost_ctx
-                            .map(|ctx| ctx.estimated.round() as i64)
+                            .map(|ctx| ctx.estimated.round() as u64)
                             .unwrap_or_default(),
                         cost_actual: cost_ctx
-                            .map(|ctx| ctx.actual.round() as i64)
+                            .map(|ctx| ctx.actual.round() as u64)
                             .unwrap_or_default(),
                         // TODO: These are limits but unrelated to demand control. How should we populate them?
                         depth: 0,

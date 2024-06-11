@@ -1309,13 +1309,28 @@ expression: aggregated_metrics
             "limits_stats": {
               "strategy": "test",
               "cost_estimated": [
-                10,
-                10
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2
               ],
               "max_cost_estimated": 10,
               "cost_actual": [
-                7,
-                7
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2
               ],
               "max_cost_actual": 7,
               "depth": 2,

@@ -305,6 +305,7 @@ dependencies = [
  "futures",
  "futures-test",
  "graphql_client",
+ "hdrhistogram",
  "heck",
  "hex",
  "hmac",
@@ -3232,12 +3233,13 @@ dependencies = [
 
 [[package]]
 name = "hdrhistogram"
-version = "7.5.2"
+version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f19b9f54f7c7f55e31401bb647626ce0cf0f67b0004982ce815b3ee72a02aa8"
+checksum = "765c9198f173dd59ce26ff9f95ef0aafd0a0fe01fb9d72841bc5066a4c06511d"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.7",
  "byteorder",
+ "crossbeam-channel",
  "flate2",
  "nom",
  "num-traits",
