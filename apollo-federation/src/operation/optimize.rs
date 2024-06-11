@@ -1299,9 +1299,15 @@ impl Operation {
         self.optimize_internal(fragments, /*min_usages_to_optimize*/ 1)
     }
 
-    // Mainly for testing.
-    fn expand_all_fragments(&self) -> Result<Self, FederationError> {
-        let selection_set = self.selection_set.expand_all_fragments()?;
+    // PORT_NOTE: This mirrors the JS version's `Operation.expandAllFragments`. But this method is
+    // mainly for unit tests. The actual port of `expandAllFragments` is in `normalize_operation`.
+    fn expand_all_fragments_and_normalize(&self) -> Result<Self, FederationError> {
+        let selection_set = self.selection_set.expand_all_fragments()?.normalize(
+            &self.selection_set.type_position,
+            &self.named_fragments,
+            &self.schema,
+            NormalizeSelectionOption::NormalizeRecursively,
+        )?;
         Ok(Self {
             named_fragments: Default::default(),
             selection_set,
@@ -1351,7 +1357,7 @@ mod tests {
 
     macro_rules! assert_without_fragments {
         ($operation: expr, @$expected: literal) => {{
-            let without_fragments = $operation.expand_all_fragments().unwrap();
+            let without_fragments = $operation.expand_all_fragments_and_normalize().unwrap();
             insta::assert_snapshot!(without_fragments, @$expected);
             without_fragments
         }};
@@ -1417,7 +1423,7 @@ mod tests {
         "#;
 
         let operation = parse_operation(&parse_schema(schema_doc), query);
-        let expanded = operation.expand_all_fragments().unwrap();
+        let expanded = operation.expand_all_fragments_and_normalize().unwrap();
         assert_optimized!(expanded, operation.named_fragments, @r###"
         fragment F_shared on T {
           id
@@ -1563,7 +1569,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "snapshot assertion")]
     fn handles_fragments_using_other_fragments() {
         let schema = r#"
               type Query {
@@ -1738,7 +1743,7 @@ mod tests {
         ($schema_doc: expr, $query: expr, @$expanded: literal) => {{
             let schema = parse_schema($schema_doc);
             let operation = parse_operation(&schema, $query);
-            let without_fragments = operation.expand_all_fragments().unwrap();
+            let without_fragments = operation.expand_all_fragments_and_normalize().unwrap();
             insta::assert_snapshot!(without_fragments, @$expanded);
 
             let mut optimized = without_fragments;
@@ -1754,7 +1759,7 @@ mod tests {
         ($schema_doc: expr, $query: expr, @$expanded: literal) => {{
             let schema = parse_schema($schema_doc);
             let operation = parse_operation(&schema, $query);
-            let without_fragments = operation.expand_all_fragments().unwrap();
+            let without_fragments = operation.expand_all_fragments_and_normalize().unwrap();
             insta::assert_snapshot!(without_fragments, @$expanded);
 
             let mut optimized = without_fragments;
@@ -2111,7 +2116,6 @@ mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "snapshot assertion")]
     fn fragments_application_makes_type_condition_trivial() {
         let schema_doc = r#"
               type Query {
