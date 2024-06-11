@@ -1258,7 +1258,11 @@ impl Operation {
     //            However, it's only used in tests. So, it's removed in the Rust version.
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
-    pub(crate) fn optimize(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
+    fn optimize_internal(
+        &mut self,
+        fragments: &NamedFragments,
+        min_usages_to_optimize: u32,
+    ) -> Result<(), FederationError> {
         if fragments.is_empty() {
             return Ok(());
         }
@@ -1273,11 +1277,24 @@ impl Operation {
         // Optimize the named fragment definitions by dropping low-usage ones.
         let mut final_fragments = fragments.clone();
         let final_selection_set =
-            final_fragments.reduce(&self.selection_set, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)?;
+            final_fragments.reduce(&self.selection_set, min_usages_to_optimize)?;
 
         self.selection_set = final_selection_set;
         self.named_fragments = final_fragments;
         Ok(())
+    }
+
+    pub(crate) fn optimize(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
+        self.optimize_internal(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
+    }
+
+    /// Used by legacy roundtrip tests.
+    /// - This lowers `min_usages_to_optimize` to `1` in order to make it easier to write unit tests.
+    fn optimize_for_roundtrip_test(
+        &mut self,
+        fragments: &NamedFragments,
+    ) -> Result<(), FederationError> {
+        self.optimize_internal(fragments, /*min_usages_to_optimize*/ 1)
     }
 
     // Mainly for testing.
@@ -1651,6 +1668,22 @@ mod tests {
         }};
     }
 
+    /// Tests ported from JS codebase rely on special behavior of
+    /// `Operation::optimize_for_roundtrip_test` that is specific for testing, since it makes it
+    /// easier to write tests.
+    macro_rules! test_fragments_roundtrip_legacy {
+        ($schema_doc: expr, $query: expr, @$expanded: literal) => {{
+            let schema = parse_schema($schema_doc);
+            let operation = parse_operation(&schema, $query);
+            let without_fragments = operation.expand_all_fragments().unwrap();
+            insta::assert_snapshot!(without_fragments, @$expanded);
+
+            let mut optimized = without_fragments;
+            optimized.optimize_for_roundtrip_test(&operation.named_fragments).unwrap();
+            assert_eq!(optimized.to_string(), operation.to_string());
+        }};
+    }
+
     #[test]
     fn handles_fragments_with_nested_selections() {
         let schema_doc = r#"
@@ -1701,6 +1734,395 @@ mod tests {
                     t2 {
                       x
                     }
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_nested_fragments_with_field_intersection() {
+        let schema_doc = r#"
+            type Query {
+                t: T
+            }
+    
+            type T {
+                a: A
+                b: Int
+            }
+    
+            type A {
+                x: String
+                y: String
+                z: String
+            }
+        "#;
+
+        // The subtlety here is that `FA` contains `__typename` and so after we're reused it, the
+        // selection will look like:
+        // {
+        //   t {
+        //     a {
+        //       ...FA
+        //     }
+        //   }
+        // }
+        // But to recognize that `FT` can be reused from there, we need to be able to see that
+        // the `__typename` that `FT` wants is inside `FA` (and since FA applies on the parent type `A`
+        // directly, it is fine to reuse).
+        let query = r#"
+            fragment FA on A {
+                __typename
+                x
+                y
+            }
+    
+            fragment FT on T {
+                a {
+                __typename
+                ...FA
+                }
+            }
+    
+            query {
+                t {
+                ...FT
+                }
+            }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+        {
+          t {
+            a {
+              __typename
+              x
+              y
+            }
+          }
+        }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragment_matching_subset_of_field_selection() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              type T {
+                a: String
+                b: B
+                c: Int
+                d: D
+              }
+        
+              type B {
+                x: String
+                y: String
+              }
+        
+              type D {
+                m: String
+                n: String
+              }
+        "#;
+
+        let query = r#"
+                fragment FragT on T {
+                  b {
+                    __typename
+                    x
+                  }
+                  c
+                  d {
+                    m
+                  }
+                }
+        
+                {
+                  t {
+                    ...FragT
+                    d {
+                      n
+                    }
+                    a
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    b {
+                      __typename
+                      x
+                    }
+                    c
+                    d {
+                      m
+                      n
+                    }
+                    a
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragment_matching_subset_of_inline_fragment_selection() {
+        // Pretty much the same test than the previous one, but matching inside a fragment selection inside
+        // of inside a field selection.
+        // PORT_NOTE: ` implements I` was added in the definition of `type T`, so that validation can pass.
+        let schema_doc = r#"
+          type Query {
+            i: I
+          }
+    
+          interface I {
+            a: String
+          }
+    
+          type T implements I {
+            a: String
+            b: B
+            c: Int
+            d: D
+          }
+    
+          type B {
+            x: String
+            y: String
+          }
+    
+          type D {
+            m: String
+            n: String
+          }
+        "#;
+
+        let query = r#"
+            fragment FragT on T {
+              b {
+                __typename
+                x
+              }
+              c
+              d {
+                m
+              }
+            }
+    
+            {
+              i {
+                ... on T {
+                  ...FragT
+                  d {
+                    n
+                  }
+                  a
+                }
+              }
+            }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+            {
+              i {
+                ... on T {
+                  b {
+                    __typename
+                    x
+                  }
+                  c
+                  d {
+                    m
+                    n
+                  }
+                  a
+                }
+              }
+            }
+        "###);
+    }
+
+    #[test]
+    fn intersecting_fragments() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              type T {
+                a: String
+                b: B
+                c: Int
+                d: D
+              }
+        
+              type B {
+                x: String
+                y: String
+              }
+        
+              type D {
+                m: String
+                n: String
+              }
+        "#;
+
+        // Note: the code that reuse fragments iterates on fragments in the order they are defined
+        // in the document, but when it reuse a fragment, it puts it at the beginning of the
+        // selection (somewhat random, it just feel often easier to read), so the net effect on
+        // this example is that `Frag2`, which will be reused after `Frag1` will appear first in
+        // the re-optimized selection. So we put it first in the input too so that input and output
+        // actually match (the `testFragmentsRoundtrip` compares strings, so it is sensible to
+        // ordering; we could theoretically use `Operation.equals` instead of string equality,
+        // which wouldn't really on ordering, but `Operation.equals` is not entirely trivial and
+        // comparing strings make problem a bit more obvious).
+        let query = r#"
+                fragment Frag1 on T {
+                  b {
+                    x
+                  }
+                  c
+                  d {
+                    m
+                  }
+                }
+        
+                fragment Frag2 on T {
+                  a
+                  b {
+                    __typename
+                    x
+                  }
+                  d {
+                    m
+                    n
+                  }
+                }
+        
+                {
+                  t {
+                    ...Frag1
+                    ...Frag2
+                  }
+                }
+        "#;
+
+        // PORT_NOTE: `__typename` and `x`'s placements are switched in Rust.
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    b {
+                      __typename
+                      x
+                    }
+                    c
+                    d {
+                      m
+                      n
+                    }
+                    a
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn fragments_application_makes_type_condition_trivial() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              interface I {
+                x: String
+              }
+        
+              type T implements I {
+                x: String
+                a: String
+              }
+        "#;
+
+        let query = r#"
+                fragment FragI on I {
+                  x
+                  ... on T {
+                    a
+                  }
+                }
+        
+                {
+                  t {
+                    ...FragI
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    x
+                    a
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragment_matching_at_the_top_level_of_another_fragment() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              type T {
+                a: String
+                u: U
+              }
+        
+              type U {
+                x: String
+                y: String
+              }
+        "#;
+
+        let query = r#"
+                fragment Frag1 on T {
+                  a
+                }
+        
+                fragment Frag2 on T {
+                  u {
+                    x
+                    y
+                  }
+                  ...Frag1
+                }
+        
+                fragment Frag3 on Query {
+                  t {
+                    ...Frag2
+                  }
+                }
+        
+                {
+                  ...Frag3
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    u {
+                      x
+                      y
+                    }
+                    a
                   }
                 }
         "###);
