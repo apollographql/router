@@ -75,12 +75,12 @@ impl Selectors for GraphQLAttributes {
 
     fn on_response_field(
         &self,
+        attrs: &mut Vec<KeyValue>,
         ty: &NamedType,
         field: &Field,
         value: &Value,
         ctx: &Context,
-    ) -> Vec<KeyValue> {
-        let mut attrs = Vec::with_capacity(4);
+    ) {
         if let Some(true) = self.field_name {
             if let Some(name) = (GraphQLSelector::FieldName {
                 field_name: FieldName::String,
@@ -127,7 +127,6 @@ impl Selectors for GraphQLAttributes {
                 attrs.push(KeyValue::new("graphql.operation.name", length));
             }
         }
-        attrs
     }
 }
 
@@ -167,7 +166,8 @@ mod test {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
-        let result = attributes.on_response_field(ty(), field(), &json!(true), &ctx);
+        let mut result = Default::default();
+        attributes.on_response_field(&mut result, ty(), field(), &json!(true), &ctx);
         assert_eq!(result.len(), 4);
         assert_eq!(result[0].key.as_str(), "graphql.field.name");
         assert_eq!(result[0].value.as_str(), "field_name");
@@ -190,8 +190,14 @@ mod test {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
-        let result =
-            attributes.on_response_field(ty(), field(), &json!(vec![true, true, true]), &ctx);
+        let mut result = Default::default();
+        attributes.on_response_field(
+            &mut result,
+            ty(),
+            field(),
+            &json!(vec![true, true, true]),
+            &ctx,
+        );
         assert_eq!(result.len(), 5);
         assert_eq!(result[0].key.as_str(), "graphql.field.name");
         assert_eq!(result[0].value.as_str(), "field_name");

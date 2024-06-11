@@ -44,6 +44,7 @@ use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
@@ -2820,27 +2821,28 @@ impl SelectionSet {
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
     ) -> Result<SelectionSet, FederationError> {
-        let mut normalized_selection_map = SelectionMap::new();
+        let mut normalized_selections = Self {
+            schema: schema.clone(),
+            type_position: parent_type.clone(),
+            selections: Default::default(), // start empty
+        };
         for (_, selection) in self.selections.iter() {
             if let Some(selection_or_set) =
                 selection.normalize(parent_type, named_fragments, schema, option)?
             {
                 match selection_or_set {
                     SelectionOrSet::Selection(normalized_selection) => {
-                        normalized_selection_map.insert(normalized_selection);
+                        normalized_selections.add_local_selection(&normalized_selection)?;
                     }
                     SelectionOrSet::SelectionSet(normalized_set) => {
-                        normalized_selection_map.extend_ref(&normalized_set.selections);
+                        // Since the `selection` has been expanded/lifted, we use
+                        // `add_selection_set` to make sure it's rebased.
+                        normalized_selections.add_selection_set(&normalized_set)?;
                     }
                 }
             }
         }
-
-        Ok(SelectionSet {
-            schema: self.schema.clone(),
-            type_position: self.type_position.clone(),
-            selections: Arc::new(normalized_selection_map),
-        })
+        Ok(normalized_selections)
     }
 
     fn has_defer(&self) -> bool {
@@ -3298,6 +3300,20 @@ pub(crate) fn subselection_type_if_abstract(
     }
 }
 
+impl FieldData {
+    fn with_updated_position(
+        &self,
+        schema: ValidFederationSchema,
+        field_position: FieldDefinitionPosition,
+    ) -> Self {
+        Self {
+            schema,
+            field_position,
+            ..self.clone()
+        }
+    }
+}
+
 impl FieldSelection {
     /// Normalize this field selection (merging selections with the same keys), with the following
     /// additional transformations:
@@ -3347,6 +3363,13 @@ impl FieldSelection {
         }))
     }
 
+    fn with_updated_element(&self, element: FieldData) -> Self {
+        Self {
+            field: Field::new(element),
+            ..self.clone()
+        }
+    }
+
     fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -3354,13 +3377,28 @@ impl FieldSelection {
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
+        let field_position =
+            if self.field.schema() == schema && self.field.parent_type_position() == *parent_type {
+                self.field.data().field_position.clone()
+            } else {
+                parent_type.field(self.field.data().name().clone())?
+            };
+
+        let field_element = if self.field.schema() == schema
+            && self.field.data().field_position == field_position
+        {
+            self.field.data().clone()
+        } else {
+            self.field
+                .data()
+                .with_updated_position(schema.clone(), field_position)
+        };
+
         if let Some(selection_set) = &self.selection_set {
+            let field_composite_type_position: CompositeTypeDefinitionPosition =
+                field_element.output_base_type()?.try_into()?;
             let mut normalized_selection: SelectionSet =
                 if NormalizeSelectionOption::NormalizeRecursively == option {
-                    let field = self.field.data().field_position.get(schema.schema())?;
-                    let field_composite_type_position: CompositeTypeDefinitionPosition = schema
-                        .get_type(field.ty.inner_named_type().clone())?
-                        .try_into()?;
                     selection_set.normalize(
                         &field_composite_type_position,
                         named_fragments,
@@ -3371,7 +3409,7 @@ impl FieldSelection {
                     selection_set.clone()
                 };
 
-            let mut selection = self.clone();
+            let mut selection = self.with_updated_element(field_element);
             if normalized_selection.is_empty() {
                 // In rare cases, it's possible that everything in the sub-selection was trimmed away and so the
                 // sub-selection is empty. Which suggest something may be wrong with this part of the query
@@ -3388,7 +3426,8 @@ impl FieldSelection {
                 let non_included_typename = Selection::from_field(
                     Field::new(FieldData {
                         schema: schema.clone(),
-                        field_position: parent_type.introspection_typename_field(),
+                        field_position: field_composite_type_position
+                            .introspection_typename_field(),
                         alias: None,
                         arguments: Arc::new(vec![]),
                         directives: Arc::new(directives),
@@ -3410,7 +3449,7 @@ impl FieldSelection {
             // in RS version we only store the field position reference so we don't need to update the
             // underlying elements
             Ok(Some(SelectionOrSet::Selection(Selection::from(
-                self.clone(),
+                self.with_updated_element(field_element),
             ))))
         }
     }
@@ -3678,6 +3717,20 @@ impl InlineFragmentSelection {
                 return if normalized_selection_set.is_empty() {
                     Ok(None)
                 } else {
+                    // We need to rebase since the parent type for the selection set could be
+                    // changed.
+                    // Note: Rebasing after normalization, since rebasing before that can error out.
+                    //       Or, `normalize` could `rebase` at the same time.
+                    let normalized_selection_set = if useless_fragment {
+                        normalized_selection_set.clone()
+                    } else {
+                        normalized_selection_set.rebase_on(
+                            parent_type,
+                            named_fragments,
+                            schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )?
+                    };
                     Ok(Some(SelectionOrSet::SelectionSet(normalized_selection_set)))
                 };
             }
@@ -3685,11 +3738,12 @@ impl InlineFragmentSelection {
 
         // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
         // (note that even if we're not recursive, we may still have some "lifting" to do)
+        // Note: This normalized_selection_set is not rebased here yet. It will be rebased later as necessary.
         let normalized_selection_set = if NormalizeSelectionOption::NormalizeRecursively == option {
             let normalized = self.selection_set.normalize(
-                self.casted_type(),
+                &self.selection_set.type_position,
                 named_fragments,
-                schema,
+                &self.selection_set.schema,
                 option,
             )?;
             // It could be that nothing was satisfiable.
@@ -3793,24 +3847,63 @@ impl InlineFragmentSelection {
 
             // If we can lift all selections, then that just mean we can get rid of the current fragment altogether
             if liftable_selections.len() == normalized_selection_set.selections.len() {
-                return Ok(Some(SelectionOrSet::SelectionSet(normalized_selection_set)));
+                // Rebasing is necessary since this normalized sub-selection set changed its parent.
+                let rebased_selection_set = normalized_selection_set.rebase_on(
+                    parent_type,
+                    named_fragments,
+                    schema,
+                    RebaseErrorHandlingOption::ThrowError,
+                )?;
+                return Ok(Some(SelectionOrSet::SelectionSet(rebased_selection_set)));
             }
 
             // Otherwise, if there are "liftable" selections, we must return a set comprised of those lifted selection,
             // and the current fragment _without_ those lifted selections.
             if liftable_selections.len() > 0 {
+                // Converting `... [on T] { <liftable_selections> <non-liftable_selections> }` into
+                // `{ ... [on T] { <non-liftable_selections> } <liftable_selections> }`.
+                // PORT_NOTE: It appears that this lifting could be repeatable (meaning lifted
+                // selection could be broken down further and lifted again), but normalize is not
+                // applied recursively. This could be worth investigating.
+                let Some(rebased_inline_fragment) = self.inline_fragment.rebase_on(
+                    parent_type,
+                    schema,
+                    RebaseErrorHandlingOption::ThrowError,
+                )?
+                else {
+                    return Err(FederationError::internal(
+                        "Rebase should've thrown an error",
+                    ));
+                };
                 let mut mutable_selections = self.selection_set.selections.clone();
                 let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
                 final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
+                let rebased_casted_type = rebased_inline_fragment.data().casted_type();
                 let final_inline_fragment: Selection = InlineFragmentSelection::new(
-                    self.inline_fragment.clone(),
+                    rebased_inline_fragment,
                     SelectionSet {
                         schema: schema.clone(),
-                        type_position: self.inline_fragment.data().casted_type(),
+                        type_position: rebased_casted_type,
                         selections: Arc::new(final_fragment_selections.clone()),
                     },
                 )
                 .into();
+
+                // Since liftable_selections are changing their parent, we need to rebase them.
+                liftable_selections = liftable_selections
+                    .into_iter()
+                    .map(|(_key, sel)| {
+                        sel.rebase_on(
+                            parent_type,
+                            named_fragments,
+                            schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )?
+                        .ok_or_else(|| {
+                            FederationError::internal("Unable to rebase selection updates")
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
 
                 let mut final_selection_map = SelectionMap::new();
                 final_selection_map.insert(final_inline_fragment);
@@ -3832,15 +3925,22 @@ impl InlineFragmentSelection {
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(self.clone()),
             ))))
-        } else if let Some(rebased) = self.inline_fragment.rebase_on(
+        } else if let Some(rebased_inline_fragment) = self.inline_fragment.rebase_on(
             parent_type,
             schema,
             RebaseErrorHandlingOption::ThrowError,
         )? {
+            let rebased_casted_type = rebased_inline_fragment.data().casted_type();
+            let rebased_selection_set = normalized_selection_set.rebase_on(
+                &rebased_casted_type,
+                named_fragments,
+                schema,
+                RebaseErrorHandlingOption::ThrowError,
+            )?;
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(InlineFragmentSelection::new(
-                    rebased,
-                    normalized_selection_set,
+                    rebased_inline_fragment,
+                    rebased_selection_set,
                 )),
             ))))
         } else {

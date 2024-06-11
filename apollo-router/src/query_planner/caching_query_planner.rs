@@ -153,9 +153,10 @@ where
         &mut self,
         query_analysis: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: InMemoryCachePlanner,
+        previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
+        experimental_pql_prewarm: bool,
     ) {
         let _timer = Timer::new(|duration| {
             ::tracing::info!(
@@ -172,49 +173,58 @@ where
                 }),
         );
 
-        let mut cache_keys = {
-            let cache = previous_cache.lock().await;
+        let mut cache_keys = match previous_cache {
+            Some(ref previous_cache) => {
+                let cache = previous_cache.lock().await;
 
-            let count = count.unwrap_or(cache.len() / 3);
+                let count = count.unwrap_or(cache.len() / 3);
 
-            cache
-                .iter()
-                .map(
-                    |(
-                        CachingQueryKey {
-                            query,
-                            operation,
-                            hash,
-                            metadata,
-                            plan_options,
-                            config_mode: _,
-                            schema_id: _,
-                            introspection: _,
+                cache
+                    .iter()
+                    .map(
+                        |(
+                            CachingQueryKey {
+                                query,
+                                operation,
+                                hash,
+                                metadata,
+                                plan_options,
+                                config_mode: _,
+                                schema_id: _,
+                                introspection: _,
+                            },
+                            _,
+                        )| WarmUpCachingQueryKey {
+                            query: query.clone(),
+                            operation: operation.clone(),
+                            hash: Some(hash.clone()),
+                            metadata: metadata.clone(),
+                            plan_options: plan_options.clone(),
+                            config_mode: self.config_mode.clone(),
+                            introspection: self.introspection,
                         },
-                        _,
-                    )| WarmUpCachingQueryKey {
-                        query: query.clone(),
-                        operation: operation.clone(),
-                        hash: Some(hash.clone()),
-                        metadata: metadata.clone(),
-                        plan_options: plan_options.clone(),
-                        config_mode: self.config_mode.clone(),
-                        introspection: self.introspection,
-                    },
-                )
-                .take(count)
-                .collect::<Vec<_>>()
+                    )
+                    .take(count)
+                    .collect::<Vec<_>>()
+            }
+            None => Vec::new(),
         };
 
         cache_keys.shuffle(&mut thread_rng());
 
+        let should_warm_with_pqs =
+            (experimental_pql_prewarm && previous_cache.is_none()) || previous_cache.is_some();
         let persisted_queries_operations = persisted_query_layer.all_operations();
 
-        let capacity = cache_keys.len()
-            + persisted_queries_operations
-                .as_ref()
-                .map(|ops| ops.len())
-                .unwrap_or(0);
+        let capacity = if should_warm_with_pqs {
+            cache_keys.len()
+                + persisted_queries_operations
+                    .as_ref()
+                    .map(|ops| ops.len())
+                    .unwrap_or(0)
+        } else {
+            cache_keys.len()
+        };
         tracing::info!(
             "warming up the query plan cache with {} queries, this might take a while",
             capacity
@@ -222,18 +232,20 @@ where
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
-        let mut all_cache_keys = Vec::with_capacity(capacity);
-        if let Some(queries) = persisted_queries_operations {
-            for query in queries {
-                all_cache_keys.push(WarmUpCachingQueryKey {
-                    query,
-                    operation: None,
-                    hash: None,
-                    metadata: CacheKeyMetadata::default(),
-                    plan_options: PlanOptions::default(),
-                    config_mode: self.config_mode.clone(),
-                    introspection: self.introspection,
-                });
+        let mut all_cache_keys: Vec<WarmUpCachingQueryKey> = Vec::with_capacity(capacity);
+        if should_warm_with_pqs {
+            if let Some(queries) = persisted_queries_operations {
+                for query in queries {
+                    all_cache_keys.push(WarmUpCachingQueryKey {
+                        query,
+                        operation: None,
+                        hash: None,
+                        metadata: CacheKeyMetadata::default(),
+                        plan_options: PlanOptions::default(),
+                        config_mode: self.config_mode.clone(),
+                        introspection: self.introspection,
+                    });
+                }
             }
         }
 
@@ -269,19 +281,22 @@ where
             };
 
             if experimental_reuse_query_plans {
-                // if the query hash did not change with the schema update, we can reuse the previously cached entry
-                if let Some(hash) = hash {
-                    if hash == doc.hash {
-                        if let Some(entry) =
-                            { previous_cache.lock().await.get(&caching_key).cloned() }
-                        {
-                            self.cache.insert_in_memory(caching_key, entry).await;
-                            reused += 1;
-                            continue;
+                // check if prewarming via seeing if the previous cache exists (aka a reloaded router); if reloading, try to reuse the
+                if let Some(ref previous_cache) = previous_cache {
+                    // if the query hash did not change with the schema update, we can reuse the previously cached entry
+                    if let Some(hash) = hash {
+                        if hash == doc.hash {
+                            if let Some(entry) =
+                                { previous_cache.lock().await.get(&caching_key).cloned() }
+                            {
+                                self.cache.insert_in_memory(caching_key, entry).await;
+                                reused += 1;
+                                continue;
+                            }
                         }
                     }
                 }
-            }
+            };
 
             let entry = self
                 .cache
