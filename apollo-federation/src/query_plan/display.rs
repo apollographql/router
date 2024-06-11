@@ -56,13 +56,17 @@ impl SubscriptionNode {
         state.indent()?;
 
         state.write("Primary: {")?;
+        state.indent()?;
         primary.write_indented(state)?;
+        state.dedent()?;
         state.write("},")?;
 
         if let Some(rest) = rest {
             state.new_line()?;
             state.write("Rest: {")?;
+            state.indent()?;
             rest.write_indented(state)?;
+            state.dedent()?;
             state.write("},")?;
         }
 
