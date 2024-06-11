@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Test server request body size metrics
+description: Server request body size metrics
 expression: "&metrics.all()"
 info:
   telemetry:
@@ -12,6 +12,8 @@ info:
           http.server.response.body.size: true
 ---
 - name: http.server.response.body.size
+  description: Size of HTTP server response bodies
+  unit: By
   data:
     datapoints:
       - sum: 35
