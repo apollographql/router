@@ -216,10 +216,6 @@ fn interface_union_interaction() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add fragment of condition "A" (runtimes: [A]) to parent type "I" (runtimes: [B, C])"#
-)]
-// TODO: investigate this failure
 fn interface_union_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
@@ -501,10 +497,6 @@ fn union_union_interaction() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add fragment of condition "A" (runtimes: [A]) to parent type "U1" (runtimes: [B, C])"#
-)]
-// TODO: investigate this failure
 fn union_union_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
