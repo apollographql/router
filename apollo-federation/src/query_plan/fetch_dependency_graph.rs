@@ -3653,21 +3653,16 @@ fn handle_requires(
     let head = dependency_graph
         .federated_query_graph
         .edge_head_weight(query_graph_edge_id)?;
+    let entity_type_schema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&head.source)?
+        .clone();
     let QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(entity_type_position)) =
         head.type_.clone()
     else {
         return Err(FederationError::internal(
             "@requires applied on non-entity object type",
         ));
-    };
-    let entity_type_schema = dependency_graph
-        .federated_query_graph
-        .schema_by_source(&head.source)?
-        .clone();
-    let post_require_inputs_edge_info = PostRequireInputsEdgeInfo {
-        entity_type_position: entity_type_position.clone(),
-        entity_type_schema: &entity_type_schema,
-        query_graph_edge_id,
     };
 
     // In many cases, we can optimize @requires by merging the requirement to previously existing nodes. However,
@@ -3923,7 +3918,9 @@ fn handle_requires(
         add_post_require_inputs(
             dependency_graph,
             &path_for_parent,
-            post_require_inputs_edge_info,
+            &entity_type_schema,
+            entity_type_position.clone(),
+            query_graph_edge_id,
             context,
             parent.parent_node_id,
             post_require_node_id,
@@ -3998,7 +3995,9 @@ fn handle_requires(
         add_post_require_inputs(
             dependency_graph,
             fetch_node_path,
-            post_require_inputs_edge_info,
+            &entity_type_schema,
+            entity_type_position.clone(),
+            query_graph_edge_id,
             context,
             fetch_node_id,
             new_node_id,
@@ -4134,33 +4133,31 @@ fn inputs_for_require(
     }
 }
 
-struct PostRequireInputsEdgeInfo<'a> {
-    entity_type_position: ObjectTypeDefinitionPosition,
-    entity_type_schema: &'a ValidFederationSchema,
-    query_graph_edge_id: EdgeIndex,
-}
-
+// Yes, many arguments, but this is an internal function with no obvious grouping
+#[allow(clippy::too_many_arguments)]
 fn add_post_require_inputs(
     dependency_graph: &mut FetchDependencyGraph,
     require_node_path: &FetchDependencyGraphNodePath,
-    edge_info: PostRequireInputsEdgeInfo,
+    entity_type_schema: &ValidFederationSchema,
+    entity_type_position: ObjectTypeDefinitionPosition,
+    query_graph_edge_id: EdgeIndex,
     context: &OpGraphPathContext,
     pre_require_node_id: NodeIndex,
     post_require_node_id: NodeIndex,
 ) -> Result<(), FederationError> {
     let (inputs, key_inputs) = inputs_for_require(
         dependency_graph,
-        edge_info.entity_type_position.clone(),
-        edge_info.query_graph_edge_id,
+        entity_type_position.clone(),
+        query_graph_edge_id,
         context,
         true,
     )?;
     // Note that `compute_input_rewrites_on_key_fetch` will return `None` in general, but if `entity_type_position` is an interface/interface object,
     // then we need those rewrites to ensure the underlying fetch is valid.
     let input_rewrites = compute_input_rewrites_on_key_fetch(
-        &edge_info.entity_type_position.type_name.clone(),
-        &edge_info.entity_type_position.into(),
-        edge_info.entity_type_schema,
+        &entity_type_position.type_name.clone(),
+        &entity_type_position.into(),
+        entity_type_schema,
     )?;
     let post_require_node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, post_require_node_id)?;
