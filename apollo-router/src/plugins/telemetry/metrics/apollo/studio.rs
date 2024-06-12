@@ -363,13 +363,13 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
 impl AddAssign<SingleLimitsStats> for LimitsStats {
     fn add_assign(&mut self, rhs: SingleLimitsStats) {
         if self.cost_estimated.record(rhs.cost_estimated).is_ok() {
-            self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated as u64);
+            self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated);
         } else {
             tracing::warn!("could not record estimated cost in LimitsStats");
         }
 
         if self.cost_actual.record(rhs.cost_actual).is_ok() {
-            self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual as u64);
+            self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual);
         } else {
             tracing::warn!("could not record actual cost in LimitsStats");
         }

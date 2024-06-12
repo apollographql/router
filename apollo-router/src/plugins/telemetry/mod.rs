@@ -1377,6 +1377,7 @@ impl Telemetry {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_apollo_metrics(
         context: &Context,
         field_level_instrumentation_ratio: f64,
