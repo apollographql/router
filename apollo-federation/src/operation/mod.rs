@@ -150,7 +150,7 @@ impl Operation {
             defer_conditions: IndexMap::new(),
         }
         // TODO(@TylerBloom): Once defer is implement, the above statement needs to be replaced
-        // with the commented-out one below.
+        // with the commented-out one below. This is part of FED-95
         /*
         if self.has_defer() {
             todo!("@defer not implemented");
