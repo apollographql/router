@@ -11,6 +11,7 @@ use super::duration_histogram::DurationHistogram;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
+use crate::plugins::telemetry::metrics::apollo::cost_histogram::CostHistogram;
 
 fn serialize_histogram<S: serde::Serializer>(
     histogram: &Histogram<u64>,
@@ -322,12 +323,8 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
 
 pub(crate) struct LimitsStats {
     strategy: String,
-    #[serde(serialize_with = "serialize_histogram")]
-    cost_estimated: Histogram<u64>,
-    max_cost_estimated: u64,
-    #[serde(serialize_with = "serialize_histogram")]
-    cost_actual: Histogram<u64>,
-    max_cost_actual: u64,
+    cost_estimated: CostHistogram,
+    cost_actual: CostHistogram,
     depth: u64,
     height: u64,
     alias_count: u64,
@@ -340,18 +337,10 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
     fn from(value: LimitsStats) -> Self {
         Self {
             strategy: value.strategy,
-            cost_estimated: value
-                .cost_estimated
-                .iter_linear(1)
-                .map(|v| v.count_at_value() as i64)
-                .collect(),
-            max_cost_estimated: value.max_cost_estimated,
-            cost_actual: value
-                .cost_actual
-                .iter_linear(1)
-                .map(|v| v.count_at_value() as i64)
-                .collect(),
-            max_cost_actual: value.max_cost_actual,
+            cost_estimated: value.cost_estimated.to_vec(),
+            max_cost_estimated: value.cost_estimated.max(),
+            cost_actual: value.cost_actual.to_vec(),
+            max_cost_actual: value.cost_actual.max(),
             depth: value.depth,
             height: value.height,
             alias_count: value.alias_count,
@@ -362,15 +351,19 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
 
 impl AddAssign<SingleLimitsStats> for LimitsStats {
     fn add_assign(&mut self, rhs: SingleLimitsStats) {
-        if rhs.cost_estimated > 0 && self.cost_estimated.record(rhs.cost_estimated).is_ok() {
-            self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated);
-        } else {
+        if self
+            .cost_estimated
+            .record(rhs.cost_estimated.unwrap_or_default())
+            .is_err()
+        {
             tracing::warn!("could not record estimated cost in LimitsStats");
         }
 
-        if rhs.cost_actual > 0 && self.cost_actual.record(rhs.cost_actual).is_ok() {
-            self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual);
-        } else {
+        if self
+            .cost_actual
+            .record(rhs.cost_actual.unwrap_or_default())
+            .is_err()
+        {
             tracing::warn!("could not record actual cost in LimitsStats");
         }
 
@@ -386,26 +379,29 @@ impl AddAssign<SingleLimitsStats> for LimitsStats {
 
 impl From<SingleLimitsStats> for LimitsStats {
     fn from(value: SingleLimitsStats) -> Self {
-        let mut cost_estimated = Histogram::new(3).unwrap();
-        if value.cost_estimated > 0 && cost_estimated.record(value.cost_estimated).is_err() {
-            tracing::warn!(
-                "could not record estimated cost when converting SingleLimitsStats to LimitsStats"
-            );
+        let mut cost_estimated = CostHistogram::new();
+        if let Some(cost) = value.cost_estimated {
+            let res = cost_estimated.record(cost);
+            if res.is_err() {
+                tracing::warn!(
+                    "could not record estimated cost when converting SingleLimitsStats to LimitsStats"
+                );
+            }
         }
 
-        let mut cost_actual = Histogram::new(3).unwrap();
-        if value.cost_actual > 0 && cost_actual.record(value.cost_actual).is_err() {
-            tracing::warn!(
-                "could not record actual cost when converting SingleLimitsStats to LimitsStats"
-            );
+        let mut cost_actual = CostHistogram::new();
+        if let Some(cost) = value.cost_actual {
+            let res = cost_actual.record(cost);
+            if res.is_err() {
+                tracing::warn!(
+                    "could not record actual cost when converting SingleLimitsStats to LimitsStats"
+                );
+            }
         }
-
         Self {
-            strategy: value.strategy,
+            strategy: value.strategy.unwrap_or_default(),
             cost_estimated,
-            max_cost_estimated: value.cost_estimated,
             cost_actual,
-            max_cost_actual: value.cost_actual,
             depth: value.depth,
             height: value.height,
             alias_count: value.alias_count,
@@ -416,9 +412,9 @@ impl From<SingleLimitsStats> for LimitsStats {
 
 #[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct SingleLimitsStats {
-    pub(crate) strategy: String,
-    pub(crate) cost_estimated: u64,
-    pub(crate) cost_actual: u64,
+    pub(crate) strategy: Option<String>,
+    pub(crate) cost_estimated: Option<f64>,
+    pub(crate) cost_actual: Option<f64>,
     pub(crate) depth: u64,
     pub(crate) height: u64,
     pub(crate) alias_count: u64,
@@ -529,9 +525,9 @@ mod test {
                             without_field_instrumentation: true,
                         },
                         limits_stats: SingleLimitsStats {
-                            strategy: "test".to_string(),
-                            cost_estimated: 10,
-                            cost_actual: 7,
+                            strategy: Some("test".to_string()),
+                            cost_estimated: Some(10.0),
+                            cost_actual: Some(7.0),
                             depth: 2,
                             height: 4,
                             alias_count: 0,

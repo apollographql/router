@@ -26,6 +26,7 @@ use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
+pub(crate) mod cost_histogram;
 mod duration_histogram;
 pub(crate) mod studio;
 

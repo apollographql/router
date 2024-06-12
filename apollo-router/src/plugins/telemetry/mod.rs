@@ -1424,15 +1424,9 @@ impl Telemetry {
                     let strategy = guard.get::<demand_control::strategy::Strategy>();
                     let cost_ctx = guard.get::<demand_control::CostContext>();
                     SingleLimitsStats {
-                        strategy: strategy
-                            .and_then(|s| serde_json::to_string(&s.mode).ok())
-                            .unwrap_or_default(),
-                        cost_estimated: cost_ctx
-                            .map(|ctx| ctx.estimated.round() as u64)
-                            .unwrap_or_default(),
-                        cost_actual: cost_ctx
-                            .map(|ctx| ctx.actual.round() as u64)
-                            .unwrap_or_default(),
+                        strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
+                        cost_estimated: cost_ctx.map(|ctx| ctx.estimated),
+                        cost_actual: cost_ctx.map(|ctx| ctx.actual),
 
                         // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
                         // TODO: Populate these with Traffic Shaping results

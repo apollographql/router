@@ -1321,7 +1321,6 @@ expression: aggregated_metrics
                 0,
                 2
               ],
-              "max_cost_estimated": 10,
               "cost_actual": [
                 0,
                 0,
@@ -1332,7 +1331,6 @@ expression: aggregated_metrics
                 0,
                 2
               ],
-              "max_cost_actual": 7,
               "depth": 2,
               "height": 4,
               "alias_count": 0,
