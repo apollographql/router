@@ -578,6 +578,47 @@ The default value of `experimental_parallelism` is `1`.
 
 In practice, you should tune `experimental_parallelism` based on metrics and benchmarks gathered from your router.
 
+<MinVersion version="1.49.0">
+
+### Enhanced operation signature generation
+
+</MinVersion>
+
+<ExperimentalFeature />
+
+Apollo's original operation signature operation removed information about fields that are not basic object type fields such as input types, enum types, union types, interface types.
+These types are often not included in usage reports and removed from the signature that is sent in the usage reporting payload. 
+
+Beginning in v1.49.0, the router supports enhanced operation signature generation including:
+
+* The full normalized form of input objects and enum references
+* Aliases
+* Additional small normalization improvements
+
+Configure it in `router.yaml` with `telemetry.apollo.experimental_apollo_signature_normalization_algorithm`
+
+```yaml title="router.yaml"
+# This assumes you are using the default `new` value for
+# experimental_apollo_metrics_generation_mode: new
+telemetry: 
+  apollo.experimental_apollo_signature_normalization_algorithm: enhanced # Default is legacy
+```
+
+<Note>
+
+Once you enable `enhanced` signature normalization, there will be a lag in changes to your metrics.
+This is because historical operations still use the `legacy` signature algorithm.
+
+</Note>
+
+The router supports a legacy JavaScript implementation and a newer experimental Rust implementation for generating the stats report keys and referenced fields that are sent in Apollo usage reports.
+Starting in v1.49.0, the default operation signature generation method is the `new` kind. You can revert it to the older `legacy` type or turn on `both` to log warnings if the implementations disagree.
+
+Configure it in `router.yaml` with the `experimental_apollo_metrics_generation_mode` option:
+
+```yaml title="router.yaml"
+experimental_apollo_metrics_generation_mode: legacy # Default is new
+```
 
 ### Safelisting with persisted queries
 
