@@ -12,7 +12,7 @@ info:
           http.server.response.body.size: true
 ---
 - name: http.server.response.body.size
-  description: Size of HTTP server response bodies
+  description: Size of HTTP server response bodies.
   unit: By
   data:
     datapoints:
