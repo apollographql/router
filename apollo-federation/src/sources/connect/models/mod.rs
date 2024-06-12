@@ -281,6 +281,8 @@ mod tests {
                         star: None,
                     },
                 ),
+                entity: false,
+                on_root_type: true,
             },
             ConnectId {
                 label: "connectors.json http: Get /posts",
@@ -356,6 +358,8 @@ mod tests {
                         star: None,
                     },
                 ),
+                entity: false,
+                on_root_type: true,
             },
         }
         "###);
