@@ -190,10 +190,10 @@ type Query
   manyArgsQuery(arg1: String, arg2: String, arg3: String, arg4: String, arg5: String, arg6: String, arg7: String): EverythingResponse!
   underscoreQuery(arg_: String, _arg2: String, _arg3_: String): UnderscoreResponse
   enumUsageQuery(
-    nonNullEnumInput: SomeEnum!, 
-    nullableEnumInput: SomeEnum, 
+    nonNullEnumInput: SomeEnum!,
+    nullableEnumInput: SomeEnum,
     enumInputList: [SomeEnum],
-    enumInputListOfLists: [[SomeEnum]], 
+    enumInputListOfLists: [[SomeEnum]],
     enumInputObject: EnumInputType,
     enumInputObjectList: [EnumInputType],
     enumInputObjectListOfLists: [[EnumInputType]],
@@ -211,7 +211,6 @@ enum SomeEnum
   SOME_VALUE_6 @join__enumValue(graph: MAIN)
   SOME_VALUE_7 @join__enumValue(graph: MAIN)
   SOME_VALUE_8 @join__enumValue(graph: MAIN)
-  SOME_VALUE_9 @join__enumValue(graph: MAIN)
   SOME_VALUE_9 @join__enumValue(graph: MAIN)
   SOME_VALUE_10 @join__enumValue(graph: MAIN)
   SOME_VALUE_11 @join__enumValue(graph: MAIN)
