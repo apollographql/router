@@ -35,8 +35,6 @@ pub(crate) enum TraceIdFormat {
     OpenTelemetry,
     /// Datadog trace ID, a u64.
     Datadog,
-    /// Apollo Studio trace id
-    Apollo,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -126,6 +124,11 @@ pub(crate) enum RouterSelector {
     TraceId {
         /// The format of the trace ID.
         trace_id: TraceIdFormat,
+    },
+    /// Apollo Studio operation id
+    StudioOperationId {
+        /// Apollo Studio operation id
+        studio_operation_id: bool,
     },
     /// A value from context.
     ResponseContext {
@@ -566,20 +569,13 @@ impl Selector for RouterSelector {
                 .map(opentelemetry::Value::from),
             RouterSelector::TraceId {
                 trace_id: trace_id_format,
-            } => {
-                if let TraceIdFormat::Apollo = &trace_id_format {
-                    return None;
+            } => trace_id().map(|id| {
+                match trace_id_format {
+                    TraceIdFormat::OpenTelemetry => id.to_string(),
+                    TraceIdFormat::Datadog => id.to_datadog(),
                 }
-                trace_id().map(|id| {
-                    match trace_id_format {
-                        TraceIdFormat::OpenTelemetry => id.to_string(),
-                        TraceIdFormat::Datadog => id.to_datadog(),
-                        // It happens in the response
-                        TraceIdFormat::Apollo => String::new(),
-                    }
-                    .into()
-                })
-            }
+                .into()
+            }),
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
@@ -636,20 +632,14 @@ impl Selector for RouterSelector {
             }
             RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
-            RouterSelector::TraceId {
-                trace_id: trace_id_format,
-            } => {
-                if let TraceIdFormat::Apollo = &trace_id_format {
-                    response
-                        .context
-                        .get::<_, String>(APOLLO_OPERATION_ID)
-                        .ok()
-                        .flatten()
-                        .map(opentelemetry::Value::from)
-                } else {
-                    None
-                }
-            }
+            RouterSelector::StudioOperationId {
+                studio_operation_id,
+            } if *studio_operation_id => response
+                .context
+                .get::<_, String>(APOLLO_OPERATION_ID)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
             _ => None,
         }
     }
@@ -864,17 +854,14 @@ impl Selector for SupergraphSelector {
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::Cost { cost } => {
-                let extensions = ctx.extensions().lock();
-                extensions
-                    .get::<CostContext>()
-                    .map(|cost_result| match cost {
-                        CostValue::Estimated => cost_result.estimated.into(),
-                        CostValue::Actual => cost_result.actual.into(),
-                        CostValue::Delta => cost_result.delta().into(),
-                        CostValue::Result => cost_result.result.into(),
-                    })
-            }
+            SupergraphSelector::Cost { cost } => ctx.extensions().with_lock(|lock| {
+                lock.get::<CostContext>().map(|cost_result| match cost {
+                    CostValue::Estimated => cost_result.estimated.into(),
+                    CostValue::Actual => cost_result.actual.into(),
+                    CostValue::Delta => cost_result.delta().into(),
+                    CostValue::Result => cost_result.result.into(),
+                })
+            }),
             SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
                 if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
                     == Some(serde_json_bytes::Value::Bool(true))
@@ -1464,7 +1451,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1486,7 +1473,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1511,7 +1498,7 @@ mod test {
                         .supergraph_request(Arc::new(
                             http::Request::builder()
                                 .header("header_key", "header_value")
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -2016,8 +2003,8 @@ mod test {
 
     #[test]
     fn test_router_studio_trace_id() {
-        let selector = RouterSelector::TraceId {
-            trace_id: TraceIdFormat::Apollo,
+        let selector = RouterSelector::StudioOperationId {
+            studio_operation_id: true,
         };
         let ctx = crate::Context::new();
         let _ = ctx.insert(APOLLO_OPERATION_ID, "42".to_string()).unwrap();

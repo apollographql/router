@@ -237,7 +237,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-federation"
-version = "1.48.0"
+version = "1.48.1"
 dependencies = [
  "apollo-compiler 1.0.0-beta.17 (git+https://github.com/tninesling/apollo-rs.git?rev=65c4c92443dc19b85ef8a8c22dce397ab3ac24a8)",
  "derive_more",
@@ -289,7 +289,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router"
-version = "1.48.0"
+version = "1.48.1"
 dependencies = [
  "access-json",
  "anyhow",
@@ -318,6 +318,7 @@ dependencies = [
  "console",
  "console-subscriber",
  "cookie",
+ "crossbeam-channel",
  "dashmap",
  "derivative",
  "derive_more",
@@ -452,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-benchmarks"
-version = "1.48.0"
+version = "1.48.1"
 dependencies = [
  "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-router",
@@ -468,7 +469,7 @@ dependencies = [
 
 [[package]]
 name = "apollo-router-scaffold"
-version = "1.48.0"
+version = "1.48.1"
 dependencies = [
  "anyhow",
  "cargo-scaffold",

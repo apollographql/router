@@ -1,8 +1,6 @@
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure - missing `__typename` under `a`
 fn it_works_with_nested_fragments_1() {
     let planner = planner!(
         Subgraph1: r#"
@@ -94,7 +92,7 @@ fn it_works_with_nested_fragments_1() {
                 }
               }
             }
-            
+
             fragment FooChildSelect on Foo {
               __typename
               foo
@@ -109,7 +107,7 @@ fn it_works_with_nested_fragments_1() {
                 }
               }
             }
-            
+
             fragment FooSelect on Foo {
               __typename
               foo
@@ -571,8 +569,6 @@ fn it_preserves_directives_when_fragment_is_reused() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
     // Slightly artificial example for simplicity, but this highlight the problem.
     // In that example, the only queried subgraph is the first one (there is in fact
@@ -650,8 +646,6 @@ fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure - snapshot mismatch (complicated)
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_differs() {
     // This test is designed such that type `Outer` implements the interface `I` in `Subgraph1`
     // but not in `Subgraph2`, yet `I` exists in `Subgraph2` (but only `Inner` implements it
@@ -758,7 +752,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -775,7 +769,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -856,7 +850,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -873,7 +867,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -956,7 +950,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -973,7 +967,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -998,8 +992,6 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_subtyping_relation_diff
 }
 
 #[test]
-#[should_panic(expected = r#"snapshot assertion"#)]
-// TODO: investigate this failure
 fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relation_differs() {
     // This test is similar to the subtyping case (it tests the same problems), but test the case
     // of unions instead of interfaces.
@@ -1088,7 +1080,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1103,7 +1095,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1183,7 +1175,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1198,7 +1190,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1278,7 +1270,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
               }
             },
             Parallel {
-              Flatten(path: "outer1") {
+              Flatten(path: "outer2") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
@@ -1293,7 +1285,7 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
                   }
                 },
               },
-              Flatten(path: "outer2") {
+              Flatten(path: "outer1") {
                 Fetch(service: "Subgraph1") {
                   {
                     ... on Outer {
