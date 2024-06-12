@@ -100,7 +100,7 @@ impl Default for SingleFieldStat {
             requests_with_errors_count: Default::default(),
             observed_execution_count: Default::default(),
             latency: Default::default(),
-            length: Histogram::new(1).expect("Histogram can be created"),
+            length: Histogram::new(3).expect("Histogram can be created"),
         }
     }
 }
@@ -217,7 +217,7 @@ impl Default for FieldStat {
             requests_with_errors_count: Default::default(),
             observed_execution_count: Default::default(),
             latency: Default::default(),
-            length: Histogram::new(1).expect("Histogram can be created"),
+            length: Histogram::new(3).expect("Histogram can be created"),
         }
     }
 }
@@ -362,27 +362,37 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
 
 impl AddAssign<SingleLimitsStats> for LimitsStats {
     fn add_assign(&mut self, rhs: SingleLimitsStats) {
-        // TODO: Should we log a warning for these fallible calls to record?
         if self.cost_estimated.record(rhs.cost_estimated).is_ok() {
             self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated as u64);
+        } else {
+            tracing::warn!("could not record estimated cost in LimitsStats");
         }
 
         if self.cost_actual.record(rhs.cost_actual).is_ok() {
             self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual as u64);
+        } else {
+            tracing::warn!("could not record actual cost in LimitsStats");
         }
 
-        // TODO: depth, height, alias_count, root_field_count?
+        // TODO: How do we handle depth, height, alias_count, and root_field_count?
     }
 }
 
 impl From<SingleLimitsStats> for LimitsStats {
     fn from(value: SingleLimitsStats) -> Self {
-        // TODO: Should we log a warning for these fallible calls to record?
-        let mut cost_estimated = Histogram::new(1).unwrap();
-        let _ = cost_estimated.record(value.cost_estimated);
+        let mut cost_estimated = Histogram::new(3).unwrap();
+        if cost_estimated.record(value.cost_estimated).is_err() {
+            tracing::warn!(
+                "could not record estimated cost when converting SingleLimitsStats to LimitsStats"
+            );
+        }
 
-        let mut cost_actual = Histogram::new(1).unwrap();
-        let _ = cost_actual.record(value.cost_actual);
+        let mut cost_actual = Histogram::new(3).unwrap();
+        if cost_actual.record(value.cost_actual).is_err() {
+            tracing::warn!(
+                "could not record actual cost when converting SingleLimitsStats to LimitsStats"
+            );
+        }
 
         Self {
             strategy: value.strategy,

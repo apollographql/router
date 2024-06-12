@@ -1363,7 +1363,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
-                                            &field_lengths.field_lengths, // TODO: I think we need to submit these on all the responses
+                                            &field_lengths.field_lengths,
                                         );
                                     }
                                 }
@@ -1433,7 +1433,9 @@ impl Telemetry {
                         cost_actual: cost_ctx
                             .map(|ctx| ctx.actual.round() as u64)
                             .unwrap_or_default(),
-                        // TODO: These are limits but unrelated to demand control. How should we populate them?
+
+                        // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
+                        // TODO: Populate these with Traffic Shaping results
                         depth: 0,
                         height: 0,
                         alias_count: 0,
@@ -1573,7 +1575,7 @@ impl Telemetry {
                     latency: Default::default(),
                     observed_execution_count: 0,
                     requests_with_errors_count: 0,
-                    length: Histogram::new(1).expect("Histogram can be created"),
+                    length: Histogram::new(3).expect("Histogram can be created"),
                 });
             let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
             field_stat
@@ -1582,6 +1584,9 @@ impl Telemetry {
             field_stat.observed_execution_count += 1;
             field_stat.errors_count += node.error.len() as u64;
 
+            // The `field_lengths`` histogram should have data for all list fields in the response.
+            // Here, we are iterating over ftv1 traces, which may not exist for every list field.
+            // If that's the case, we'll be dropping list length data here.
             if let Some(histogram) = field_lengths
                 .get(&node.parent_type)
                 .and_then(|entry| entry.get(field_name))

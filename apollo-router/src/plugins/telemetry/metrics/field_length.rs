@@ -27,14 +27,17 @@ impl ResponseVisitor for FieldLengthRecorder {
     ) {
         match value {
             serde_json_bytes::Value::Array(items) => {
-                // TODO: What should we do with the fallible `record` here?
-                let _ = self
+                if self
                     .field_lengths
                     .entry(ty.to_string())
                     .or_default()
                     .entry(field.name.to_string())
-                    .or_insert_with(|| Histogram::new(1).expect("Histogram can be created"))
-                    .record(items.len() as u64);
+                    .or_insert_with(|| Histogram::new(3).expect("Histogram can be created"))
+                    .record(items.len() as u64)
+                    .is_err()
+                {
+                    tracing::warn!("failed to record field length in histogram")
+                }
 
                 for item in items {
                     self.visit_list_item(request, field.ty().inner_named_type(), field, item);
