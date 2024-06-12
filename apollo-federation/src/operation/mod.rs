@@ -597,11 +597,21 @@ pub(crate) enum Selection {
     InlineFragment(Arc<InlineFragmentSelection>),
 }
 
+/// Element enum that is more general than OpPathElement.
+/// - Used for operation optimization.
+#[derive(Debug, Clone, derive_more::From)]
+pub(crate) enum OperationElement {
+    Field(Field),
+    FragmentSpread(FragmentSpread),
+    InlineFragment(InlineFragment),
+}
+
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
         Self::Field(Arc::new(field.with_subselection(sub_selections)))
     }
 
+    /// Build a selection from an OpPathElement and a sub-selection set.
     pub(crate) fn from_element(
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
@@ -611,6 +621,34 @@ impl Selection {
         match element {
             OpPathElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
             OpPathElement::InlineFragment(inline_fragment) => {
+                let Some(sub_selections) = sub_selections else {
+                    return Err(FederationError::internal(
+                        "unexpected inline fragment without sub-selections",
+                    ));
+                };
+                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
+            }
+        }
+    }
+
+    /// Build a selection from an OperationElement and a sub-selection set.
+    /// - `named_fragments`: Named fragment definitions that are rebased for the element's schema.
+    pub(crate) fn from_operation_element(
+        element: OperationElement,
+        sub_selections: Option<SelectionSet>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Selection, FederationError> {
+        match element {
+            OperationElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
+            OperationElement::FragmentSpread(fragment_spread) => {
+                if sub_selections.is_some() {
+                    return Err(FederationError::internal(
+                        "unexpected fragment spread with sub-selections",
+                    ));
+                }
+                Ok(FragmentSpreadSelection::new(fragment_spread, named_fragments)?.into())
+            }
+            OperationElement::InlineFragment(inline_fragment) => {
                 let Some(sub_selections) = sub_selections else {
                     return Err(FederationError::internal(
                         "unexpected inline fragment without sub-selections",
@@ -660,13 +698,25 @@ impl Selection {
         }
     }
 
+    pub(crate) fn operation_element(&self) -> Result<OperationElement, FederationError> {
+        match self {
+            Selection::Field(field_selection) => {
+                Ok(OperationElement::Field(field_selection.field.clone()))
+            }
+            Selection::FragmentSpread(fragment_spread_selection) => Ok(
+                OperationElement::FragmentSpread(fragment_spread_selection.spread.clone()),
+            ),
+            Selection::InlineFragment(inline_fragment_selection) => Ok(
+                OperationElement::InlineFragment(inline_fragment_selection.inline_fragment.clone()),
+            ),
+        }
+    }
+
+    // Note: Fragment spreads can be present in optimized operations.
     pub(crate) fn selection_set(&self) -> Result<Option<&SelectionSet>, FederationError> {
         match self {
             Selection::Field(field_selection) => Ok(field_selection.selection_set.as_ref()),
-            Selection::FragmentSpread(_) => Err(Internal {
-                message: "Fragment spread does not directly have a selection set".to_owned(),
-            }
-            .into()),
+            Selection::FragmentSpread(_) => Ok(None),
             Selection::InlineFragment(inline_fragment_selection) => {
                 Ok(Some(&inline_fragment_selection.selection_set))
             }
@@ -1414,6 +1464,23 @@ impl FragmentSpreadSelection {
             spread: FragmentSpread::new(spread_data),
             selection_set: fragment.selection_set.clone(),
         }
+    }
+
+    /// Creates a fragment spread selection (in an optimized operation).
+    /// - `named_fragments`: Named fragment definitions that are rebased for the element's schema.
+    pub(crate) fn new(
+        fragment_spread: FragmentSpread,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
+        let fragment_name = &fragment_spread.data().fragment_name;
+        let fragment = named_fragments.get(fragment_name).ok_or_else(|| {
+            FederationError::internal(format!("Fragment {} not found", fragment_name))
+        })?;
+        debug_assert_eq!(fragment_spread.data().schema, fragment.schema);
+        Ok(Self {
+            spread: fragment_spread,
+            selection_set: fragment.selection_set.clone(),
+        })
     }
 
     fn normalize(
@@ -2374,13 +2441,20 @@ impl SelectionSet {
                 .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
-        let element = first.element()?.rebase_on_or_error(parent_type, schema)?;
+        let element =
+            first
+                .operation_element()?
+                .rebase_on_or_error(parent_type, schema, named_fragments)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
-            return Selection::from_element(element, /*sub_selection*/ None);
+            return Selection::from_operation_element(
+                element,
+                /*sub_selection*/ None,
+                named_fragments,
+            );
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
@@ -2402,7 +2476,7 @@ impl SelectionSet {
             sub_selection_updates.values().map(|v| v.iter()),
             named_fragments,
         )?);
-        Selection::from_element(element, updated_sub_selection)
+        Selection::from_operation_element(element, updated_sub_selection, named_fragments)
     }
 
     /// Build a selection set by aggregating all items from the `selection_key_groups` iterator.
@@ -4680,6 +4754,25 @@ impl Display for InlineFragment {
             f.write_str("...")?;
         }
         data.directives.serialize().no_indent().fmt(f)
+    }
+}
+
+impl Display for FragmentSpread {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let data = self.data();
+        f.write_str("...")?;
+        f.write_str(&data.fragment_name)?;
+        data.directives.serialize().no_indent().fmt(f)
+    }
+}
+
+impl Display for OperationElement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationElement::Field(field) => field.fmt(f),
+            OperationElement::InlineFragment(inline_fragment) => inline_fragment.fmt(f),
+            OperationElement::FragmentSpread(fragment_spread) => fragment_spread.fmt(f),
+        }
     }
 }
 
