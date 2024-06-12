@@ -1151,11 +1151,19 @@ fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
 
 #[test]
 fn it_requires_rust_apollo_metrics_generation_for_enhanced_signature_normalization() {
+    let mut plugins_config = serde_json::Map::new();
+    plugins_config.insert(
+        "telemetry".to_string(),
+        serde_json::json! {{
+            "apollo": {
+                "experimental_apollo_signature_normalization_algorithm": "enhanced"
+            }
+        }},
+    );
+
     let error = Configuration::builder()
-        .experimental_apollo_signature_normalization_algorithm(
-            ApolloSignatureNormalizationAlgorithm::Enhanced,
-        )
         .experimental_apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
+        .apollo_plugins(plugins_config)
         .build()
         .expect_err("Must have an error because we have conflicting config options");
 

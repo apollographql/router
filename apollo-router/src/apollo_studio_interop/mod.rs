@@ -26,7 +26,7 @@ use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 
-use crate::configuration::ApolloSignatureNormalizationAlgorithm;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.

@@ -5,7 +5,6 @@ use router_bridge::planner::QueryPlannerConfig;
 use test_log::test;
 
 use super::*;
-use crate::configuration::ApolloSignatureNormalizationAlgorithm;
 
 macro_rules! assert_generated_report {
     ($actual:expr) => {
