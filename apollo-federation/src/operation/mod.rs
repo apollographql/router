@@ -3123,7 +3123,10 @@ impl SelectionSet {
                     field: field.clone(),
                 }),
                 Selection::FragmentSpread(_fragment) => {
-                    todo!()
+                    debug_assert!(
+                        false,
+                        "unexpected fragment spreads in expanded fetch operation"
+                    );
                 }
                 Selection::InlineFragment(inline_fragment) => {
                     let condition = inline_fragment
