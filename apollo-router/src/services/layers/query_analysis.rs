@@ -20,8 +20,8 @@ use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
-use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -197,21 +197,23 @@ impl QueryAnalysisLayer {
                     .extensions()
                     .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
 
-                let extended_refs_enabled = match self
-                    .configuration
-                    .apollo_plugins
-                    .plugins
-                    .get("telemetry") {
-                    Some(telemetry_config) => {
-                        match serde_json::from_value::<TelemetryConfig>(telemetry_config.clone()) {
-                            Ok(conf) => {
-                                matches!(conf.apollo.experimental_apollo_metrics_reference_mode, ApolloMetricsReferenceMode::Extended)
-                            },
-                            _ => false
+                let extended_refs_enabled =
+                    match self.configuration.apollo_plugins.plugins.get("telemetry") {
+                        Some(telemetry_config) => {
+                            match serde_json::from_value::<TelemetryConfig>(
+                                telemetry_config.clone(),
+                            ) {
+                                Ok(conf) => {
+                                    matches!(
+                                        conf.apollo.experimental_apollo_metrics_reference_mode,
+                                        ApolloMetricsReferenceMode::Extended
+                                    )
+                                }
+                                _ => false,
+                            }
                         }
-                    },
-                    None => false
-                };
+                        None => false,
+                    };
 
                 if extended_refs_enabled {
                     let extended_reference_stats = generate_extended_references(
