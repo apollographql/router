@@ -164,11 +164,15 @@ impl Operation {
                 .any(|f| f.has_defer())
     }
 
-    pub(crate) fn without_defer(self) -> Self {
+    /// Removes the @defer directive from all selections without removing that selection.
+    // PORT_NOTE: This behavior differs from the JS code, which removes anything with @defer.
+    // TODO(@TylerBloom): After the private preview and @defer being impl-ed, check if this logic
+    // should be changed to mirror the JS code.
+    pub(crate) fn without_defer(mut self) -> Self {
         if self.has_defer() {
-            todo!("@defer not implemented");
+            self.selection_set.without_defer();
         }
-
+        debug_assert!(!self.has_defer());
         self
     }
 }
@@ -191,6 +195,7 @@ mod selection_map {
     use std::sync::Arc;
 
     use apollo_compiler::ast::Name;
+    use apollo_compiler::executable;
     use indexmap::IndexMap;
 
     use crate::error::FederationError;
@@ -407,6 +412,22 @@ mod selection_map {
                 }
             }
         }
+
+        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+            match self {
+                Self::Field(field) => field.get_directives_mut(),
+                Self::FragmentSpread(spread) => spread.get_directives_mut(),
+                Self::InlineFragment(inline) => inline.get_directives_mut(),
+            }
+        }
+
+        pub(crate) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
+            match self {
+                Self::Field(field) => field.get_selection_set_mut().as_mut(),
+                Self::FragmentSpread(spread) => Some(spread.get_selection_set_mut()),
+                Self::InlineFragment(inline) => Some(inline.get_selection_set_mut()),
+            }
+        }
     }
 
     #[derive(Debug)]
@@ -425,6 +446,10 @@ mod selection_map {
             Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
+        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+            Arc::make_mut(self.0).field.directives_mut()
+        }
+
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut Option<SelectionSet> {
             &mut Arc::make_mut(self.0).selection_set
         }
@@ -436,6 +461,14 @@ mod selection_map {
     impl<'a> FragmentSpreadSelectionValue<'a> {
         pub(crate) fn new(fragment_spread_selection: &'a mut Arc<FragmentSpreadSelection>) -> Self {
             Self(fragment_spread_selection)
+        }
+
+        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+            Arc::make_mut(self.0).spread.directives_mut()
+        }
+
+        pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
+            &mut Arc::make_mut(self.0).selection_set
         }
 
         pub(crate) fn get(&self) -> &Arc<FragmentSpreadSelection> {
@@ -453,6 +486,10 @@ mod selection_map {
 
         pub(crate) fn get(&self) -> &Arc<InlineFragmentSelection> {
             self.0
+        }
+
+        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+            Arc::make_mut(self.0).inline_fragment.directives_mut()
         }
 
         pub(crate) fn get_selection_set_mut(&mut self) -> &mut SelectionSet {
@@ -719,6 +756,16 @@ impl Selection {
             Selection::FragmentSpread(_) => Ok(None),
             Selection::InlineFragment(inline_fragment_selection) => {
                 Ok(Some(&inline_fragment_selection.selection_set))
+            }
+        }
+    }
+
+    pub(crate) fn try_selection_set(&self) -> Option<&SelectionSet> {
+        match self {
+            Selection::Field(field_selection) => field_selection.selection_set.as_ref(),
+            Selection::FragmentSpread(_) => None,
+            Selection::InlineFragment(inline_fragment_selection) => {
+                Some(&inline_fragment_selection.selection_set)
             }
         }
     }
@@ -1190,6 +1237,10 @@ mod field_selection {
             &self.data
         }
 
+        pub(crate) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+            &mut self.data.directives
+        }
+
         pub(crate) fn sibling_typename(&self) -> Option<&Name> {
             self.data.sibling_typename.as_ref()
         }
@@ -1373,6 +1424,10 @@ mod fragment_spread_selection {
                 key: data.key(),
                 data,
             }
+        }
+
+        pub(crate) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+            &mut self.data.directives
         }
 
         pub(crate) fn data(&self) -> &FragmentSpreadData {
@@ -1667,6 +1722,10 @@ mod inline_fragment_selection {
 
         pub(crate) fn data(&self) -> &InlineFragmentData {
             &self.data
+        }
+
+        pub(crate) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+            &mut self.data.directives
         }
 
         pub(crate) fn with_updated_type_condition(
@@ -2917,6 +2976,26 @@ impl SelectionSet {
             }
         }
         Ok(normalized_selections)
+    }
+
+    /// Removes the @defer directive from all selections without removing that selection.
+    // PORT_NOTE: This behavior differs from the JS code, which removes anything with @defer.
+    // TODO(@TylerBloom): After the private preview and @defer being impl-ed, check if this logic
+    // should be changed to mirror the JS code.
+    fn without_defer(&mut self) {
+        // TODO: This doesn't seem like the correct way to get the directive name...
+        let Some(defer_name) = self.schema.get_directive_definition(&name!("defer")) else {
+            // TODO: Return an error? Continue? Dunno...
+            return;
+        };
+        for (_key, mut selection) in Arc::make_mut(&mut self.selections).iter_mut() {
+            Arc::make_mut(selection.get_directives_mut())
+                .retain(|dir| dir.name != defer_name.directive_name);
+            if let Some(set) = selection.get_selection_set_mut() {
+                set.without_defer();
+            }
+        }
+        debug_assert!(!self.has_defer());
     }
 
     fn has_defer(&self) -> bool {
