@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use axum::headers::HeaderName;
+use derivative::Derivative;
 use opentelemetry::sdk::metrics::new_view;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::Instrument;
@@ -241,6 +242,19 @@ pub(crate) enum TraceIdFormat {
     ///
     /// (e.g. Trace ID 16 -> 16)
     Decimal,
+}
+
+/// Apollo usage report signature normalization algorithm
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ApolloSignatureNormalizationAlgorithm {
+    /// Use the algorithm that matches the JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
+    /// edge cases from the JS implementation that affected normalization.
+    Enhanced,
 }
 
 /// Apollo usage report reference generation modes.

@@ -159,6 +159,7 @@ expression: "&schema"
         }
       ]
     },
+<<<<<<< HEAD
     "ApolloMetricsReferenceMode": {
       "description": "Apollo usage report reference generation modes.",
       "oneOf": [
@@ -166,13 +167,28 @@ expression: "&schema"
           "description": "Use the Enhanced mode that reports input object fields and enum value references as well as object fields.",
           "enum": [
             "enhanced"
+=======
+    "ApolloSignatureNormalizationAlgorithm": {
+      "description": "Apollo usage report signature normalization algorithm",
+      "oneOf": [
+        {
+          "description": "Use the algorithm that matches the JavaScript-based implementation.",
+          "enum": [
+            "legacy"
+>>>>>>> dev
           ],
           "type": "string"
         },
         {
+<<<<<<< HEAD
           "description": "Use the standard mode that only reports referenced object fields.",
           "enum": [
             "standard"
+=======
+          "description": "Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some edge cases from the JS implementation that affected normalization.",
+          "enum": [
+            "enhanced"
+>>>>>>> dev
           ],
           "type": "string"
         }
@@ -1592,6 +1608,10 @@ expression: "&schema"
         "errors": {
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
+        },
+        "experimental_apollo_signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
         },
         "experimental_otlp_endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/",

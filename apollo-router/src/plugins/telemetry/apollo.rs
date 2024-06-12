@@ -16,6 +16,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::config::ApolloMetricsReferenceMode;
+use super::config::ApolloSignatureNormalizationAlgorithm;
 use super::config::Sampler;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
@@ -104,6 +105,10 @@ pub(crate) struct Config {
 
     /// Configure the way errors are transmitted to Apollo Studio
     pub(crate) errors: ErrorsConfiguration,
+
+    /// Set the signature normalization algorithm to use when sending Apollo usage reports.
+    pub(crate) experimental_apollo_signature_normalization_algorithm:
+        ApolloSignatureNormalizationAlgorithm,
 
     /// Set the Apollo usage report reference reporting mode to use.
     pub(crate) experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
@@ -207,6 +212,8 @@ impl Default for Config {
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
             errors: ErrorsConfiguration::default(),
+            experimental_apollo_signature_normalization_algorithm:
+                ApolloSignatureNormalizationAlgorithm::default(),
             experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode::default(),
         }
     }
@@ -390,7 +397,10 @@ impl Report {
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
-            extended_references_enabled: matches!(metrics_reference_mode, ApolloMetricsReferenceMode::Extended),
+            extended_references_enabled: matches!(
+                metrics_reference_mode,
+                ApolloMetricsReferenceMode::Extended
+            ),
             ..Default::default()
         };
 
