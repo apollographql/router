@@ -53,9 +53,9 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_pla
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ParallelNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::ResponsePathElement;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::SequenceNode;
-use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{Details, Limits};
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::Sampler;
@@ -96,6 +96,14 @@ const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: Key =
     Key::from_static_str("apollo_private.http.response_headers");
 pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
+pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
+    Key::from_static_str("apollo_private.cost.estimated");
+pub(crate) const APOLLO_PRIVATE_COST_ACTUAL: Key =
+    Key::from_static_str("apollo_private.cost.actual");
+pub(crate) const APOLLO_PRIVATE_COST_STRATEGY: Key =
+    Key::from_static_str("apollo_private.cost.strategy");
+pub(crate) const APOLLO_PRIVATE_COST_RESULT: Key =
+    Key::from_static_str("apollo_private.cost.result");
 pub(crate) const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const PATH: Key = Key::from_static_str("graphql.path");
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
@@ -110,7 +118,7 @@ pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.o
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
-const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
+const REPORTS_INCLUDE_ATTRS: [Key; 22] = [
     APOLLO_PRIVATE_REQUEST,
     APOLLO_PRIVATE_DURATION_NS_KEY,
     APOLLO_PRIVATE_SENT_TIME_OFFSET,
@@ -119,6 +127,10 @@ const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
     APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS,
     APOLLO_PRIVATE_OPERATION_SIGNATURE,
     APOLLO_PRIVATE_FTV1,
+    APOLLO_PRIVATE_COST_STRATEGY,
+    APOLLO_PRIVATE_COST_RESULT,
+    APOLLO_PRIVATE_COST_ESTIMATED,
+    APOLLO_PRIVATE_COST_ACTUAL,
     PATH,
     SUBGRAPH_NAME,
     CLIENT_NAME_KEY,
@@ -261,6 +273,7 @@ enum TreeData {
         operation_signature: String,
         operation_name: String,
         variables_json: HashMap<String, String>,
+        limits: Option<Limits>,
     },
     QueryPlanNode(QueryPlanNode),
     DeferPrimary(DeferNodePrimary),
@@ -395,6 +408,7 @@ impl Exporter {
                     operation_signature,
                     operation_name,
                     variables_json,
+                    limits,
                 } => {
                     root_trace.field_execution_weight = self.field_execution_weight;
                     root_trace.signature = operation_signature;
@@ -402,6 +416,7 @@ impl Exporter {
                         variables_json,
                         operation_name,
                     });
+                    root_trace.limits = limits;
                     results.push(root_trace.clone());
                 }
                 TreeData::Execution(operation_type) => {
@@ -572,6 +587,35 @@ impl Exporter {
                 )]
             }
             SUPERGRAPH_SPAN_NAME => {
+                let limits = span
+                    .attributes
+                    .get(&APOLLO_PRIVATE_COST_RESULT)
+                    .and_then(extract_string)
+                    .map(|result| {
+                        Limits {
+                            result,
+                            strategy: span
+                                .attributes
+                                .get(&APOLLO_PRIVATE_COST_STRATEGY)
+                                .and_then(extract_string)
+                                .unwrap_or_default(),
+                            cost_estimated: span
+                                .attributes
+                                .get(&APOLLO_PRIVATE_COST_ESTIMATED)
+                                .and_then(extract_u64)
+                                .unwrap_or_default(),
+                            cost_actual: span
+                                .attributes
+                                .get(&APOLLO_PRIVATE_COST_ACTUAL)
+                                .and_then(extract_u64)
+                                .unwrap_or_default(),
+                            // Not extracted yet
+                            depth: 0,
+                            height: 0,
+                            alias_count: 0,
+                            root_field_count: 0,
+                        }
+                    });
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
                     operation_signature: span
@@ -589,6 +633,7 @@ impl Exporter {
                         .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
                         .and_then(extract_json)
                         .unwrap_or_default(),
+                    limits,
                 });
                 child_nodes
             }
@@ -751,6 +796,7 @@ impl Exporter {
                         .and_then(extract_string)
                         .unwrap_or_default(),
                     variables_json: HashMap::new(),
+                    limits: None,
                 });
 
                 child_nodes.push(TreeData::Execution(
@@ -816,6 +862,18 @@ fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
 pub(crate) fn extract_i64(v: &Value) -> Option<i64> {
     if let Value::I64(v) = v {
         Some(*v)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn extract_u64(v: &Value) -> Option<u64> {
+    if let Value::I64(v) = v {
+        if *v > 0 {
+            Some(*v as u64)
+        } else {
+            None
+        }
     } else {
         None
     }

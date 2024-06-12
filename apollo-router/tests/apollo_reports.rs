@@ -54,6 +54,7 @@ async fn config(
     use_legacy_request_span: bool,
     batch: bool,
     reports: Arc<Mutex<Vec<Report>>>,
+    demand_control: bool,
 ) -> (JoinHandle<()>, serde_json::Value) {
     std::env::set_var("APOLLO_KEY", "test");
     std::env::set_var("APOLLO_GRAPH_REF", "test");
@@ -89,6 +90,10 @@ async fn config(
             Some(serde_json::Value::Bool(use_legacy_request_span))
         })
         .expect("Could not sub in endpoint");
+    config = jsonpath_lib::replace_with(config, "$.preview_demand_control.enabled", &mut |_| {
+        Some(serde_json::Value::Bool(demand_control))
+    })
+    .expect("Could not sub in endpoint");
     (task, config)
 }
 
@@ -96,8 +101,9 @@ async fn get_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
+    demand_control: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, false, reports).await;
+    let (task, config) = config(use_legacy_request_span, false, reports, demand_control).await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
@@ -121,8 +127,9 @@ async fn get_batch_router_service(
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
+    demand_control: bool,
 ) -> (JoinHandle<()>, BoxCloneService) {
-    let (task, config) = config(use_legacy_request_span, true, reports).await;
+    let (task, config) = config(use_legacy_request_span, true, reports, demand_control).await;
     let builder = TestHarness::builder()
         .try_log_level("INFO")
         .configuration_json(config)
@@ -211,6 +218,7 @@ async fn get_trace_report(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
     use_legacy_request_span: bool,
+    demand_control: bool,
 ) -> Report {
     get_report(
         get_router_service,
@@ -218,6 +226,7 @@ async fn get_trace_report(
         use_legacy_request_span,
         false,
         request,
+        demand_control,
         |r| {
             !r.traces_per_query
                 .values()
@@ -241,6 +250,7 @@ async fn get_batch_trace_report(
         use_legacy_request_span,
         false,
         request,
+        false,
         |r| {
             !r.traces_per_query
                 .values()
@@ -269,6 +279,7 @@ async fn get_metrics_report(reports: Arc<Mutex<Vec<Report>>>, request: router::R
         false,
         false,
         request,
+        false,
         has_metrics,
     )
     .await
@@ -291,17 +302,19 @@ async fn get_metrics_report_mocked(
         false,
         true,
         request,
+        false,
         has_metrics,
     )
     .await
 }
 
 async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
-    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool) -> Fut,
+    service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool, bool) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
     use_legacy_request_span: bool,
     mocked: bool,
     request: router::Request,
+    demand_control: bool,
     filter: T,
 ) -> Report
 where
@@ -309,7 +322,13 @@ where
 {
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
-    let (task, mut service) = service_fn(reports.clone(), use_legacy_request_span, mocked).await;
+    let (task, mut service) = service_fn(
+        reports.clone(),
+        use_legacy_request_span,
+        mocked,
+        demand_control,
+    )
+    .await;
     let response = service
         .ready()
         .await
@@ -358,7 +377,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
 ) -> u64 {
     let _guard = TEST.lock().await;
     reports.lock().await.clear();
-    let (task, mut service) = get_batch_router_service(reports.clone(), mocked, false).await;
+    let (task, mut service) = get_batch_router_service(reports.clone(), mocked, false, false).await;
     let response = service
         .ready()
         .await
@@ -402,7 +421,7 @@ async fn non_defer() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -418,7 +437,7 @@ async fn test_condition_if() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -434,7 +453,7 @@ async fn test_condition_else() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -448,7 +467,7 @@ async fn test_trace_id() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -487,7 +506,7 @@ async fn test_client_name() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -502,7 +521,7 @@ async fn test_client_version() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -518,7 +537,7 @@ async fn test_send_header() {
             .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -560,7 +579,7 @@ async fn test_send_variable_value() {
         .unwrap();
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_trace_report(reports, req, use_legacy_request_span).await;
+        let report = get_trace_report(reports, req, use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -619,4 +638,18 @@ async fn test_stats_mocked() {
             ".query_latency_stats.latency_count" => "[latency_count]"
         });
     });
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_trace() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .build()
+            .unwrap();
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_trace_report(reports, req, use_legacy_request_span, true).await;
+        assert_report!(report);
+    }
 }

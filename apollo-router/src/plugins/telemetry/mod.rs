@@ -86,12 +86,17 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::cost::{
+    APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_RESULT,
+    APOLLO_PRIVATE_COST_STRATEGY,
+};
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
@@ -588,15 +593,16 @@ impl Plugin for Telemetry {
 
                     (req.context.clone(), custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments)
                 },
-                move |(ctx, custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
+                move |(ctx, custom_instruments, mut custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
 
                     async move {
                         let span = Span::current();
-                        span.set_span_dyn_attributes(custom_attributes);
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+                        add_cost_attributes(&ctx, &mut custom_attributes);
+                        span.set_span_dyn_attributes(custom_attributes);
                         match &result {
                             Ok(resp) => {
                                 span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
@@ -772,6 +778,29 @@ impl Plugin for Telemetry {
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         self.custom_endpoints.clone()
     }
+}
+
+fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
+    context.extensions().with_lock(|c| {
+        if let Some(cost) = c.get::<CostContext>().cloned() {
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ESTIMATED.clone(),
+                AttributeValue::I64(cost.estimated as i64),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ACTUAL.clone(),
+                AttributeValue::I64(cost.actual as i64),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_RESULT.clone(),
+                AttributeValue::String(cost.result.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_STRATEGY.clone(),
+                AttributeValue::String(cost.strategy.into()),
+            ));
+        }
+    });
 }
 
 impl Telemetry {

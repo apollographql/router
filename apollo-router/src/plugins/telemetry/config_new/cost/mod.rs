@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::KeyValue;
+use opentelemetry_api::{Key, KeyValue};
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -23,6 +23,15 @@ use crate::services::supergraph;
 use crate::services::supergraph::Request;
 use crate::services::supergraph::Response;
 use crate::Context;
+
+pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
+    Key::from_static_str("apollo_private.cost.estimated");
+pub(crate) const APOLLO_PRIVATE_COST_ACTUAL: Key =
+    Key::from_static_str("apollo_private.cost.actual");
+pub(crate) const APOLLO_PRIVATE_COST_STRATEGY: Key =
+    Key::from_static_str("apollo_private.cost.strategy");
+pub(crate) const APOLLO_PRIVATE_COST_RESULT: Key =
+    Key::from_static_str("apollo_private.cost.result");
 
 static COST_ESTIMATED: &str = "cost.estimated";
 static COST_ACTUAL: &str = "cost.actual";
