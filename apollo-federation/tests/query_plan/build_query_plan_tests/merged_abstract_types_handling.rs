@@ -872,8 +872,6 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn does_not_error_out_handling_fragments_when_interface_subtyping_is_involved() {
     // This test essentially make sure the issue in https://github.com/apollographql/federation/issues/2592
     // is resolved.

@@ -540,3 +540,106 @@ fn avoid_considering_indirect_paths_from_the_root_when_a_more_direct_one_exists(
     // key) is never exactly a good idea.
     assert_eq!(plan.statistics.evaluated_plan_count.get(), 4);
 }
+
+/// https://apollographql.atlassian.net/browse/FED-301
+#[test]
+fn multiplication_overflow_in_reduce_options_if_needed() {
+    let planner = planner!(
+        // default config
+        Subgraph1: SUBGRAPH,
+        Subgraph2: SUBGRAPH,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          t {
+            f00: id  f01: id  f02: id  f03: id  f04: id  f05: id  f06: id  f07: id
+            f08: id  f09: id  f10: id  f11: id  f12: id  f13: id  f14: id  f15: id
+            f16: id  f17: id  f18: id  f19: id  f20: id  f21: id  f22: id  f23: id
+            f24: id  f25: id  f26: id  f27: id  f28: id  f29: id  f30: id  f31: id
+            f32: id  f33: id  f34: id  f35: id  f36: id  f37: id  f38: id  f39: id
+            f40: id  f41: id  f42: id  f43: id  f44: id  f45: id  f46: id  f47: id
+            f48: id  f49: id  f50: id  f51: id  f52: id  f53: id  f54: id  f55: id
+            f56: id  f57: id  f58: id  f59: id  f60: id  f61: id  f62: id  f63: id
+          }
+        }
+        "#,
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              t {
+                f14: id
+                f15: id
+                f16: id
+                f17: id
+                f18: id
+                f19: id
+                f20: id
+                f21: id
+                f22: id
+                f23: id
+                f24: id
+                f25: id
+                f26: id
+                f27: id
+                f28: id
+                f29: id
+                f30: id
+                f31: id
+                f32: id
+                f33: id
+                f34: id
+                f35: id
+                f36: id
+                f37: id
+                f38: id
+                f39: id
+                f40: id
+                f41: id
+                f42: id
+                f43: id
+                f44: id
+                f45: id
+                f46: id
+                f47: id
+                f48: id
+                f49: id
+                f50: id
+                f51: id
+                f52: id
+                f53: id
+                f54: id
+                f55: id
+                f56: id
+                f57: id
+                f58: id
+                f59: id
+                f60: id
+                f61: id
+                f62: id
+                f63: id
+                f00: id
+                f13: id
+                f01: id
+                f02: id
+                f03: id
+                f04: id
+                f05: id
+                f06: id
+                f07: id
+                f08: id
+                f09: id
+                f10: id
+                f11: id
+                f12: id
+              }
+            }
+          },
+        }
+        "###
+    );
+    // max_evaluated_plans defaults to 10_000
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 8192);
+}
