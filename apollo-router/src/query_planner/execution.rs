@@ -26,6 +26,7 @@ use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::subscription::SubscriptionConfig;
+use crate::query_planner::fetch::Variables;
 use crate::query_planner::FlattenNode;
 use crate::query_planner::Primary;
 use crate::query_planner::CONDITION_ELSE_SPAN_NAME;
@@ -285,27 +286,44 @@ impl PlanNode {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
                     } else {
-                        let service = parameters.service_factory.create();
-                        let request = FetchRequest::builder()
-                            .context(parameters.context.clone())
-                            .fetch_node(fetch_node.clone())
-                            .supergraph_request(parameters.supergraph_request.clone())
-                            .data(parent_value.clone())
-                            .current_dir(current_dir.clone())
-                            .deferred_fetches(parameters.deferred_fetches.clone())
-                            .build();
-                        let (v, e) = service
-                            .oneshot(request)
-                            .instrument(tracing::info_span!(
-                                FETCH_SPAN_NAME,
-                                "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = fetch_node.service_name.as_str(),
-                                "apollo_private.sent_time_offset" = fetch_time_offset
-                            ))
-                            .await
-                            .unwrap();
-                        value = v;
-                        errors = e;
+                        match Variables::new(
+                            &fetch_node.requires,
+                            &fetch_node.variable_usages,
+                            parent_value,
+                            current_dir,
+                            parameters.supergraph_request.body(),
+                            parameters.schema.as_ref(),
+                            &fetch_node.input_rewrites,
+                            &fetch_node.context_rewrites,
+                        ) {
+                            Some(variables) => {
+                                let service = parameters.service_factory.create();
+                                let request = FetchRequest::builder()
+                                    .context(parameters.context.clone())
+                                    .fetch_node(fetch_node.clone())
+                                    .supergraph_request(parameters.supergraph_request.clone())
+                                    .variables(variables)
+                                    .current_dir(current_dir.clone())
+                                    .deferred_fetches(parameters.deferred_fetches.clone())
+                                    .build();
+                                let (v, e) = service
+                                    .oneshot(request)
+                                    .instrument(tracing::info_span!(
+                                        FETCH_SPAN_NAME,
+                                        "otel.kind" = "INTERNAL",
+                                        "apollo.subgraph.name" = fetch_node.service_name.as_str(),
+                                        "apollo_private.sent_time_offset" = fetch_time_offset
+                                    ))
+                                    .await
+                                    .unwrap();
+                                value = v;
+                                errors = e;
+                            }
+                            None => {
+                                value = Value::Object(Object::default());
+                                errors = Vec::new();
+                            }
+                        };
                     }
                 }
                 PlanNode::Defer {

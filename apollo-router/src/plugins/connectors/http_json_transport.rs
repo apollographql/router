@@ -71,10 +71,11 @@ pub(crate) mod http_json_transport {
     use super::HttpJsonTransportError;
     use super::Value;
     use crate::error::ConnectorDirectiveError;
+    use crate::query_planner::fetch::Variables;
 
     pub(crate) fn make_request(
         transport: &HttpJsonTransport,
-        inputs: Value,
+        inputs: Variables,
     ) -> Result<http::Request<hyper::Body>, HttpJsonTransportError> {
         let body = hyper::Body::empty();
 
@@ -96,9 +97,9 @@ pub(crate) mod http_json_transport {
 
     fn make_uri(
         transport: &HttpJsonTransport,
-        inputs: &Value,
+        inputs: &Variables,
     ) -> Result<url::Url, ConnectorDirectiveError> {
-        let flat_inputs = flatten_keys(inputs);
+        let flat_inputs = flatten_keys(&Value::Object(inputs.variables.clone()));
         let path = transport
             .path_template
             .generate_path(&Value::Object(flat_inputs))
