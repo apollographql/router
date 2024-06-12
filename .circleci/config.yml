@@ -45,14 +45,14 @@ executors:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: "15.4.0"
+      xcode: "14.3.1"
     resource_class: macos.m1.medium.gen1
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: "15.4.0"
+      xcode: "14.3.1"
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
