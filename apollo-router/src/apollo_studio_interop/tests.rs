@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use apollo_compiler::Schema;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
@@ -788,61 +786,4 @@ async fn test_compare() {
         }),
         UsageReportingComparisonResult::BothNotEqual
     ));
-}
-
-#[test(tokio::test)]
-async fn test_generate_extended_references_inline_enums() {
-    let schema_str = include_str!("testdata/schema_interop.graphql");
-
-    let query_str = r#"
-      fragment EnumFragment on Query {
-        query2: enumInputQuery(enumInput: SOME_VALUE_4) {
-          listOfBools
-        }
-      }
-      
-      query InlineEnumQuery {
-        query1: enumInputQuery(enumInput: SOME_VALUE_1, inputType: { enumInput: SOME_VALUE_2, enumListInput: [SOME_VALUE_3] }) {
-          basicTypes {
-            nonNullId
-          }
-        }
-        ...EnumFragment
-        ... {
-          query3: enumInputQuery(enumInput: SOME_VALUE_5) {
-            listOfBools
-          }
-        }
-      }"#;
-
-    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
-    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
-
-    let generated =
-        generate_extended_references(Arc::new(doc), Some("InlineEnumQuery".into()), &schema);
-
-    println!("generated: {:?}", generated);
-}
-
-#[test(tokio::test)]
-async fn test_generate_extended_references_variable_enums() {
-    // todo
-    let schema_str = include_str!("testdata/schema_interop.graphql");
-
-    let query_str = r#"
-      query AliasQuery2($var1: SomeEnum) {
-        enumInputQuery(enumInput: $var1) {
-          basicTypes {
-            nonNullId
-          }
-        }
-      }"#;
-
-    let schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
-    let doc = ExecutableDocument::parse_and_validate(&schema, query_str, "query.graphql").unwrap();
-
-    let generated =
-        generate_extended_references(Arc::new(doc), Some("AliasQuery2".into()), &schema);
-
-    println!("generated: {:?}", generated);
 }

@@ -607,8 +607,11 @@ impl Configuration {
         };
 
         if let Some(config) = apollo_telemetry_config {
-            if matches!(config.experimental_apollo_signature_normalization_algorithm, ApolloSignatureNormalizationAlgorithm::Enhanced)
-                && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+            if matches!(
+                config.experimental_apollo_signature_normalization_algorithm,
+                ApolloSignatureNormalizationAlgorithm::Enhanced
+            ) && self.experimental_apollo_metrics_generation_mode
+                != ApolloMetricsGenerationMode::New
             {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
@@ -616,8 +619,11 @@ impl Configuration {
                 });
             }
 
-            if matches!(config.experimental_apollo_metrics_reference_mode, ApolloMetricsReferenceMode::Extended)
-                && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+            if matches!(
+                config.experimental_apollo_metrics_reference_mode,
+                ApolloMetricsReferenceMode::Extended
+            ) && self.experimental_apollo_metrics_generation_mode
+                != ApolloMetricsGenerationMode::New
             {
                 return Err(ConfigurationError::InvalidConfiguration {
                     message: "`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`",
