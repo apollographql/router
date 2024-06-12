@@ -3,6 +3,7 @@
 use std::borrow::Borrow;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
@@ -66,11 +67,22 @@ impl BothModeComparisonJob {
     fn execute(self) {
         // TODO: once the Rust query planner does not use `todo!()` anymore,
         // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
+        //
         let rust_result = std::panic::catch_unwind(|| {
             let name = self.operation_name.clone().map(Name::new).transpose()?;
             USING_CATCH_UNWIND.set(true);
+
+            let start = Instant::now();
+
             // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);
+
+            f64_histogram!(
+                "apollo.router.query_planning.plan.duration",
+                "Duration of the query planning.",
+                start.elapsed().as_secs_f64(),
+                "planner" = "rust" 
+            );
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
             USING_CATCH_UNWIND.set(false);
@@ -89,6 +101,7 @@ impl BothModeComparisonJob {
                 ),
             ))
         });
+
 
         let name = self.operation_name.as_deref();
         let operation_desc = if let Ok(operation) = self.document.get_operation(name) {
