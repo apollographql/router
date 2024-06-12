@@ -1424,7 +1424,6 @@ impl Telemetry {
                     let strategy = guard.get::<demand_control::strategy::Strategy>();
                     let cost_ctx = guard.get::<demand_control::CostContext>();
                     SingleLimitsStats {
-                        // TODO: Determine how we handle `None` for these, as logging 0 is probably wrong
                         strategy: strategy
                             .and_then(|s| serde_json::to_string(&s.mode).ok())
                             .unwrap_or_default(),
@@ -1585,7 +1584,7 @@ impl Telemetry {
             field_stat.observed_execution_count += 1;
             field_stat.errors_count += node.error.len() as u64;
 
-            // The `field_lengths`` histogram should have data for all list fields in the response.
+            // The `field_lengths` histogram should have data for all list fields in the response.
             // Here, we are iterating over ftv1 traces, which may not exist for every list field.
             // If that's the case, we'll be dropping list length data here.
             if let Some(histogram) = field_lengths

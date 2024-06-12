@@ -374,7 +374,13 @@ impl AddAssign<SingleLimitsStats> for LimitsStats {
             tracing::warn!("could not record actual cost in LimitsStats");
         }
 
-        // TODO: How do we handle depth, height, alias_count, and root_field_count?
+        // These are derived from the query and thus shouldn't change when we collect metrics
+        // for subsequent responses. We overwrite here in case the `LimitsStats` instance
+        // was created with default values before adding in `rhs`.
+        self.height = rhs.height;
+        self.depth = rhs.depth;
+        self.alias_count = rhs.alias_count;
+        self.root_field_count = rhs.root_field_count;
     }
 }
 
