@@ -1,4 +1,4 @@
-### docs(telemetry): add docs about standard instruments for subgraph ([PR #5422](https://github.com/apollographql/router/pull/5422))
+### Standard instrument configuration documentation for subgraphs ([PR #5422](https://github.com/apollographql/router/pull/5422))
 
 Added documentations about standard instruments available at the subgraph service:
 
