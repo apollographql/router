@@ -170,7 +170,7 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
 }

@@ -143,6 +143,15 @@ impl Operation {
     // PORT_NOTE(@goto-bus-stop): It might make sense for the returned data structure to *be* the
     // `DeferNormalizer` from the JS side
     pub(crate) fn with_normalized_defer(self) -> NormalizedDefer {
+        NormalizedDefer {
+            operation: self,
+            has_defers: false,
+            assigned_defer_labels: HashSet::new(),
+            defer_conditions: IndexMap::new(),
+        }
+        // TODO(@TylerBloom): Once defer is implement, the above statement needs to be replaced
+        // with the commented-out one below.
+        /*
         if self.has_defer() {
             todo!("@defer not implemented");
         } else {
@@ -153,6 +162,7 @@ impl Operation {
                 defer_conditions: IndexMap::new(),
             }
         }
+        */
     }
 
     fn has_defer(&self) -> bool {
@@ -2977,14 +2987,8 @@ impl SelectionSet {
 
     /// Removes the @defer directive from all selections without removing that selection.
     fn without_defer(&mut self) {
-        // TODO: This doesn't seem like the correct way to get the directive name...
-        let Some(defer_name) = self.schema.get_directive_definition(&name!("defer")) else {
-            // TODO: Return an error? Continue? Dunno...
-            return;
-        };
         for (_key, mut selection) in Arc::make_mut(&mut self.selections).iter_mut() {
-            Arc::make_mut(selection.get_directives_mut())
-                .retain(|dir| dir.name != defer_name.directive_name);
+            Arc::make_mut(selection.get_directives_mut()).retain(|dir| dir.name != name!("defer"));
             if let Some(set) = selection.get_selection_set_mut() {
                 set.without_defer();
             }
