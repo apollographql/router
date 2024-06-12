@@ -932,13 +932,62 @@ impl SelectionSet {
 //  F1 first, and then realize that this increases F2 usages to 2, which means we stop there and keep F2.
 
 impl NamedFragments {
-    /// Compute the reduced set of NamedFragments that are used in the selection set at least
-    /// `min_usage_to_optimize` times. Also, computes the new selection set that uses only the
-    /// reduced set of fragments by expanding the other ones.
+    /// Updates `self` by computing the reduced set of NamedFragments that are used in the
+    /// selection set and other fragments at least `min_usage_to_optimize` times. Also, computes
+    /// the new selection set that uses only the reduced set of fragments by expanding the other
+    /// ones.
+    /// - Returned selection set will be normalized.
     fn reduce(
         &mut self,
         selection_set: &SelectionSet,
         min_usage_to_optimize: u32,
+    ) -> Result<SelectionSet, FederationError> {
+        let min_usage_to_optimize: i32 = min_usage_to_optimize.try_into().unwrap_or(i32::MAX);
+
+        // Call `reduce_inner` repeatedly until we reach a fix-point, since newly computed
+        // selection set may drop some fragment references due to normalization, which could lead
+        // to further reduction.
+        // - It is hard to avoid this chain reaction, since we need to account for the effects of
+        //   normalization.
+        let mut last_size = self.size();
+        let mut last_selection_set = selection_set.clone();
+        while last_size > 0 {
+            let new_selection_set =
+                self.reduce_inner(&last_selection_set, min_usage_to_optimize)?;
+
+            // Reached a fix-point => stop
+            if self.size() == last_size {
+                // Assumes that `new_selection_set` is the same as `last_selection_set` in this
+                // case.
+                break;
+            }
+
+            // If we've expanded some fragments but kept others, then it's not 100% impossible that
+            // some fragment was used multiple times in some expanded fragment(s), but that
+            // post-expansion all of it's usages are "dead" branches that are removed by the final
+            // `normalize`. In that case though, we need to ensure we don't include the now-unused
+            // fragment in the final list of fragments.
+            // TODO: remark that the same reasoning could leave a single instance of a fragment
+            // usage, so if we really really want to never have less than `minUsagesToOptimize`, we
+            // could do some loop of `expand then normalize` unless all fragments are provably used
+            // enough. We don't bother, because leaving this is not a huge deal and it's not worth
+            // the complexity, but it could be that we can refactor all this later to avoid this
+            // case without additional complexity.
+
+            // Prepare the next iteration
+            last_size = self.size();
+            last_selection_set = new_selection_set;
+        }
+        Ok(last_selection_set)
+    }
+
+    /// The inner loop body of `reduce` method.
+    /// - Takes i32 `min_usage_to_optimize` since `collect_used_fragment_names` counts usages in
+    ///   i32.
+    fn reduce_inner(
+        &mut self,
+        selection_set: &SelectionSet,
+        min_usage_to_optimize: i32,
     ) -> Result<SelectionSet, FederationError> {
         // Initial computation of fragment usages in `selection_set`.
         let mut usages = HashMap::new();
@@ -962,7 +1011,6 @@ impl NamedFragments {
         // - We take advantage of the fact that `NamedFragments` is already sorted in dependency
         //   order.
         // PORT_NOTE: The `computeFragmentsToKeep` function is implemented here.
-        let min_usage_to_optimize: i32 = min_usage_to_optimize.try_into().unwrap_or(i32::MAX);
         let original_size = self.size();
         for fragment in self.iter_rev() {
             let usage_count = usages.get(&fragment.name).copied().unwrap_or_default();
@@ -1435,13 +1483,9 @@ mod tests {
         let operation = parse_operation(&parse_schema(schema_doc), query);
         let expanded = operation.expand_all_fragments_and_normalize().unwrap();
         assert_optimized!(expanded, operation.named_fragments, @r###"
-        fragment F_shared on T {
+        fragment F_target on T {
           id
           a
-        }
-
-        fragment F_target on T {
-          ...F_shared
           b
           c
         }
