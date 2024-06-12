@@ -26,6 +26,8 @@ pub struct Connector {
     pub id: ConnectId,
     pub transport: Transport,
     pub selection: JSONSelection,
+    pub entity: bool,
+    pub on_root_type: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -80,6 +82,18 @@ impl Connector {
                     source_http,
                 )?);
 
+                let parent_type_name = args.position.field.type_name().clone();
+                let schema_def = &schema.schema().schema_definition;
+                let on_root_type = schema_def
+                    .query
+                    .as_ref()
+                    .map(|ty| ty.name == parent_type_name)
+                    .or(schema_def
+                        .mutation
+                        .as_ref()
+                        .map(|ty| ty.name == parent_type_name))
+                    .unwrap_or(false);
+
                 let id = ConnectId {
                     label: make_label(&subgraph_name, source_name, &transport),
                     subgraph_name: subgraph_name.clone(),
@@ -90,6 +104,8 @@ impl Connector {
                     id: id.clone(),
                     transport,
                     selection: args.selection,
+                    entity: args.entity,
+                    on_root_type,
                 };
 
                 Ok((id, connector))

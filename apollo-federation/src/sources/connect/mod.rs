@@ -3,6 +3,8 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Name;
+use apollo_compiler::name;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
@@ -58,5 +60,27 @@ impl Hash for ConnectId {
 impl Display for ConnectId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.label)
+    }
+}
+
+impl ConnectId {
+    pub fn new_for_test(subgraph_name: NodeStr, type_name: Name, field_name: Name) -> Self {
+        use crate::schema::ObjectFieldDefinitionPosition;
+        use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
+
+        Self {
+            label: "test label".to_string(),
+            subgraph_name,
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: ObjectOrInterfaceFieldDefinitionPosition::Object(
+                    ObjectFieldDefinitionPosition {
+                        type_name,
+                        field_name,
+                    },
+                ),
+                directive_name: name!(connect),
+                directive_index: 0,
+            },
+        }
     }
 }

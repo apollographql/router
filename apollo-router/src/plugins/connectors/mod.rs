@@ -13,6 +13,8 @@ pub(crate) use self::directives::Source;
 pub(crate) mod configuration;
 mod fetch;
 pub(crate) mod http_json_transport;
+#[allow(dead_code)]
+pub(crate) mod make_requests;
 mod request_inputs;
 mod request_response;
 mod response_formatting;
