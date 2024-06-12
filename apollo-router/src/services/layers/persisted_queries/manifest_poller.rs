@@ -207,8 +207,18 @@ impl PersistedQueryManifestPoller {
     /// Create a new [`PersistedQueryManifestPoller`] from CLI options and YAML configuration.
     /// Starts polling immediately and this function only returns after all chunks have been fetched
     /// and the [`PersistedQueryManifest`] has been fully populated.
-    pub(crate) async fn new(config: Configuration) -> Result<Self, BoxError> {
-        if let Some(manifest_files) = config.persisted_queries.experimental_local_manifests {
+    pub(crate) async fn new(
+        config: Configuration,
+        persisted_queries_manifest: Option<Arc<String>>,
+    ) -> Result<Self, BoxError> {
+        let parsed_manifest_files: Option<Vec<String>> = match persisted_queries_manifest {
+            None => None,
+            Some(s) => match serde_json::from_str(&s) {
+                Ok(v) => Some(v),
+                Err(_) => return Err("could not parse local persisted queries manifest ".into()),
+            },
+        };
+        if let Some(manifest_files) = parsed_manifest_files {
             if manifest_files.is_empty() {
                 return Err("no local persisted query list files specified".into());
             }
@@ -699,6 +709,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -715,6 +726,7 @@ mod tests {
                 ])))
                 .build()
                 .unwrap(),
+            None
         )
         .await
         .is_err());
@@ -732,6 +744,7 @@ mod tests {
                 ])))
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -779,6 +792,7 @@ mod tests {
     async fn uses_local_manifest() {
         let (_, body, _) = fake_manifest();
         let id = "5678".to_string();
+        let manifest = include_str!("../../../../tests/fixtures/persisted-queries-manifest.json");
 
         let manifest_manager = PersistedQueryManifestPoller::new(
             Configuration::fake_builder()
@@ -787,12 +801,11 @@ mod tests {
                     Some(true),
                     Some(false),
                     Some(PersistedQueriesSafelist::default()),
-                    Some(vec![
-                        "tests/fixtures/persisted-queries-manifest.json".to_string()
-                    ]),
+                    None,
                 ))
                 .build()
                 .unwrap(),
+            Some(Arc::new(manifest.to_string())),
         )
         .await
         .unwrap();

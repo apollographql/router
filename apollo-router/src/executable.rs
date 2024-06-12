@@ -34,6 +34,7 @@ use crate::metrics::meter_provider;
 use crate::plugin::plugins;
 use crate::plugins::telemetry::reload::init_telemetry;
 use crate::router::ConfigurationSource;
+use crate::router::PersistedQueriesSource;
 use crate::router::RouterHttpServer;
 use crate::router::SchemaSource;
 use crate::router::ShutdownSource;
@@ -247,6 +248,15 @@ pub struct Opt {
     #[clap(long = "listen", env = "APOLLO_ROUTER_LISTEN_ADDRESS")]
     listen_address: Option<SocketAddr>,
 
+    /// Schema location relative to the project directory.
+    #[clap(
+        alias = "pq",
+        long = "persisted-queries",
+        value_parser,
+        env = "APOLLO_ROUTER_PERSISTED_QUERIES_PATH"
+    )]
+    persisted_queries_path: Option<PathBuf>,
+
     /// Display version and exit.
     #[clap(action = ArgAction::SetTrue, long, short = 'V')]
     pub(crate) version: bool,
@@ -429,6 +439,7 @@ impl Executable {
         schema: Option<SchemaSource>,
         license: Option<LicenseSource>,
         config: Option<ConfigurationSource>,
+        persisted_queries: Option<PersistedQueriesSource>,
         cli_args: Option<Opt>,
     ) -> Result<()> {
         let opt = cli_args.unwrap_or_else(Opt::parse);
@@ -485,7 +496,9 @@ impl Executable {
                 Discussed::new().print_preview();
                 Ok(())
             }
-            None => Self::inner_start(shutdown, schema, config, license, opt).await,
+            None => {
+                Self::inner_start(shutdown, schema, config, license, persisted_queries, opt).await
+            }
         };
 
         if apollo_telemetry_initialized {
@@ -504,6 +517,7 @@ impl Executable {
         schema: Option<SchemaSource>,
         config: Option<ConfigurationSource>,
         license: Option<LicenseSource>,
+        persisted_queries: Option<PersistedQueriesSource>,
         mut opt: Opt,
     ) -> Result<()> {
         if opt.apollo_uplink_poll_interval < Duration::from_secs(10) {
@@ -658,6 +672,32 @@ impl Executable {
             }
         };
 
+        let persisted_queries = match (persisted_queries, opt.persisted_queries_path.as_ref()) {
+            (Some(_), Some(_)) => {
+                return Err(anyhow!(
+                    "--persisted-queries and APOLLO_ROUTER_PERSISTED_QUERIES_PATH cannot be used when a custom persisted queries source is in use"
+                ));
+            }
+            (Some(persisted_queries), None) => persisted_queries,
+            #[allow(clippy::blocks_in_conditions)]
+            _ => match opt.persisted_queries_path.as_ref().map(|path| {
+                let path = if path.is_relative() {
+                    current_directory.join(path)
+                } else {
+                    path.to_path_buf()
+                };
+
+                PersistedQueriesSource::File {
+                    path,
+                    watch: opt.hot_reload,
+                    delay: None,
+                }
+            }) {
+                Some(persisted_queries) => persisted_queries,
+                None => Default::default(),
+            },
+        };
+
         // If there are custom plugins then if RUST_LOG hasn't been set and APOLLO_ROUTER_LOG contains one of the defaults.
         let user_plugins_present = plugins().filter(|p| !p.is_apollo()).count() > 0;
         let rust_log_set = std::env::var("RUST_LOG").is_ok();
@@ -687,6 +727,7 @@ impl Executable {
             .and_uplink(uplink_config)
             .schema(schema_source)
             .license(license)
+            .persisted_queries(persisted_queries)
             .shutdown(shutdown.unwrap_or(ShutdownSource::CtrlC))
             .start();
 

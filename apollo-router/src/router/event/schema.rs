@@ -30,7 +30,7 @@ pub enum SchemaSource {
     #[display(fmt = "Stream")]
     Stream(#[derivative(Debug = "ignore")] SchemaStream),
 
-    /// A YAML file that may be watched for changes.
+    /// A file that may be watched for changes.
     #[display(fmt = "File")]
     File {
         /// The path of the schema file.

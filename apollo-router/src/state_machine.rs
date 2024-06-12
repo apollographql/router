@@ -24,7 +24,9 @@ use super::http_server_factory::HttpServerHandle;
 use super::router::ApolloRouterError::NoConfiguration;
 use super::router::ApolloRouterError::NoSchema;
 use super::router::ApolloRouterError::{self};
+use super::router::Event::NoMorePersistedQueriesManifest;
 use super::router::Event::UpdateConfiguration;
+use super::router::Event::UpdatePersistedQueriesManifest;
 use super::router::Event::UpdateSchema;
 use super::router::Event::{self};
 use crate::configuration::metrics::Metrics;
@@ -55,6 +57,7 @@ enum State<FA: RouterSuperServiceFactory> {
     Startup {
         configuration: Option<Arc<Configuration>>,
         schema: Option<Arc<String>>,
+        persisted_queries_manifest: Option<Option<Arc<String>>>,
         license: Option<LicenseState>,
         listen_addresses_guard: OwnedRwLockWriteGuard<ListenAddresses>,
     },
@@ -62,6 +65,7 @@ enum State<FA: RouterSuperServiceFactory> {
         configuration: Arc<Configuration>,
         _metrics: Option<Metrics>,
         schema: Arc<String>,
+        persisted_queries_manifest: Option<Arc<String>>,
         license: LicenseState,
         server_handle: Option<HttpServerHandle>,
         router_service_factory: FA::RouterFactory,
@@ -115,12 +119,17 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         }
     }
 
+    async fn no_more_persisted_queries(self) -> Self {
+        self
+    }
+
     async fn update_inputs<S>(
         mut self,
         state_machine: &mut StateMachine<S, FA>,
         new_schema: Option<Arc<String>>,
         new_configuration: Option<Arc<Configuration>>,
         new_license: Option<LicenseState>,
+        new_persisted_queries: Option<Option<Arc<String>>>,
     ) -> Self
     where
         S: HttpServerFactory,
@@ -130,12 +139,15 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             Startup {
                 schema,
                 configuration,
+                persisted_queries_manifest,
                 license,
                 listen_addresses_guard,
             } => {
                 *schema = new_schema.or_else(|| schema.take());
                 *configuration = new_configuration.or_else(|| configuration.take());
                 *license = new_license.or_else(|| license.take());
+                *persisted_queries_manifest =
+                    new_persisted_queries.or_else(|| persisted_queries_manifest.take());
 
                 if let (Some(schema), Some(configuration), Some(license)) =
                     (schema, configuration, license)
@@ -148,6 +160,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                             configuration.clone(),
                             schema.clone(),
                             *license,
+                            persisted_queries_manifest.clone().unwrap_or(None),
                             listen_addresses_guard,
                             vec![],
                         )
@@ -163,6 +176,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 schema,
                 configuration,
                 license,
+                persisted_queries_manifest,
                 server_handle,
                 router_service_factory,
                 all_connections_stopped_signals,
@@ -223,6 +237,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                         configuration.clone(),
                         schema.clone(),
                         *license,
+                        persisted_queries_manifest.clone(),
                         &mut guard,
                         signals,
                     )
@@ -310,6 +325,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
         configuration: Arc<Configuration>,
         schema: Arc<String>,
         license: LicenseState,
+        persisted_queries_manifest: Option<Arc<String>>,
         listen_addresses_guard: &mut OwnedRwLockWriteGuard<ListenAddresses>,
         mut all_connections_stopped_signals: Vec<mpsc::Receiver<()>>,
     ) -> Result<State<FA>, ApolloRouterError>
@@ -364,6 +380,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
                 configuration.clone(),
                 schema.to_string(),
                 previous_router_service_factory,
+                persisted_queries_manifest.clone(),
                 None,
             )
             .await
@@ -424,6 +441,7 @@ impl<FA: RouterSuperServiceFactory> State<FA> {
             _metrics: metrics,
             schema,
             license,
+            persisted_queries_manifest: persisted_queries_manifest,
             server_handle: Some(server_handle),
             router_service_factory,
             all_connections_stopped_signals,
@@ -515,6 +533,7 @@ where
             configuration: None,
             schema: None,
             license: None,
+            persisted_queries_manifest: None,
             listen_addresses_guard: self
                 .listen_addresses_guard
                 .take()
@@ -533,22 +552,29 @@ where
             state = match event {
                 UpdateConfiguration(configuration) => {
                     state
-                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None)
+                        .update_inputs(&mut self, None, Some(Arc::new(configuration)), None, None)
                         .await
                 }
                 NoMoreConfiguration => state.no_more_configuration().await,
                 UpdateSchema(schema) => {
                     state
-                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None)
+                        .update_inputs(&mut self, Some(Arc::new(schema)), None, None, None)
                         .await
                 }
                 NoMoreSchema => state.no_more_schema().await,
                 UpdateLicense(license) => {
                     state
-                        .update_inputs(&mut self, None, None, Some(license))
+                        .update_inputs(&mut self, None, None, Some(license), None)
                         .await
                 }
-                Reload => state.update_inputs(&mut self, None, None, None).await,
+                UpdatePersistedQueriesManifest(pqm) => {
+                    state
+                        .update_inputs(&mut self, None, None, None, Some(pqm.map(Arc::new)))
+                        .await
+                }
+                NoMorePersistedQueriesManifest => state.no_more_persisted_queries().await,
+
+                Reload => state.update_inputs(&mut self, None, None, None, None).await,
                 NoMoreLicense => state.no_more_license().await,
                 Shutdown => state.shutdown(&self.http_server_factory).await,
             };
@@ -988,7 +1014,7 @@ mod tests {
         router_factory
             .expect_create()
             .times(1)
-            .returning(|_, _, _, _, _| Err(BoxError::from("Error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("Error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(0, 1, 0, 1, 0);
 
@@ -1016,7 +1042,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| {
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1026,7 +1052,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
 
         let (server_factory, shutdown_receivers) = create_mock_server_factory(1, 1, 1, 1, 1);
         let minimal_schema = include_str!("testdata/minimal_supergraph.graphql");
@@ -1057,7 +1083,7 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| {
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1067,13 +1093,13 @@ mod tests {
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .returning(|_, _, _, _, _| Err(BoxError::from("error")));
+            .returning(|_, _, _, _, _, _| Err(BoxError::from("error")));
         router_factory
             .expect_create()
             .times(1)
             .in_sequence(&mut seq)
-            .withf(|_, configuration, _, _, _| configuration.homepage.enabled)
-            .returning(|_, _, _, _, _| {
+            .withf(|_, configuration, _, _, _, _| configuration.homepage.enabled)
+            .returning(|_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1121,6 +1147,7 @@ mod tests {
                 configuration: Arc<Configuration>,
                 schema: String,
                 previous_router_service_factory: Option<&'a MockMyRouterFactory>,
+                persisted_queries_manifest: Option<Arc<String>>,
                 extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
             ) -> Result<MockMyRouterFactory, BoxError>;
         }
@@ -1287,7 +1314,7 @@ mod tests {
             } else {
                 expect_times_called
             })
-            .returning(move |_, _, _, _, _| {
+            .returning(move |_, _, _, _, _, _| {
                 let mut router = MockMyRouterFactory::new();
                 router.expect_clone().return_once(MockMyRouterFactory::new);
                 router.expect_web_endpoints().returning(MultiMap::new);
@@ -1303,12 +1330,13 @@ mod tests {
                     move |_, _configuration: &Arc<Configuration>,
                           _,
                           previous_router_service_factory: &Option<&MockMyRouterFactory>,
+                          _,
                           _extra_plugins: &Option<Vec<(String, Box<dyn DynPlugin>)>>|
                           {
                             previous_router_service_factory.is_some()
                           },
                 )
-                .returning(move |_, _, _, _, _| {
+                .returning(move |_, _, _,_, _, _| {
                     let mut router = MockMyRouterFactory::new();
                     router.expect_clone().return_once(MockMyRouterFactory::new);
                     router.expect_web_endpoints().returning(MultiMap::new);

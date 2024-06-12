@@ -13,6 +13,7 @@ pub use error::ApolloRouterError;
 pub use event::ConfigurationSource;
 pub(crate) use event::Event;
 pub use event::LicenseSource;
+pub use event::PersistedQueriesSource;
 pub(crate) use event::ReloadSource;
 pub use event::SchemaSource;
 pub use event::ShutdownSource;
@@ -128,6 +129,7 @@ impl RouterHttpServer {
         configuration: Option<ConfigurationSource>,
         license: Option<LicenseSource>,
         shutdown: Option<ShutdownSource>,
+        persisted_queries: Option<PersistedQueriesSource>,
         uplink: Option<UplinkConfig>,
         is_telemetry_disabled: Option<bool>,
     ) -> RouterHttpServer {

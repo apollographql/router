@@ -1,5 +1,6 @@
 mod configuration;
 mod license;
+mod persisted_queries;
 mod reload;
 mod schema;
 mod shutdown;
@@ -9,17 +10,20 @@ use std::fmt::Formatter;
 
 pub use configuration::ConfigurationSource;
 pub use license::LicenseSource;
+pub use persisted_queries::PersistedQueriesSource;
 pub(crate) use reload::ReloadSource;
 pub use schema::SchemaSource;
 pub use shutdown::ShutdownSource;
 
 use self::Event::NoMoreConfiguration;
 use self::Event::NoMoreLicense;
+use self::Event::NoMorePersistedQueriesManifest;
 use self::Event::NoMoreSchema;
 use self::Event::Reload;
 use self::Event::Shutdown;
 use self::Event::UpdateConfiguration;
 use self::Event::UpdateLicense;
+use self::Event::UpdatePersistedQueriesManifest;
 use self::Event::UpdateSchema;
 use crate::uplink::license_enforcement::LicenseState;
 use crate::Configuration;
@@ -40,6 +44,12 @@ pub(crate) enum Event {
 
     /// Update license {}
     UpdateLicense(LicenseState),
+
+    /// Update persisted queries manifest
+    UpdatePersistedQueriesManifest(Option<String>),
+
+    /// Tere are no more updates to the persisted queries
+    NoMorePersistedQueriesManifest,
 
     /// There were no more updates to license.
     NoMoreLicense,
@@ -68,6 +78,12 @@ impl Debug for Event {
             }
             UpdateLicense(e) => {
                 write!(f, "UpdateLicense({e:?})")
+            }
+            UpdatePersistedQueriesManifest(_) => {
+                write!(f, "UpdatePersistedQueriesManifest(<redacted>)")
+            }
+            NoMorePersistedQueriesManifest => {
+                write!(f, "NoMorePersistedQueriesManifest")
             }
             NoMoreLicense => {
                 write!(f, "NoMoreLicense")

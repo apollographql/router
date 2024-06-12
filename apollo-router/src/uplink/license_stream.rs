@@ -489,6 +489,8 @@ mod test {
         UpdateSchema,
         NoMoreSchema,
         UpdateLicense,
+        NoMorePersistedQueriesManifest,
+        UpdatePersistedQueriesManifest,
         HaltLicense,
         WarnLicense,
         NoMoreLicense,
@@ -503,6 +505,12 @@ mod test {
                 Event::NoMoreConfiguration => SimpleEvent::NoMoreConfiguration,
                 Event::UpdateSchema(_) => SimpleEvent::UpdateSchema,
                 Event::NoMoreSchema => SimpleEvent::NoMoreSchema,
+                Event::UpdatePersistedQueriesManifest(_) => {
+                    SimpleEvent::UpdatePersistedQueriesManifest
+                }
+                Event::NoMorePersistedQueriesManifest => {
+                    SimpleEvent::NoMorePersistedQueriesManifest
+                }
                 Event::UpdateLicense(LicenseState::LicensedHalt) => SimpleEvent::HaltLicense,
                 Event::UpdateLicense(LicenseState::LicensedWarn) => SimpleEvent::WarnLicense,
                 Event::UpdateLicense(_) => SimpleEvent::UpdateLicense,

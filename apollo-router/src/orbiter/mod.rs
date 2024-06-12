@@ -99,6 +99,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
+        persisted_queries_manifest: Option<Arc<String>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
         self.delegate
@@ -107,6 +108,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                 configuration.clone(),
                 schema.clone(),
                 previous_router,
+                persisted_queries_manifest,
                 extra_plugins,
             )
             .await

@@ -1,7 +1,6 @@
 mod id_extractor;
 mod manifest_poller;
 
-#[cfg(test)]
 use std::sync::Arc;
 
 use http::header::CACHE_CONTROL;
@@ -33,11 +32,18 @@ pub(crate) struct PersistedQueryLayer {
 impl PersistedQueryLayer {
     /// Create a new [`PersistedQueryLayer`] from CLI options, YAML configuration,
     /// and optionally, an existing persisted query manifest poller.
-    pub(crate) async fn new(configuration: &Configuration) -> Result<Self, BoxError> {
+    pub(crate) async fn new(
+        configuration: &Configuration,
+        persisted_queries_manifest: Option<Arc<String>>,
+    ) -> Result<Self, BoxError> {
         if configuration.persisted_queries.enabled {
             Ok(Self {
                 manifest_poller: Some(
-                    PersistedQueryManifestPoller::new(configuration.clone()).await?,
+                    PersistedQueryManifestPoller::new(
+                        configuration.clone(),
+                        persisted_queries_manifest,
+                    )
+                    .await?,
                 ),
                 introspection_enabled: configuration.supergraph.introspection,
             })
@@ -391,6 +397,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -406,6 +413,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -424,6 +432,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None
         )
         .await
         .is_ok());
@@ -443,6 +452,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -473,6 +483,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -506,6 +517,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -544,6 +556,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -563,6 +576,7 @@ mod tests {
                 .persisted_query(PersistedQueries::builder().enabled(true).build())
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -588,6 +602,7 @@ mod tests {
                 .apq(Apq::fake_builder().enabled(false).build())
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -694,7 +709,7 @@ mod tests {
             .build()
             .unwrap();
 
-        let pq_layer = PersistedQueryLayer::new(&config).await.unwrap();
+        let pq_layer = PersistedQueryLayer::new(&config, None).await.unwrap();
 
         let schema = Arc::new(
             Schema::parse_test(
@@ -779,6 +794,7 @@ mod tests {
                 .apq(Apq::fake_builder().enabled(false).build())
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -838,6 +854,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -872,6 +889,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -901,6 +919,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -933,6 +952,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -963,6 +983,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -989,6 +1010,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -1015,6 +1037,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();
@@ -1048,6 +1071,7 @@ mod tests {
                 .uplink(uplink_config)
                 .build()
                 .unwrap(),
+            None,
         )
         .await
         .unwrap();

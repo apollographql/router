@@ -139,6 +139,7 @@ pub(crate) trait RouterSuperServiceFactory: Send + Sync + 'static {
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
+        persisted_queries_manifest: Option<Arc<String>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError>;
 }
@@ -157,6 +158,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a Self::RouterFactory>,
+        persisted_queries_manifest: Option<Arc<String>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<Self::RouterFactory, BoxError> {
         // we have to create a telemetry plugin before creating everything else, to generate a trace
@@ -211,6 +213,7 @@ impl RouterSuperServiceFactory for YamlRouterFactory {
             configuration,
             schema,
             previous_router,
+            persisted_queries_manifest,
             initial_telemetry_plugin,
             extra_plugins,
         )
@@ -225,6 +228,7 @@ impl YamlRouterFactory {
         configuration: Arc<Configuration>,
         schema: String,
         previous_router: Option<&'a RouterCreator>,
+        persisted_queries_manifest: Option<Arc<String>>,
         initial_telemetry_plugin: Option<Box<dyn DynPlugin>>,
         extra_plugins: Option<Vec<(String, Box<dyn DynPlugin>)>>,
     ) -> Result<RouterCreator, BoxError> {
@@ -241,7 +245,7 @@ impl YamlRouterFactory {
         let query_analysis_layer =
             QueryAnalysisLayer::new(supergraph_creator.schema(), Arc::clone(&configuration)).await;
 
-        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration).await?);
+        let persisted_query_layer = Arc::new(PersistedQueryLayer::new(&configuration,  persisted_queries_manifest).await?);
 
         if let Some(previous_router) = previous_router {
             let previous_cache = previous_router.previous_cache();
@@ -495,6 +499,7 @@ pub async fn create_test_service_factory_from_yaml(schema: &str, configuration: 
             is_telemetry_disabled,
             Arc::new(config),
             schema.to_string(),
+            None,
             None,
             None,
         )
@@ -859,6 +864,7 @@ mod test {
                 is_telemetry_disabled,
                 Arc::new(config),
                 schema.to_string(),
+                None,
                 None,
                 None,
             )
