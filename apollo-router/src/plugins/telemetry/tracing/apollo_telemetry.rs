@@ -58,6 +58,7 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
 use crate::plugins::telemetry::otlp::Protocol;
@@ -287,6 +288,7 @@ impl Exporter {
         errors_configuration: &'a ErrorsConfiguration,
         batch_config: &'a BatchProcessorConfig,
         use_legacy_request_span: Option<bool>,
+        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
 
@@ -313,6 +315,7 @@ impl Exporter {
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
+                    metrics_reference_mode,
                 )?))
             } else {
                 None

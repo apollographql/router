@@ -243,6 +243,17 @@ pub(crate) enum TraceIdFormat {
     Decimal,
 }
 
+/// Apollo usage report reference generation modes.
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ApolloMetricsReferenceMode {
+    /// Use the extended mode to report input object fields and enum value references as well as object fields.
+    Extended,
+    /// Use the standard mode that only reports referenced object fields.
+    #[default]
+    Standard,
+}
+
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]

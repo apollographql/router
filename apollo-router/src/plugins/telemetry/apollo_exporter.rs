@@ -32,6 +32,7 @@ use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
+use super::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
@@ -95,6 +96,7 @@ pub(crate) struct ApolloExporter {
     client: Client,
     strip_traces: AtomicBool,
     studio_backoff: Mutex<Instant>,
+    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 impl ApolloExporter {
@@ -104,6 +106,7 @@ impl ApolloExporter {
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
+        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<ApolloExporter, BoxError> {
         let header = proto::reports::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
@@ -132,6 +135,7 @@ impl ApolloExporter {
             header,
             strip_traces: Default::default(),
             studio_backoff: Mutex::new(Instant::now()),
+            metrics_reference_mode,
         })
     }
 
@@ -205,7 +209,7 @@ impl ApolloExporter {
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
-        let mut proto_report = report.build_proto_report(self.header.clone());
+        let mut proto_report = report.build_proto_report(self.header.clone(), self.metrics_reference_mode);
         prost::Message::encode(&proto_report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder

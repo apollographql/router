@@ -63,6 +63,15 @@ pub(crate) struct ExtendedReferenceStats {
     pub(crate) referenced_enums: HashMap<String, HashSet<String>>,
 }
 
+impl ExtendedReferenceStats {
+    pub(crate) fn new() -> Self {
+        ExtendedReferenceStats {
+            referenced_input_fields: HashMap::new(),
+            referenced_enums: HashMap::new(),
+        }
+    }
+}
+
 /// The aggregation of ExtendedReferenceStats across a number of executions.
 #[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct AggregatedExtendedReferenceStats {
@@ -73,12 +82,9 @@ pub(crate) struct AggregatedExtendedReferenceStats {
     pub(crate) referenced_enums: HashMap<String, HashMap<String, u64>>,
 }
 
-impl ExtendedReferenceStats {
-    pub(crate) fn new() -> Self {
-        ExtendedReferenceStats {
-            referenced_input_fields: HashMap::new(),
-            referenced_enums: HashMap::new(),
-        }
+impl AggregatedExtendedReferenceStats {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.referenced_input_fields.is_empty() && self.referenced_enums.is_empty()
     }
 }
 

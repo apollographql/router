@@ -14,13 +14,14 @@ use tokio::sync::Mutex;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
-use crate::configuration::ApolloMetricsReferenceMode;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -196,12 +197,23 @@ impl QueryAnalysisLayer {
                     .extensions()
                     .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
 
-                // todo move this config to the telemetry section (also for enhanced signature?)
-                if self
+                let extended_refs_enabled = match self
                     .configuration
-                    .experimental_apollo_metrics_reference_mode
-                    == ApolloMetricsReferenceMode::Enhanced
-                {
+                    .apollo_plugins
+                    .plugins
+                    .get("telemetry") {
+                    Some(telemetry_config) => {
+                        match serde_json::from_value::<TelemetryConfig>(telemetry_config.clone()) {
+                            Ok(conf) => {
+                                matches!(conf.apollo.experimental_apollo_metrics_reference_mode, ApolloMetricsReferenceMode::Extended)
+                            },
+                            _ => false
+                        }
+                    },
+                    None => false
+                };
+
+                if extended_refs_enabled {
                     let extended_reference_stats = generate_extended_references(
                         doc.executable.clone(),
                         op_name,

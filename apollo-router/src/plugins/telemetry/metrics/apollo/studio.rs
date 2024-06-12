@@ -202,7 +202,11 @@ impl From<ContextualizedStats>
                 .collect(),
             query_latency_stats: Some(stats.query_latency_stats.into()),
             context: Some(stats.context),
-            extended_references: Some(stats.extended_references.into()), // todo check config if it's easy
+            extended_references: if stats.extended_references.is_empty() {
+                None
+            } else {
+                Some(stats.extended_references.into())
+            },
             limits_stats: None,
             local_per_type_stat: HashMap::new(),
             operation_count: 0,
