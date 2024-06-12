@@ -227,9 +227,13 @@ dependencies = [
  "hex",
  "indexmap 2.2.3",
  "insta",
+ "itertools 0.13.0",
  "lazy_static",
  "multimap 0.10.0",
+ "nom",
  "petgraph",
+ "serde",
+ "serde_json",
  "serde_json_bytes",
  "sha1",
  "strum 0.26.2",
@@ -3722,6 +3726,15 @@ name = "itertools"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ba291022dbbd398a455acf126c1e341954079855bc60dfdda641363bd6922569"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
 dependencies = [
  "either",
 ]

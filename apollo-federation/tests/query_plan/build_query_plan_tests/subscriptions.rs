@@ -43,32 +43,36 @@ fn basic_subscription_query_plan() {
         @r###"
       QueryPlan {
         Subscription {
-          Primary: {Fetch(service: "SubgraphA") {
-                  subscription MySubscription__SubgraphA__0 {
-              onNewUser {
-                __typename
-                id
-                name
-              }
-            }
-          },},
-          Rest: {Sequence {
-            Flatten(path: "onNewUser") {
-              Fetch(service: "SubgraphB") {
-                {
-                  ... on User {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on User {
-                    address
-                  }
+          Primary: {
+            Fetch(service: "SubgraphA") {
+              {
+                onNewUser {
+                  __typename
+                  id
+                  name
                 }
+              }
+            },
+          },
+          Rest: {
+            Sequence {
+              Flatten(path: "onNewUser") {
+                Fetch(service: "SubgraphB") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      address
+                    }
+                  }
+                },
               },
             },
-          },},
+          },
         },
       }
       "###
@@ -115,14 +119,16 @@ fn basic_subscription_with_single_subgraph() {
         @r###"
       QueryPlan {
         Subscription {
-          Primary: {Fetch(service: "SubgraphA") {
-                  subscription MySubscription__SubgraphA__0 {
-              onNewUser {
-                id
-                name
+          Primary: {
+            Fetch(service: "SubgraphA") {
+              {
+                onNewUser {
+                  id
+                  name
+                }
               }
-            }
-          },},
+            },
+          },
         },
       }
       "###

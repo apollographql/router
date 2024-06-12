@@ -429,8 +429,6 @@ fn avoids_unnecessary_fetches() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure: fetch nodes are queries instead of mutations?
 fn it_executes_mutation_operations_in_sequence() {
     let planner = planner!(
         Subgraph1: r#"
