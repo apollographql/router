@@ -12,29 +12,16 @@ use super::InlineFragmentData;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::NormalizeSelectionOption;
+use super::OperationElement;
 use super::Selection;
 use super::SelectionId;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use crate::error::FederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-
-// TODO(@goto-bus-stop): this is precomputed in the QueryPlanner constructor. Can we expose that
-// here? Or can we move it onto the FederationSchema instance?
-fn is_interface_object(obj: &ObjectTypeDefinitionPosition, schema: &ValidFederationSchema) -> bool {
-    if let Ok(intf_obj_directive) = get_federation_spec_definition_from_subgraph(schema)
-        .and_then(|spec| spec.interface_object_directive(schema))
-    {
-        obj.try_get(schema.schema())
-            .is_some_and(|o| o.directives.has(&intf_obj_directive.name))
-    } else {
-        false
-    }
-}
 
 fn print_possible_runtimes(
     composite_type: &CompositeTypeDefinitionPosition,
@@ -116,7 +103,7 @@ impl Field {
             return if schema
                 .possible_runtime_types(parent_type.clone())?
                 .iter()
-                .any(|t| is_interface_object(t, schema))
+                .any(|t| t.is_interface_object_type(schema))
             {
                 if let RebaseErrorHandlingOption::ThrowError = error_handling {
                     Err(FederationError::internal(
@@ -173,7 +160,7 @@ impl Field {
         // case 2
         let is_interface_object_type =
             match ObjectTypeDefinitionPosition::try_from(field_parent_type.clone()) {
-                Ok(ref o) => is_interface_object(o, &self.data().schema),
+                Ok(ref o) => o.is_interface_object_type(&self.data().schema),
                 Err(_) => false,
             };
         field_parent_type.is_interface_type() || is_interface_object_type
@@ -306,6 +293,49 @@ impl FieldSelection {
             }
         }
         Ok(true)
+    }
+}
+
+impl FragmentSpread {
+    /// - `named_fragments`: named fragment definitions that are rebased for the subgraph.
+    // Note: Unlike other `rebase_on`, this method should only be used during fetch operation
+    //       optimization. Thus, it's rebasing within the same subgraph schema.
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        named_fragments: &NamedFragments,
+        error_handling: RebaseErrorHandlingOption,
+    ) -> Result<Option<FragmentSpread>, FederationError> {
+        let Some(named_fragment) = named_fragments.get(&self.data().fragment_name) else {
+            return if let RebaseErrorHandlingOption::ThrowError = error_handling {
+                Err(FederationError::internal(format!(
+                    "Cannot rebase {} fragment if it isn't part of the provided fragments",
+                    self.data().fragment_name
+                )))
+            } else {
+                Ok(None)
+            };
+        };
+        debug_assert_eq!(
+            *schema,
+            self.data().schema,
+            "Fragment spread should only be rebased within the same subgraph"
+        );
+        debug_assert_eq!(
+            *schema, named_fragment.schema,
+            "Referenced named fragment should've been rebased for the subgraph"
+        );
+        if !runtime_types_intersect(
+            parent_type,
+            &named_fragment.type_condition_position,
+            &self.data().schema,
+        ) {
+            return Ok(None);
+        }
+        Ok(Some(FragmentSpread::new(
+            FragmentSpreadData::from_fragment(&named_fragment, &self.data().directives),
+        )))
     }
 }
 
@@ -610,6 +640,48 @@ impl InlineFragmentSelection {
         self.inline_fragment
             .can_rebase_on(parent_type, parent_schema)
             .0
+    }
+}
+
+impl OperationElement {
+    pub(crate) fn rebase_on_or_error(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        schema: &ValidFederationSchema,
+        named_fragments: &NamedFragments,
+    ) -> Result<OperationElement, FederationError> {
+        let result: Option<OperationElement> = match self {
+            OperationElement::Field(field) => field
+                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
+                .map(|val| val.map(Into::into)),
+            OperationElement::FragmentSpread(fragment) => fragment
+                .rebase_on(
+                    parent_type,
+                    schema,
+                    named_fragments,
+                    RebaseErrorHandlingOption::ThrowError,
+                )
+                .map(|val| val.map(Into::into)),
+            OperationElement::InlineFragment(inline) => inline
+                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
+                .map(|val| val.map(Into::into)),
+        }?;
+        result.ok_or_else(|| {
+            FederationError::internal(format!(
+                "Cannot rebase operation element {} on {}",
+                self, parent_type
+            ))
+        })
+    }
+
+    pub(crate) fn sub_selection_type_position(
+        &self,
+    ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
+        match self {
+            OperationElement::Field(field) => Ok(field.data().output_base_type()?.try_into().ok()),
+            OperationElement::FragmentSpread(_) => Ok(None), // No sub-selection set
+            OperationElement::InlineFragment(inline) => Ok(Some(inline.data().casted_type())),
+        }
     }
 }
 
