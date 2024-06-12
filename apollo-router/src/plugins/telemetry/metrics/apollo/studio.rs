@@ -331,8 +331,6 @@ pub(crate) struct LimitsStats {
     root_field_count: u64,
 }
 
-impl LimitsStats {}
-
 impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::reports::LimitsStats {
     fn from(value: LimitsStats) -> Self {
         Self {
@@ -351,20 +349,16 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
 
 impl AddAssign<SingleLimitsStats> for LimitsStats {
     fn add_assign(&mut self, rhs: SingleLimitsStats) {
-        if self
-            .cost_estimated
-            .record(rhs.cost_estimated.unwrap_or_default())
-            .is_err()
-        {
-            tracing::warn!("could not record estimated cost in LimitsStats");
+        if let Some(cost) = rhs.cost_estimated {
+            if self.cost_estimated.record(cost).is_err() {
+                tracing::warn!("could not record estimated cost in LimitsStats");
+            }
         }
 
-        if self
-            .cost_actual
-            .record(rhs.cost_actual.unwrap_or_default())
-            .is_err()
-        {
-            tracing::warn!("could not record actual cost in LimitsStats");
+        if let Some(cost) = rhs.cost_actual {
+            if self.cost_actual.record(cost).is_err() {
+                tracing::warn!("could not record actual cost in LimitsStats");
+            }
         }
 
         // These are derived from the query and thus shouldn't change when we collect metrics
@@ -398,6 +392,7 @@ impl From<SingleLimitsStats> for LimitsStats {
                 );
             }
         }
+
         Self {
             strategy: value.strategy.unwrap_or_default(),
             cost_estimated,
