@@ -279,6 +279,28 @@ impl ValidFederationSchema {
 
         todo!()
     }
+
+    pub(crate) fn is_interface_object_type(
+        &self,
+        type_definition_position: TypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
+        let Some(subgraph_metadata) = &self.subgraph_metadata else {
+            return Ok(false);
+        };
+        let Some(interface_object_directive_definition) = subgraph_metadata
+            .federation_spec_definition()
+            .interface_object_directive_definition(self)?
+        else {
+            return Ok(false);
+        };
+        match type_definition_position {
+            TypeDefinitionPosition::Object(type_) => Ok(type_
+                .get(self.schema())?
+                .directives
+                .has(&interface_object_directive_definition.name)),
+            _ => Ok(false),
+        }
+    }
 }
 
 impl Deref for ValidFederationSchema {
