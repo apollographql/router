@@ -196,6 +196,7 @@ impl QueryAnalysisLayer {
                     .extensions()
                     .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
 
+                // todo move this config to the telemetry section (also for enhanced signature?)
                 if self
                     .configuration
                     .experimental_apollo_metrics_reference_mode
@@ -207,10 +208,9 @@ impl QueryAnalysisLayer {
                         self.schema.api_schema(),
                         &request.supergraph_request.body().variables.clone(),
                     );
-                    request
-                        .context
-                        .extensions()
-                        .with_lock(|mut lock| lock.insert::<ExtendedReferenceStats>(extended_reference_stats));
+                    request.context.extensions().with_lock(|mut lock| {
+                        lock.insert::<ExtendedReferenceStats>(extended_reference_stats)
+                    });
                 }
 
                 Ok(SupergraphRequest {

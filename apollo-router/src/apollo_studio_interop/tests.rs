@@ -1,8 +1,9 @@
+use std::sync::Arc;
+
 use apollo_compiler::Schema;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
 use router_bridge::planner::QueryPlannerConfig;
-use std::sync::Arc;
 use test_log::test;
 
 use super::*;

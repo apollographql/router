@@ -6,7 +6,12 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use super::duration_histogram::DurationHistogram;
+use crate::apollo_studio_interop::AggregatedExtendedReferenceStats;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::EnumStats;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::InputFieldStats;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::InputTypeStats;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
@@ -34,6 +39,7 @@ pub(crate) struct SingleContextualizedStats {
     pub(crate) context: StatsContext,
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
+    pub(crate) extended_references: ExtendedReferenceStats,
 }
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
@@ -81,6 +87,7 @@ pub(crate) struct ContextualizedStats {
     context: StatsContext,
     query_latency_stats: QueryLatencyStats,
     per_type_stat: HashMap<String, TypeStat>,
+    extended_references: AggregatedExtendedReferenceStats,
 }
 
 impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
@@ -90,6 +97,7 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
         for (k, v) in stats.per_type_stat {
             *self.per_type_stat.entry(k).or_default() += v;
         }
+        self.extended_references += stats.extended_references;
     }
 }
 
@@ -194,7 +202,7 @@ impl From<ContextualizedStats>
                 .collect(),
             query_latency_stats: Some(stats.query_latency_stats.into()),
             context: Some(stats.context),
-            extended_references: None,
+            extended_references: Some(stats.extended_references.into()), // todo check config if it's easy
             limits_stats: None,
             local_per_type_stat: HashMap::new(),
             operation_count: 0,
@@ -263,6 +271,44 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
             // Round sampling-rate-compensated floating-point estimates to nearest integers:
             estimated_execution_count: stat.latency.total as u64,
             latency_count: stat.latency.buckets_to_i64(),
+        }
+    }
+}
+
+impl From<AggregatedExtendedReferenceStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::ExtendedReferences
+{
+    fn from(references: AggregatedExtendedReferenceStats) -> Self {
+        Self {
+            input_types: references
+                .referenced_input_fields
+                .into_iter()
+                .map(|(type_name, type_stats)| {
+                    (
+                        type_name,
+                        InputTypeStats {
+                            field_names: type_stats
+                                .into_iter()
+                                .map(|(field_name, field_stats)| {
+                                    (
+                                        field_name,
+                                        InputFieldStats {
+                                            refs: field_stats.referenced,
+                                            null_refs: field_stats.null_reference,
+                                            missing: field_stats.undefined_reference,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+            enum_values: references
+                .referenced_enums
+                .into_iter()
+                .map(|(k, v)| (k, EnumStats { enum_values: v }))
+                .collect(),
         }
     }
 }
@@ -390,6 +436,7 @@ mod test {
                                 },
                             ),
                         ]),
+                        extended_references: ExtendedReferenceStats::new(),
                     },
                     referenced_fields_by_type: HashMap::from([(
                         "type1".into(),

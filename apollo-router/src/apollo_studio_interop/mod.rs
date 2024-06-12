@@ -3,6 +3,7 @@ use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::ops::AddAssign;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
@@ -25,12 +26,13 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
+use serde::Serialize;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
 
-/// The stats for an input object field.
-#[derive(Debug, Clone)]
+/// The stats for a single execution of an input object field.
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct InputObjectFieldStats {
     /// True if the input object field was referenced.
     pub(crate) referenced: bool,
@@ -40,14 +42,101 @@ pub(crate) struct InputObjectFieldStats {
     pub(crate) undefined_reference: bool,
 }
 
+/// The stats for a an input object field across multiple executions.
+#[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct AggregatedInputObjectFieldStats {
+    /// The number of executions where the field was referenced.
+    pub(crate) referenced: u64,
+    /// The number of executions where the field was referenced with a null value.
+    pub(crate) null_reference: u64,
+    /// The number of executions where the field was missing or undefined.
+    pub(crate) undefined_reference: u64,
+}
+
 /// The result of the generate_extended_references function which contains input object field and
-/// enum value stats.
-#[derive(Debug, Clone)]
+/// enum value stats for a single execution.
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct ExtendedReferenceStats {
     /// A map of parent type to a map of field name to stats
     pub(crate) referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     /// A map of enum name to a set of enum values that were referenced
     pub(crate) referenced_enums: HashMap<String, HashSet<String>>,
+}
+
+/// The aggregation of ExtendedReferenceStats across a number of executions.
+#[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct AggregatedExtendedReferenceStats {
+    /// A map of parent type to a map of field name to aggregated stats
+    pub(crate) referenced_input_fields:
+        HashMap<String, HashMap<String, AggregatedInputObjectFieldStats>>,
+    /// A map of enum name to a map of enum values to the number of executions that referenced them.
+    pub(crate) referenced_enums: HashMap<String, HashMap<String, u64>>,
+}
+
+impl ExtendedReferenceStats {
+    pub(crate) fn new() -> Self {
+        ExtendedReferenceStats {
+            referenced_input_fields: HashMap::new(),
+            referenced_enums: HashMap::new(),
+        }
+    }
+}
+
+impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
+    fn add_assign(&mut self, other_stats: ExtendedReferenceStats) {
+        // Merge input object references
+        for (type_name, type_stats) in other_stats.referenced_input_fields.iter() {
+            for (field_name, field_stats) in type_stats.iter() {
+                match self
+                    .referenced_input_fields
+                    .entry(type_name.to_string())
+                    .or_default()
+                    .entry(field_name.to_string())
+                {
+                    Entry::Occupied(mut entry) => {
+                        let stats: &mut AggregatedInputObjectFieldStats = entry.get_mut();
+                        stats.referenced += if field_stats.referenced { 1 } else { 0 };
+                        stats.null_reference += if field_stats.null_reference { 1 } else { 0 };
+                        stats.undefined_reference += if field_stats.undefined_reference {
+                            1
+                        } else {
+                            0
+                        };
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(AggregatedInputObjectFieldStats {
+                            referenced: if field_stats.referenced { 1 } else { 0 },
+                            null_reference: if field_stats.null_reference { 1 } else { 0 },
+                            undefined_reference: if field_stats.undefined_reference {
+                                1
+                            } else {
+                                0
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        // Merge enum references
+        for (enum_name, enum_values) in other_stats.referenced_enums.iter() {
+            for enum_value in enum_values.iter() {
+                match self
+                    .referenced_enums
+                    .entry(enum_name.to_string())
+                    .or_default()
+                    .entry(enum_value.to_string())
+                {
+                    Entry::Occupied(mut entry) => {
+                        *entry.get_mut() += 1;
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(1);
+                    }
+                }
+            }
+        }
+    }
 }
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
@@ -355,18 +444,6 @@ impl UsageGenerator<'_> {
             self.process_extended_refs_for_selection_set(&operation.selection_set);
         }
 
-        /*
-        let mut sorted_keys: Vec<_> = temp_stats.referenced_enums.keys().collect();
-        sorted_keys.sort();
-
-        let mut sorted_vecs: Vec<(String, Vec<String>)> = Vec::new();
-        for &key in sorted_keys.iter() {
-            let vals = temp_stats.referenced_enums.get(key).unwrap();
-            let mut sorted_vals: Vec<String> = vals.iter().cloned().collect();
-            sorted_vals.sort();
-            sorted_vecs.push((key.to_string(), sorted_vals));
-        }
-        */
         ExtendedReferenceStats {
             referenced_input_fields: self.input_field_references.clone(),
             referenced_enums: self.enums_by_name.clone(),
@@ -480,8 +557,6 @@ impl UsageGenerator<'_> {
                 let field_type = field_def.ty.inner_named_type().to_string();
                 let maybe_field_val = obj_value_map.get(&field_name.to_string());
 
-                let is_referenced = maybe_field_val.is_some();
-                let is_null = maybe_field_val.is_some_and(|v| v.is_null());
                 self.add_input_object_reference(
                     type_name.to_string(),
                     field_name.to_string(),
@@ -503,8 +578,6 @@ impl UsageGenerator<'_> {
     ) {
         match self.schema.types.get(type_name.to_string().as_str()) {
             Some(ExtendedType::InputObject(input_object_type)) => {
-                // todo input object stuff (ref/null/undefined)
-
                 match var_value {
                     // For input objects, we store input object references and process each of the field variables
                     Some(JsonValue::Object(json_obj)) => {

@@ -459,15 +459,6 @@ impl Plugin for Telemetry {
                                 }
                             }
 
-                            if let Some(temp_stats) = response
-                                .context
-                                .extensions()
-                                .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
-                            {
-                                // todo store in report somewhere instead of logging out.
-                                println!("ExtendedReferenceStats: {:?}", temp_stats);
-                            }
-
                             if response.context.extensions().with_lock(|lock| {
                                 lock.get::<Arc<UsageReporting>>()
                                     .map(|u| {
@@ -1404,6 +1395,16 @@ impl Telemetry {
                 let traces = Self::subgraph_ftv1_traces(context);
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
+
+                // If extended references are populated, we want to add them to the SingleStatsReport
+                let extended_references = match context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
+                {
+                    Some(extended_refs) => extended_refs,
+                    None => ExtendedReferenceStats::new(),
+                };
+
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1449,6 +1450,7 @@ impl Telemetry {
                                     ..Default::default()
                                 },
                                 per_type_stat,
+                                extended_references,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type

@@ -384,7 +384,7 @@ impl Report {
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
-            extended_references_enabled: true, // todo pass in from configuration
+            extended_references_enabled: true, // todo get from config once it's moved to telemetry config. also rename config to "extended" instead of "enhanced"
             ..Default::default()
         };
 
@@ -394,7 +394,8 @@ impl Report {
                 .insert(key.clone(), traces_and_stats.clone().into());
         }
 
-        // println!("report: {:?}", report);
+        // temp
+        println!("report: {:?}", report);
 
         report
     }
