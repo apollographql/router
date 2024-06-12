@@ -35,10 +35,11 @@ use indexmap::map::Iter;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
+use crate::error::FederationError;
 use crate::subgraph::ValidSubgraph;
 
-type MergeWarning = &'static str;
-type MergeError = &'static str;
+type MergeWarning = String;
+type MergeError = String;
 
 struct Merger {
     errors: Vec<MergeError>,
@@ -48,6 +49,20 @@ struct Merger {
 pub struct MergeSuccess {
     pub schema: Valid<Schema>,
     pub composition_hints: Vec<MergeWarning>,
+}
+
+impl From<FederationError> for MergeFailure {
+    fn from(err: FederationError) -> Self {
+        // TODO: Consider an easier transition / interop between MergeFailure and FederationError
+        // TODO: This is most certainly not the right error kind. MergeFailure's
+        // errors need to be in an enum that could be matched on rather than a
+        // str.
+        MergeFailure {
+            schema: None,
+            errors: vec![err.to_string()],
+            composition_hints: vec![],
+        }
+    }
 }
 
 pub struct MergeFailure {
@@ -86,8 +101,9 @@ impl Merger {
             if let Ok(subgraph_name) = Name::new(&subgraph.name.to_uppercase()) {
                 subgraphs_and_enum_values.push((*subgraph, subgraph_name));
             } else {
-                self.errors
-                    .push("Subgraph name couldn't be transformed into valid GraphQL name");
+                self.errors.push(String::from(
+                    "Subgraph name couldn't be transformed into valid GraphQL name",
+                ));
             }
         }
         if !self.errors.is_empty() {
@@ -190,7 +206,8 @@ impl Merger {
             (Some(a), Some(b)) => {
                 if a != b {
                     // TODO add info about type and from/to subgraph
-                    self.composition_hints.push("conflicting descriptions");
+                    self.composition_hints
+                        .push(String::from("conflicting descriptions"));
                 }
             }
         }

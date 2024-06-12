@@ -3122,9 +3122,7 @@ impl SelectionSet {
                     path: Vec::new(),
                     field: field.clone(),
                 }),
-                Selection::FragmentSpread(_fragment) => {
-                    todo!()
-                }
+                Selection::FragmentSpread(_fragment) => return fields,
                 Selection::InlineFragment(inline_fragment) => {
                     let condition = inline_fragment
                         .inline_fragment
