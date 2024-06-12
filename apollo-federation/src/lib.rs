@@ -111,8 +111,7 @@ impl Supergraph {
     pub fn compose(subgraphs: Vec<&ValidSubgraph>) -> Result<Self, MergeFailure> {
         let schema = merge_subgraphs(subgraphs)?.schema;
         Ok(Self {
-            schema: ValidFederationSchema::new(schema)
-                .map_err(|err| Into::<MergeFailure>::into(err))?,
+            schema: ValidFederationSchema::new(schema).map_err(Into::<MergeFailure>::into)?,
         })
     }
 
