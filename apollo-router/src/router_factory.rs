@@ -262,12 +262,31 @@ impl YamlRouterFactory {
                 .warm_up_query_planner(
                     &query_analysis_layer,
                     &persisted_query_layer,
-                    previous_cache,
+                    Some(previous_cache),
                     configuration.supergraph.query_planning.warmed_up_queries,
                     configuration
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
+                    configuration
+                        .persisted_queries
+                        .experimental_prewarm_query_plan_cache,
+                )
+                .await;
+        } else {
+            supergraph_creator
+                .warm_up_query_planner(
+                    &query_analysis_layer,
+                    &persisted_query_layer,
+                    None,
+                    configuration.supergraph.query_planning.warmed_up_queries,
+                    configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_reuse_query_plans,
+                    configuration
+                        .persisted_queries
+                        .experimental_prewarm_query_plan_cache,
                 )
                 .await;
         };
