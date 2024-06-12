@@ -594,42 +594,36 @@ impl Configuration {
             });
         }
 
-        let (extended_refs_enabled, signature_normalization_algorithm) =
-            match self.apollo_plugins.plugins.get("telemetry") {
-                Some(telemetry_config) => {
-                    match serde_json::from_value::<crate::plugins::telemetry::config::Conf>(
-                        telemetry_config.clone(),
-                    ) {
-                        Ok(conf) => (
-                            matches!(
-                                conf.apollo.experimental_apollo_metrics_reference_mode,
-                                ApolloMetricsReferenceMode::Extended
-                            ),
-                            conf.apollo
-                                .experimental_apollo_signature_normalization_algorithm,
-                        ),
-                        _ => (false, ApolloSignatureNormalizationAlgorithm::default()),
-                    }
+        let apollo_telemetry_config = match self.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<crate::plugins::telemetry::config::Conf>(
+                    telemetry_config.clone(),
+                ) {
+                    Ok(conf) => Some(conf.apollo),
+                    _ => None,
                 }
-                _ => (false, ApolloSignatureNormalizationAlgorithm::default()),
-            };
-
-        if extended_refs_enabled
-            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
-        {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`",
-                error: "either change to the standard reference generation mode, or change to new metrics generation".into()
-            });
+            }
+            _ => None,
         };
 
-        if signature_normalization_algorithm == ApolloSignatureNormalizationAlgorithm::Enhanced
-            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
-        {
-            return Err(ConfigurationError::InvalidConfiguration {
-                message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
-                error: "either change to the legacy signature normalization mode, or change to new metrics generation".into()
-            });
+        if let Some(config) = apollo_telemetry_config {
+            if matches!(config.experimental_apollo_signature_normalization_algorithm, ApolloSignatureNormalizationAlgorithm::Enhanced)
+                && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
+                    error: "either change to the legacy signature normalization mode, or change to new metrics generation".into()
+                });
+            }
+
+            if matches!(config.experimental_apollo_metrics_reference_mode, ApolloMetricsReferenceMode::Extended)
+                && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`",
+                    error: "either change to the standard reference generation mode, or change to new metrics generation".into()
+                });
+            };
         }
 
         Ok(self)

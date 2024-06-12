@@ -561,7 +561,7 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let signature_normalization_mode =
+                    let signature_normalization_algorithm =
                         match self.configuration.apollo_plugins.plugins.get("telemetry") {
                             Some(telemetry_config) => {
                                 match serde_json::from_value::<TelemetryConfig>(
@@ -582,7 +582,7 @@ impl BridgeQueryPlanner {
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
-                        &signature_normalization_mode,
+                        &signature_normalization_algorithm,
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where
