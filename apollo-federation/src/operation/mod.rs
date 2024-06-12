@@ -165,9 +165,6 @@ impl Operation {
     }
 
     /// Removes the @defer directive from all selections without removing that selection.
-    // PORT_NOTE: This behavior differs from the JS code, which removes anything with @defer.
-    // TODO(@TylerBloom): After the private preview and @defer being impl-ed, check if this logic
-    // should be changed to mirror the JS code.
     pub(crate) fn without_defer(mut self) -> Self {
         if self.has_defer() {
             self.selection_set.without_defer();
@@ -413,7 +410,7 @@ mod selection_map {
             }
         }
 
-        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
             match self {
                 Self::Field(field) => field.get_directives_mut(),
                 Self::FragmentSpread(spread) => spread.get_directives_mut(),
@@ -421,7 +418,7 @@ mod selection_map {
             }
         }
 
-        pub(crate) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
+        pub(super) fn get_selection_set_mut(&mut self) -> Option<&mut SelectionSet> {
             match self {
                 Self::Field(field) => field.get_selection_set_mut().as_mut(),
                 Self::FragmentSpread(spread) => Some(spread.get_selection_set_mut()),
@@ -446,7 +443,7 @@ mod selection_map {
             Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
-        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
             Arc::make_mut(self.0).field.directives_mut()
         }
 
@@ -463,7 +460,7 @@ mod selection_map {
             Self(fragment_spread_selection)
         }
 
-        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
             Arc::make_mut(self.0).spread.directives_mut()
         }
 
@@ -488,7 +485,7 @@ mod selection_map {
             self.0
         }
 
-        pub(crate) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn get_directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
             Arc::make_mut(self.0).inline_fragment.directives_mut()
         }
 
@@ -1237,7 +1234,7 @@ mod field_selection {
             &self.data
         }
 
-        pub(crate) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
             &mut self.data.directives
         }
 
@@ -1426,7 +1423,7 @@ mod fragment_spread_selection {
             }
         }
 
-        pub(crate) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
             &mut self.data.directives
         }
 
@@ -1724,7 +1721,7 @@ mod inline_fragment_selection {
             &self.data
         }
 
-        pub(crate) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
+        pub(super) fn directives_mut(&mut self) -> &mut Arc<executable::DirectiveList> {
             &mut self.data.directives
         }
 
@@ -2979,9 +2976,6 @@ impl SelectionSet {
     }
 
     /// Removes the @defer directive from all selections without removing that selection.
-    // PORT_NOTE: This behavior differs from the JS code, which removes anything with @defer.
-    // TODO(@TylerBloom): After the private preview and @defer being impl-ed, check if this logic
-    // should be changed to mirror the JS code.
     fn without_defer(&mut self) {
         // TODO: This doesn't seem like the correct way to get the directive name...
         let Some(defer_name) = self.schema.get_directive_definition(&name!("defer")) else {
