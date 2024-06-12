@@ -362,13 +362,13 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
 
 impl AddAssign<SingleLimitsStats> for LimitsStats {
     fn add_assign(&mut self, rhs: SingleLimitsStats) {
-        if self.cost_estimated.record(rhs.cost_estimated).is_ok() {
+        if rhs.cost_estimated > 0 && self.cost_estimated.record(rhs.cost_estimated).is_ok() {
             self.max_cost_estimated = self.max_cost_estimated.max(rhs.cost_estimated);
         } else {
             tracing::warn!("could not record estimated cost in LimitsStats");
         }
 
-        if self.cost_actual.record(rhs.cost_actual).is_ok() {
+        if rhs.cost_actual > 0 && self.cost_actual.record(rhs.cost_actual).is_ok() {
             self.max_cost_actual = self.max_cost_actual.max(rhs.cost_actual);
         } else {
             tracing::warn!("could not record actual cost in LimitsStats");
@@ -387,14 +387,14 @@ impl AddAssign<SingleLimitsStats> for LimitsStats {
 impl From<SingleLimitsStats> for LimitsStats {
     fn from(value: SingleLimitsStats) -> Self {
         let mut cost_estimated = Histogram::new(3).unwrap();
-        if cost_estimated.record(value.cost_estimated).is_err() {
+        if value.cost_estimated > 0 && cost_estimated.record(value.cost_estimated).is_err() {
             tracing::warn!(
                 "could not record estimated cost when converting SingleLimitsStats to LimitsStats"
             );
         }
 
         let mut cost_actual = Histogram::new(3).unwrap();
-        if cost_actual.record(value.cost_actual).is_err() {
+        if value.cost_actual > 0 && cost_actual.record(value.cost_actual).is_err() {
             tracing::warn!(
                 "could not record actual cost when converting SingleLimitsStats to LimitsStats"
             );
