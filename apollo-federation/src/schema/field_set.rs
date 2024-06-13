@@ -12,6 +12,7 @@ use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::operation::NamedFragments;
 use crate::operation::SelectionSet;
+use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -24,20 +25,27 @@ use crate::schema::ValidFederationSchema;
 // However, since `parse_field_set` uses the standard GraphQL parser, which allows aliases,
 // we need this secondary check to ensure that aliases are not used.
 fn check_absence_of_aliases(
-    field_set: &Valid<FieldSet>,
+    selection_set: &SelectionSet,
     code_str: &str,
 ) -> Result<(), FederationError> {
-    let aliases = field_set.selection_set.fields().filter_map(|field| {
-        field.alias.as_ref().map(|alias|
-            SingleFederationError::UnsupportedFeature {
-                // PORT_NOTE: The JS version also quotes the directive name in the error message.
-                //            For example, "aliases are not currently supported in @requires".
-                message: format!(
-                    r#"Cannot use alias "{}" in "{}": aliases are not currently supported in the used directive"#,
-                    alias, code_str)
-            })
-    });
-    MultipleFederationErrors::from_iter(aliases).into_result()
+    let mut alias_errors = vec![];
+    selection_set.for_each_element(&mut |elem| {
+        let OpPathElement::Field(field) = elem else {
+            return Ok(());
+        };
+        let Some(alias) = &field.data().alias else {
+            return Ok(());
+        };
+        alias_errors.push(SingleFederationError::UnsupportedFeature {
+            // PORT_NOTE: The JS version also quotes the directive name in the error message.
+            //            For example, "aliases are not currently supported in @requires".
+            message: format!(
+                r#"Cannot use alias "{}" in "{}": aliases are not currently supported in the used directive"#,
+                alias, code_str)
+        });
+        Ok(())
+    })?;
+    MultipleFederationErrors::from_iter(alias_errors).into_result()
 }
 
 // TODO: In the JS codebase, this has some error-rewriting to help give the user better hints around
@@ -56,12 +64,15 @@ pub(crate) fn parse_field_set(
         "field_set.graphql",
     )?;
 
-    // Validate the field set has no aliases.
-    check_absence_of_aliases(&field_set, value)?;
-
     // field set should not contain any named fragments
     let named_fragments = NamedFragments::new(&IndexMap::new(), schema);
-    SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)
+    let selection_set =
+        SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)?;
+
+    // Validate the field set has no aliases.
+    check_absence_of_aliases(&selection_set, value)?;
+
+    Ok(selection_set)
 }
 
 /// This exists because there's a single callsite in extract_subgraphs_from_supergraph() that needs
