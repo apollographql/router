@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::{Key, KeyValue};
+use opentelemetry_api::Key;
+use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
