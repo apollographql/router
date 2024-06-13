@@ -460,10 +460,6 @@ fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved()
 }
 
 #[test]
-#[should_panic(
-    expected = r#"variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"#
-)]
-// TODO: investigate this failure
 fn it_preserves_directives_when_fragment_not_used() {
     // (because used only once)
     let planner = planner!(
@@ -482,7 +478,7 @@ fn it_preserves_directives_when_fragment_not_used() {
     assert_plan!(
         &planner,
         r#"
-          query test($if: Boolean) {
+          query test($if: Boolean!) {
             t {
               id
               ...OnT @include(if: $if)
@@ -513,10 +509,6 @@ fn it_preserves_directives_when_fragment_not_used() {
 }
 
 #[test]
-#[should_panic(
-    expected = "variable `$test1` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"
-)]
-// TODO: investigate this failure
 fn it_preserves_directives_when_fragment_is_reused() {
     let planner = planner!(
         Subgraph1: r#"
@@ -534,7 +526,7 @@ fn it_preserves_directives_when_fragment_is_reused() {
     assert_plan!(
         &planner,
         r#"
-          query test($test1: Boolean, $test2: Boolean) {
+          query test($test1: Boolean!, $test2: Boolean!) {
             t {
               id
               ...OnT @include(if: $test1)
