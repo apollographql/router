@@ -72,16 +72,11 @@ impl InnerCacheMetricsService {
         mut request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
         let cache_attributes = Self::get_cache_attributes(&mut request);
-        println!(
-            "inner metrics cache attributes in root req for {}: {:?}",
-            self.name, cache_attributes
-        );
 
         let response = self.service.call(request).await?;
 
         if let Some(cache_attributes) = cache_attributes {
             if let Some(counter) = &self.counter {
-                println!("inner metrics cache {}: will update metrics", self.name,);
                 Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
             }
         }
@@ -135,7 +130,6 @@ impl InnerCacheMetricsService {
         } else {
             Arc::new(hash_vary_headers(&cache_attributes.headers))
         };
-        println!("will update cache counter");
 
         CacheCounter::record(
             counter,

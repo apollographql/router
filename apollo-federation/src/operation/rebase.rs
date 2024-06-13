@@ -1,5 +1,7 @@
 use std::sync::Arc;
 
+use itertools::Itertools;
+
 use super::runtime_types_intersect;
 use super::Field;
 use super::FieldSelection;
@@ -18,24 +20,9 @@ use super::SelectionId;
 use super::SelectionSet;
 use super::TYPENAME_FIELD;
 use crate::error::FederationError;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::schema::position::CompositeTypeDefinitionPosition;
-use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
-
-// TODO(@goto-bus-stop): this is precomputed in the QueryPlanner constructor. Can we expose that
-// here? Or can we move it onto the FederationSchema instance?
-fn is_interface_object(obj: &ObjectTypeDefinitionPosition, schema: &ValidFederationSchema) -> bool {
-    if let Ok(intf_obj_directive) = get_federation_spec_definition_from_subgraph(schema)
-        .and_then(|spec| spec.interface_object_directive(schema))
-    {
-        obj.try_get(schema.schema())
-            .is_some_and(|o| o.directives.has(&intf_obj_directive.name))
-    } else {
-        false
-    }
-}
 
 fn print_possible_runtimes(
     composite_type: &CompositeTypeDefinitionPosition,
@@ -117,7 +104,8 @@ impl Field {
             return if schema
                 .possible_runtime_types(parent_type.clone())?
                 .iter()
-                .any(|t| is_interface_object(t, schema))
+                .map(|t| schema.is_interface_object_type(t.clone().into()))
+                .process_results(|mut iter| iter.any(|b| b))?
             {
                 if let RebaseErrorHandlingOption::ThrowError = error_handling {
                     Err(FederationError::internal(
@@ -138,7 +126,7 @@ impl Field {
 
         let field_from_parent = parent_type.field(self.data().name().clone())?;
         return if field_from_parent.try_get(schema.schema()).is_some()
-            && self.can_rebase_on(parent_type)
+            && self.can_rebase_on(parent_type)?
         {
             let mut updated_field_data = self.data().clone();
             updated_field_data.schema = schema.clone();
@@ -165,19 +153,21 @@ impl Field {
     ///  that `parent_type` is indeed an implementation of `field_parent_type` because it's possible that this implementation relationship exists
     ///  in the supergraph, but not in any of the subgraph schema involved here. So we just let it be. Not that `rebase_on` will complain anyway
     ///  if the field name simply does not exist in `parent_type`.
-    fn can_rebase_on(&self, parent_type: &CompositeTypeDefinitionPosition) -> bool {
+    fn can_rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+    ) -> Result<bool, FederationError> {
         let field_parent_type = self.data().field_position.parent();
         // case 1
         if field_parent_type.type_name() == parent_type.type_name() {
-            return true;
+            return Ok(true);
         }
         // case 2
-        let is_interface_object_type =
-            match ObjectTypeDefinitionPosition::try_from(field_parent_type.clone()) {
-                Ok(ref o) => is_interface_object(o, &self.data().schema),
-                Err(_) => false,
-            };
-        field_parent_type.is_interface_type() || is_interface_object_type
+        let is_interface_object_type = self
+            .data()
+            .schema
+            .is_interface_object_type(field_parent_type.clone().into())?;
+        Ok(field_parent_type.is_interface_type() || is_interface_object_type)
     }
 
     fn type_if_added_to(
@@ -206,7 +196,7 @@ impl Field {
             };
             return Ok(Some(schema.get_type(type_name.clone())?.try_into()?));
         }
-        if self.can_rebase_on(parent_type) {
+        if self.can_rebase_on(parent_type)? {
             let Some(type_name) = parent_type
                 .field(data.field_position.field_name().clone())
                 .ok()
