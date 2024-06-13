@@ -724,11 +724,15 @@ fn compute_plan_internal(
     }
 }
 
+// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    todo!("FED-95")
+    Err(SingleFederationError::Internal {
+        message: String::from("@defer is currently not supported"),
+    }
+    .into())
 }
 
 #[cfg(test)]
