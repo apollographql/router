@@ -12,6 +12,6 @@ http = "0.2"
 schemars = { version = "0.8", features = ["url"] }
 serde = "1"
 serde_json = "1"
-serde_json_bytes = "0.2"
+serde_json_bytes.workspace = true
 tokio = { version = "1", features = ["full"] }
 tower = { version = "0.4", features = ["full"] }

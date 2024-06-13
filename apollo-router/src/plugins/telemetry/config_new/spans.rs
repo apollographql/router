@@ -111,13 +111,13 @@ mod test {
     use std::sync::Arc;
 
     use http::header::USER_AGENT;
-    use jsonpath_rust::JsonPathInst;
     use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
     use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
     use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
     use opentelemetry_semantic_conventions::trace::URL_PATH;
     use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
     use parking_lot::Mutex;
+    use serde_json_bytes::path::JsonPathInst;
 
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::graphql;
