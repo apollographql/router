@@ -1150,10 +1150,7 @@ mod router_plugin {
     // Uri.port
     #[rhai_fn(get = "port", pure, return_raw)]
     pub(crate) fn uri_port_get(x: &mut Uri) -> Result<Dynamic, Box<EvalAltResult>> {
-        to_dynamic(
-            x.port()
-                .map(|p| p.as_u16())
-        )
+        to_dynamic(x.port().map(|p| p.as_u16()))
     }
 
     #[rhai_fn(set = "port", return_raw)]
@@ -1171,8 +1168,8 @@ mod router_plugin {
                 parts.authority = Some(new_authority);
                 *x = Uri::from_parts(parts).map_err(|e| e.to_string())?;
                 Ok(())
-            },
-            None => Err(format!("authority is missing").into()),
+            }
+            None => Err("invalid URI; unable to set port".into()),
         }
     }
 
