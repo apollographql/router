@@ -413,6 +413,19 @@ impl LicenseEnforcementReport {
                 },
             },
             SchemaRestriction::Spec {
+                name: "connect".to_string(),
+                spec_url: "https://specs.apollo.dev/connect".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+            },
+            SchemaRestriction::Spec {
                 name: "context".to_string(),
                 spec_url: "https://specs.apollo.dev/context".to_string(),
                 version_req: semver::VersionReq {
@@ -675,6 +688,7 @@ mod test {
     use crate::uplink::license_enforcement::License;
     use crate::uplink::license_enforcement::LicenseEnforcementReport;
     use crate::uplink::license_enforcement::OneOrMany;
+    use crate::uplink::license_enforcement::SchemaViolation;
     use crate::Configuration;
 
     fn check(router_yaml: &str, supergraph_schema: &str) -> LicenseEnforcementReport {
@@ -897,5 +911,25 @@ mod test {
             report.restricted_schema_in_use.is_empty(),
             "shouldn't have found restricted features"
         );
+    }
+
+    #[test]
+    fn schema_enforcement_connectors() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/schema_enforcement_connectors.graphql"),
+        );
+
+        assert_eq!(
+            1,
+            report.restricted_schema_in_use.len(),
+            "should have found restricted connect feature"
+        );
+        if let SchemaViolation::Spec { url, name } = &report.restricted_schema_in_use[0] {
+            assert_eq!("https://specs.apollo.dev/connect/v0.1", url);
+            assert_eq!("connect", name);
+        } else {
+            panic!("should have reported connect feature violation")
+        }
     }
 }

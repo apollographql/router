@@ -1,0 +1,5 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"]) {
+  query: Query
+}
