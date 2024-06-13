@@ -17,14 +17,14 @@ You can configure instruments in `router.yaml` with `telemetry.instrumentation.i
 
 OpenTelemetry specifies multiple [standard metric instruments](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/) that are available in the router:
 
-+ At the router service:
++ In the [router service](#router-request-lifecycle-services):
 
   * `http.server.active_requests` - The number of active requests in flight.
   * `http.server.request.body.size` - A histogram of request body sizes for requests handled by the router.
   * `http.server.request.duration` - A histogram of request durations for requests handled by the router.
   * `http.server.response.body.size` - A histogram of response body sizes for requests handled by the router.
 
-+ At the subgraph service:
++ In the [subgraph service](#router-request-lifecycle-services):
 
   * `http.client.request.body.size` - A histogram of request body sizes for requests handled by subgraphs.
   * `http.client.request.duration` - A histogram of request durations for requests handled by subgraphs.
