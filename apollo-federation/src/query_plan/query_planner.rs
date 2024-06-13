@@ -19,7 +19,6 @@ use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIV
 use crate::link::spec::Identity;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
-use crate::operation::NormalizedDefer;
 use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
@@ -171,7 +170,7 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
 }
@@ -239,7 +238,7 @@ impl QueryPlanner {
                 _ => None,
             })
             .filter(|position| {
-                query_graph.sources().any(|(_name, schema)| {
+                query_graph.subgraphs().any(|(_name, schema)| {
                     schema
                         .schema()
                         .types
@@ -250,7 +249,7 @@ impl QueryPlanner {
             .collect::<IndexSet<_>>();
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
-            let mut sources = query_graph.sources().filter_map(|(_name, subgraph)| {
+            let mut sources = query_graph.subgraphs().filter_map(|(_name, subgraph)| {
                 match subgraph.try_get_type(position.type_name().clone())? {
                     // This is only called for type names that are abstract in the supergraph, so it
                     // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
@@ -309,7 +308,7 @@ impl QueryPlanner {
     }
 
     pub fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
-        &self.federated_query_graph.sources
+        self.federated_query_graph.subgraph_schemas()
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
@@ -336,12 +335,7 @@ impl QueryPlanner {
         let statistics = QueryPlanningStatistics::default();
 
         if self.config.debug.bypass_planner_for_single_subgraph {
-            // A federated query graph always have 1 more sources than there is subgraph, because the root vertices
-            // belong to no subgraphs and use a special source named '_'. So we skip that "fake" source.
-            let mut subgraphs = self
-                .federated_query_graph
-                .sources()
-                .filter(|&(name, _schema)| name != "_");
+            let mut subgraphs = self.federated_query_graph.subgraphs();
             if let (Some((subgraph_name, _subgraph_schema)), None) =
                 (subgraphs.next(), subgraphs.next())
             {
@@ -374,29 +368,37 @@ impl QueryPlanner {
             &self.interface_types_with_interface_objects,
         )?;
 
-        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
-            if self.config.incremental_delivery.enable_defer {
-                let NormalizedDefer {
-                    operation,
-                    assigned_defer_labels,
-                    defer_conditions,
-                    has_defers,
-                } = normalized_operation.with_normalized_defer();
-                if has_defers && is_subscription {
-                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
-                }
-                (
-                    operation,
-                    Some(assigned_defer_labels),
-                    Some(defer_conditions),
-                    has_defers,
-                )
-            } else {
-                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
-                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
-                // to end up passing through a @defer to a subgraph by mistake).
-                (normalized_operation.without_defer(), None, None, false)
-            };
+        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) = (
+            normalized_operation.without_defer(),
+            None,
+            None::<IndexMap<String, IndexSet<String>>>,
+            false,
+        );
+        /* TODO(TylerBloom): After defer is impl-ed and after the private preview, the call
+         * above needs to be replaced with this if-else expression.
+        if self.config.incremental_delivery.enable_defer {
+            let NormalizedDefer {
+                operation,
+                assigned_defer_labels,
+                defer_conditions,
+                has_defers,
+            } = normalized_operation.with_normalized_defer();
+            if has_defers && is_subscription {
+                return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+            }
+            (
+                operation,
+                Some(assigned_defer_labels),
+                Some(defer_conditions),
+                has_defers,
+            )
+        } else {
+            // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
+            // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
+            // to end up passing through a @defer to a subgraph by mistake).
+            (normalized_operation.without_defer(), None, None, false)
+        };
+        */
 
         if normalized_operation.selection_set.selections.is_empty() {
             return Ok(QueryPlan::default());
@@ -722,11 +724,15 @@ fn compute_plan_internal(
     }
 }
 
+// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    todo!("FED-95")
+    Err(SingleFederationError::Internal {
+        message: String::from("@defer is currently not supported"),
+    }
+    .into())
 }
 
 #[cfg(test)]
@@ -923,7 +929,6 @@ type User
         )
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
-        // TODO: This is the current output, but it's wrong: it's not fetching `vendor.name` at all.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
@@ -942,76 +947,47 @@ type User
                 }
               }
             },
-            Parallel {
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Movie {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Movie {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
+            Flatten(path: "bestRatedProducts.@") {
+              Fetch(service: "products") {
+                {
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                  ... on Movie {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Book {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
+                  }
+                  ... on Movie {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
+                  }
+                }
               },
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Book {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Book {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
-                    }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
-                    }
-                  },
-                },
+            },
+            Flatten(path: "bestRatedProducts.@.vendor") {
+              Fetch(service: "accounts") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    name
+                  }
+                }
               },
             },
           },
