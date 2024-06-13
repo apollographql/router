@@ -42,6 +42,7 @@ pub(crate) struct QueryAnalysisLayer {
     configuration: Arc<Configuration>,
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
+    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -54,6 +55,8 @@ impl QueryAnalysisLayer {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
+        let metrics_reference_mode = TelemetryConfig::metrics_reference_mode(&configuration);
+
         Self {
             schema,
             cache: Arc::new(Mutex::new(LruCache::new(
@@ -66,6 +69,7 @@ impl QueryAnalysisLayer {
             ))),
             enable_authorization_directives,
             configuration,
+            metrics_reference_mode,
         }
     }
 
@@ -197,25 +201,10 @@ impl QueryAnalysisLayer {
                     .extensions()
                     .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
 
-                let extended_refs_enabled =
-                    match self.configuration.apollo_plugins.plugins.get("telemetry") {
-                        Some(telemetry_config) => {
-                            match serde_json::from_value::<TelemetryConfig>(
-                                telemetry_config.clone(),
-                            ) {
-                                Ok(conf) => {
-                                    matches!(
-                                        conf.apollo.experimental_apollo_metrics_reference_mode,
-                                        ApolloMetricsReferenceMode::Extended
-                                    )
-                                }
-                                _ => false,
-                            }
-                        }
-                        None => false,
-                    };
-
-                if extended_refs_enabled {
+                if matches!(
+                    self.metrics_reference_mode,
+                    ApolloMetricsReferenceMode::Extended
+                ) {
                     let extended_reference_stats = generate_extended_references(
                         doc.executable.clone(),
                         op_name,

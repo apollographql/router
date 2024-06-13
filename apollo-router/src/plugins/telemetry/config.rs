@@ -23,6 +23,7 @@ use super::*;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
+use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -681,6 +682,37 @@ impl Conf {
                 (_, _) => 0.0,
             },
         )
+    }
+
+    pub(crate) fn metrics_reference_mode(
+        configuration: &Configuration,
+    ) -> ApolloMetricsReferenceMode {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => conf.apollo.experimental_apollo_metrics_reference_mode,
+                    _ => ApolloMetricsReferenceMode::default(),
+                }
+            }
+            _ => ApolloMetricsReferenceMode::default(),
+        }
+    }
+
+    pub(crate) fn signature_normalization_algorithm(
+        configuration: &Configuration,
+    ) -> ApolloSignatureNormalizationAlgorithm {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => {
+                        conf.apollo
+                            .experimental_apollo_signature_normalization_algorithm
+                    }
+                    _ => ApolloSignatureNormalizationAlgorithm::default(),
+                }
+            }
+            _ => ApolloSignatureNormalizationAlgorithm::default(),
+        }
     }
 }
 

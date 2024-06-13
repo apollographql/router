@@ -487,7 +487,8 @@ impl UsageGenerator<'_> {
         let enum_name_stats = match self.enums_by_name.get_mut(&enum_name) {
             Some(existing_stats) => existing_stats,
             None => {
-                self.enums_by_name.insert(enum_name.to_string(), HashSet::new());
+                self.enums_by_name
+                    .insert(enum_name.to_string(), HashSet::new());
                 self.enums_by_name.get_mut(&enum_name).unwrap()
             }
         };
