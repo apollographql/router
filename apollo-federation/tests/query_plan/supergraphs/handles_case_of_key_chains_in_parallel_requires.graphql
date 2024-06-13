@@ -1,0 +1,77 @@
+# Composed from subgraphs with hash: 31c0bf4aeea8c73b60a47e91ea9bcc475127782a
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+scalar join__FieldSet
+
+enum join__Graph {
+  SUBGRAPH1 @join__graph(name: "Subgraph1", url: "none")
+  SUBGRAPH2 @join__graph(name: "Subgraph2", url: "none")
+  SUBGRAPH3 @join__graph(name: "Subgraph3", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: SUBGRAPH1)
+  @join__type(graph: SUBGRAPH2)
+  @join__type(graph: SUBGRAPH3)
+{
+  t: T @join__field(graph: SUBGRAPH1)
+}
+
+union T
+  @join__type(graph: SUBGRAPH1)
+  @join__unionMember(graph: SUBGRAPH1, member: "T1")
+  @join__unionMember(graph: SUBGRAPH1, member: "T2")
+ = T1 | T2
+
+type T1
+  @join__type(graph: SUBGRAPH1, key: "id1")
+  @join__type(graph: SUBGRAPH2, key: "id1")
+  @join__type(graph: SUBGRAPH2, key: "id2")
+  @join__type(graph: SUBGRAPH3, key: "id2")
+{
+  id1: ID! @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2)
+  id2: ID! @join__field(graph: SUBGRAPH2) @join__field(graph: SUBGRAPH3)
+  x: Int @join__field(graph: SUBGRAPH3)
+}
+
+type T2
+  @join__type(graph: SUBGRAPH1, key: "id")
+  @join__type(graph: SUBGRAPH3, key: "id")
+{
+  id: ID!
+  y: Int @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH3, external: true)
+  z: Int @join__field(graph: SUBGRAPH3, requires: "y")
+}

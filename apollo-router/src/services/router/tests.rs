@@ -243,7 +243,7 @@ async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
             .build()
             .unwrap()
             .supergraph_request
-            .map(|req: crate::request::Request| {
+            .map(|req: graphql::Request| {
                 // Modify the request so that it is a valid array of requests.
                 let mut json_bytes = serde_json::to_vec(&req).unwrap();
                 let mut result = vec![b'['];
@@ -284,7 +284,7 @@ async fn it_processes_a_valid_query_batch() {
             .build()
             .unwrap()
             .supergraph_request
-            .map(|req_2: crate::request::Request| {
+            .map(|req_2: graphql::Request| {
                 // Create clones of our standard query and update it to have 3 unique queries
                 let mut req_1 = req_2.clone();
                 let mut req_3 = req_2.clone();
@@ -340,7 +340,7 @@ async fn it_will_not_process_a_query_batch_without_enablement() {
             .build()
             .unwrap()
             .supergraph_request
-            .map(|req: crate::request::Request| {
+            .map(|req: graphql::Request| {
                 // Modify the request so that it is a valid array of requests.
                 let mut json_bytes = serde_json::to_vec(&req).unwrap();
                 let mut result = vec![b'['];
@@ -381,7 +381,7 @@ async fn it_will_not_process_a_poorly_formatted_query_batch() {
             .build()
             .unwrap()
             .supergraph_request
-            .map(|req: crate::request::Request| {
+            .map(|req: graphql::Request| {
                 // Modify the request so that it is a valid array of requests.
                 let mut json_bytes = serde_json::to_vec(&req).unwrap();
                 let mut result = vec![b'['];
@@ -440,7 +440,7 @@ async fn it_will_process_a_non_batched_defered_query() {
             .build()
             .unwrap()
             .supergraph_request
-            .map(|req: crate::request::Request| {
+            .map(|req: graphql::Request| {
                 let bytes = serde_json::to_vec(&req).unwrap();
                 hyper::Body::from(bytes)
             });
@@ -494,7 +494,7 @@ async fn it_will_not_process_a_batched_deferred_query() {
             .build()
             .unwrap()
             .supergraph_request
-            .map(|req: crate::request::Request| {
+            .map(|req: graphql::Request| {
                 // Modify the request so that it is a valid array of requests.
                 let mut json_bytes = serde_json::to_vec(&req).unwrap();
                 let mut result = vec![b'['];

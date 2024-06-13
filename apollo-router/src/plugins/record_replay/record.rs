@@ -104,7 +104,9 @@ impl Plugin for Record {
                     let context = res.context.clone();
 
                     let after_complete = once(async move {
-                        let recording = context.extensions().lock().remove::<Recording>();
+                        let recording = context
+                            .extensions()
+                            .with_lock(|mut lock| lock.remove::<Recording>());
 
                         if let Some(mut recording) = recording {
                             let res_headers = externalize_header_map(&headers)?;
@@ -170,12 +172,14 @@ impl Plugin for Record {
 
                 let recording_enabled =
                     if req.supergraph_request.headers().contains_key(RECORD_HEADER) {
-                        req.context.extensions().lock().insert(Recording {
-                            supergraph_sdl: supergraph_sdl.clone().to_string(),
-                            client_request: Default::default(),
-                            client_response: Default::default(),
-                            formatted_query_plan: Default::default(),
-                            subgraph_fetches: Default::default(),
+                        req.context.extensions().with_lock(|mut lock| {
+                            lock.insert(Recording {
+                                supergraph_sdl: supergraph_sdl.clone().to_string(),
+                                client_request: Default::default(),
+                                client_response: Default::default(),
+                                formatted_query_plan: Default::default(),
+                                subgraph_fetches: Default::default(),
+                            })
                         });
                         true
                     } else {
@@ -191,26 +195,29 @@ impl Plugin for Record {
                     let method = req.supergraph_request.method().to_string();
                     let uri = req.supergraph_request.uri().to_string();
 
-                    if let Some(recording) = req.context.extensions().lock().get_mut::<Recording>()
-                    {
-                        recording.client_request = RequestDetails {
-                            query,
-                            operation_name,
-                            variables,
-                            headers,
-                            method,
-                            uri,
-                        };
-                    }
+                    req.context.extensions().with_lock(|mut lock| {
+                        if let Some(recording) = lock.get_mut::<Recording>() {
+                            recording.client_request = RequestDetails {
+                                query,
+                                operation_name,
+                                variables,
+                                headers,
+                                method,
+                                uri,
+                            };
+                        }
+                    });
                 }
                 req
             })
             .map_response(|res: supergraph::Response| {
                 let context = res.context.clone();
                 res.map_stream(move |chunk| {
-                    if let Some(recording) = context.extensions().lock().get_mut::<Recording>() {
-                        recording.client_response.chunks.push(chunk.clone());
-                    }
+                    context.extensions().with_lock(|mut lock| {
+                        if let Some(recording) = lock.get_mut::<Recording>() {
+                            recording.client_response.chunks.push(chunk.clone());
+                        }
+                    });
 
                     chunk
                 })
@@ -222,9 +229,12 @@ impl Plugin for Record {
     fn execution_service(&self, service: execution::BoxService) -> execution::BoxService {
         ServiceBuilder::new()
             .map_request(|req: execution::Request| {
-                if let Some(recording) = req.context.extensions().lock().get_mut::<Recording>() {
-                    recording.formatted_query_plan = req.query_plan.formatted_query_plan.clone();
-                }
+                req.context.extensions().with_lock(|mut lock| {
+                    if let Some(recording) = lock.get_mut::<Recording>() {
+                        recording.formatted_query_plan =
+                            req.query_plan.formatted_query_plan.clone();
+                    }
+                });
                 req
             })
             .service(service)
@@ -277,17 +287,17 @@ impl Plugin for Record {
                                     request: req,
                                 };
 
-                                if let Some(recording) =
-                                    res.context.extensions().lock().get_mut::<Recording>()
-                                {
-                                    if recording.subgraph_fetches.is_none() {
-                                        recording.subgraph_fetches = Some(Default::default());
-                                    }
+                                res.context.extensions().with_lock(|mut lock| {
+                                    if let Some(recording) = lock.get_mut::<Recording>() {
+                                        if recording.subgraph_fetches.is_none() {
+                                            recording.subgraph_fetches = Some(Default::default());
+                                        }
 
-                                    if let Some(fetches) = &mut recording.subgraph_fetches {
-                                        fetches.insert(operation_name, subgraph);
+                                        if let Some(fetches) = &mut recording.subgraph_fetches {
+                                            fetches.insert(operation_name, subgraph);
+                                        }
                                     }
-                                }
+                                });
                                 Ok(res)
                             }
                             Err(err) => Err(err),

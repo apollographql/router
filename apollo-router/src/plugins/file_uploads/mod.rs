@@ -177,7 +177,9 @@ async fn router_layer(
         let mut multipart = MultipartRequest::new(request_body.into(), boundary, limits);
         let operations_stream = multipart.operations_field().await?;
 
-        req.context.extensions().lock().insert(multipart);
+        req.context
+            .extensions()
+            .with_lock(|mut lock| lock.insert(multipart));
 
         let content_type = operations_stream
             .headers()
@@ -203,9 +205,7 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
     let multipart = req
         .context
         .extensions()
-        .lock()
-        .get::<MultipartRequest>()
-        .cloned();
+        .with_lock(|lock| lock.get::<MultipartRequest>().cloned());
 
     if let Some(mut multipart) = multipart {
         let map_field = multipart.map_field().await?;
@@ -227,13 +227,12 @@ async fn supergraph_layer(mut req: supergraph::Request) -> Result<supergraph::Re
             }
         }
 
-        req.context
-            .extensions()
-            .lock()
-            .insert(SupergraphLayerResult {
+        req.context.extensions().with_lock(|mut lock| {
+            lock.insert(SupergraphLayerResult {
                 multipart,
                 map: Arc::new(map_field),
-            });
+            })
+        });
     }
     Ok(req)
 }
@@ -306,9 +305,7 @@ fn execution_layer(req: execution::Request) -> Result<execution::Request> {
     let supergraph_result = req
         .context
         .extensions()
-        .lock()
-        .get::<SupergraphLayerResult>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SupergraphLayerResult>().cloned());
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult { map, .. } = supergraph_result;
 
@@ -322,9 +319,7 @@ async fn subgraph_layer(mut req: subgraph::Request) -> subgraph::Request {
     let supergraph_result = req
         .context
         .extensions()
-        .lock()
-        .get::<SupergraphLayerResult>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SupergraphLayerResult>().cloned());
     if let Some(supergraph_result) = supergraph_result {
         let SupergraphLayerResult { multipart, map } = supergraph_result;
 

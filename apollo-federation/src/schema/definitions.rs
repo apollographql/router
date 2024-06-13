@@ -9,6 +9,7 @@ use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 
+#[derive(derive_more::From)]
 pub(crate) enum AbstractType {
     Interface(InterfaceTypeDefinitionPosition),
     Union(UnionTypeDefinitionPosition),

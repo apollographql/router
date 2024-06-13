@@ -15,6 +15,7 @@ use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tokio::time::Instant;
 use tower::BoxError;
 
@@ -22,7 +23,6 @@ use super::attributes::HttpServerAttributes;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
 use crate::plugins::telemetry::config_new::attributes::SubgraphAttributes;
@@ -93,7 +93,13 @@ impl InstrumentsConfig {
                 inner: Mutex::new(CustomHistogramInner {
                     increment: Increment::Duration(Instant::now()),
                     condition: Condition::True,
-                    histogram: Some(meter.f64_histogram("http.server.request.duration").init()),
+                    histogram: Some(
+                        meter
+                            .f64_histogram("http.server.request.duration")
+                            .with_unit(Unit::new("s"))
+                            .with_description("Duration of HTTP server requests.")
+                            .init(),
+                    ),
                     attributes: Vec::new(),
                     selector: None,
                     selectors: match &self.router.attributes.http_server_request_duration {
@@ -126,7 +132,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.server.request.body.size").init(),
+                                meter
+                                    .f64_histogram("http.server.request.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP server request bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::RequestHeader {
@@ -160,7 +170,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.server.response.body.size").init(),
+                                meter
+                                    .f64_histogram("http.server.response.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP server response bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::ResponseHeader {
@@ -183,6 +197,8 @@ impl InstrumentsConfig {
                     counter: Some(
                         meter
                             .i64_up_down_counter("http.server.active_requests")
+                            .with_unit(Unit::new("request"))
+                            .with_description("Number of active HTTP server requests.")
                             .init(),
                     ),
                     attrs_config: match &self.router.attributes.http_server_active_requests {
@@ -213,34 +229,39 @@ impl InstrumentsConfig {
 
     pub(crate) fn new_subgraph_instruments(&self) -> SubgraphInstruments {
         let meter = metrics::meter_provider().meter(METER_NAME);
-        let http_client_request_duration = self
-            .subgraph
-            .attributes
-            .http_client_request_duration
-            .is_enabled()
-            .then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.subgraph.attributes.http_client_request_duration {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
+        let http_client_request_duration =
+            self.subgraph
+                .attributes
+                .http_client_request_duration
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.subgraph.attributes.http_client_request_duration {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Duration(Instant::now()),
+                            condition: Condition::True,
+                            histogram: Some(
+                                meter
+                                    .f64_histogram("http.client.request.duration")
+                                    .with_unit(Unit::new("s"))
+                                    .with_description("Duration of HTTP client requests.")
+                                    .init(),
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: None,
+                            selectors,
+                            updated: false,
+                        }),
                     }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::Duration(Instant::now()),
-                        condition: Condition::True,
-                        histogram: Some(meter.f64_histogram("http.client.request.duration").init()),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: None,
-                        selectors,
-                        updated: false,
-                    }),
-                }
-            });
+                });
         let http_client_request_body_size =
             self.subgraph
                 .attributes
@@ -261,7 +282,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.client.request.body.size").init(),
+                                meter
+                                    .f64_histogram("http.client.request.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP client request bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
@@ -294,7 +319,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.client.response.body.size").init(),
+                                meter
+                                    .f64_histogram("http.client.response.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP client response bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
@@ -662,7 +691,14 @@ pub(crate) trait Instrumented {
     fn on_request(&self, request: &Self::Request);
     fn on_response(&self, response: &Self::Response);
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) {}
-    fn on_response_field(&self, _typed_value: &TypedValue, _ctx: &Context) {}
+    fn on_response_field(
+        &self,
+        _type: &apollo_compiler::executable::NamedType,
+        _field: &apollo_compiler::executable::Field,
+        _value: &Value,
+        _ctx: &Context,
+    ) {
+    }
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
@@ -691,8 +727,14 @@ where
         self.attributes.on_response_event(response, ctx);
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
-        self.attributes.on_response_field(typed_value, ctx);
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
+        self.attributes.on_response_field(ty, field, value, ctx);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -914,12 +956,18 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
         for counter in &self.counters {
-            counter.on_response_field(typed_value, ctx);
+            counter.on_response_field(ty, field, value, ctx);
         }
         for histogram in &self.histograms {
-            histogram.on_response_field(typed_value, ctx);
+            histogram.on_response_field(ty, field, value, ctx);
         }
     }
 }
@@ -1122,6 +1170,16 @@ pub(crate) enum Increment {
     FieldCustom(Option<i64>),
 }
 
+fn to_i64(value: opentelemetry::Value) -> Option<i64> {
+    match value {
+        opentelemetry::Value::I64(i) => Some(i),
+        opentelemetry::Value::String(s) => s.as_str().parse::<i64>().ok(),
+        opentelemetry::Value::F64(f) => Some(f.floor() as i64),
+        opentelemetry::Value::Bool(_) => None,
+        opentelemetry::Value::Array(_) => None,
+    }
+}
+
 pub(crate) struct CustomCounter<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
@@ -1168,12 +1226,8 @@ where
 
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1212,12 +1266,8 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1273,12 +1323,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1344,35 +1390,29 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
             return;
-        }
-
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(typed_value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
         }
 
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(typed_value, ctx))
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
@@ -1400,8 +1440,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.counter.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
-            counter.add(increment, &attrs);
+            counter.add(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }
@@ -1571,15 +1626,9 @@ where
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1616,15 +1665,9 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1676,12 +1719,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1743,35 +1782,29 @@ where
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(
+        &self,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
         let mut inner = self.inner.lock();
-        if !inner.condition.evaluate_response_field(typed_value, ctx) {
+        if !inner
+            .condition
+            .evaluate_response_field(ty, field, value, ctx)
+        {
             return;
-        }
-
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(typed_value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
         }
 
         if let Some(selected_value) = inner
             .selector
             .as_ref()
-            .and_then(|s| s.on_response_field(typed_value, ctx))
+            .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
@@ -1799,8 +1832,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.histogram.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &attrs);
+            histogram.record(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }
@@ -1853,7 +1901,6 @@ mod tests {
     use apollo_compiler::ast::Name;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::execution::JsonMap;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -1864,6 +1911,7 @@ mod tests {
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
     use serde_json::json;
+    use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
 
     use super::*;
@@ -1882,6 +1930,8 @@ mod tests {
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
     use crate::Context;
+
+    type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
     #[derive(RustEmbed)]
     #[folder = "src/plugins/telemetry/config_new/fixtures"]
@@ -2019,6 +2069,108 @@ mod tests {
         Root {
             values: HashMap<String, TypedValueMirror>,
         },
+    }
+
+    impl TypedValueMirror {
+        fn field(&self) -> Option<apollo_compiler::executable::Field> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Number {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::String {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::List {
+                    field_name,
+                    field_type,
+                    ..
+                }
+                | TypedValueMirror::Object {
+                    field_name,
+                    field_type,
+                    ..
+                } => Some(Self::create_field(field_type.clone(), field_name.clone())),
+            }
+        }
+
+        fn ty(&self) -> Option<NamedType> {
+            match self {
+                TypedValueMirror::Null | TypedValueMirror::Root { .. } => None,
+                TypedValueMirror::Bool { type_name, .. }
+                | TypedValueMirror::Number { type_name, .. }
+                | TypedValueMirror::String { type_name, .. }
+                | TypedValueMirror::List { type_name, .. }
+                | TypedValueMirror::Object { type_name, .. } => {
+                    Some(Self::create_type_name(type_name.clone()))
+                }
+            }
+        }
+
+        fn value(&self) -> Option<Value> {
+            match self {
+                TypedValueMirror::Null => Some(Value::Null),
+                TypedValueMirror::Bool { value, .. } => Some(serde_json_bytes::json!(*value)),
+                TypedValueMirror::Number { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::String { value, .. } => Some(serde_json_bytes::json!(value)),
+                TypedValueMirror::List { values, .. } => {
+                    let values = values.iter().filter_map(|v| v.value()).collect();
+                    Some(Value::Array(values))
+                }
+                TypedValueMirror::Object { values, .. } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+                TypedValueMirror::Root { values } => {
+                    let values = values
+                        .iter()
+                        .map(|(k, v)| (k.clone().into(), v.value().unwrap_or(Value::Null)))
+                        .collect();
+                    Some(Value::Object(values))
+                }
+            }
+        }
+
+        fn create_field(
+            field_type: String,
+            field_name: String,
+        ) -> apollo_compiler::executable::Field {
+            apollo_compiler::executable::Field {
+                definition: apollo_compiler::schema::FieldDefinition {
+                    description: None,
+                    name: NamedType::new(field_name.clone()).expect("valid field name"),
+                    arguments: vec![],
+                    ty: apollo_compiler::schema::Type::Named(
+                        NamedType::new(field_type.clone()).expect("valid type name"),
+                    ),
+                    directives: Default::default(),
+                }
+                .into(),
+                alias: None,
+                name: NamedType::new(field_name.clone()).expect("valid field name"),
+                arguments: vec![],
+                directives: Default::default(),
+                selection_set: SelectionSet::new(
+                    NamedType::new(field_name).expect("valid field name"),
+                ),
+            }
+        }
+
+        fn create_type_name(type_name: String) -> Name {
+            NamedType::new(type_name).expect("valid type name")
+        }
     }
 
     #[derive(Deserialize, JsonSchema)]
@@ -2234,9 +2386,12 @@ mod tests {
                                         .on_response_event(&response, &context);
                                 }
                                 Event::ResponseField { typed_value } => {
-                                    let typed_value_data: TypedValueData = typed_value.into();
-                                    let typed_value = TypedValue::from(&typed_value_data);
-                                    graphql_instruments.on_response_field(&typed_value, &context);
+                                    graphql_instruments.on_response_field(
+                                        &typed_value.ty().expect("type should exist"),
+                                        &typed_value.field().expect("field should exist"),
+                                        &typed_value.value().expect("value should exist"),
+                                        &context,
+                                    );
                                 }
                                 Event::Context { map } => {
                                     for (key, value) in map {
@@ -2328,171 +2483,6 @@ mod tests {
         let mut file = File::create(path).unwrap();
         file.write_all(schema.unwrap().as_bytes())
             .expect("write schema");
-    }
-
-    enum TypedValueData {
-        Null,
-        Bool {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: bool,
-        },
-        Number {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: serde_json::Number,
-        },
-        String {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            value: String,
-        },
-        List {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            values: Vec<TypedValueData>,
-        },
-        Object {
-            type_name: NamedType,
-            field_definition: apollo_compiler::executable::Field,
-            values: HashMap<String, TypedValueData>,
-        },
-        Root {
-            values: HashMap<String, TypedValueData>,
-        },
-    }
-
-    impl From<TypedValueMirror> for TypedValueData {
-        fn from(value: TypedValueMirror) -> Self {
-            match value {
-                TypedValueMirror::Null => TypedValueData::Null,
-                TypedValueMirror::Bool {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::Bool {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::Number {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::Number {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::String {
-                    type_name,
-                    field_type,
-                    field_name,
-                    value,
-                } => TypedValueData::String {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    value,
-                },
-                TypedValueMirror::List {
-                    type_name,
-                    field_type,
-                    field_name,
-                    values,
-                } => TypedValueData::List {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    values: values.into_iter().map(|v| v.into()).collect(),
-                },
-                TypedValueMirror::Object {
-                    type_name,
-                    field_type,
-                    field_name,
-                    values,
-                } => TypedValueData::Object {
-                    type_name: Self::type_name(type_name),
-                    field_definition: Self::field(field_type, field_name),
-                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
-                },
-                TypedValueMirror::Root { values } => TypedValueData::Root {
-                    values: values.into_iter().map(|(k, v)| (k, v.into())).collect(),
-                },
-            }
-        }
-    }
-
-    impl TypedValueData {
-        fn field(field_type: String, field_name: String) -> apollo_compiler::executable::Field {
-            apollo_compiler::executable::Field {
-                definition: apollo_compiler::schema::FieldDefinition {
-                    description: None,
-                    name: NamedType::new(field_name.clone()).expect("valid field name"),
-                    arguments: vec![],
-                    ty: apollo_compiler::schema::Type::Named(
-                        NamedType::new(field_type.clone()).expect("valid type name"),
-                    ),
-                    directives: Default::default(),
-                }
-                .into(),
-                alias: None,
-                name: NamedType::new(field_name.clone()).expect("valid field name"),
-                arguments: vec![],
-                directives: Default::default(),
-                selection_set: SelectionSet::new(
-                    NamedType::new(field_name).expect("valid field name"),
-                ),
-            }
-        }
-
-        fn type_name(type_name: String) -> Name {
-            NamedType::new(type_name).expect("valid type name")
-        }
-    }
-
-    impl<'a> From<&'a TypedValueData> for TypedValue<'a> {
-        fn from(value: &'a TypedValueData) -> Self {
-            match value {
-                TypedValueData::Null => TypedValue::Null,
-                TypedValueData::Bool {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::Bool(type_name, field_definition, value),
-                TypedValueData::Number {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::Number(type_name, field_definition, value),
-                TypedValueData::String {
-                    type_name,
-                    field_definition,
-                    value,
-                } => TypedValue::String(type_name, field_definition, value),
-                TypedValueData::List {
-                    type_name,
-                    field_definition,
-                    values,
-                } => TypedValue::List(
-                    type_name,
-                    field_definition,
-                    values.iter().map(|v| v.into()).collect(),
-                ),
-                TypedValueData::Object {
-                    type_name,
-                    field_definition,
-                    values,
-                } => TypedValue::Object(
-                    type_name,
-                    field_definition,
-                    values.iter().map(|(k, v)| (k.clone(), v.into())).collect(),
-                ),
-                TypedValueData::Root { values } => {
-                    TypedValue::Root(values.iter().map(|(k, v)| (k.clone(), v.into())).collect())
-                }
-            }
-        }
     }
 
     #[tokio::test]

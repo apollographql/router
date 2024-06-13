@@ -375,7 +375,9 @@ impl SubgraphAuth {
             ServiceBuilder::new()
                 .map_request(move |req: SubgraphRequest| {
                     let signing_params = signing_params.clone();
-                    req.context.extensions().lock().insert(signing_params);
+                    req.context
+                        .extensions()
+                        .with_lock(|mut lock| lock.insert(signing_params));
                     req
                 })
                 .service(service)
@@ -645,11 +647,11 @@ mod test {
         request: &SubgraphRequest,
         service_name: String,
     ) -> http::Request<RouterBody> {
-        let signing_params = {
-            let ctx = request.context.extensions().lock();
-            let sp = ctx.get::<Arc<SigningParamsConfig>>();
-            sp.cloned().unwrap()
-        };
+        let signing_params = request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned())
+            .unwrap();
 
         let http_request = request
             .clone()

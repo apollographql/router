@@ -14,6 +14,7 @@ mod bridge_query_planner;
 mod bridge_query_planner_pool;
 mod caching_query_planner;
 mod convert;
+mod dual_query_planner;
 mod execution;
 pub(crate) mod fetch;
 mod labeler;

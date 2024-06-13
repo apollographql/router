@@ -1,0 +1,5 @@
+mutation Test_Mutation_Space($arg1withalongnamegoeshere0123456789: Boolean) {
+    mutation2(id: "x") {
+        updateCheckConfiguration(arg1: $arg1withalongnamegoeshere0123456789, arg2: false)
+    }
+}

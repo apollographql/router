@@ -159,6 +159,25 @@ expression: "&schema"
         }
       ]
     },
+    "ApolloSignatureNormalizationAlgorithm": {
+      "description": "Apollo usage report signature normalization algorithm",
+      "oneOf": [
+        {
+          "description": "Use the algorithm that matches the JavaScript-based implementation.",
+          "enum": [
+            "legacy"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some edge cases from the JS implementation that affected normalization.",
+          "enum": [
+            "enhanced"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "Apq": {
       "additionalProperties": false,
       "description": "Automatic Persisted Queries (APQ) configuration",
@@ -1574,10 +1593,22 @@ expression: "&schema"
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
         },
+        "experimental_apollo_signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
+        },
         "experimental_otlp_endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/",
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
           "type": "string"
+        },
+        "experimental_otlp_tracing_protocol": {
+          "$ref": "#/definitions/Protocol",
+          "description": "#/definitions/Protocol"
+        },
+        "experimental_otlp_tracing_sampler": {
+          "$ref": "#/definitions/SamplerOption",
+          "description": "#/definitions/SamplerOption"
         },
         "field_level_instrumentation_sampler": {
           "$ref": "#/definitions/SamplerOption",
@@ -4140,6 +4171,11 @@ expression: "&schema"
           "description": "Activates Persisted Queries (disabled by default)",
           "type": "boolean"
         },
+        "experimental_prewarm_query_plan_cache": {
+          "default": false,
+          "description": "Experimental feature to prewarm the query plan cache with persisted queries",
+          "type": "boolean"
+        },
         "log_unknown": {
           "default": false,
           "description": "Enabling this field configures the router to log any freeform GraphQL request that is not in the persisted query list",
@@ -5025,6 +5061,20 @@ expression: "&schema"
           },
           "required": [
             "trace_id"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Apollo Studio operation id",
+          "properties": {
+            "studio_operation_id": {
+              "description": "Apollo Studio operation id",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "studio_operation_id"
           ],
           "type": "object"
         },
@@ -6880,13 +6930,6 @@ expression: "&schema"
           "description": "Datadog trace ID, a u64.",
           "enum": [
             "datadog"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Apollo Studio trace id",
-          "enum": [
-            "apollo"
           ],
           "type": "string"
         }
