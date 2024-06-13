@@ -127,7 +127,10 @@ fn create_request(
 ) -> Result<Vec<HttpRequest>, HttpJsonTransportError> {
     Ok(vec![HttpRequest {
         context,
-        http_request: http_json_transport::make_request(json_transport, variables)?,
+        http_request: http_json_transport::make_request(
+            json_transport,
+            Value::Object(variables.variables.clone()),
+        )?,
     }])
 }
 
