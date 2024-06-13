@@ -4,6 +4,10 @@ use hdrhistogram::Histogram;
 use serde::ser::SerializeSeq;
 use serde::Serialize;
 
+/// A histogram for recording lengths of list fields in GraphQL responses. This implementation is clamped to a maximum
+/// of 386 buckets, a restriction imposed by Studio. The buckets roughly follow order of magnitude of the recorded value,
+/// so lower values are recorded with higher levels of granularity. Each value under 100 has its own integer bucket, values
+/// between 100 and 1000 have buckets of width 10, and so on up to 116000. Anything over 116000 ends up in the final bucket.
 #[derive(Clone, Debug)]
 pub(crate) struct ListLengthHistogram {
     histogram: Histogram<u64>,
@@ -68,8 +72,8 @@ impl AddAssign<ListLengthHistogram> for ListLengthHistogram {
 mod test {
     use super::*;
 
-    #[test_log::test]
-    fn low_magnitude_counts() {
+    #[test]
+    fn magnitude_based_bucketing() {
         let mut hist = ListLengthHistogram::new();
 
         for i in 0..120000 {

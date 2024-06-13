@@ -3,6 +3,9 @@ use hdrhistogram::RecordError;
 use serde::ser::SerializeSeq;
 use serde::Serialize;
 
+/// A histogram for query costs. Since costs are calculated exponentially (ie. the cost of a list
+/// field is the length multiplied by the cost of its children), they are stored in exponentially
+/// increasing buckets.
 #[derive(Clone, Debug)]
 pub(crate) struct CostHistogram {
     histogram: Histogram<u64>,
@@ -30,18 +33,49 @@ impl CostHistogram {
 
     pub(crate) fn to_vec(&self) -> Vec<i64> {
         self.histogram
-            .iter_linear(1)
-            .map(|v| v.count_at_value() as i64)
+            .iter_log(1, 2.0)
+            .map(|v| v.count_since_last_iteration() as i64)
+            .take(383)
             .collect()
     }
 }
 
 impl Serialize for CostHistogram {
     fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        let mut seq = serializer.serialize_seq(Some(self.histogram.buckets() as usize))?;
-        for value in self.histogram.iter_linear(1) {
-            seq.serialize_element(&value.count_at_value())?;
+        let buckets = self.to_vec();
+        let mut seq = serializer.serialize_seq(Some(buckets.len()))?;
+        for value in buckets {
+            seq.serialize_element(&value)?;
         }
         seq.end()
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+
+    #[test]
+    fn exponential_bucketing() {
+        let mut hist = CostHistogram::new();
+
+        // Go up to 2^20
+        for i in 0..1048576 {
+            hist.record(i as f64).unwrap();
+        }
+        assert_eq!(hist.histogram.len(), 1048575);
+
+        let v = hist.to_vec();
+        assert_eq!(v.len(), 21);
+
+        for i in 1..21 {
+            let pow_of_two = i as u32;
+            assert_eq!(
+                v[i],
+                2_i64.pow(pow_of_two - 1),
+                "testing count of bucket {}",
+                i
+            );
+        }
     }
 }
