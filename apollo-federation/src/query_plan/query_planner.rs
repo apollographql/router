@@ -363,8 +363,8 @@ impl QueryPlanner {
         let reuse_query_fragments = self.config.reuse_query_fragments;
         let normalized_operation = normalize_operation(
             operation,
-            NamedFragments::new(&document.fragments, &self.api_schema),
-            &self.api_schema,
+            NamedFragments::new(&document.fragments, &self.supergraph_schema),
+            &self.supergraph_schema,
             &self.interface_types_with_interface_objects,
         )?;
 
