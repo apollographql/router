@@ -63,7 +63,9 @@ input EnumInputType
   @join__type(graph: MAIN)
 {
   enumInput: SomeEnum!
+  nullableEnumInput: SomeEnum
   enumListInput: [SomeEnum!]!
+  enumListOfListInput: [[SomeEnum]]
   nestedEnumType: [NestedEnumInputType]
 }
 
@@ -155,7 +157,10 @@ type Mutation
 input NestedEnumInputType
   @join__type(graph: MAIN)
 {
-  someEnum: SomeEnum
+  someEnum: SomeEnum!
+  someNullableEnum: SomeEnum
+  someEnumList: [SomeEnum]
+  someEnumListOfList: [[SomeEnum]]
 }
 
 input NestedInputType
@@ -197,6 +202,7 @@ type Query
     enumInputObject: EnumInputType,
     enumInputObjectList: [EnumInputType],
     enumInputObjectListOfLists: [[EnumInputType]],
+    anotherEnumList: [AnotherEnum],
   ): BasicResponse
 }
 
@@ -236,6 +242,15 @@ enum SomeEnum
   SOME_VALUE_31 @join__enumValue(graph: MAIN)
   SOME_VALUE_32 @join__enumValue(graph: MAIN)
   SOME_VALUE_33 @join__enumValue(graph: MAIN)
+  SOME_VALUE_34 @join__enumValue(graph: MAIN)
+}
+
+enum AnotherEnum
+  @join__type(graph: MAIN)
+{
+  ANOTHER_VALUE_1 @join__enumValue(graph: MAIN)
+  ANOTHER_VALUE_2 @join__enumValue(graph: MAIN)
+  ANOTHER_VALUE_3 @join__enumValue(graph: MAIN)
 }
 
 type SortResponse

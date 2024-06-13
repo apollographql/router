@@ -253,7 +253,6 @@ pub(crate) fn generate_usage_reporting(
     generator.generate_usage_reporting()
 }
 
-#[allow(dead_code)]
 pub(crate) fn generate_extended_references(
     doc: Arc<Valid<ExecutableDocument>>,
     operation_name: Option<String>,
