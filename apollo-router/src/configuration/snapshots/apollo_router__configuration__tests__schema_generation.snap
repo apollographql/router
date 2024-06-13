@@ -1,6 +1,5 @@
 ---
 source: apollo-router/src/configuration/tests.rs
-assertion_line: 26
 expression: "&schema"
 ---
 {
@@ -5067,6 +5066,25 @@ expression: "&schema"
           },
           "required": [
             "response_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The operation name from the query.",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "operation_name"
           ],
           "type": "object"
         },
