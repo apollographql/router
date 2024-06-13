@@ -10,6 +10,7 @@ use tower::BoxError;
 use super::instruments::Increment;
 use crate::metrics;
 use crate::plugins::demand_control::CostContext;
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -278,6 +279,29 @@ pub(crate) enum CostValue {
     Delta,
     /// The result of the cost calculation. This is the error code returned by the cost calculation.
     Result,
+}
+
+pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
+    context.extensions().with_lock(|c| {
+        if let Some(cost) = c.get::<CostContext>().cloned() {
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ESTIMATED.clone(),
+                AttributeValue::I64(cost.estimated as i64),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ACTUAL.clone(),
+                AttributeValue::I64(cost.actual as i64),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_RESULT.clone(),
+                AttributeValue::String(cost.result.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_STRATEGY.clone(),
+                AttributeValue::String(cost.strategy.into()),
+            ));
+        }
+    });
 }
 
 #[cfg(test)]
