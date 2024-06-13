@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
-use hdrhistogram::Histogram;
-
+use crate::plugins::telemetry::metrics::apollo::list_length_histogram::ListLengthHistogram;
 use crate::response::ResponseVisitor;
 
 pub(crate) struct FieldLengthRecorder {
     // Maps type -> field -> histogram (of lengths)
-    pub(crate) field_lengths: HashMap<String, HashMap<String, Histogram<u64>>>,
+    pub(crate) field_lengths: HashMap<String, HashMap<String, ListLengthHistogram>>,
 }
 
 impl FieldLengthRecorder {
@@ -27,17 +26,12 @@ impl ResponseVisitor for FieldLengthRecorder {
     ) {
         match value {
             serde_json_bytes::Value::Array(items) => {
-                if self
-                    .field_lengths
+                self.field_lengths
                     .entry(ty.to_string())
                     .or_default()
                     .entry(field.name.to_string())
-                    .or_insert_with(|| Histogram::new(3).expect("Histogram can be created"))
-                    .record(items.len() as u64)
-                    .is_err()
-                {
-                    tracing::warn!("failed to record field length in histogram")
-                }
+                    .or_default()
+                    .record(items.len());
 
                 for item in items {
                     self.visit_list_item(request, field.ty().inner_named_type(), field, item);

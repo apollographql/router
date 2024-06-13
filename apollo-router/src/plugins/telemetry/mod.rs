@@ -15,11 +15,11 @@ use futures::future::ready;
 use futures::future::BoxFuture;
 use futures::stream::once;
 use futures::StreamExt;
-use hdrhistogram::Histogram;
 use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
+use metrics::apollo::list_length_histogram::ListLengthHistogram;
 use metrics::apollo::studio::SingleLimitsStats;
 use metrics::field_length::FieldLengthRecorder;
 use multimap::MultiMap;
@@ -482,7 +482,7 @@ impl Plugin for Telemetry {
                                     // the query is invalid, we did not parse the operation kind
                                     OperationKind::Query,
                                     None,
-                                    &Default::default(),
+                                    &mut Default::default(),
                                 );
                             }
 
@@ -1262,7 +1262,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         operation_subtype,
-                        &Default::default(),
+                        &mut Default::default(),
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1302,7 +1302,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
-                        &Default::default(),
+                        &mut Default::default(),
                     );
                 }
                 Ok(router_response.map(move |response_stream| {
@@ -1333,7 +1333,7 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
-                                                &field_lengths.field_lengths,
+                                                &mut field_lengths.field_lengths,
                                             );
                                         }
                                     } else {
@@ -1349,7 +1349,7 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
-                                            &field_lengths.field_lengths,
+                                            &mut field_lengths.field_lengths,
                                         );
                                     }
                                 } else {
@@ -1363,7 +1363,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
-                                            &field_lengths.field_lengths,
+                                            &mut field_lengths.field_lengths,
                                         );
                                     }
                                 }
@@ -1386,7 +1386,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
-        field_lengths: &HashMap<String, HashMap<String, Histogram<u64>>>,
+        field_lengths: &mut HashMap<String, HashMap<String, ListLengthHistogram>>,
     ) {
         let metrics = if let Some(usage_reporting) = {
             let lock = context.extensions().lock();
@@ -1529,13 +1529,13 @@ impl Telemetry {
     fn per_type_stat(
         traces: &[(ByteString, proto::reports::Trace)],
         field_level_instrumentation_ratio: f64,
-        field_lengths: &HashMap<String, HashMap<String, Histogram<u64>>>,
+        field_lengths: &mut HashMap<String, HashMap<String, ListLengthHistogram>>,
     ) -> HashMap<String, SingleTypeStat> {
         fn recur(
             per_type: &mut HashMap<String, SingleTypeStat>,
             field_execution_weight: f64,
             node: &proto::reports::trace::Node,
-            field_lengths: &HashMap<String, HashMap<String, Histogram<u64>>>,
+            field_lengths: &mut HashMap<String, HashMap<String, ListLengthHistogram>>,
         ) {
             for child in &node.child {
                 recur(per_type, field_execution_weight, child, field_lengths)
@@ -1569,7 +1569,7 @@ impl Telemetry {
                     latency: Default::default(),
                     observed_execution_count: 0,
                     requests_with_errors_count: 0,
-                    length: Histogram::new(3).expect("Histogram can be created"),
+                    length: ListLengthHistogram::new(),
                 });
             let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
             field_stat
@@ -1582,8 +1582,8 @@ impl Telemetry {
             // Here, we are iterating over ftv1 traces, which may not exist for every list field.
             // If that's the case, we'll be dropping list length data here.
             if let Some(histogram) = field_lengths
-                .get(&node.parent_type)
-                .and_then(|entry| entry.get(field_name))
+                .get_mut(&node.parent_type)
+                .and_then(|entry| entry.remove(field_name))
             {
                 field_stat.length += histogram;
             }

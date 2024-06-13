@@ -28,6 +28,7 @@ use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 pub(crate) mod cost_histogram;
 mod duration_histogram;
+pub(crate) mod list_length_histogram;
 pub(crate) mod studio;
 
 fn default_buckets() -> Vec<f64> {
