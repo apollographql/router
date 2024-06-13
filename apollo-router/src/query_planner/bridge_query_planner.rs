@@ -73,6 +73,7 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
+    context: crate::Context,
 }
 
 #[derive(Clone)]
@@ -408,6 +409,7 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
+            context: Default::default(),
         })
     }
 
@@ -435,6 +437,7 @@ impl BridgeQueryPlanner {
     ) -> Result<Query, QueryPlannerError> {
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
+            self.context.clone(),
             &self.configuration,
             &query,
             executable,
@@ -710,6 +713,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
             context,
         } = req;
 
+        self.context = context.clone();
         let metadata = context
             .extensions()
             .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned().unwrap_or_default());

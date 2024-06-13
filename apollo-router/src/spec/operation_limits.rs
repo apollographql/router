@@ -56,6 +56,7 @@ impl OperationLimits<bool> {
 
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
+    context: crate::Context,
     configuration: &Configuration,
     query: &str,
     document: &ExecutableDocument,
@@ -68,11 +69,6 @@ pub(crate) fn check(
         root_fields: config_limits.max_root_fields,
         aliases: config_limits.max_aliases,
     };
-    if !max.map(|limit| limit.is_some()).any() {
-        // No configured limit
-        return Ok(());
-    }
-
     let Ok(operation) = document.get_operation(operation_name) else {
         // Undefined or ambiguous operation name.
         // The request is invalid and will be rejected by some other part of the router,
@@ -82,6 +78,17 @@ pub(crate) fn check(
 
     let mut fragment_cache = HashMap::new();
     let measured = count(document, &mut fragment_cache, &operation.selection_set);
+    // Let's store measured for later use in metrics
+    context
+        .extensions()
+        .with_lock(|mut lock| lock.insert::<OperationLimits<u32>>(measured));
+
+    // If we don't have a configured limit, we can just return Ok
+    if !max.map(|limit| limit.is_some()).any() {
+        // No configured limit
+        return Ok(());
+    }
+
     let exceeded = max.combine(measured, |_, config, measured| {
         if let Some(limit) = config {
             measured > limit
