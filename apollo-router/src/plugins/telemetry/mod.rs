@@ -1237,8 +1237,6 @@ impl Telemetry {
         let operation_kind: OperationKind =
             ctx.get(OPERATION_KIND).ok().flatten().unwrap_or_default();
 
-        // here?
-
         match result {
             Err(e) => {
                 if !matches!(sender, Sender::Noop) {

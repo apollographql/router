@@ -252,16 +252,6 @@ impl ExecutionService {
         nullified_paths: &mut Vec<Path>,
         mut response: Response,
     ) -> Option<Response> {
-        /*
-        println!("\nin process_graphql_response");
-        println!("query: ${:?}", query);
-        println!("operation_name: ${:?}", operation_name);
-        println!("variables: ${:?}", variables);
-        println!("is_deferred: ${:?}", is_deferred);
-        println!("response: ${:?}", response);
-        println!("nullified_paths: ${:?}", nullified_paths);
-        */
-
         // responses that would fall under a path that was previously nullified are not sent
         if response
             .path
