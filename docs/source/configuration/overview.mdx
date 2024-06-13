@@ -580,17 +580,22 @@ In practice, you should tune `experimental_parallelism` based on metrics and ben
 
 <MinVersion version="1.49.0">
 
-### Enhanced operation signature generation
+### Enhanced operation signature normalization
 
 </MinVersion>
 
 <ExperimentalFeature />
 
-Apollo's legacy operation signature algorithm removed information about non-standard object fields such as input, enum, union, and interface types. Because usage reporting relies on operation signatures, usage reports did not include these types.
+<EnterpriseFeature />
 
-Beginning in v1.49.0, the router supports enhanced operation signature normalization, including aliases and the full normalized form of input objects and enum references.
+Apollo's legacy operation signature algorithm removes information about certain fields, such as input objects and aliases.
+This removal means some operations may have the same normalized signature though they are distinct operations.
 
-Configure it in `router.yaml` with the `telemetry.apollo.experimental_apollo_signature_normalization_algorithm` option:
+Beginning in v1.49.0, the router supports enhanced operation signature normalization.
+Enhanced normalization incorporates [input types](#input-types) and [aliases](#aliases) in signature generation.
+It also includes other improvements that make it more likely that two operations that only vary slightly appear as the same normalized operation in GraphOS Studio.
+
+Configure enhanced operation signature normalization in `router.yaml` with the `telemetry.apollo.experimental_apollo_signature_normalization_algorithm` option:
 
 ```yaml title="router.yaml"
 telemetry: 
@@ -598,40 +603,145 @@ telemetry:
     experimental_apollo_signature_normalization_algorithm: enhanced # Default is legacy
 ```
 
-Once you enable this configuration, you can ____ in GraphOS Studio.
+Once you enable this configuration, operations with enhanced signatures appear with different operation IDs than they did previously in Studio.
 
-<Note>
+#### Input types
 
-Once you enable `enhanced` signature normalization, there will be a lag in changes to metrics in Studio.
-This is because historical operations still use the `legacy` operation signature normalization algorithm.
+Enhanced signatures include input object type shapes, while still redacting any actual values.
+Legacy signatures [replace input object type with `{}`](/graphos/metrics/operation-signatures/#1-transform-in-line-argument-values).
 
-</Note>
+Given the following example operation:
 
-<MinVersion version="1.49.0">
-
-### Enhanced reference reporting
-
-</MinVersion>
-
-Apollo's legacy reporting didn't include input and enum references.
-Beginning in v1.49.0, the router supports reporting these reference types.
-
-Configure it in `router.yaml` with the `telemetry.apollo.experimental_apollo_metrics_reference_mode` option:
-
-```yaml title="router.yaml"
-telemetry: 
-  apollo:
-    experimental_apollo_metrics_reference_mode: enhanced # Default is legacy
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: { 
+      inputString: "foo", 
+      inputInt: 42, 
+      inputBoolean: null, 
+      nestedType: { someFloat: 4.2 }, 
+      enumInput: SOME_VALUE_1, 
+      nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ], 
+      listInput: [1, 2, 3] 
+    }
+  ) {
+    enumResponse
+  }
+}
 ```
 
-Once you enable this configuration, you can ____ in GraphOS Studio.
+The legacy normalization algorithm generates the following signature:
 
-<Note>
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(input: {}) {
+    enumResponse
+  }
+}
+```
 
-Once you enable `enhanced` reference reporting, there will be a lag in changes to metrics in Studio.
-This is because historical operations still use the `legacy` reference reporting.
+The enhanced normalization algorithm generates the following signature:
 
-</Note>
+```graphql {3-11} showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: {
+      inputString: "", 
+      inputInt: 0, 
+      inputBoolean: null, 
+      nestedType: {someFloat: 0}, 
+      enumInput: SOME_VALUE_1, 
+      nestedTypeList: [{someFloat: 0, someNullableFloat: null}], 
+      listInput: []
+    }
+  ) {
+      enumResponse
+  }
+}
+```
+
+#### Aliases
+
+Enhanced signatures include any field aliases used in an operation.
+Legacy signatures [remove aliases completely](/graphos/metrics/operation-signatures/#field-aliases), meaning the signature may be invalid if the same field was used with multiple aliases.
+
+Given the following example operation:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The legacy normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceResponse {
+      sharedField
+    }
+    interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The enhanced normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
 
 ### Safelisting with persisted queries
 
