@@ -302,6 +302,7 @@ fn entities_with_fields_from_request(
     request: &SubgraphRequest,
     _schema: Arc<Valid<Schema>>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
+    use apollo_compiler::ast::Selection;
     use MakeRequestError::*;
 
     let (entities_field, typename_requested) = graphql_utils::get_entity_fields(
@@ -317,13 +318,13 @@ fn entities_with_fields_from_request(
         .selection_set
         .iter()
         .map(|selection| match selection {
-            apollo_compiler::ast::Selection::Field(_) => Ok(vec![]),
+            Selection::Field(_) => Ok(vec![]),
 
-            apollo_compiler::ast::Selection::FragmentSpread(_) => Err(InvalidOperation(
+            Selection::FragmentSpread(_) => Err(InvalidOperation(
                 "_entities selection can't be a named fragment".into(),
             )),
 
-            apollo_compiler::ast::Selection::InlineFragment(frag) => {
+            Selection::InlineFragment(frag) => {
                 let typename = frag
                     .type_condition
                     .as_ref()
@@ -333,13 +334,17 @@ fn entities_with_fields_from_request(
                     .iter()
                     .map(|sel| {
                         let field = match sel {
-                            apollo_compiler::ast::Selection::Field(f) => f,
-                            apollo_compiler::ast::Selection::FragmentSpread(_) => todo!(),
-                            apollo_compiler::ast::Selection::InlineFragment(_) => todo!(),
+                            Selection::Field(f) => f,
+                            Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
+                                return Err(InvalidOperation(
+                                    "handling fragments inside entity selections not implemented"
+                                        .into(),
+                                ))
+                            }
                         };
-                        (typename.to_string(), field)
+                        Ok((typename.to_string(), field))
                     })
-                    .collect::<Vec<_>>())
+                    .collect::<Result<Vec<_>, _>>()?)
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -1079,7 +1084,13 @@ mod tests {
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
 
         let connector = Connector {
-            id: ConnectId::new_for_test("subgraph_name".into(), name!(Query), name!(users)),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                name!(Query),
+                name!(users),
+                0,
+                "test label",
+            ),
             transport: apollo_federation::sources::connect::Transport::HttpJson(
                 HttpJsonTransport {
                     base_url: "http://localhost/api".into(),

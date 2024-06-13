@@ -61,6 +61,7 @@ pub(super) async fn handle_responses(
 
             let mut res_data = {
                 let (res, _apply_to_errors) = connector.selection.apply_to(&json_data);
+                // TODO log apply_to_errors as diagnostics
                 res.unwrap_or_else(|| Value::Null)
             };
 
@@ -149,10 +150,7 @@ pub(super) async fn handle_responses(
         }
     }
 
-    let data = match data.is_empty() {
-        true => None,
-        false => Some(Value::Object(data)),
-    };
+    let data = (!data.is_empty()).then(|| Value::Object(data));
 
     let response = SubgraphResponse::builder()
         .and_data(data)
@@ -201,7 +199,13 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
         let connector = Connector {
-            id: ConnectId::new_for_test("subgraph_name".into(), name!(Query), name!(hello)),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                name!(Query),
+                name!(hello),
+                0,
+                "test label",
+            ),
             transport: Transport::HttpJson(HttpJsonTransport {
                 base_url: "http://localhost/api".into(),
                 path_template: URLPathTemplate::parse("/path").unwrap(),
@@ -269,7 +273,13 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_entities() {
         let connector = Connector {
-            id: ConnectId::new_for_test("subgraph_name".into(), name!(Query), name!(user)),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                name!(Query),
+                name!(user),
+                0,
+                "test label",
+            ),
             transport: Transport::HttpJson(HttpJsonTransport {
                 base_url: "http://localhost/api".into(),
                 path_template: URLPathTemplate::parse("/path").unwrap(),
@@ -354,7 +364,13 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_entity_field() {
         let connector = Connector {
-            id: ConnectId::new_for_test("subgraph_name".into(), name!(User), name!(field)),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                name!(User),
+                name!(field),
+                0,
+                "test label",
+            ),
             transport: Transport::HttpJson(HttpJsonTransport {
                 base_url: "http://localhost/api".into(),
                 path_template: URLPathTemplate::parse("/path").unwrap(),
@@ -441,7 +457,13 @@ mod tests {
     #[tokio::test]
     async fn test_handle_responses_errors() {
         let connector = Connector {
-            id: ConnectId::new_for_test("subgraph_name".into(), name!(Query), name!(user)),
+            id: ConnectId::new(
+                "subgraph_name".into(),
+                name!(Query),
+                name!(user),
+                0,
+                "test label",
+            ),
             transport: Transport::HttpJson(HttpJsonTransport {
                 base_url: "http://localhost/api".into(),
                 path_template: URLPathTemplate::parse("/path").unwrap(),
