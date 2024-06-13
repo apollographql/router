@@ -269,6 +269,8 @@ mod soure_node_tests {
                     body: Default::default(),
                 }),
                 selection: JSONSelection::parse(".data { id }").unwrap().1,
+                entity: false,
+                on_root_type: false,
             },
         );
 

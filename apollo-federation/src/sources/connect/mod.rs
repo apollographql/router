@@ -3,6 +3,7 @@ use std::hash::Hash;
 use std::hash::Hasher;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Name;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
@@ -11,6 +12,7 @@ mod models;
 pub(crate) mod spec;
 mod url_path_template;
 
+use apollo_compiler::name;
 pub use json_selection::ApplyTo;
 pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
@@ -30,6 +32,8 @@ pub use self::models::HttpJsonTransport;
 pub use self::models::Transport;
 use super::to_remove::SourceId;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
+use crate::schema::ObjectFieldDefinitionPosition;
+use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
 
 pub type Connectors = Arc<IndexMap<SourceId, Connector>>;
 
@@ -58,5 +62,31 @@ impl Hash for ConnectId {
 impl Display for ConnectId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.label)
+    }
+}
+
+impl ConnectId {
+    /// Mostly intended for tests in apollo-router
+    pub fn new(
+        subgraph_name: NodeStr,
+        type_name: Name,
+        field_name: Name,
+        index: usize,
+        label: &str,
+    ) -> Self {
+        Self {
+            label: label.to_string(),
+            subgraph_name,
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: ObjectOrInterfaceFieldDefinitionPosition::Object(
+                    ObjectFieldDefinitionPosition {
+                        type_name,
+                        field_name,
+                    },
+                ),
+                directive_name: name!(connect),
+                directive_index: index,
+            },
+        }
     }
 }
