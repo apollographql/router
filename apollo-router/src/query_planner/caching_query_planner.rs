@@ -634,7 +634,7 @@ pub(crate) struct CachingQueryKey {
 
 // Update this key every time the cache key or the query plan format has to change.
 // When changed it MUST BE CALLED OUT PROMINENTLY IN THE CHANGELOG.
-const CACHE_KEY_VERSION: usize = 0;
+const CACHE_KEY_VERSION: usize = 1;
 const FEDERATION_VERSION: &str = std::env!("FEDERATION_VERSION");
 
 impl std::fmt::Display for CachingQueryKey {
@@ -643,13 +643,11 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(self.operation.as_deref().unwrap_or("-"));
         let operation = hex::encode(hasher.finalize());
 
-        let mut hasher = Sha256::new();
-        hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
-        hasher.update(
-            &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
-        );
-        hasher.update(&self.config_mode.0);
-        hasher.update([self.introspection as u8]);
+        let mut hasher = StructHasher::new();
+        self.metadata.hash(&mut hasher);
+        self.plan_options.hash(&mut hasher);
+        self.config_mode.hash(&mut hasher);
+        self.introspection.hash(&mut hasher);
         let metadata = hex::encode(hasher.finalize());
 
         write!(
