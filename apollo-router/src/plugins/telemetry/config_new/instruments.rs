@@ -93,7 +93,13 @@ impl InstrumentsConfig {
                 inner: Mutex::new(CustomHistogramInner {
                     increment: Increment::Duration(Instant::now()),
                     condition: Condition::True,
-                    histogram: Some(meter.f64_histogram("http.server.request.duration").init()),
+                    histogram: Some(
+                        meter
+                            .f64_histogram("http.server.request.duration")
+                            .with_unit(Unit::new("s"))
+                            .with_description("Duration of HTTP server requests.")
+                            .init(),
+                    ),
                     attributes: Vec::new(),
                     selector: None,
                     selectors: match &self.router.attributes.http_server_request_duration {
@@ -126,7 +132,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.server.request.body.size").init(),
+                                meter
+                                    .f64_histogram("http.server.request.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP server request bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::RequestHeader {
@@ -160,7 +170,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.server.response.body.size").init(),
+                                meter
+                                    .f64_histogram("http.server.response.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP server response bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::ResponseHeader {
@@ -183,6 +197,8 @@ impl InstrumentsConfig {
                     counter: Some(
                         meter
                             .i64_up_down_counter("http.server.active_requests")
+                            .with_unit(Unit::new("request"))
+                            .with_description("Number of active HTTP server requests.")
                             .init(),
                     ),
                     attrs_config: match &self.router.attributes.http_server_active_requests {
@@ -213,34 +229,39 @@ impl InstrumentsConfig {
 
     pub(crate) fn new_subgraph_instruments(&self) -> SubgraphInstruments {
         let meter = metrics::meter_provider().meter(METER_NAME);
-        let http_client_request_duration = self
-            .subgraph
-            .attributes
-            .http_client_request_duration
-            .is_enabled()
-            .then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.subgraph.attributes.http_client_request_duration {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
+        let http_client_request_duration =
+            self.subgraph
+                .attributes
+                .http_client_request_duration
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.subgraph.attributes.http_client_request_duration {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Duration(Instant::now()),
+                            condition: Condition::True,
+                            histogram: Some(
+                                meter
+                                    .f64_histogram("http.client.request.duration")
+                                    .with_unit(Unit::new("s"))
+                                    .with_description("Duration of HTTP client requests.")
+                                    .init(),
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: None,
+                            selectors,
+                            updated: false,
+                        }),
                     }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::Duration(Instant::now()),
-                        condition: Condition::True,
-                        histogram: Some(meter.f64_histogram("http.client.request.duration").init()),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: None,
-                        selectors,
-                        updated: false,
-                    }),
-                }
-            });
+                });
         let http_client_request_body_size =
             self.subgraph
                 .attributes
@@ -261,7 +282,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.client.request.body.size").init(),
+                                meter
+                                    .f64_histogram("http.client.request.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP client request bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
@@ -294,7 +319,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.client.response.body.size").init(),
+                                meter
+                                    .f64_histogram("http.client.response.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP client response bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {

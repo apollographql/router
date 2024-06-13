@@ -159,6 +159,25 @@ expression: "&schema"
         }
       ]
     },
+    "ApolloSignatureNormalizationAlgorithm": {
+      "description": "Apollo usage report signature normalization algorithm",
+      "oneOf": [
+        {
+          "description": "Use the algorithm that matches the JavaScript-based implementation.",
+          "enum": [
+            "legacy"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some edge cases from the JS implementation that affected normalization.",
+          "enum": [
+            "enhanced"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "Apq": {
       "additionalProperties": false,
       "description": "Automatic Persisted Queries (APQ) configuration",
@@ -1573,6 +1592,10 @@ expression: "&schema"
         "errors": {
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
+        },
+        "experimental_apollo_signature_normalization_algorithm": {
+          "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
+          "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
         },
         "experimental_otlp_endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/",

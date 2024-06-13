@@ -44,6 +44,8 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::dual_query_planner::BothModeComparisonJob;
 use crate::query_planner::fetch::QueryHash;
@@ -559,11 +561,28 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
+                    let signature_normalization_mode =
+                        match self.configuration.apollo_plugins.plugins.get("telemetry") {
+                            Some(telemetry_config) => {
+                                match serde_json::from_value::<TelemetryConfig>(
+                                    telemetry_config.clone(),
+                                ) {
+                                    Ok(conf) => {
+                                        conf.apollo
+                                            .experimental_apollo_signature_normalization_algorithm
+                                    }
+                                    _ => ApolloSignatureNormalizationAlgorithm::default(),
+                                }
+                            }
+                            None => ApolloSignatureNormalizationAlgorithm::default(),
+                        };
+
                     let generated_usage_reporting = generate_usage_reporting(
                         &signature_doc.executable,
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
+                        &signature_normalization_mode,
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where

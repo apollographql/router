@@ -855,10 +855,11 @@ impl Selection {
                         Ok(expanded_sub_selections.into())
                     } else {
                         // Create an inline fragment since type condition is necessary.
-                        let inline = InlineFragmentSelection::from_fragment_spread_selection(
+                        let inline = InlineFragmentSelection::from_selection_set(
                             parent_type.clone(),
-                            fragment,
-                        )?;
+                            expanded_sub_selections,
+                            fragment.spread.data().directives.clone(),
+                        );
                         Ok(Selection::from(inline).into())
                     }
                 }
@@ -895,7 +896,7 @@ impl SelectionSet {
     fn retain_fragments(
         &self,
         fragments_to_keep: &NamedFragments,
-    ) -> Result<Self, FederationError> {
+    ) -> Result<SelectionSet, FederationError> {
         self.lazy_map(fragments_to_keep, |selection| {
             Ok(selection
                 .retain_fragments(&self.type_position, fragments_to_keep)?
@@ -932,13 +933,62 @@ impl SelectionSet {
 //  F1 first, and then realize that this increases F2 usages to 2, which means we stop there and keep F2.
 
 impl NamedFragments {
-    /// Compute the reduced set of NamedFragments that are used in the selection set at least
-    /// `min_usage_to_optimize` times. Also, computes the new selection set that uses only the
-    /// reduced set of fragments by expanding the other ones.
+    /// Updates `self` by computing the reduced set of NamedFragments that are used in the
+    /// selection set and other fragments at least `min_usage_to_optimize` times. Also, computes
+    /// the new selection set that uses only the reduced set of fragments by expanding the other
+    /// ones.
+    /// - Returned selection set will be normalized.
     fn reduce(
         &mut self,
         selection_set: &SelectionSet,
         min_usage_to_optimize: u32,
+    ) -> Result<SelectionSet, FederationError> {
+        let min_usage_to_optimize: i32 = min_usage_to_optimize.try_into().unwrap_or(i32::MAX);
+
+        // Call `reduce_inner` repeatedly until we reach a fix-point, since newly computed
+        // selection set may drop some fragment references due to normalization, which could lead
+        // to further reduction.
+        // - It is hard to avoid this chain reaction, since we need to account for the effects of
+        //   normalization.
+        let mut last_size = self.size();
+        let mut last_selection_set = selection_set.clone();
+        while last_size > 0 {
+            let new_selection_set =
+                self.reduce_inner(&last_selection_set, min_usage_to_optimize)?;
+
+            // Reached a fix-point => stop
+            if self.size() == last_size {
+                // Assumes that `new_selection_set` is the same as `last_selection_set` in this
+                // case.
+                break;
+            }
+
+            // If we've expanded some fragments but kept others, then it's not 100% impossible that
+            // some fragment was used multiple times in some expanded fragment(s), but that
+            // post-expansion all of it's usages are "dead" branches that are removed by the final
+            // `normalize`. In that case though, we need to ensure we don't include the now-unused
+            // fragment in the final list of fragments.
+            // TODO: remark that the same reasoning could leave a single instance of a fragment
+            // usage, so if we really really want to never have less than `minUsagesToOptimize`, we
+            // could do some loop of `expand then normalize` unless all fragments are provably used
+            // enough. We don't bother, because leaving this is not a huge deal and it's not worth
+            // the complexity, but it could be that we can refactor all this later to avoid this
+            // case without additional complexity.
+
+            // Prepare the next iteration
+            last_size = self.size();
+            last_selection_set = new_selection_set;
+        }
+        Ok(last_selection_set)
+    }
+
+    /// The inner loop body of `reduce` method.
+    /// - Takes i32 `min_usage_to_optimize` since `collect_used_fragment_names` counts usages in
+    ///   i32.
+    fn reduce_inner(
+        &mut self,
+        selection_set: &SelectionSet,
+        min_usage_to_optimize: i32,
     ) -> Result<SelectionSet, FederationError> {
         // Initial computation of fragment usages in `selection_set`.
         let mut usages = HashMap::new();
@@ -962,7 +1012,6 @@ impl NamedFragments {
         // - We take advantage of the fact that `NamedFragments` is already sorted in dependency
         //   order.
         // PORT_NOTE: The `computeFragmentsToKeep` function is implemented here.
-        let min_usage_to_optimize: i32 = min_usage_to_optimize.try_into().unwrap_or(i32::MAX);
         let original_size = self.size();
         for fragment in self.iter_rev() {
             let usage_count = usages.get(&fragment.name).copied().unwrap_or_default();
@@ -974,6 +1023,7 @@ impl NamedFragments {
                 Self::update_usages(&mut usages, fragment, usage_count);
             }
         }
+
         self.retain(|name, _fragment| {
             let usage_count = usages.get(name).copied().unwrap_or_default();
             usage_count >= min_usage_to_optimize
@@ -1258,7 +1308,12 @@ impl Operation {
     //            However, it's only used in tests. So, it's removed in the Rust version.
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
-    pub(crate) fn optimize(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
+    /// `fragments` - rebased fragment definitions for the operation's subgraph
+    fn optimize_internal(
+        &mut self,
+        fragments: &NamedFragments,
+        min_usages_to_optimize: u32,
+    ) -> Result<(), FederationError> {
         if fragments.is_empty() {
             return Ok(());
         }
@@ -1273,16 +1328,36 @@ impl Operation {
         // Optimize the named fragment definitions by dropping low-usage ones.
         let mut final_fragments = fragments.clone();
         let final_selection_set =
-            final_fragments.reduce(&self.selection_set, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)?;
+            final_fragments.reduce(&self.selection_set, min_usages_to_optimize)?;
 
         self.selection_set = final_selection_set;
         self.named_fragments = final_fragments;
         Ok(())
     }
 
-    // Mainly for testing.
-    fn expand_all_fragments(&self) -> Result<Self, FederationError> {
-        let selection_set = self.selection_set.expand_all_fragments()?;
+    /// `fragments` - rebased fragment definitions for the operation's subgraph
+    pub(crate) fn optimize(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
+        self.optimize_internal(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
+    }
+
+    /// Used by legacy roundtrip tests.
+    /// - This lowers `min_usages_to_optimize` to `1` in order to make it easier to write unit tests.
+    fn optimize_for_roundtrip_test(
+        &mut self,
+        fragments: &NamedFragments,
+    ) -> Result<(), FederationError> {
+        self.optimize_internal(fragments, /*min_usages_to_optimize*/ 1)
+    }
+
+    // PORT_NOTE: This mirrors the JS version's `Operation.expandAllFragments`. But this method is
+    // mainly for unit tests. The actual port of `expandAllFragments` is in `normalize_operation`.
+    fn expand_all_fragments_and_normalize(&self) -> Result<Self, FederationError> {
+        let selection_set = self.selection_set.expand_all_fragments()?.normalize(
+            &self.selection_set.type_position,
+            &self.named_fragments,
+            &self.schema,
+            NormalizeSelectionOption::NormalizeRecursively,
+        )?;
         Ok(Self {
             named_fragments: Default::default(),
             selection_set,
@@ -1330,9 +1405,18 @@ mod tests {
         }
     }
 
+    fn validate_operation(schema: &ValidFederationSchema, query: &str) {
+        apollo_compiler::ExecutableDocument::parse_and_validate(
+            schema.schema(),
+            query,
+            "query.graphql",
+        )
+        .unwrap();
+    }
+
     macro_rules! assert_without_fragments {
         ($operation: expr, @$expected: literal) => {{
-            let without_fragments = $operation.expand_all_fragments().unwrap();
+            let without_fragments = $operation.expand_all_fragments_and_normalize().unwrap();
             insta::assert_snapshot!(without_fragments, @$expected);
             without_fragments
         }};
@@ -1342,8 +1426,81 @@ mod tests {
         ($operation: expr, $named_fragments: expr, @$expected: literal) => {{
             let mut optimized = $operation.clone();
             optimized.optimize(&$named_fragments).unwrap();
+            validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
+    }
+
+    #[test]
+    fn duplicate_fragment_spreads_after_fragment_expansion() {
+        // This is a regression test for FED-290, making sure `make_select` method can handle
+        // duplicate fragment spreads.
+        // During optimization, `make_selection` may merge multiple fragment spreads with the same
+        // key. This can happen in the case below where `F1` and `F2` are expanded and generating
+        // two duplicate `F_shared` spreads in the definition of `fragment F_target`.
+        let schema_doc = r#"
+            type Query {
+                t: T
+                t2: T
+            }
+
+            type T {
+                id: ID!
+                a: Int!
+                b: Int!
+                c: Int!
+            }
+        "#;
+
+        let query = r#"
+            fragment F_shared on T {
+                id
+                a
+            }
+            fragment F1 on T {
+                ...F_shared
+                b
+            }
+
+            fragment F2 on T {
+                ...F_shared
+                c
+            }
+
+            fragment F_target on T {
+                ...F1
+                ...F2
+            }
+
+            query {
+                t {
+                    ...F_target
+                }
+                t2 {
+                    ...F_target
+                }
+            }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema_doc), query);
+        let expanded = operation.expand_all_fragments_and_normalize().unwrap();
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+        fragment F_target on T {
+          id
+          a
+          b
+          c
+        }
+
+        {
+          t {
+            ...F_target
+          }
+          t2 {
+            ...F_target
+          }
+        }
+        "###);
     }
 
     #[test]
@@ -1468,7 +1625,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore] // Appears to be an expansion bug.
     fn handles_fragments_using_other_fragments() {
         let schema = r#"
               type Query {
@@ -1643,11 +1799,29 @@ mod tests {
         ($schema_doc: expr, $query: expr, @$expanded: literal) => {{
             let schema = parse_schema($schema_doc);
             let operation = parse_operation(&schema, $query);
-            let without_fragments = operation.expand_all_fragments().unwrap();
+            let without_fragments = operation.expand_all_fragments_and_normalize().unwrap();
             insta::assert_snapshot!(without_fragments, @$expanded);
 
             let mut optimized = without_fragments;
             optimized.optimize(&operation.named_fragments).unwrap();
+            validate_operation(&operation.schema, &optimized.to_string());
+            assert_eq!(optimized.to_string(), operation.to_string());
+        }};
+    }
+
+    /// Tests ported from JS codebase rely on special behavior of
+    /// `Operation::optimize_for_roundtrip_test` that is specific for testing, since it makes it
+    /// easier to write tests.
+    macro_rules! test_fragments_roundtrip_legacy {
+        ($schema_doc: expr, $query: expr, @$expanded: literal) => {{
+            let schema = parse_schema($schema_doc);
+            let operation = parse_operation(&schema, $query);
+            let without_fragments = operation.expand_all_fragments_and_normalize().unwrap();
+            insta::assert_snapshot!(without_fragments, @$expanded);
+
+            let mut optimized = without_fragments;
+            optimized.optimize_for_roundtrip_test(&operation.named_fragments).unwrap();
+            validate_operation(&operation.schema, &optimized.to_string());
             assert_eq!(optimized.to_string(), operation.to_string());
         }};
     }
@@ -1705,5 +1879,1198 @@ mod tests {
                   }
                 }
         "###);
+    }
+
+    #[test]
+    fn handles_nested_fragments_with_field_intersection() {
+        let schema_doc = r#"
+            type Query {
+                t: T
+            }
+    
+            type T {
+                a: A
+                b: Int
+            }
+    
+            type A {
+                x: String
+                y: String
+                z: String
+            }
+        "#;
+
+        // The subtlety here is that `FA` contains `__typename` and so after we're reused it, the
+        // selection will look like:
+        // {
+        //   t {
+        //     a {
+        //       ...FA
+        //     }
+        //   }
+        // }
+        // But to recognize that `FT` can be reused from there, we need to be able to see that
+        // the `__typename` that `FT` wants is inside `FA` (and since FA applies on the parent type `A`
+        // directly, it is fine to reuse).
+        let query = r#"
+            fragment FA on A {
+                __typename
+                x
+                y
+            }
+    
+            fragment FT on T {
+                a {
+                __typename
+                ...FA
+                }
+            }
+    
+            query {
+                t {
+                ...FT
+                }
+            }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+        {
+          t {
+            a {
+              __typename
+              x
+              y
+            }
+          }
+        }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragment_matching_subset_of_field_selection() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              type T {
+                a: String
+                b: B
+                c: Int
+                d: D
+              }
+        
+              type B {
+                x: String
+                y: String
+              }
+        
+              type D {
+                m: String
+                n: String
+              }
+        "#;
+
+        let query = r#"
+                fragment FragT on T {
+                  b {
+                    __typename
+                    x
+                  }
+                  c
+                  d {
+                    m
+                  }
+                }
+        
+                {
+                  t {
+                    ...FragT
+                    d {
+                      n
+                    }
+                    a
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    b {
+                      __typename
+                      x
+                    }
+                    c
+                    d {
+                      m
+                      n
+                    }
+                    a
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragment_matching_subset_of_inline_fragment_selection() {
+        // Pretty much the same test than the previous one, but matching inside a fragment selection inside
+        // of inside a field selection.
+        // PORT_NOTE: ` implements I` was added in the definition of `type T`, so that validation can pass.
+        let schema_doc = r#"
+          type Query {
+            i: I
+          }
+    
+          interface I {
+            a: String
+          }
+    
+          type T implements I {
+            a: String
+            b: B
+            c: Int
+            d: D
+          }
+    
+          type B {
+            x: String
+            y: String
+          }
+    
+          type D {
+            m: String
+            n: String
+          }
+        "#;
+
+        let query = r#"
+            fragment FragT on T {
+              b {
+                __typename
+                x
+              }
+              c
+              d {
+                m
+              }
+            }
+    
+            {
+              i {
+                ... on T {
+                  ...FragT
+                  d {
+                    n
+                  }
+                  a
+                }
+              }
+            }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+            {
+              i {
+                ... on T {
+                  b {
+                    __typename
+                    x
+                  }
+                  c
+                  d {
+                    m
+                    n
+                  }
+                  a
+                }
+              }
+            }
+        "###);
+    }
+
+    #[test]
+    fn intersecting_fragments() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              type T {
+                a: String
+                b: B
+                c: Int
+                d: D
+              }
+        
+              type B {
+                x: String
+                y: String
+              }
+        
+              type D {
+                m: String
+                n: String
+              }
+        "#;
+
+        // Note: the code that reuse fragments iterates on fragments in the order they are defined
+        // in the document, but when it reuse a fragment, it puts it at the beginning of the
+        // selection (somewhat random, it just feel often easier to read), so the net effect on
+        // this example is that `Frag2`, which will be reused after `Frag1` will appear first in
+        // the re-optimized selection. So we put it first in the input too so that input and output
+        // actually match (the `testFragmentsRoundtrip` compares strings, so it is sensible to
+        // ordering; we could theoretically use `Operation.equals` instead of string equality,
+        // which wouldn't really on ordering, but `Operation.equals` is not entirely trivial and
+        // comparing strings make problem a bit more obvious).
+        let query = r#"
+                fragment Frag1 on T {
+                  b {
+                    x
+                  }
+                  c
+                  d {
+                    m
+                  }
+                }
+        
+                fragment Frag2 on T {
+                  a
+                  b {
+                    __typename
+                    x
+                  }
+                  d {
+                    m
+                    n
+                  }
+                }
+        
+                {
+                  t {
+                    ...Frag1
+                    ...Frag2
+                  }
+                }
+        "#;
+
+        // PORT_NOTE: `__typename` and `x`'s placements are switched in Rust.
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    b {
+                      __typename
+                      x
+                    }
+                    c
+                    d {
+                      m
+                      n
+                    }
+                    a
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn fragments_application_makes_type_condition_trivial() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              interface I {
+                x: String
+              }
+        
+              type T implements I {
+                x: String
+                a: String
+              }
+        "#;
+
+        let query = r#"
+                fragment FragI on I {
+                  x
+                  ... on T {
+                    a
+                  }
+                }
+        
+                {
+                  t {
+                    ...FragI
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    x
+                    a
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragment_matching_at_the_top_level_of_another_fragment() {
+        let schema_doc = r#"
+              type Query {
+                t: T
+              }
+        
+              type T {
+                a: String
+                u: U
+              }
+        
+              type U {
+                x: String
+                y: String
+              }
+        "#;
+
+        let query = r#"
+                fragment Frag1 on T {
+                  a
+                }
+        
+                fragment Frag2 on T {
+                  u {
+                    x
+                    y
+                  }
+                  ...Frag1
+                }
+        
+                fragment Frag3 on Query {
+                  t {
+                    ...Frag2
+                  }
+                }
+        
+                {
+                  ...Frag3
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t {
+                    u {
+                      x
+                      y
+                    }
+                    a
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragments_used_in_context_where_they_get_trimmed() {
+        let schema_doc = r#"
+              type Query {
+                t1: T1
+              }
+        
+              interface I {
+                x: Int
+              }
+        
+              type T1 implements I {
+                x: Int
+                y: Int
+              }
+        
+              type T2 implements I {
+                x: Int
+                z: Int
+              }
+        "#;
+
+        let query = r#"
+                fragment FragOnI on I {
+                  ... on T1 {
+                    y
+                  }
+                  ... on T2 {
+                    z
+                  }
+                }
+        
+                {
+                  t1 {
+                    ...FragOnI
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t1 {
+                    y
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragments_used_in_the_context_of_non_intersecting_abstract_types() {
+        let schema_doc = r#"
+              type Query {
+                i2: I2
+              }
+        
+              interface I1 {
+                x: Int
+              }
+        
+              interface I2 {
+                y: Int
+              }
+        
+              interface I3 {
+                z: Int
+              }
+        
+              type T1 implements I1 & I2 {
+                x: Int
+                y: Int
+              }
+        
+              type T2 implements I1 & I3 {
+                x: Int
+                z: Int
+              }
+        "#;
+
+        let query = r#"
+                fragment FragOnI1 on I1 {
+                  ... on I2 {
+                    y
+                  }
+                  ... on I3 {
+                    z
+                  }
+                }
+        
+                {
+                  i2 {
+                    ...FragOnI1
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  i2 {
+                    ... on I1 {
+                      ... on I2 {
+                        y
+                      }
+                      ... on I3 {
+                        z
+                      }
+                    }
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn handles_fragments_on_union_in_context_with_limited_intersection() {
+        let schema_doc = r#"
+              type Query {
+                t1: T1
+              }
+        
+              union U = T1 | T2
+        
+              type T1 {
+                x: Int
+              }
+        
+              type T2 {
+                y: Int
+              }
+        "#;
+
+        let query = r#"
+                fragment OnU on U {
+                  ... on T1 {
+                    x
+                  }
+                  ... on T2 {
+                    y
+                  }
+                }
+        
+                {
+                  t1 {
+                    ...OnU
+                  }
+                }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                {
+                  t1 {
+                    x
+                  }
+                }
+        "###);
+    }
+
+    #[test]
+    fn off_by_1_error() {
+        let schema = r#"
+              type Query {
+                t: T
+              }
+              type T {
+                id: String!
+                a: A
+                v: V
+              }
+              type A {
+                id: String!
+              }
+              type V {
+                t: T!
+              }
+        "#;
+
+        let query = r#"
+              {
+                t {
+                  ...TFrag
+                  v {
+                    t {
+                      id
+                      a {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+
+              fragment TFrag on T {
+                __typename
+                id
+              }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema), query);
+
+        let expanded = assert_without_fragments!(
+            operation,
+            @r###"
+              {
+                t {
+                  __typename
+                  id
+                  v {
+                    t {
+                      id
+                      a {
+                        __typename
+                        id
+                      }
+                    }
+                  }
+                }
+              }
+            "###
+        );
+
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+        fragment TFrag on T {
+          __typename
+          id
+        }
+
+        {
+          t {
+            ...TFrag
+            v {
+              t {
+                ...TFrag
+                a {
+                  __typename
+                  id
+                }
+              }
+            }
+          }
+        }
+        "###);
+    }
+
+    #[test]
+    fn removes_all_unused_fragments() {
+        let schema = r#"
+              type Query {
+                t1: T1
+              }
+        
+              union U1 = T1 | T2 | T3
+              union U2 =      T2 | T3
+        
+              type T1 {
+                x: Int
+              }
+        
+              type T2 {
+                y: Int
+              }
+        
+              type T3 {
+                z: Int
+              }
+        "#;
+
+        let query = r#"
+              query {
+                t1 {
+                  ...Outer
+                }
+              }
+        
+              fragment Outer on U1 {
+                ... on T1 {
+                  x
+                }
+                ... on T2 {
+                  ... Inner
+                }
+                ... on T3 {
+                  ... Inner
+                }
+              }
+        
+              fragment Inner on U2 {
+                ... on T2 {
+                  y
+                }
+              }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema), query);
+
+        let expanded = assert_without_fragments!(
+            operation,
+            @r###"
+              {
+                t1 {
+                  x
+                }
+              }
+            "###
+        );
+
+        // This is a bit of contrived example, but the reusing code will be able
+        // to figure out that the `Outer` fragment can be reused and will initially
+        // do so, but it's only use once, so it will expand it, which yields:
+        // {
+        //   t1 {
+        //     ... on T1 {
+        //       x
+        //     }
+        //     ... on T2 {
+        //       ... Inner
+        //     }
+        //     ... on T3 {
+        //       ... Inner
+        //     }
+        //   }
+        // }
+        // and so `Inner` will not be expanded (it's used twice). Except that
+        // the `normalize` code is apply then and will _remove_ both instances
+        // of `.... Inner`. Which is ok, but we must make sure the fragment
+        // itself is removed since it is not used now, which this test ensures.
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+              {
+                t1 {
+                  x
+                }
+              }
+        "###);
+    }
+
+    #[test]
+    fn removes_fragments_only_used_by_unused_fragments() {
+        // Similar to the previous test, but we artificially add a
+        // fragment that is only used by the fragment that is finally
+        // unused.
+        let schema = r#"
+              type Query {
+                t1: T1
+              }
+        
+              union U1 = T1 | T2 | T3
+              union U2 =      T2 | T3
+        
+              type T1 {
+                x: Int
+              }
+        
+              type T2 {
+                y1: Y
+                y2: Y
+              }
+        
+              type T3 {
+                z: Int
+              }
+        
+              type Y {
+                v: Int
+              }
+        "#;
+
+        let query = r#"
+              query {
+                t1 {
+                  ...Outer
+                }
+              }
+        
+              fragment Outer on U1 {
+                ... on T1 {
+                  x
+                }
+                ... on T2 {
+                  ... Inner
+                }
+                ... on T3 {
+                  ... Inner
+                }
+              }
+        
+              fragment Inner on U2 {
+                ... on T2 {
+                  y1 {
+                    ...WillBeUnused
+                  }
+                  y2 {
+                    ...WillBeUnused
+                  }
+                }
+              }
+        
+              fragment WillBeUnused on Y {
+                v
+              }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema), query);
+
+        let expanded = assert_without_fragments!(
+            operation,
+            @r###"
+              {
+                t1 {
+                  x
+                }
+              }
+            "###
+        );
+
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+              {
+                t1 {
+                  x
+                }
+              }
+        "###);
+    }
+
+    #[test]
+    fn keeps_fragments_used_by_other_fragments() {
+        let schema = r#"
+              type Query {
+                t1: T
+                t2: T
+              }
+        
+              type T {
+                a1: Int
+                a2: Int
+                b1: B
+                b2: B
+              }
+        
+              type B {
+                x: Int
+                y: Int
+              }
+        "#;
+
+        let query = r#"
+              query {
+                t1 {
+                  ...TFields
+                }
+                t2 {
+                  ...TFields
+                }
+              }
+        
+              fragment TFields on T {
+                ...DirectFieldsOfT
+                b1 {
+                  ...BFields
+                }
+                b2 {
+                  ...BFields
+                }
+              }
+        
+              fragment DirectFieldsOfT on T {
+                a1
+                a2
+              }
+        
+              fragment BFields on B {
+                x
+                y
+              }
+        "#;
+
+        let operation = parse_operation(&parse_schema(schema), query);
+
+        let expanded = assert_without_fragments!(
+            operation,
+            @r###"
+              {
+                t1 {
+                  a1
+                  a2
+                  b1 {
+                    x
+                    y
+                  }
+                  b2 {
+                    x
+                    y
+                  }
+                }
+                t2 {
+                  a1
+                  a2
+                  b1 {
+                    x
+                    y
+                  }
+                  b2 {
+                    x
+                    y
+                  }
+                }
+              }
+            "###
+        );
+
+        // The `DirectFieldsOfT` fragments should not be kept as it is used only once within `TFields`,
+        // but the `BFields` one should be kept.
+        assert_optimized!(expanded, operation.named_fragments, @r###"
+        fragment BFields on B {
+          x
+          y
+        }
+
+        fragment TFields on T {
+          a1
+          a2
+          b1 {
+            ...BFields
+          }
+          b2 {
+            ...BFields
+          }
+        }
+
+        {
+          t1 {
+            ...TFields
+          }
+          t2 {
+            ...TFields
+          }
+        }
+        "###);
+    }
+
+    ///
+    /// applied directives
+    ///
+
+    #[test]
+    #[should_panic(expected = "directive cannot be used on FRAGMENT_DEFINITION")]
+    // TODO: Investigate this restriction on query document in Rust version.
+    fn reuse_fragments_with_same_directive_on_the_fragment() {
+        let schema_doc = r#"
+                type Query {
+                  t1: T
+                  t2: T
+                  t3: T
+                }
+        
+                type T {
+                  a: Int
+                  b: Int
+                  c: Int
+                  d: Int
+                }
+        "#;
+
+        let query = r#"
+                  fragment DirectiveOnDef on T @include(if: $cond1) {
+                    a
+                  }
+        
+                  query myQuery($cond1: Boolean!, $cond2: Boolean!) {
+                    t1 {
+                      ...DirectiveOnDef
+                    }
+                    t2 {
+                      ... on T @include(if: $cond2) {
+                        a
+                      }
+                    }
+                    t3 {
+                      ...DirectiveOnDef @include(if: $cond2)
+                    }
+                  }
+        "#;
+
+        test_fragments_roundtrip!(schema_doc, query, @r###"
+                  query myQuery($cond1: Boolean!, $cond2: Boolean!) {
+                    t1 {
+                      ... on T @include(if: $cond1) {
+                        a
+                      }
+                    }
+                    t2 {
+                      ... on T @include(if: $cond2) {
+                        a
+                      }
+                    }
+                    t3 {
+                      ... on T @include(if: $cond1) @include(if: $cond2) {
+                        a
+                      }
+                    }
+                  }
+        "###);
+    }
+
+    #[test]
+    fn reuse_fragments_with_same_directive_in_the_fragment_selection() {
+        let schema_doc = r#"
+                type Query {
+                  t1: T
+                  t2: T
+                  t3: T
+                }
+        
+                type T {
+                  a: Int
+                  b: Int
+                  c: Int
+                  d: Int
+                }
+        "#;
+
+        let query = r#"
+                  fragment DirectiveInDef on T {
+                    a @include(if: $cond1)
+                  }
+        
+                  query myQuery($cond1: Boolean!, $cond2: Boolean!) {
+                    t1 {
+                      a
+                    }
+                    t2 {
+                      ...DirectiveInDef
+                    }
+                    t3 {
+                      a @include(if: $cond2)
+                    }
+                  }
+        "#;
+
+        test_fragments_roundtrip_legacy!(schema_doc, query, @r###"
+                  query myQuery($cond1: Boolean!, $cond2: Boolean!) {
+                    t1 {
+                      a
+                    }
+                    t2 {
+                      a @include(if: $cond1)
+                    }
+                    t3 {
+                      a @include(if: $cond2)
+                    }
+                  }
+        "###);
+    }
+
+    #[test]
+    fn reuse_fragments_with_directives_on_inline_fragments() {
+        let schema_doc = r#"
+                type Query {
+                  t1: T
+                  t2: T
+                  t3: T
+                }
+        
+                type T {
+                  a: Int
+                  b: Int
+                  c: Int
+                  d: Int
+                }
+        "#;
+
+        let query = r#"
+                  fragment NoDirectiveDef on T {
+                    a
+                  }
+        
+                  query myQuery($cond1: Boolean!) {
+                    t1 {
+                      ...NoDirectiveDef
+                    }
+                    t2 {
+                      ...NoDirectiveDef @include(if: $cond1)
+                    }
+                  }
+        "#;
+
+        test_fragments_roundtrip!(schema_doc, query, @r###"
+                  query myQuery($cond1: Boolean!) {
+                    t1 {
+                      a
+                    }
+                    t2 {
+                      ... on T @include(if: $cond1) {
+                        a
+                      }
+                    }
+                  }
+        "###);
+    }
+
+    ///
+    /// empty branches removal
+    ///
+
+    mod test_empty_branch_removal {
+        use super::*;
+
+        const TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL: &str = r#"
+            type Query {
+                t: T
+                u: Int
+            }
+
+            type T {
+                a: Int
+                b: Int
+                c: C
+            }
+
+            type C {
+                x: String
+                y: String
+            }
+        "#;
+
+        fn without_empty_branches(query: &str) -> String {
+            let operation =
+                parse_operation(&parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL), query);
+            operation
+                .selection_set
+                .without_empty_branches()
+                .unwrap()
+                .unwrap()
+                .to_string()
+        }
+
+        #[test]
+        fn operation_not_modified_if_no_empty_branches() {
+            let test_vec = vec!["{ t { a } }", "{ t { a b } }", "{ t { a c { x y } } }"];
+            for query in test_vec {
+                assert_eq!(without_empty_branches(query), query);
+            }
+        }
+
+        #[test]
+        // TODO: port `SelectionSetNode`
+        fn removes_simple_empty_branches() {
+            //it('removes simple empty branches', () => {
+            //     expect(withoutEmptyBranches(
+            //       astSSet(
+            //         astField('t', astSSet(
+            //           astField('a'),
+            //           astField('c', astSSet()),
+            //         ))
+            //       )
+            //     )).toBe('{ t { a } }');
+            //
+            //     expect(withoutEmptyBranches(
+            //       astSSet(
+            //         astField('t', astSSet(
+            //           astField('c', astSSet()),
+            //           astField('a'),
+            //         ))
+            //       )
+            //     )).toBe('{ t { a } }');
+            //
+            //     expect(withoutEmptyBranches(
+            //       astSSet(
+            //         astField('t', astSSet())
+            //       )
+            //     )).toBeUndefined();
+            //   });
+        }
+
+        #[test]
+        // TODO: port `SelectionSetNode`
+        fn removes_cascading_empty_branches() {
+            //it('removes cascading empty branches', () => {
+            //     expect(withoutEmptyBranches(
+            //       astSSet(
+            //         astField('t', astSSet(
+            //           astField('c', astSSet()),
+            //         ))
+            //       )
+            //     )).toBeUndefined();
+            //
+            //     expect(withoutEmptyBranches(
+            //       astSSet(
+            //         astField('u'),
+            //         astField('t', astSSet(
+            //           astField('c', astSSet()),
+            //         ))
+            //       )
+            //     )).toBe('{ u }');
+            //
+            //     expect(withoutEmptyBranches(
+            //       astSSet(
+            //         astField('t', astSSet(
+            //           astField('c', astSSet()),
+            //         )),
+            //         astField('u'),
+            //       )
+            //     )).toBe('{ u }');
+            //   });
+        }
     }
 }
