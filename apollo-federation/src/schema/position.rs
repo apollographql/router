@@ -30,7 +30,6 @@ use strum::IntoEnumIterator;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
-use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::referencer::EnumTypeReferencers;
@@ -108,14 +107,6 @@ impl TypeDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema ExtendedType> {
         self.get(schema).ok()
-    }
-
-    pub(crate) fn is_interface_object_type(&self, schema: &FederationSchema) -> bool {
-        match self {
-            TypeDefinitionPosition::Object(obj) => obj.is_interface_object_type(schema),
-
-            _ => false,
-        }
     }
 }
 
@@ -508,14 +499,6 @@ impl CompositeTypeDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema ExtendedType> {
         self.get(schema).ok()
-    }
-
-    pub(crate) fn is_interface_object_type(&self, schema: &FederationSchema) -> bool {
-        match self {
-            CompositeTypeDefinitionPosition::Object(obj) => obj.is_interface_object_type(schema),
-
-            _ => false,
-        }
     }
 }
 
@@ -1895,17 +1878,6 @@ impl ObjectTypeDefinitionPosition {
         schema: &'schema Schema,
     ) -> Option<&'schema Node<ObjectType>> {
         self.get(schema).ok()
-    }
-
-    pub(crate) fn is_interface_object_type(&self, schema: &FederationSchema) -> bool {
-        if let Ok(interface_obj_directive) = get_federation_spec_definition_from_subgraph(schema)
-            .and_then(|spec| spec.interface_object_directive(schema))
-        {
-            self.try_get(schema.schema())
-                .is_some_and(|o| o.directives.has(&interface_obj_directive.name))
-        } else {
-            false
-        }
     }
 
     fn make_mut<'schema>(
