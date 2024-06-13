@@ -675,7 +675,7 @@ async fn test_demand_control_trace_batched() {
                 result.push(b']');
                 hyper::Body::from(result)
             });
-        let req: router::Request = request.try_into().expect("could not convert request");
+        let req: router::Request = request.into();
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_batch_trace_report(reports, req, use_legacy_request_span, true).await;
         assert_report!(report);
