@@ -586,39 +586,52 @@ In practice, you should tune `experimental_parallelism` based on metrics and ben
 
 <ExperimentalFeature />
 
-Apollo's original operation signature operation removed information about fields that are not basic object type fields such as input types, enum types, union types, interface types.
-These types are often not included in usage reports and removed from the signature that is sent in the usage reporting payload. 
+Apollo's legacy operation signature algorithm removed information about non-standard object fields such as input, enum, union, and interface types. Because usage reporting relies on operation signatures, usage reports did not include these types.
 
-Beginning in v1.49.0, the router supports enhanced operation signature generation including:
+Beginning in v1.49.0, the router supports enhanced operation signature normalization, including aliases and the full normalized form of input objects and enum references.
 
-* The full normalized form of input objects and enum references
-* Aliases
-* Additional small normalization improvements
-
-Configure it in `router.yaml` with `telemetry.apollo.experimental_apollo_signature_normalization_algorithm`
+Configure it in `router.yaml` with the `telemetry.apollo.experimental_apollo_signature_normalization_algorithm` option:
 
 ```yaml title="router.yaml"
-# This assumes you are using the default `new` value for
-# experimental_apollo_metrics_generation_mode: new
 telemetry: 
-  apollo.experimental_apollo_signature_normalization_algorithm: enhanced # Default is legacy
+  apollo:
+    experimental_apollo_signature_normalization_algorithm: enhanced # Default is legacy
 ```
+
+Once you enable this configuration, you can ____ in GraphOS Studio.
 
 <Note>
 
-Once you enable `enhanced` signature normalization, there will be a lag in changes to your metrics.
-This is because historical operations still use the `legacy` signature algorithm.
+Once you enable `enhanced` signature normalization, there will be a lag in changes to metrics in Studio.
+This is because historical operations still use the `legacy` operation signature normalization algorithm.
 
 </Note>
 
-The router supports a legacy JavaScript implementation and a newer experimental Rust implementation for generating the stats report keys and referenced fields that are sent in Apollo usage reports.
-Starting in v1.49.0, the default operation signature generation method is the `new` kind. You can revert it to the older `legacy` type or turn on `both` to log warnings if the implementations disagree.
+<MinVersion version="1.49.0">
 
-Configure it in `router.yaml` with the `experimental_apollo_metrics_generation_mode` option:
+### Enhanced reference reporting
+
+</MinVersion>
+
+Apollo's legacy reporting didn't include input and enum references.
+Beginning in v1.49.0, the router supports reporting these reference types.
+
+Configure it in `router.yaml` with the `telemetry.apollo.experimental_apollo_metrics_reference_mode` option:
 
 ```yaml title="router.yaml"
-experimental_apollo_metrics_generation_mode: legacy # Default is new
+telemetry: 
+  apollo:
+    experimental_apollo_metrics_reference_mode: enhanced # Default is legacy
 ```
+
+Once you enable this configuration, you can ____ in GraphOS Studio.
+
+<Note>
+
+Once you enable `enhanced` reference reporting, there will be a lag in changes to metrics in Studio.
+This is because historical operations still use the `legacy` reference reporting.
+
+</Note>
 
 ### Safelisting with persisted queries
 
