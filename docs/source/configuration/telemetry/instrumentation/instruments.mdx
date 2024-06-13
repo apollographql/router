@@ -22,7 +22,6 @@ OpenTelemetry specifies multiple [standard metric instruments](https://opentelem
   * `http.server.active_requests` - The number of active requests in flight.
   * `http.server.request.body.size` - A histogram of request body sizes for requests handled by the router.
   * `http.server.request.duration` - A histogram of request durations for requests handled by the router.
-  * `http.server.response.body.size` - A histogram of response body sizes for requests handled by the router.
 
 + In the [subgraph service](#router-request-lifecycle-services):
 
@@ -41,7 +40,6 @@ telemetry:
         http.server.active_requests: true # (default false)
         http.server.request.body.size: true # (default false)
         http.server.request.duration: true # (default false)
-        http.server.response.body.size: true # (default false)
       subgraph:
         http.client.request.body.size: true # (default false)
         http.client.request.duration: true # (default false)
