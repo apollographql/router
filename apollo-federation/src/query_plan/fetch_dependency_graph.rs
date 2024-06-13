@@ -3062,6 +3062,10 @@ fn compute_nodes_for_key_resolution<'a>(
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
     // We shouldn't have a key on a non-composite type
     let source_type: CompositeTypeDefinitionPosition = source.type_.clone().try_into()?;
+    let source_schema: ValidFederationSchema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&source.source)?
+        .clone();
     let dest_type: CompositeTypeDefinitionPosition = dest.type_.clone().try_into()?;
     let dest_schema: ValidFederationSchema = dependency_graph
         .federated_query_graph
@@ -3153,7 +3157,7 @@ fn compute_nodes_for_key_resolution<'a>(
     let node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
     let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
-        &dependency_graph.supergraph_schema,
+        &source_schema,
         &source_type,
         None,
     )));
