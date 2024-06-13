@@ -135,19 +135,7 @@ impl PlannerMode {
         schema: &Schema,
         configuration: &Configuration,
     ) -> Result<Arc<QueryPlanner>, ServiceBuildError> {
-        let config = apollo_federation::query_plan::query_planner::QueryPlannerConfig {
-            reuse_query_fragments: configuration
-                .supergraph
-                .reuse_query_fragments
-                .unwrap_or(true),
-            subgraph_graphql_validation: false,
-            generate_query_fragments: false,
-            incremental_delivery:
-                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
-                    enable_defer: configuration.supergraph.defer_support,
-                },
-            debug: Default::default(),
-        };
+        let config = configuration.rust_query_planner_config();
         Ok(Arc::new(QueryPlanner::new(
             schema.federation_supergraph(),
             config,

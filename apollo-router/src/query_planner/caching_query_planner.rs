@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::task;
@@ -12,9 +13,7 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
 use router_bridge::planner::UsageReporting;
-use serde::Serialize;
 use sha2::Digest;
 use sha2::Sha256;
 use tower::BoxError;
@@ -54,15 +53,6 @@ pub(crate) type InMemoryCachePlanner =
     InMemoryCache<CachingQueryKey, Result<QueryPlannerContent, Arc<QueryPlannerError>>>;
 pub(crate) const APOLLO_OPERATION_ID: &str = "apollo_operation_id";
 
-#[derive(Debug, Clone, Hash, PartialEq, Eq, Serialize)]
-pub(crate) enum ConfigMode {
-    //FIXME: add the Rust planner structure once it is hashable and serializable,
-    // for now use the JS config as it expected to be identical to the Rust one
-    Rust(Arc<QueryPlannerConfig>),
-    Both(Arc<QueryPlannerConfig>),
-    Js(Arc<QueryPlannerConfig>),
-}
-
 /// A query planner wrapper that caches results.
 ///
 /// The query planner performs LRU caching.
@@ -77,7 +67,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     plugins: Arc<Plugins>,
     enable_authorization_directives: bool,
     experimental_reuse_query_plans: bool,
-    config_mode: ConfigMode,
+    config_mode: Arc<QueryHash>,
     introspection: bool,
 }
 
@@ -123,17 +113,23 @@ where
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(configuration, &schema).unwrap_or(false);
 
-        let config_mode = match configuration.experimental_query_planner_mode {
+        let mut hasher = StructHasher::new();
+        match configuration.experimental_query_planner_mode {
             crate::configuration::QueryPlannerMode::New => {
-                ConfigMode::Rust(Arc::new(configuration.js_query_planner_config()))
+                configuration.rust_query_planner_config().hash(&mut hasher);
+                //hasher.update(&configuration.rust_query_planner_config());
             }
             crate::configuration::QueryPlannerMode::Legacy => {
-                ConfigMode::Js(Arc::new(configuration.js_query_planner_config()))
+                configuration.js_query_planner_config().hash(&mut hasher);
+
+                configuration.rust_query_planner_config().hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Both => {
-                ConfigMode::Both(Arc::new(configuration.js_query_planner_config()))
+                configuration.js_query_planner_config().hash(&mut hasher);
             }
         };
+        let config_mode = Arc::new(QueryHash(hasher.finalize()));
+
         Ok(Self {
             cache,
             delegate,
@@ -632,7 +628,7 @@ pub(crate) struct CachingQueryKey {
     pub(crate) hash: CachingQueryHash,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: ConfigMode,
+    pub(crate) config_mode: Arc<QueryHash>,
     pub(crate) introspection: bool,
 }
 
@@ -652,8 +648,7 @@ impl std::fmt::Display for CachingQueryKey {
         hasher.update(
             &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
         );
-        hasher
-            .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
+        hasher.update(&self.config_mode.0);
         hasher.update([self.introspection as u8]);
         let metadata = hex::encode(hasher.finalize());
 
@@ -710,8 +705,34 @@ pub(crate) struct WarmUpCachingQueryKey {
     pub(crate) hash: Option<CachingQueryHash>,
     pub(crate) metadata: CacheKeyMetadata,
     pub(crate) plan_options: PlanOptions,
-    pub(crate) config_mode: ConfigMode,
+    pub(crate) config_mode: Arc<QueryHash>,
     pub(crate) introspection: bool,
+}
+
+struct StructHasher {
+    hasher: Sha256,
+}
+
+impl StructHasher {
+    fn new() -> Self {
+        Self {
+            hasher: Sha256::new(),
+        }
+    }
+    fn finalize(self) -> Vec<u8> {
+        self.hasher.finalize().as_slice().into()
+    }
+}
+
+impl Hasher for StructHasher {
+    fn finish(&self) -> u64 {
+        unreachable!()
+    }
+
+    fn write(&mut self, bytes: &[u8]) {
+        self.hasher.update(&[0xFF][..]);
+        self.hasher.update(bytes);
+    }
 }
 
 #[cfg(test)]

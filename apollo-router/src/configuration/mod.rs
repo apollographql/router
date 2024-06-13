@@ -436,6 +436,21 @@ impl Configuration {
             type_conditioned_fetching: self.experimental_type_conditioned_fetching,
         }
     }
+
+    pub(crate) fn rust_query_planner_config(
+        &self,
+    ) -> apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+        apollo_federation::query_plan::query_planner::QueryPlannerConfig {
+            reuse_query_fragments: self.supergraph.reuse_query_fragments.unwrap_or(true),
+            subgraph_graphql_validation: false,
+            generate_query_fragments: false,
+            incremental_delivery:
+                apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
+                    enable_defer: self.supergraph.defer_support,
+                },
+            debug: Default::default(),
+        }
+    }
 }
 
 impl Default for Configuration {
