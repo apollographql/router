@@ -81,17 +81,17 @@ mod test {
         }
 
         let v = hist.to_vec();
-        for i in 0..100 {
-            assert_eq!(v[i], 1, "testing contents of bucket {}", i);
+        for (i, item) in v.iter().enumerate().take(100) {
+            assert_eq!(*item, 1, "testing contents of bucket {}", i);
         }
-        for i in 100..190 {
-            assert_eq!(v[i], 10, "testing contents of bucket {}", i);
+        for (i, item) in v.iter().enumerate().take(190).skip(100) {
+            assert_eq!(*item, 10, "testing contents of bucket {}", i);
         }
-        for i in 190..280 {
-            assert_eq!(v[i], 100, "testing contents of bucket {}", i);
+        for (i, item) in v.iter().enumerate().take(280).skip(190) {
+            assert_eq!(*item, 100, "testing contents of bucket {}", i);
         }
-        for i in 280..386 {
-            assert_eq!(v[i], 1000, "testing contents of bucket {}", i);
+        for (i, item) in v.iter().enumerate().take(386).skip(280) {
+            assert_eq!(*item, 1000, "testing contents of bucket {}", i);
         }
         assert_eq!(v[386], 4000, "testing contents of last bucket");
     }

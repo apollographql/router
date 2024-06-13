@@ -68,10 +68,10 @@ mod test {
         let v = hist.to_vec();
         assert_eq!(v.len(), 21);
 
-        for i in 1..21 {
+        for (i, item) in v.iter().enumerate().take(21).skip(1) {
             let pow_of_two = i as u32;
             assert_eq!(
-                v[i],
+                *item,
                 2_i64.pow(pow_of_two - 1),
                 "testing count of bucket {}",
                 i
