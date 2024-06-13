@@ -130,7 +130,6 @@ impl Query {
         let data = std::mem::take(&mut response.data);
 
         let original_operation = self.operation(operation_name);
-
         match data {
             Some(Value::Object(mut input)) => {
                 if self.is_deferred(defer_conditions) {
