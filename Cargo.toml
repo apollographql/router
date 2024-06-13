@@ -70,7 +70,7 @@ serde_json = { version = "1.0.114", features = [
     "preserve_order",
     "float_roundtrip",
 ] }
-serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
+serde_json_bytes = { version = "0.2.3", features = ["preserve_order"] }
 sha1 = "0.10.6"
 tempfile = "3.10.0"
 tokio = { version = "1.36.0", features = ["full"] }
