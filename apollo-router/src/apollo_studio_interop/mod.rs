@@ -92,56 +92,66 @@ impl AggregatedExtendedReferenceStats {
 
 impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
     fn add_assign(&mut self, other_stats: ExtendedReferenceStats) {
+        // Not using entry API here due to performance impact
+
         // Merge input object references
         for (type_name, type_stats) in other_stats.referenced_input_fields.iter() {
-            for (field_name, field_stats) in type_stats.iter() {
-                match self
-                    .referenced_input_fields
-                    .entry(type_name.to_string())
-                    .or_default()
-                    .entry(field_name.to_string())
-                {
-                    Entry::Occupied(mut entry) => {
-                        let stats: &mut AggregatedInputObjectFieldStats = entry.get_mut();
-                        stats.referenced += if field_stats.referenced { 1 } else { 0 };
-                        stats.null_reference += if field_stats.null_reference { 1 } else { 0 };
-                        stats.undefined_reference += if field_stats.undefined_reference {
-                            1
-                        } else {
-                            0
-                        };
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(AggregatedInputObjectFieldStats {
-                            referenced: if field_stats.referenced { 1 } else { 0 },
-                            null_reference: if field_stats.null_reference { 1 } else { 0 },
-                            undefined_reference: if field_stats.undefined_reference {
-                                1
-                            } else {
-                                0
-                            },
-                        });
-                    }
+            let field_name_stats = match self.referenced_input_fields.get_mut(type_name) {
+                Some(existing_stats) => existing_stats,
+                None => {
+                    self.referenced_input_fields
+                        .insert(type_name.to_string(), HashMap::new());
+                    self.referenced_input_fields.get_mut(type_name).unwrap()
                 }
+            };
+
+            for (field_name, field_stats) in type_stats.iter() {
+                let ref_count = if field_stats.referenced { 1 } else { 0 };
+                let null_ref_count = if field_stats.null_reference { 1 } else { 0 };
+                let undefined_ref_count = if field_stats.undefined_reference {
+                    1
+                } else {
+                    0
+                };
+
+                match field_name_stats.get_mut(field_name) {
+                    Some(existing_stats) => {
+                        existing_stats.referenced += ref_count;
+                        existing_stats.null_reference += null_ref_count;
+                        existing_stats.undefined_reference += undefined_ref_count;
+                    }
+                    None => {
+                        field_name_stats.insert(
+                            field_name.to_string(),
+                            AggregatedInputObjectFieldStats {
+                                referenced: ref_count,
+                                null_reference: null_ref_count,
+                                undefined_reference: undefined_ref_count,
+                            },
+                        );
+                    }
+                };
             }
         }
 
         // Merge enum references
         for (enum_name, enum_values) in other_stats.referenced_enums.iter() {
-            for enum_value in enum_values.iter() {
-                match self
-                    .referenced_enums
-                    .entry(enum_name.to_string())
-                    .or_default()
-                    .entry(enum_value.to_string())
-                {
-                    Entry::Occupied(mut entry) => {
-                        *entry.get_mut() += 1;
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(1);
-                    }
+            let enum_name_stats = match self.referenced_enums.get_mut(enum_name) {
+                Some(existing_stats) => existing_stats,
+                None => {
+                    self.referenced_enums
+                        .insert(enum_name.to_string(), HashMap::new());
+                    self.referenced_enums.get_mut(enum_name).unwrap()
                 }
+            };
+
+            for enum_value in enum_values.iter() {
+                match enum_name_stats.get_mut(enum_value) {
+                    Some(existing_stats) => *existing_stats += 1,
+                    None => {
+                        enum_name_stats.insert(enum_value.to_string(), 1);
+                    }
+                };
             }
         }
     }
@@ -473,10 +483,16 @@ impl UsageGenerator<'_> {
     }
 
     fn add_enum_reference(&mut self, enum_name: String, enum_value: String) {
-        self.enums_by_name
-            .entry(enum_name)
-            .or_default()
-            .insert(enum_value.to_string());
+        // Not using entry API here due to performance impact
+        let enum_name_stats = match self.enums_by_name.get_mut(&enum_name) {
+            Some(existing_stats) => existing_stats,
+            None => {
+                self.enums_by_name.insert(enum_name.to_string(), HashSet::new());
+                self.enums_by_name.get_mut(&enum_name).unwrap()
+            }
+        };
+
+        enum_name_stats.insert(enum_value.to_string());
     }
 
     fn add_input_object_reference(
@@ -486,28 +502,33 @@ impl UsageGenerator<'_> {
         is_referenced: bool,
         is_null_reference: bool,
     ) {
-        match self
-            .input_field_references
-            .entry(type_name)
-            .or_default()
-            .entry(field_name)
-        {
-            Entry::Occupied(mut entry) => {
-                // The input object field stats are additive in that it represents whether the field was referenced/null/undefined
-                // at least once within this operation.
-                let stats: &mut InputObjectFieldStats = entry.get_mut();
+        // Not using entry API here due to performance impact
+        let type_name_stats = match self.input_field_references.get_mut(&type_name) {
+            Some(existing_stats) => existing_stats,
+            None => {
+                self.input_field_references
+                    .insert(type_name.to_string(), HashMap::new());
+                self.input_field_references.get_mut(&type_name).unwrap()
+            }
+        };
+
+        match type_name_stats.get_mut(&field_name) {
+            Some(stats) => {
                 stats.referenced = stats.referenced || is_referenced;
                 stats.null_reference = stats.null_reference || is_null_reference;
                 stats.undefined_reference = stats.undefined_reference || !is_referenced;
             }
-            Entry::Vacant(entry) => {
-                entry.insert(InputObjectFieldStats {
-                    referenced: is_referenced,
-                    null_reference: is_null_reference,
-                    undefined_reference: !is_referenced,
-                });
+            None => {
+                type_name_stats.insert(
+                    field_name.to_string(),
+                    InputObjectFieldStats {
+                        referenced: is_referenced,
+                        null_reference: is_null_reference,
+                        undefined_reference: !is_referenced,
+                    },
+                );
             }
-        }
+        };
     }
 
     fn process_extended_refs_for_selection_set(&mut self, selection_set: &SelectionSet) {
