@@ -243,6 +243,7 @@ async fn get_batch_trace_report(
     reports: Arc<Mutex<Vec<Report>>>,
     request: router::Request,
     use_legacy_request_span: bool,
+    demand_control: bool,
 ) -> Report {
     get_report(
         get_batch_router_service,
@@ -250,7 +251,7 @@ async fn get_batch_trace_report(
         use_legacy_request_span,
         false,
         request,
-        false,
+        demand_control,
         |r| {
             !r.traces_per_query
                 .values()
@@ -491,7 +492,8 @@ async fn test_batch_trace_id() {
                 hyper::Body::from(result)
             });
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
+        let report =
+            get_batch_trace_report(reports, request.into(), use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -563,7 +565,8 @@ async fn test_batch_send_header() {
                 hyper::Body::from(result)
             });
         let reports = Arc::new(Mutex::new(vec![]));
-        let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
+        let report =
+            get_batch_trace_report(reports, request.into(), use_legacy_request_span, false).await;
         assert_report!(report);
     }
 }
@@ -650,6 +653,31 @@ async fn test_demand_control_trace() {
         let req: router::Request = request.try_into().expect("could not convert request");
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_trace_report(reports, req, use_legacy_request_span, true).await;
+        assert_report!(report);
+    }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_trace_batched() {
+    for use_legacy_request_span in [true, false] {
+        let request = supergraph::Request::fake_builder()
+            .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+            .build()
+            .unwrap()
+            .supergraph_request
+            .map(|req| {
+                // Modify the request so that it is a valid array of requests.
+                let mut json_bytes = serde_json::to_vec(&req).unwrap();
+                let mut result = vec![b'['];
+                result.append(&mut json_bytes.clone());
+                result.push(b',');
+                result.append(&mut json_bytes);
+                result.push(b']');
+                hyper::Body::from(result)
+            });
+        let req: router::Request = request.try_into().expect("could not convert request");
+        let reports = Arc::new(Mutex::new(vec![]));
+        let report = get_batch_trace_report(reports, req, use_legacy_request_span, true).await;
         assert_report!(report);
     }
 }
