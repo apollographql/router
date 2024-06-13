@@ -93,10 +93,6 @@ fn can_use_a_key_on_an_interface_object_type() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
-)]
-// TODO: investigate this failure
 fn can_use_a_key_on_an_interface_object_from_an_interface_object_type() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -229,9 +225,10 @@ fn does_not_rely_on_an_interface_object_directly_for_typename() {
 
 #[test]
 #[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
+    expected = r#"Cannot add selection of field "I.id" to selection set of parent type "A""#
 )]
 // TODO: investigate this failure
+// - Fails to rebase on an interface object type in a subgraph.
 fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is_requested() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -374,10 +371,6 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
-)]
-// TODO: investigate this failure
 fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_starts_with_interface_object(
 ) {
     let planner = planner!(
@@ -434,9 +427,10 @@ fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_
 
 #[test]
 #[should_panic(
-    expected = r#"Cannot add selection of field "I.__typename" to selection set of parent type "I" that is potentially an interface object type at runtime"#
+    expected = r#"Cannot add selection of field "I.id" to selection set of parent type "A""#
 )]
 // TODO: investigate this failure
+// - Fails to rebase on an interface object type in a subgraph.
 fn it_avoids_buffering_interface_object_results_that_may_have_to_be_filtered_with_lists() {
     let planner = planner!(
         S1: r#"
