@@ -63,10 +63,6 @@ impl FederationSchema {
         &self.schema
     }
 
-    pub(crate) fn schema_mut(&mut self) -> &mut Schema {
-        &mut self.schema
-    }
-
     /// Discard the Federation metadata and return the apollo-compiler schema.
     pub fn into_inner(self) -> Schema {
         self.schema

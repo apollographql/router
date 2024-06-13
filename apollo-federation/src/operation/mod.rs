@@ -44,6 +44,7 @@ use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::definitions::AbstractType;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
@@ -596,20 +597,58 @@ pub(crate) enum Selection {
     InlineFragment(Arc<InlineFragmentSelection>),
 }
 
+/// Element enum that is more general than OpPathElement.
+/// - Used for operation optimization.
+#[derive(Debug, Clone, derive_more::From)]
+pub(crate) enum OperationElement {
+    Field(Field),
+    FragmentSpread(FragmentSpread),
+    InlineFragment(InlineFragment),
+}
+
 impl Selection {
     pub(crate) fn from_field(field: Field, sub_selections: Option<SelectionSet>) -> Self {
         Self::Field(Arc::new(field.with_subselection(sub_selections)))
     }
 
+    /// Build a selection from an OpPathElement and a sub-selection set.
     pub(crate) fn from_element(
         element: OpPathElement,
         sub_selections: Option<SelectionSet>,
-    ) -> Result<Self, FederationError> {
+    ) -> Result<Selection, FederationError> {
         // PORT_NOTE: This is TODO item is copied from the JS `selectionOfElement` function.
         // TODO: validate that the subSelection is ok for the element
         match element {
             OpPathElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
             OpPathElement::InlineFragment(inline_fragment) => {
+                let Some(sub_selections) = sub_selections else {
+                    return Err(FederationError::internal(
+                        "unexpected inline fragment without sub-selections",
+                    ));
+                };
+                Ok(InlineFragmentSelection::new(inline_fragment, sub_selections).into())
+            }
+        }
+    }
+
+    /// Build a selection from an OperationElement and a sub-selection set.
+    /// - `named_fragments`: Named fragment definitions that are rebased for the element's schema.
+    pub(crate) fn from_operation_element(
+        element: OperationElement,
+        sub_selections: Option<SelectionSet>,
+        named_fragments: &NamedFragments,
+    ) -> Result<Selection, FederationError> {
+        match element {
+            OperationElement::Field(field) => Ok(Self::from_field(field, sub_selections)),
+            OperationElement::FragmentSpread(fragment_spread) => {
+                if sub_selections.is_some() {
+                    return Err(FederationError::internal(
+                        "unexpected fragment spread with sub-selections",
+                    ));
+                }
+                Ok(FragmentSpreadSelection::new(fragment_spread, named_fragments)?.into())
+            }
+            OperationElement::InlineFragment(inline_fragment) => {
                 let Some(sub_selections) = sub_selections else {
                     return Err(FederationError::internal(
                         "unexpected inline fragment without sub-selections",
@@ -659,13 +698,25 @@ impl Selection {
         }
     }
 
+    pub(crate) fn operation_element(&self) -> Result<OperationElement, FederationError> {
+        match self {
+            Selection::Field(field_selection) => {
+                Ok(OperationElement::Field(field_selection.field.clone()))
+            }
+            Selection::FragmentSpread(fragment_spread_selection) => Ok(
+                OperationElement::FragmentSpread(fragment_spread_selection.spread.clone()),
+            ),
+            Selection::InlineFragment(inline_fragment_selection) => Ok(
+                OperationElement::InlineFragment(inline_fragment_selection.inline_fragment.clone()),
+            ),
+        }
+    }
+
+    // Note: Fragment spreads can be present in optimized operations.
     pub(crate) fn selection_set(&self) -> Result<Option<&SelectionSet>, FederationError> {
         match self {
             Selection::Field(field_selection) => Ok(field_selection.selection_set.as_ref()),
-            Selection::FragmentSpread(_) => Err(Internal {
-                message: "Fragment spread does not directly have a selection set".to_owned(),
-            }
-            .into()),
+            Selection::FragmentSpread(_) => Ok(None),
             Selection::InlineFragment(inline_fragment_selection) => {
                 Ok(Some(&inline_fragment_selection.selection_set))
             }
@@ -828,6 +879,22 @@ impl Selection {
         } else {
             // selection has no (sub-)selection set.
             Ok(self.clone())
+        }
+    }
+
+    pub(crate) fn any_element(
+        &self,
+        parent_type_position: CompositeTypeDefinitionPosition,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        match self {
+            Selection::Field(field_selection) => field_selection.any_element(predicate),
+            Selection::InlineFragment(inline_fragment_selection) => {
+                inline_fragment_selection.any_element(predicate)
+            }
+            Selection::FragmentSpread(fragment_spread_selection) => {
+                fragment_spread_selection.any_element(parent_type_position, predicate)
+            }
         }
     }
 }
@@ -1078,6 +1145,37 @@ mod field_selection {
             self,
             selection_set: Option<SelectionSet>,
         ) -> FieldSelection {
+            if cfg!(debug_assertions) {
+                if let Some(ref selection_set) = selection_set {
+                    if let Ok(field_type) = self.data.output_base_type() {
+                        if let Ok(field_type_position) =
+                            CompositeTypeDefinitionPosition::try_from(field_type)
+                        {
+                            debug_assert_eq!(
+                                field_type_position,
+                                selection_set.type_position,
+                                "Field and its selection set should point to the same type position [field position: {}, selection position: {}]", field_type_position, selection_set.type_position,
+                            );
+                            debug_assert_eq!(
+                                self.data().schema,
+                                selection_set.schema,
+                                "Field and its selection set should point to the same schema",
+                            );
+                        } else {
+                            debug_assert!(
+                                false,
+                                "Field with subselection does not reference CompositeTypePosition"
+                            );
+                        }
+                    } else {
+                        debug_assert!(
+                            false,
+                            "Field with subselection does not reference CompositeTypePosition"
+                        );
+                    }
+                }
+            }
+
             FieldSelection {
                 field: self,
                 selection_set,
@@ -1368,6 +1466,23 @@ impl FragmentSpreadSelection {
         }
     }
 
+    /// Creates a fragment spread selection (in an optimized operation).
+    /// - `named_fragments`: Named fragment definitions that are rebased for the element's schema.
+    pub(crate) fn new(
+        fragment_spread: FragmentSpread,
+        named_fragments: &NamedFragments,
+    ) -> Result<Self, FederationError> {
+        let fragment_name = &fragment_spread.data().fragment_name;
+        let fragment = named_fragments.get(fragment_name).ok_or_else(|| {
+            FederationError::internal(format!("Fragment {} not found", fragment_name))
+        })?;
+        debug_assert_eq!(fragment_spread.data().schema, fragment.schema);
+        Ok(Self {
+            spread: fragment_spread,
+            selection_set: fragment.selection_set.clone(),
+        })
+    }
+
     fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -1403,6 +1518,24 @@ impl FragmentSpreadSelection {
         } else {
             unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
         }
+    }
+
+    pub(crate) fn any_element(
+        &self,
+        parent_type_position: CompositeTypeDefinitionPosition,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        let inline_fragment = InlineFragment::new(InlineFragmentData {
+            schema: self.spread.data().schema.clone(),
+            parent_type_position,
+            type_condition_position: Some(self.spread.data().type_condition_position.clone()),
+            directives: self.spread.data().directives.clone(),
+            selection_id: self.spread.data().selection_id.clone(),
+        });
+        if predicate(inline_fragment.into())? {
+            return Ok(true);
+        }
+        self.selection_set.any_element(predicate)
     }
 }
 
@@ -1925,8 +2058,10 @@ impl SelectionSet {
         Ok(())
     }
 
+    /// NOTE: This is a private API and should be used with care, use `add_selection_set` instead.
+    ///
     /// Merges the given normalized selection sets into this one.
-    pub(crate) fn merge_into<'op>(
+    fn merge_into<'op>(
         &mut self,
         others: impl Iterator<Item = &'op SelectionSet>,
     ) -> Result<(), FederationError> {
@@ -1951,6 +2086,8 @@ impl SelectionSet {
         self.merge_selections_into(selections_to_merge.into_iter())
     }
 
+    /// NOTE: This is a private API and should be used with care, use `add_selection` instead.
+    ///
     /// A helper function for merging the given selections into this one.
     fn merge_selections_into<'op>(
         &mut self,
@@ -2304,13 +2441,20 @@ impl SelectionSet {
                 .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
         };
 
-        let element = first.element()?.rebase_on_or_error(parent_type, schema)?;
+        let element =
+            first
+                .operation_element()?
+                .rebase_on_or_error(parent_type, schema, named_fragments)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
         let Some(ref sub_selection_parent_type) = sub_selection_parent_type else {
             // This is a leaf, so all updates should correspond ot the same field and we just use the first.
-            return Selection::from_element(element, /*sub_selection*/ None);
+            return Selection::from_operation_element(
+                element,
+                /*sub_selection*/ None,
+                named_fragments,
+            );
         };
 
         // This case has a sub-selection. Merge all sub-selection updates.
@@ -2332,7 +2476,7 @@ impl SelectionSet {
             sub_selection_updates.values().map(|v| v.iter()),
             named_fragments,
         )?);
-        Selection::from_element(element, updated_sub_selection)
+        Selection::from_operation_element(element, updated_sub_selection, named_fragments)
     }
 
     /// Build a selection set by aggregating all items from the `selection_key_groups` iterator.
@@ -2503,29 +2647,55 @@ impl SelectionSet {
     /// Inserts a `Selection` into the inner map. Should a selection with the same key already
     /// exist in the map, the existing selection and the given selection are merged, replacing the
     /// existing selection while keeping the same insertion index.
-    fn add_selection(&mut self, selection: Selection) -> Result<(), FederationError> {
-        let selections = Arc::make_mut(&mut self.selections);
+    ///
+    /// NOTE: This method assumes selection already points to the correct schema and parent type.
+    pub(crate) fn add_local_selection(
+        &mut self,
+        selection: &Selection,
+    ) -> Result<(), FederationError> {
+        debug_assert_eq!(
+            &self.schema,
+            selection.schema(),
+            "In order to add selection it needs to point to the same schema"
+        );
+        self.merge_selections_into(std::iter::once(selection))
+    }
 
-        let key = selection.key();
-        match selections.remove(&key) {
-            Some((index, existing_selection)) => {
-                let to_merge = [existing_selection, selection];
-                // `existing_selection` and `selection` both have the same selection key,
-                // so the merged selection will also have the same selection key.
-                let selection = SelectionSet::make_selection(
-                    &self.schema,
-                    &self.type_position,
-                    to_merge.iter(),
-                    /*named_fragments*/ &Default::default(),
-                )?;
-                selections.insert_at(index, selection);
-            }
-            None => {
-                selections.insert(selection);
-            }
-        }
+    /// Inserts a `SelectionSet` into the inner map. Should any sub selection with the same key already
+    /// exist in the map, the existing selection and the given selection are merged, replacing the
+    /// existing selection while keeping the same insertion index.
+    ///
+    /// NOTE: This method assumes the target selection set already points to the same schema and type
+    /// position. Use `add_selection_set` instead if you need to rebase the selection set.
+    pub(crate) fn add_local_selection_set(
+        &mut self,
+        selection_set: &SelectionSet,
+    ) -> Result<(), FederationError> {
+        debug_assert_eq!(
+            self.schema, selection_set.schema,
+            "In order to add selection set it needs to point to the same schema."
+        );
+        debug_assert_eq!(
+            self.type_position, selection_set.type_position,
+            "In order to add selection set it needs to point to the same type position"
+        );
+        self.merge_into(std::iter::once(selection_set))
+    }
 
-        Ok(())
+    /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Should any sub
+    /// selection with the same key already exist in the map, the existing selection and the given
+    /// selection are merged, replacing the existing selection while keeping the same insertion index.
+    pub(crate) fn add_selection_set(
+        &mut self,
+        selection_set: &SelectionSet,
+    ) -> Result<(), FederationError> {
+        let rebased = selection_set.rebase_on(
+            &self.type_position,
+            &NamedFragments::default(),
+            &self.schema,
+            RebaseErrorHandlingOption::ThrowError,
+        )?;
+        self.add_local_selection_set(&rebased)
     }
 
     /// Adds a path, and optional some selections following that path, to this selection map.
@@ -2596,45 +2766,41 @@ impl SelectionSet {
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
                 let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
-                let selection_set = selection_set
-                    .map(|selection_set| {
-                        selection_set.rebase_on(
-                            &element.sub_selection_type_position()?.ok_or_else(|| {
-                                FederationError::internal("unexpected: Element has a selection set with non-composite base type")
-                            })?,
-                            &NamedFragments::default(),
-                            &self.schema,
-                            RebaseErrorHandlingOption::ThrowError,
-                        )
-                    })
-                    .transpose()?;
-                let selection = Selection::from_element(element, selection_set)?;
-                // TODO move the rebasing to add_selection/merge_into
-                if let Some(rebased_selection) = selection.rebase_on(
-                    &self.type_position,
-                    &NamedFragments::default(),
-                    &self.schema,
-                    RebaseErrorHandlingOption::ThrowError,
-                )? {
-                    self.add_selection(rebased_selection)?
+                if selection_set.is_none() || selection_set.is_some_and(|s| s.is_empty()) {
+                    // This is a somewhat common case when dealing with `@key` "conditions" that we can
+                    // end up with trying to add empty sub selection set on a non-leaf node. There is
+                    // nothing to do here - we know will have a node at specified path but currently
+                    // we don't have any sub selections so there is nothing to merge.
+                    // JS code was doing this check in `makeSelectionSet`
+                    if !ele.is_terminal()? {
+                        return Ok(());
+                    } else {
+                        // add leaf
+                        let selection = Selection::from_element(element, None)?;
+                        self.add_local_selection(&selection)?
+                    }
+                } else {
+                    let selection_set = selection_set
+                        .map(|selection_set| {
+                            selection_set.rebase_on(
+                                &element.sub_selection_type_position()?.ok_or_else(|| {
+                                    FederationError::internal("unexpected: Element has a selection set with non-composite base type")
+                                })?,
+                                &NamedFragments::default(),
+                                &self.schema,
+                                RebaseErrorHandlingOption::ThrowError,
+                            )
+                        })
+                        .transpose()?
+                        .map(|selection_set| selection_set.without_unnecessary_fragments());
+                    let selection = Selection::from_element(element, selection_set)?;
+                    self.add_local_selection(&selection)?
                 }
             }
-            // If we don't have any path, we rebase and merge in the given subselections at the root.
+            // If we don't have any path, we rebase and merge in the given sub selections at the root.
             None => {
                 if let Some(sel) = selection_set {
-                    // TODO move the rebasing to add_selection/merge_into
-                    sel.selections.values().cloned().try_for_each(|s| {
-                        if let Some(rebased) = s.rebase_on(
-                            &self.type_position,
-                            &NamedFragments::default(),
-                            &self.schema,
-                            RebaseErrorHandlingOption::ThrowError,
-                        )? {
-                            self.add_selection(rebased)
-                        } else {
-                            Ok(())
-                        }
-                    })?;
+                    self.add_selection_set(sel)?
                 }
             }
         }
@@ -2729,27 +2895,28 @@ impl SelectionSet {
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
     ) -> Result<SelectionSet, FederationError> {
-        let mut normalized_selection_map = SelectionMap::new();
+        let mut normalized_selections = Self {
+            schema: schema.clone(),
+            type_position: parent_type.clone(),
+            selections: Default::default(), // start empty
+        };
         for (_, selection) in self.selections.iter() {
             if let Some(selection_or_set) =
                 selection.normalize(parent_type, named_fragments, schema, option)?
             {
                 match selection_or_set {
                     SelectionOrSet::Selection(normalized_selection) => {
-                        normalized_selection_map.insert(normalized_selection);
+                        normalized_selections.add_local_selection(&normalized_selection)?;
                     }
                     SelectionOrSet::SelectionSet(normalized_set) => {
-                        normalized_selection_map.extend_ref(&normalized_set.selections);
+                        // Since the `selection` has been expanded/lifted, we use
+                        // `add_selection_set` to make sure it's rebased.
+                        normalized_selections.add_selection_set(&normalized_set)?;
                     }
                 }
             }
         }
-
-        Ok(SelectionSet {
-            schema: self.schema.clone(),
-            type_position: self.type_position.clone(),
-            selections: Arc::new(normalized_selection_map),
-        })
+        Ok(normalized_selections)
     }
 
     fn has_defer(&self) -> bool {
@@ -2944,7 +3111,6 @@ impl SelectionSet {
         }
     }
 
-    // TODO move this logic to SelectionSet add_selection/merge_into
     /// JS PORT NOTE: In Rust implementation we are doing the selection set updates in-place whereas
     /// JS code was pooling the updates and only apply those when building the final selection set.
     /// See `makeSelectionSet` method for details.
@@ -2978,6 +3144,27 @@ impl SelectionSet {
             type_position: parent_type.clone(),
             selections: Arc::new(final_selections),
         }
+    }
+
+    pub(crate) fn iter(&self) -> impl Iterator<Item = &Selection> {
+        self.selections.values()
+    }
+
+    /// Returns true if any elements in this selection set or its descendants returns true for the
+    /// given predicate. Note that fragment spread selections are converted to inline fragment
+    /// elements, and their fragment selection sets are recursed into.
+    // PORT_NOTE: The JS codebase calls this "some()", but that's easy to confuse with "Some" in
+    // Rust.
+    pub(crate) fn any_element(
+        &self,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        for selection in self.selections.values() {
+            if selection.any_element(self.type_position.clone(), predicate)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -3187,6 +3374,20 @@ pub(crate) fn subselection_type_if_abstract(
     }
 }
 
+impl FieldData {
+    fn with_updated_position(
+        &self,
+        schema: ValidFederationSchema,
+        field_position: FieldDefinitionPosition,
+    ) -> Self {
+        Self {
+            schema,
+            field_position,
+            ..self.clone()
+        }
+    }
+}
+
 impl FieldSelection {
     /// Normalize this field selection (merging selections with the same keys), with the following
     /// additional transformations:
@@ -3236,6 +3437,13 @@ impl FieldSelection {
         }))
     }
 
+    fn with_updated_element(&self, element: FieldData) -> Self {
+        Self {
+            field: Field::new(element),
+            ..self.clone()
+        }
+    }
+
     fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
@@ -3243,13 +3451,28 @@ impl FieldSelection {
         schema: &ValidFederationSchema,
         option: NormalizeSelectionOption,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
+        let field_position =
+            if self.field.schema() == schema && self.field.parent_type_position() == *parent_type {
+                self.field.data().field_position.clone()
+            } else {
+                parent_type.field(self.field.data().name().clone())?
+            };
+
+        let field_element = if self.field.schema() == schema
+            && self.field.data().field_position == field_position
+        {
+            self.field.data().clone()
+        } else {
+            self.field
+                .data()
+                .with_updated_position(schema.clone(), field_position)
+        };
+
         if let Some(selection_set) = &self.selection_set {
+            let field_composite_type_position: CompositeTypeDefinitionPosition =
+                field_element.output_base_type()?.try_into()?;
             let mut normalized_selection: SelectionSet =
                 if NormalizeSelectionOption::NormalizeRecursively == option {
-                    let field = self.field.data().field_position.get(schema.schema())?;
-                    let field_composite_type_position: CompositeTypeDefinitionPosition = schema
-                        .get_type(field.ty.inner_named_type().clone())?
-                        .try_into()?;
                     selection_set.normalize(
                         &field_composite_type_position,
                         named_fragments,
@@ -3260,7 +3483,7 @@ impl FieldSelection {
                     selection_set.clone()
                 };
 
-            let mut selection = self.clone();
+            let mut selection = self.with_updated_element(field_element);
             if normalized_selection.is_empty() {
                 // In rare cases, it's possible that everything in the sub-selection was trimmed away and so the
                 // sub-selection is empty. Which suggest something may be wrong with this part of the query
@@ -3277,7 +3500,8 @@ impl FieldSelection {
                 let non_included_typename = Selection::from_field(
                     Field::new(FieldData {
                         schema: schema.clone(),
-                        field_position: parent_type.introspection_typename_field(),
+                        field_position: field_composite_type_position
+                            .introspection_typename_field(),
                         alias: None,
                         arguments: Arc::new(vec![]),
                         directives: Arc::new(directives),
@@ -3299,13 +3523,28 @@ impl FieldSelection {
             // in RS version we only store the field position reference so we don't need to update the
             // underlying elements
             Ok(Some(SelectionOrSet::Selection(Selection::from(
-                self.clone(),
+                self.with_updated_element(field_element),
             ))))
         }
     }
 
     pub(crate) fn has_defer(&self) -> bool {
         self.field.has_defer() || self.selection_set.as_ref().is_some_and(|s| s.has_defer())
+    }
+
+    pub(crate) fn any_element(
+        &self,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        if predicate(self.field.clone().into())? {
+            return Ok(true);
+        }
+        if let Some(selection_set) = &self.selection_set {
+            if selection_set.any_element(predicate)? {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 }
 
@@ -3414,7 +3653,13 @@ impl InlineFragmentSelection {
     pub(crate) fn new(inline_fragment: InlineFragment, selection_set: SelectionSet) -> Self {
         debug_assert_eq!(
             inline_fragment.data().casted_type(),
-            selection_set.type_position
+            selection_set.type_position,
+            "Inline fragment type condition and its selection set should point to the same type position",
+        );
+        debug_assert_eq!(
+            inline_fragment.data().schema,
+            selection_set.schema,
+            "Inline fragment and its selection set should point to the same schema",
         );
         Self {
             inline_fragment,
@@ -3501,10 +3746,7 @@ impl InlineFragmentSelection {
             directives,
             selection_id: SelectionId::new(),
         };
-        Self {
-            inline_fragment: InlineFragment::new(inline_fragment_data),
-            selection_set,
-        }
+        InlineFragmentSelection::new(InlineFragment::new(inline_fragment_data), selection_set)
     }
 
     fn normalize(
@@ -3549,6 +3791,20 @@ impl InlineFragmentSelection {
                 return if normalized_selection_set.is_empty() {
                     Ok(None)
                 } else {
+                    // We need to rebase since the parent type for the selection set could be
+                    // changed.
+                    // Note: Rebasing after normalization, since rebasing before that can error out.
+                    //       Or, `normalize` could `rebase` at the same time.
+                    let normalized_selection_set = if useless_fragment {
+                        normalized_selection_set.clone()
+                    } else {
+                        normalized_selection_set.rebase_on(
+                            parent_type,
+                            named_fragments,
+                            schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )?
+                    };
                     Ok(Some(SelectionOrSet::SelectionSet(normalized_selection_set)))
                 };
             }
@@ -3556,11 +3812,12 @@ impl InlineFragmentSelection {
 
         // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
         // (note that even if we're not recursive, we may still have some "lifting" to do)
+        // Note: This normalized_selection_set is not rebased here yet. It will be rebased later as necessary.
         let normalized_selection_set = if NormalizeSelectionOption::NormalizeRecursively == option {
             let normalized = self.selection_set.normalize(
-                self.casted_type(),
+                &self.selection_set.type_position,
                 named_fragments,
-                schema,
+                &self.selection_set.schema,
                 option,
             )?;
             // It could be that nothing was satisfiable.
@@ -3664,24 +3921,63 @@ impl InlineFragmentSelection {
 
             // If we can lift all selections, then that just mean we can get rid of the current fragment altogether
             if liftable_selections.len() == normalized_selection_set.selections.len() {
-                return Ok(Some(SelectionOrSet::SelectionSet(normalized_selection_set)));
+                // Rebasing is necessary since this normalized sub-selection set changed its parent.
+                let rebased_selection_set = normalized_selection_set.rebase_on(
+                    parent_type,
+                    named_fragments,
+                    schema,
+                    RebaseErrorHandlingOption::ThrowError,
+                )?;
+                return Ok(Some(SelectionOrSet::SelectionSet(rebased_selection_set)));
             }
 
             // Otherwise, if there are "liftable" selections, we must return a set comprised of those lifted selection,
             // and the current fragment _without_ those lifted selections.
             if liftable_selections.len() > 0 {
+                // Converting `... [on T] { <liftable_selections> <non-liftable_selections> }` into
+                // `{ ... [on T] { <non-liftable_selections> } <liftable_selections> }`.
+                // PORT_NOTE: It appears that this lifting could be repeatable (meaning lifted
+                // selection could be broken down further and lifted again), but normalize is not
+                // applied recursively. This could be worth investigating.
+                let Some(rebased_inline_fragment) = self.inline_fragment.rebase_on(
+                    parent_type,
+                    schema,
+                    RebaseErrorHandlingOption::ThrowError,
+                )?
+                else {
+                    return Err(FederationError::internal(
+                        "Rebase should've thrown an error",
+                    ));
+                };
                 let mut mutable_selections = self.selection_set.selections.clone();
                 let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
                 final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
+                let rebased_casted_type = rebased_inline_fragment.data().casted_type();
                 let final_inline_fragment: Selection = InlineFragmentSelection::new(
-                    self.inline_fragment.clone(),
+                    rebased_inline_fragment,
                     SelectionSet {
                         schema: schema.clone(),
-                        type_position: self.inline_fragment.data().casted_type(),
+                        type_position: rebased_casted_type,
                         selections: Arc::new(final_fragment_selections.clone()),
                     },
                 )
                 .into();
+
+                // Since liftable_selections are changing their parent, we need to rebase them.
+                liftable_selections = liftable_selections
+                    .into_iter()
+                    .map(|(_key, sel)| {
+                        sel.rebase_on(
+                            parent_type,
+                            named_fragments,
+                            schema,
+                            RebaseErrorHandlingOption::ThrowError,
+                        )?
+                        .ok_or_else(|| {
+                            FederationError::internal("Unable to rebase selection updates")
+                        })
+                    })
+                    .collect::<Result<_, _>>()?;
 
                 let mut final_selection_map = SelectionMap::new();
                 final_selection_map.insert(final_inline_fragment);
@@ -3703,15 +3999,22 @@ impl InlineFragmentSelection {
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(self.clone()),
             ))))
-        } else if let Some(rebased) = self.inline_fragment.rebase_on(
+        } else if let Some(rebased_inline_fragment) = self.inline_fragment.rebase_on(
             parent_type,
             schema,
             RebaseErrorHandlingOption::ThrowError,
         )? {
+            let rebased_casted_type = rebased_inline_fragment.data().casted_type();
+            let rebased_selection_set = normalized_selection_set.rebase_on(
+                &rebased_casted_type,
+                named_fragments,
+                schema,
+                RebaseErrorHandlingOption::ThrowError,
+            )?;
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(InlineFragmentSelection::new(
-                    rebased,
-                    normalized_selection_set,
+                    rebased_inline_fragment,
+                    rebased_selection_set,
                 )),
             ))))
         } else {
@@ -3746,6 +4049,16 @@ impl InlineFragmentSelection {
         inline_fragment.directives.is_empty()
             && (inline_fragment_type_condition.is_none()
                 || inline_fragment_type_condition.is_some_and(|t| t == *maybe_parent))
+    }
+
+    pub(crate) fn any_element(
+        &self,
+        predicate: &mut impl FnMut(OpPathElement) -> Result<bool, FederationError>,
+    ) -> Result<bool, FederationError> {
+        if predicate(self.inline_fragment.clone().into())? {
+            return Ok(true);
+        }
+        self.selection_set.any_element(predicate)
     }
 }
 
@@ -4441,6 +4754,25 @@ impl Display for InlineFragment {
             f.write_str("...")?;
         }
         data.directives.serialize().no_indent().fmt(f)
+    }
+}
+
+impl Display for FragmentSpread {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let data = self.data();
+        f.write_str("...")?;
+        f.write_str(&data.fragment_name)?;
+        data.directives.serialize().no_indent().fmt(f)
+    }
+}
+
+impl Display for OperationElement {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            OperationElement::Field(field) => field.fmt(f),
+            OperationElement::InlineFragment(inline_fragment) => inline_fragment.fmt(f),
+            OperationElement::FragmentSpread(fragment_spread) => fragment_spread.fmt(f),
+        }
     }
 }
 
