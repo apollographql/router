@@ -460,10 +460,6 @@ fn it_works_with_nested_fragments_when_only_the_nested_fragment_gets_preserved()
 }
 
 #[test]
-#[should_panic(
-    expected = r#"variable `$if` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"#
-)]
-// TODO: investigate this failure
 fn it_preserves_directives_when_fragment_not_used() {
     // (because used only once)
     let planner = planner!(
@@ -482,7 +478,7 @@ fn it_preserves_directives_when_fragment_not_used() {
     assert_plan!(
         &planner,
         r#"
-          query test($if: Boolean) {
+          query test($if: Boolean!) {
             t {
               id
               ...OnT @include(if: $if)
@@ -513,10 +509,6 @@ fn it_preserves_directives_when_fragment_not_used() {
 }
 
 #[test]
-#[should_panic(
-    expected = "variable `$test1` of type `Boolean` cannot be used for argument `if` of type `Boolean!`"
-)]
-// TODO: investigate this failure
 fn it_preserves_directives_when_fragment_is_reused() {
     let planner = planner!(
         Subgraph1: r#"
@@ -534,7 +526,7 @@ fn it_preserves_directives_when_fragment_is_reused() {
     assert_plan!(
         &planner,
         r#"
-          query test($test1: Boolean, $test2: Boolean) {
+          query test($test1: Boolean!, $test2: Boolean!) {
             t {
               id
               ...OnT @include(if: $test1)
@@ -569,7 +561,7 @@ fn it_preserves_directives_when_fragment_is_reused() {
 }
 
 #[test]
-fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgaph() {
+fn it_does_not_try_to_apply_fragments_that_are_not_valid_for_the_subgraph() {
     // Slightly artificial example for simplicity, but this highlight the problem.
     // In that example, the only queried subgraph is the first one (there is in fact
     // no way to ever reach the 2nd one), so the plan should mostly simply forward
@@ -1304,5 +1296,74 @@ fn it_handles_fragment_rebasing_in_a_subgraph_where_some_union_membership_relati
           },
         }
         "#
+    );
+}
+
+#[test]
+fn it_preserves_nested_fragments_when_outer_one_has_directives_and_is_eliminated() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T {
+            id: ID!
+            t1: V
+            t2: V
+          }
+
+          type V {
+            v1: Int
+            v2: Int
+          }
+        "#,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+          query($test: Boolean!) {
+            t {
+              ...OnT @include(if: $test)
+            }
+          }
+
+          fragment OnT on T {
+            t1 {
+              ...OnV
+            }
+            t2 {
+              ...OnV
+            }
+          }
+
+          fragment OnV on V {
+            v1
+            v2
+          }
+        "#,
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              t {
+                ... on T @include(if: $test) {
+                  t1 {
+                    ...OnV
+                  }
+                  t2 {
+                    ...OnV
+                  }
+                }
+              }
+            }
+
+            fragment OnV on V {
+              v1
+              v2
+            }
+          },
+        }
+      "###
     );
 }

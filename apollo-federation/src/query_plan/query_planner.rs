@@ -19,7 +19,6 @@ use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIV
 use crate::link::spec::Identity;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
-use crate::operation::NormalizedDefer;
 use crate::operation::RebasedFragments;
 use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
@@ -171,7 +170,7 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, Default)]
+#[derive(Debug, PartialEq, Default)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
 }
@@ -369,29 +368,37 @@ impl QueryPlanner {
             &self.interface_types_with_interface_objects,
         )?;
 
-        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
-            if self.config.incremental_delivery.enable_defer {
-                let NormalizedDefer {
-                    operation,
-                    assigned_defer_labels,
-                    defer_conditions,
-                    has_defers,
-                } = normalized_operation.with_normalized_defer();
-                if has_defers && is_subscription {
-                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
-                }
-                (
-                    operation,
-                    Some(assigned_defer_labels),
-                    Some(defer_conditions),
-                    has_defers,
-                )
-            } else {
-                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
-                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
-                // to end up passing through a @defer to a subgraph by mistake).
-                (normalized_operation.without_defer(), None, None, false)
-            };
+        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) = (
+            normalized_operation.without_defer(),
+            None,
+            None::<IndexMap<String, IndexSet<String>>>,
+            false,
+        );
+        /* TODO(TylerBloom): After defer is impl-ed and after the private preview, the call
+         * above needs to be replaced with this if-else expression.
+        if self.config.incremental_delivery.enable_defer {
+            let NormalizedDefer {
+                operation,
+                assigned_defer_labels,
+                defer_conditions,
+                has_defers,
+            } = normalized_operation.with_normalized_defer();
+            if has_defers && is_subscription {
+                return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+            }
+            (
+                operation,
+                Some(assigned_defer_labels),
+                Some(defer_conditions),
+                has_defers,
+            )
+        } else {
+            // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
+            // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
+            // to end up passing through a @defer to a subgraph by mistake).
+            (normalized_operation.without_defer(), None, None, false)
+        };
+        */
 
         if normalized_operation.selection_set.selections.is_empty() {
             return Ok(QueryPlan::default());
@@ -717,11 +724,15 @@ fn compute_plan_internal(
     }
 }
 
+// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    todo!("FED-95")
+    Err(SingleFederationError::Internal {
+        message: String::from("@defer is currently not supported"),
+    }
+    .into())
 }
 
 #[cfg(test)]

@@ -473,9 +473,13 @@ dependencies = [
  "hex",
  "indexmap 2.2.3",
  "insta",
+ "itertools 0.13.0",
  "lazy_static",
  "multimap 0.10.0",
+ "nom",
  "petgraph",
+ "serde",
+ "serde_json",
  "serde_json_bytes",
  "sha1",
  "strum 0.26.2",
@@ -4307,6 +4311,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.13.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "413ee7dfc52ee1a4949ceeb7dbc8a33f2d6c088194d9f922fb8318faf1f01186"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6203,9 +6216,9 @@ dependencies = [
 
 [[package]]
 name = "regex"
-version = "1.10.3"
+version = "1.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b62dbe01f0b06f9d8dc7d49e05a0785f153b00b2c227856282f671e0318c9b15"
+checksum = "c117dbdfde9c8308975b6a18d71f3f385c89461f7b3fb054288ecf2a2058ba4c"
 dependencies = [
  "aho-corasick",
  "memchr",
@@ -6915,12 +6928,14 @@ dependencies = [
 
 [[package]]
 name = "serde_json_bytes"
-version = "0.2.2"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "feb260b2939374fad6f939f803662d4971d03395fcd03752b674bdba06565779"
+checksum = "9eb67259abd83636e3b2f4700ddc3ecfdbfe7b1b89e824da42bfea6530caf03b"
 dependencies = [
  "bytes",
  "indexmap 2.2.3",
+ "jsonpath-rust",
+ "regex",
  "serde",
  "serde_json",
 ]

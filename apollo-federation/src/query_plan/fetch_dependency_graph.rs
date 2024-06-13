@@ -20,6 +20,7 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
@@ -163,7 +164,7 @@ pub(crate) struct FetchSelectionSet {
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
 // used to update `isKnownUseful` in `FetchGroup`, and it's easier to handle this there than try
 // to pass in a callback in Rust.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct FetchInputs {
     /// The selection sets to be used as input to `_entities`, separated per parent type.
     selection_sets_per_parent_type: IndexMap<CompositeTypeDefinitionPosition, Arc<SelectionSet>>,
@@ -769,7 +770,7 @@ impl FetchDependencyGraph {
     }
 
     fn is_parent_of(&self, node_id: NodeIndex, maybe_child_id: NodeIndex) -> bool {
-        self.parents_of(node_id).any(|id| id == maybe_child_id)
+        self.parents_of(maybe_child_id).any(|id| id == node_id)
     }
 
     fn is_child_of(&self, node_id: NodeIndex, maybe_parent_id: NodeIndex) -> bool {
@@ -917,13 +918,6 @@ impl FetchDependencyGraph {
 
     fn remove_node(&mut self, node_index: NodeIndex) {
         self.on_modification();
-        let edges_to_remove: Vec<EdgeIndex> =
-            self.graph.edges(node_index).map(|edge| edge.id()).collect();
-        for edge in edges_to_remove {
-            self.graph.remove_edge(edge);
-        }
-        // Note: Probably the `remove_edge` calls are unnecessary, as `remove_node` should remove
-        // edges as well.
         self.graph.remove_node(node_index);
     }
 
@@ -1008,9 +1002,10 @@ impl FetchDependencyGraph {
         Ok(())
     }
 
-    fn is_root_node(&self, node: &FetchDependencyGraphNode) -> bool {
+    fn is_root_node(&self, node_index: NodeIndex, node: &FetchDependencyGraphNode) -> bool {
         self.root_nodes_by_subgraph
-            .contains_key(&node.subgraph_name)
+            .get(&node.subgraph_name)
+            .is_some_and(|root_node_id| *root_node_id == node_index)
     }
 
     /// - Calls `on_modification` if necessary.
@@ -1021,13 +1016,14 @@ impl FetchDependencyGraph {
         // and in that case we will end up with an empty root node. In that case, we don't remove
         // that node, but instead will recognize that case when processing nodes later.
 
-        let is_removable = |node: &FetchDependencyGraphNode| {
-            node.selection_set.selection_set.selections.is_empty() && !self.is_root_node(node)
+        let is_removable = |node_index: NodeIndex, node: &FetchDependencyGraphNode| {
+            node.selection_set.selection_set.selections.is_empty()
+                && !self.is_root_node(node_index, node)
         };
         let to_remove: HashSet<NodeIndex> = self
             .graph
             .node_references()
-            .filter_map(|(node_index, node)| is_removable(node).then_some(node_index))
+            .filter_map(|(node_index, node)| is_removable(node_index, node).then_some(node_index))
             .collect();
 
         if to_remove.is_empty() {
@@ -1038,76 +1034,94 @@ impl FetchDependencyGraph {
 
     /// - Calls `on_modification` if necessary.
     fn remove_useless_nodes(&mut self) -> Result<(), FederationError> {
-        // First, collect the nodes that are useless and can be removed.
-        // At the same time, their children should be adopted by (or "relocated to") their grandparents.
-        let mut to_relocate = vec![];
-        let mut is_removable = |node_index, node: &FetchDependencyGraphNode| {
-            if !self.is_useless_node(node_index, node)? {
-                return Ok::<bool, FederationError>(false); // not removable
-            }
+        let root_nodes: Vec<_> = self.root_node_by_subgraph_iter().map(|(_, i)| *i).collect();
+        for node_index in root_nodes {
+            self.remove_useless_nodes_bottom_up(node_index)?;
+        }
+        Ok(())
+    }
 
-            // In general, removing a node is a bit tricky because we need to deal with
-            // the fact that the node can have multiple parents, and we don't have the
-            // "path in parent" in all cases. To keep thing relatively easily, we only
-            // handle the following cases (other cases will remain non-optimal, but
-            // hopefully this handle all the cases we care about in practice):
-            //   1. if the node has no children. In which case we can just remove it with
-            //      no ceremony.
-            //   2. if the node has only a single parent and we have a path to that
-            //      parent.
+    /// Recursively collect removable useless nodes from the bottom up.
+    /// - Calls `on_modification` if necessary.
+    fn remove_useless_nodes_bottom_up(
+        &mut self,
+        node_index: NodeIndex,
+    ) -> Result<(), FederationError> {
+        // Recursively remove children first, which could make the current node removable.
+        for child in self.children_of(node_index).collect::<Vec<_>>() {
+            self.remove_useless_nodes_bottom_up(child)?;
+        }
 
+        let node = self.node_weight(node_index)?;
+        if !self.is_useless_node(node_index, node)? {
+            // Record the result of `self.is_useless_node(...)` (if negative).
+            let mut_node = Self::node_weight_mut(&mut self.graph, node_index)?;
+            mut_node.is_known_useful = true;
+            return Ok(()); // not removable
+        }
+
+        // In general, removing a node is a bit tricky because we need to deal with
+        // the fact that the node can have multiple parents, and we don't have the
+        // "path in parent" in all cases. To keep thing relatively easily, we only
+        // handle the following cases (other cases will remain non-optimal, but
+        // hopefully this handle all the cases we care about in practice):
+        //   1. if the node has no children. In which case we can just remove it with
+        //      no ceremony.
+        //   2. if the node has only a single parent and we have a path to that
+        //      parent.
+
+        let has_no_children = {
             let mut children_iter = self.children_of(node_index);
-            if children_iter.next().is_none() {
-                return Ok(true); // remove it
-            }
+            children_iter.next().is_none()
+        };
+        if has_no_children {
+            self.remove_node(node_index);
+            return Ok(());
+        }
 
+        let (parent_node_id, path_in_parent) = {
             let mut parents_iter = self.parents_relations_of(node_index);
-            if let Some(ParentRelation {
+            let Some(ParentRelation {
                 parent_node_id,
                 path_in_parent,
             }) = parents_iter.next()
-            {
-                if parents_iter.next().is_some() {
-                    // More than one parents => not removable
-                    return Ok(false);
-                }
-                let Some(path_in_parent) = path_in_parent else {
-                    return Ok(false); // not removable
-                };
-                to_relocate.push((node_index, parent_node_id, path_in_parent.clone()));
-                Ok(true) // remove it
-            } else {
-                // orphan node => ignore (don't bother to remove)
-                // PORT_NODE: This case should not happen. Even if it does, it won't participate in
-                //            the query plan anyways.
-                Ok(false)
+            else {
+                // orphan node (can't happen) => ignore (don't bother to remove)
+                return Ok(());
+            };
+
+            if parents_iter.next().is_some() {
+                // More than one parents => not removable
+                return Ok(());
             }
+            let Some(path_in_parent) = &path_in_parent else {
+                // Parent has no path to this node => not removable
+                return Ok(());
+            };
+            (parent_node_id, path_in_parent.clone())
         };
-        let mut to_remove: HashSet<NodeIndex> = HashSet::new();
-        self.graph.node_references().try_for_each(
-            |(node_index, node)| -> Result<(), FederationError> {
-                if is_removable(node_index, node)? {
-                    to_remove.insert(node_index);
-                }
-                Ok(())
-            },
-        )?;
-
-        // Connect the children of the nodes-to-be-removed to their grandparents.
-        for (node_index, parent_node_id, path_in_parent) in to_relocate {
-            self.on_modification();
-            self.relocate_children_on_merged_in(parent_node_id, node_index, &path_in_parent);
-        }
-
-        // Actually remove the nodes
-        self.retain_nodes(|node_index| !to_remove.contains(node_index));
-
+        self.remove_useless_child(parent_node_id, node_index, &path_in_parent);
         Ok(())
+    }
+
+    /// `child_path` must be the path in the ParentRelation of `node_id` to `child_id`.
+    /// - Calls `on_modification`
+    fn remove_useless_child(
+        &mut self,
+        node_id: NodeIndex,
+        child_id: NodeIndex,
+        child_path: &Arc<OpPath>,
+    ) {
+        self.on_modification();
+        // Removing the child means attaching all of its children to its parent.
+        self.relocate_children_on_merged_in(node_id, child_id, child_path);
+        self.remove_node(child_id);
     }
 
     /// If everything fetched by a node is already part of its inputs, we already have all the data
     /// and there is no need to do the fetch.
-    // PORT_NOTE: The JS version memoize the result on the node itself.
+    // PORT_NOTE: The JS version memoize the result on the node itself in this function. The Rust version
+    // memoize in the `remove_useless_nodes_bottom_up` function.
     fn is_useless_node(
         &self,
         node_index: NodeIndex,
@@ -1165,12 +1179,13 @@ impl FetchDependencyGraph {
                     .supergraph_schema
                     .get_type(condition.type_name().clone())
                 else {
+                    // Note that we're checking the true supergraph, not the API schema, so even
+                    // @inaccessible types will be found.
                     let condition_name = condition.type_name();
                     return Err(FederationError::internal(format!(
                         "Type {condition_name} should exists in the supergraph"
                     )));
                 };
-                // Note that we're checking the true supergraph, not the API schema, so even @inaccessible types will be found.
                 match condition_in_supergraph {
                     TypeDefinitionPosition::Interface(interface_type) => Ok(Some(interface_type)),
                     _ => Ok(None),
@@ -1192,21 +1207,20 @@ impl FetchDependencyGraph {
             if condition.is_interface_type() {
                 // Lastly, we just need to check that we're coming from a subgraph
                 // that has the type as an interface object in its schema.
-                Ok(self.parents_of(node_index).any(|p| {
-                    let Ok(p_node) = self.node_weight(p) else {
-                        return false;
-                    };
-                    let p_subgraph_name = &p_node.subgraph_name;
-                    let Ok(p_subgraph_schema) = get_subgraph_schema(p_subgraph_name) else {
-                        return false;
-                    };
-                    let Ok(type_in_parent) =
-                        p_subgraph_schema.get_type(condition.type_name().clone())
-                    else {
-                        return false;
-                    };
-                    type_in_parent.is_interface_object_type(p_subgraph_schema.schema())
-                }))
+                Ok(self
+                    .parents_of(node_index)
+                    .map(|p| {
+                        let p_node = self.node_weight(p)?;
+                        let p_subgraph_name = &p_node.subgraph_name;
+                        let p_subgraph_schema = get_subgraph_schema(p_subgraph_name)?;
+                        let Ok(type_in_parent) =
+                            p_subgraph_schema.get_type(condition.type_name().clone())
+                        else {
+                            return Ok(false);
+                        };
+                        p_subgraph_schema.is_interface_object_type(type_in_parent)
+                    })
+                    .process_results(|mut iter| iter.any(|b| b))?)
             } else {
                 Ok(false)
             }
@@ -1222,6 +1236,12 @@ impl FetchDependencyGraph {
             .selection_set
             .iter()
             .try_fold(true, |acc, selection| {
+                // Skip if we encountered a false before.
+                // TODO: This `try_fold` is not short-circuiting. We could improve this later.
+                if !acc {
+                    return Ok(false);
+                }
+
                 // If we're coming from an interfaceObject _to_ an interface, we're "resolving" the
                 // concrete type of the interface and don't want to treat this as useless.
                 if is_interface_type_condition_on_interface_object(selection)? {
@@ -1233,10 +1253,9 @@ impl FetchDependencyGraph {
                 let Some(condition_in_supergraph) = condition_in_supergraph else {
                     // We're not in the @interfaceObject case described above. We just check that
                     // an input selection contains the one we check.
-                    return Ok(acc
-                        && input_selections
-                            .iter()
-                            .any(|input| input.contains(selection)));
+                    return Ok(input_selections
+                        .iter()
+                        .any(|input| input.contains(selection)));
                 };
 
                 let impl_type_names: HashSet<_> = self
@@ -1306,6 +1325,7 @@ impl FetchDependencyGraph {
         Ok(()) // done
     }
 
+    /// Recursively merge child fetches top-down
     /// - Calls `on_modification` if necessary.
     fn recursive_merge_child_fetches_for_same_subgraph_and_path(
         &mut self,
@@ -1314,59 +1334,60 @@ impl FetchDependencyGraph {
         // We're traversing the `self.graph` in DFS order and mutate it top-down.
         // - Assuming the graph is a DAG and has no cycle.
         let children_nodes: Vec<_> = self.children_of(node_index).collect();
-        if children_nodes.len() < 2 {
-            return Ok(());
-        }
+        if children_nodes.len() > 1 {
+            // We iterate on all pairs of children and merge those siblings that can be merged
+            // together.
+            // We will have two indices `i` and `j` such that `i < j`. When we merge `i` and `j`,
+            // `i`-th node will be merged into `j`-th node and skip the rest of `j` iteration,
+            // since `i` is dead and we are no longer looking for another node to merge `i` into.
+            //
+            // PORT_NOTE: The JS version merges `j` into `i` instead of `i` into `j`, relying on
+            // the `merge_sibling_in` would shrink `children_nodes` dynamically. I found it easier
+            // to reason about it the other way around by incrementing `i` when it's merged into
+            // `j` without modifying `children_nodes`.
+            for (i, i_node_index) in children_nodes.iter().cloned().enumerate() {
+                for (_j, j_node_index) in children_nodes.iter().cloned().enumerate().skip(i + 1) {
+                    if self.can_merge_sibling_in(j_node_index, i_node_index)? {
+                        // Merge node `i` into node `j`.
+                        // In theory, we can merge in any direction. But, we merge i into j,
+                        // so `j` can be visited again in the outer loop.
+                        self.merge_sibling_in(j_node_index, i_node_index)?;
 
-        // We iterate on all pairs of children and merge those siblings that can be merged
-        // together.
-        // We will have two indices `i` and `j` such that `i < j`. When we merge `i` and `j`,
-        // `i`-th node will be merged into `j`-th node and skip the rest of `j` iteration,
-        // since `i` is dead and we are no longer looking for another node to merge `i` into.
-        //
-        // PORT_NOTE: The JS version merges `j` into `i` instead of `i` into `j`, relying on
-        // the `merge_sibling_in` would shrink `children_nodes` dynamically. I found it easier
-        // to reason about it the other way around by incrementing `i` when it's merged into
-        // `j` without modifying `children_nodes`.
-        for (i, i_node_index) in children_nodes.iter().cloned().enumerate() {
-            for (_j, j_node_index) in children_nodes.iter().cloned().enumerate().skip(i + 1) {
-                if self.can_merge_sibling_in(j_node_index, i_node_index)? {
-                    // Merge node `i` into node `j`.
-                    // In theory, we can merge in any direction. But, we merge i into j,
-                    // so `j` can be visited again in the outer loop.
-                    self.merge_sibling_in(j_node_index, i_node_index)?;
+                        // We're working on a minimal graph (we've done a transitive reduction
+                        // beforehand) and we need to keep the graph minimal as post-reduce steps
+                        // (the `process` method) rely on it. But merging 2 nodes _can_ break
+                        // minimality.
+                        // Say we have:
+                        //   0 ------
+                        //            \
+                        //             4
+                        //   1 -- 3 --/
+                        // and we merge nodes 0 and 1 (and let's call the result "2"), then we now
+                        // have:
+                        //      ------
+                        //     /       \
+                        //   2 <-- 3 -- 4
+                        // which is not minimal.
+                        //
+                        // So to fix it, we just re-run our dfs removal from that merged edge
+                        // (which is probably a tad overkill in theory, but for the reasons
+                        // mentioned on `reduce`, this is most likely a non-issue in practice).
+                        //
+                        // Note that this DFS can only affect the descendants of `j` (its children
+                        // and recursively so), so it does not affect our current iteration.
+                        self.remove_redundant_edges(j_node_index);
 
-                    // We're working on a minimal graph (we've done a transitive reduction
-                    // beforehand) and we need to keep the graph minimal as post-reduce steps
-                    // (the `process` method) rely on it. But merging 2 nodes _can_ break
-                    // minimality.
-                    // Say we have:
-                    //   0 ------
-                    //            \
-                    //             4
-                    //   1 -- 3 --/
-                    // and we merge nodes 0 and 1 (and let's call the result "2"), then we now
-                    // have:
-                    //      ------
-                    //     /       \
-                    //   2 <-- 3 -- 4
-                    // which is not minimal.
-                    //
-                    // So to fix it, we just re-run our dfs removal from that merged edge
-                    // (which is probably a tad overkill in theory, but for the reasons
-                    // mentioned on `reduce`, this is most likely a non-issue in practice).
-                    //
-                    // Note that this DFS can only affect the descendants of `j` (its children
-                    // and recursively so), so it does not affect our current iteration.
-                    self.remove_redundant_edges(j_node_index);
-
-                    break; // skip the rest of `j`'s iteration
+                        break; // skip the rest of `j`'s iteration
+                    }
                 }
             }
         }
 
         // Now we recurse to the sub-nodes.
-        for c in children_nodes {
+        // Note: `children_nodes` above may contain invalid nodes at this point.
+        //       So, we need to re-collect the children nodes after the merge.
+        let children_nodes_after_merge: Vec<_> = self.children_of(node_index).collect();
+        for c in children_nodes_after_merge {
             self.recursive_merge_child_fetches_for_same_subgraph_and_path(c)?;
         }
 
@@ -3042,6 +3063,10 @@ fn compute_nodes_for_key_resolution<'a>(
     // We shouldn't have a key on a non-composite type
     let source_type: CompositeTypeDefinitionPosition = source.type_.clone().try_into()?;
     let dest_type: CompositeTypeDefinitionPosition = dest.type_.clone().try_into()?;
+    let dest_schema: ValidFederationSchema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&dest.source)?
+        .clone();
     let path_in_parent = &stack_item.node_path.path_in_node;
     let updated_defer_context = stack_item.defer_context.after_subgraph_jump();
     // Note that we use the name of `dest_type` for the inputs parent type, which can seem strange,
@@ -3119,13 +3144,9 @@ fn compute_nodes_for_key_resolution<'a>(
             input_selections,
             new_context,
         ),
-        compute_input_rewrites_on_key_fetch(
-            &dependency_graph.supergraph_schema,
-            input_type.type_name(),
-            &dest_type,
-        )
-        .into_iter()
-        .flatten(),
+        compute_input_rewrites_on_key_fetch(input_type.type_name(), &dest_type, &dest_schema)?
+            .into_iter()
+            .flatten(),
     )?;
 
     // We also ensure to get the __typename of the current type in the "original" node.
@@ -3542,10 +3563,10 @@ fn create_fetch_initial_path(
 }
 
 fn compute_input_rewrites_on_key_fetch(
-    supergraph_schema: &ValidFederationSchema,
     input_type_name: &NodeStr,
     dest_type: &CompositeTypeDefinitionPosition,
-) -> Option<Vec<Arc<FetchDataRewrite>>> {
+    dest_schema: &ValidFederationSchema,
+) -> Result<Option<Vec<Arc<FetchDataRewrite>>>, FederationError> {
     // When we send a fetch to a subgraph, the inputs __typename must essentially match `dest_type`
     // so the proper __resolveReference is called. If `dest_type` is a "normal" object type, that's
     // going to be fine by default, but if `dest_type` is an interface in the supergraph (meaning
@@ -3553,7 +3574,7 @@ fn compute_input_rewrites_on_key_fetch(
     // have a __typename that is the concrete implementation type of the object, and we need to
     // rewrite it.
     if dest_type.is_interface_type()
-        || dest_type.is_interface_object_type(supergraph_schema.schema())
+        || dest_schema.is_interface_object_type(dest_type.clone().into())?
     {
         // rewrite path: [ ... on <input_type_name>, __typename ]
         let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());
@@ -3562,9 +3583,9 @@ fn compute_input_rewrites_on_key_fetch(
             path: vec![type_cond, typename_field_elem],
             set_value_to: dest_type.type_name().to_string().into(),
         });
-        Some(vec![Arc::new(rewrite)])
+        Ok(Some(vec![Arc::new(rewrite)]))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -3632,6 +3653,10 @@ fn handle_requires(
     let head = dependency_graph
         .federated_query_graph
         .edge_head_weight(query_graph_edge_id)?;
+    let entity_type_schema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&head.source)?
+        .clone();
     let QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(entity_type_position)) =
         head.type_.clone()
     else {
@@ -3893,6 +3918,7 @@ fn handle_requires(
         add_post_require_inputs(
             dependency_graph,
             &path_for_parent,
+            &entity_type_schema,
             entity_type_position.clone(),
             query_graph_edge_id,
             context,
@@ -3969,6 +3995,7 @@ fn handle_requires(
         add_post_require_inputs(
             dependency_graph,
             fetch_node_path,
+            &entity_type_schema,
             entity_type_position.clone(),
             query_graph_edge_id,
             context,
@@ -4106,9 +4133,12 @@ fn inputs_for_require(
     }
 }
 
+// Yes, many arguments, but this is an internal function with no obvious grouping
+#[allow(clippy::too_many_arguments)]
 fn add_post_require_inputs(
     dependency_graph: &mut FetchDependencyGraph,
     require_node_path: &FetchDependencyGraphNodePath,
+    entity_type_schema: &ValidFederationSchema,
     entity_type_position: ObjectTypeDefinitionPosition,
     query_graph_edge_id: EdgeIndex,
     context: &OpGraphPathContext,
@@ -4125,10 +4155,10 @@ fn add_post_require_inputs(
     // Note that `compute_input_rewrites_on_key_fetch` will return `None` in general, but if `entity_type_position` is an interface/interface object,
     // then we need those rewrites to ensure the underlying fetch is valid.
     let input_rewrites = compute_input_rewrites_on_key_fetch(
-        &dependency_graph.supergraph_schema,
         &entity_type_position.type_name.clone(),
         &entity_type_position.into(),
-    );
+        entity_type_schema,
+    )?;
     let post_require_node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, post_require_node_id)?;
     post_require_node.add_inputs(&inputs, input_rewrites.into_iter().flatten())?;

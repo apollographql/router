@@ -2511,7 +2511,7 @@ impl OpGraphPath {
                                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
                             );
                             if is_operation_field_type_leaf
-                                && self.has_an_entity_implementation_with_shareable_field(
+                                || !self.has_an_entity_implementation_with_shareable_field(
                                     &tail_weight.source,
                                     tail_type_pos.field(
                                         operation_field.data().field_position.field_name().clone(),
@@ -2642,7 +2642,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
-                        );
+                        )?;
                         if let Some(interface_path) = interface_path {
                             let (interface_path, all_options) =
                                 if direct_path_overrides_type_explosion {
@@ -2799,7 +2799,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
-                        );
+                        )?;
                         Ok((Some(all_options), None))
                     }
                     OutputTypeDefinitionPosition::Object(tail_type_pos) => {
@@ -3054,13 +3054,13 @@ impl SimultaneousPaths {
     /// the options for the `SimultaneousPaths` as a whole.
     fn flat_cartesian_product(
         options_for_each_path: Vec<Vec<SimultaneousPaths>>,
-    ) -> Vec<SimultaneousPaths> {
+    ) -> Result<Vec<SimultaneousPaths>, FederationError> {
         // This can be written more tersely with a bunch of `reduce()`/`flat_map()`s and friends,
         // but when interfaces type-explode into many implementations, this can end up with fairly
         // large `Vec`s and be a bottleneck, and a more iterative version that pre-allocates `Vec`s
         // is quite a bit faster.
         if options_for_each_path.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
         // Track, for each path, which option index we're at.
@@ -3069,8 +3069,14 @@ impl SimultaneousPaths {
         // Pre-allocate `Vec` for the result.
         let num_options = options_for_each_path
             .iter()
-            .map(|options| options.len())
-            .product();
+            .fold(1_usize, |product, options| {
+                product.saturating_mul(options.len())
+            });
+        if num_options > 1_000_000 {
+            return Err(FederationError::internal(
+                "flat_cartesian_product: excessive number of combinations: {num_options}",
+            ));
+        }
         let mut product = Vec::with_capacity(num_options);
 
         // Compute the cartesian product.
@@ -3097,7 +3103,7 @@ impl SimultaneousPaths {
             }
         }
 
-        product
+        Ok(product)
     }
 
     /// Given 2 `SimultaneousPaths` that represent 2 different options to reach the same query leaf
@@ -3399,7 +3405,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             }
         }
 
-        let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path);
+        let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path)?;
         Ok(Some(self.create_lazy_options(all_options, updated_context)))
     }
 }

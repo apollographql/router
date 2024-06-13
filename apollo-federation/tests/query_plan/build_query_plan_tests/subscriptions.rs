@@ -43,32 +43,36 @@ fn basic_subscription_query_plan() {
         @r###"
       QueryPlan {
         Subscription {
-          Primary: {Fetch(service: "SubgraphA") {
-                  subscription MySubscription__SubgraphA__0 {
-              onNewUser {
-                __typename
-                id
-                name
-              }
-            }
-          },},
-          Rest: {Sequence {
-            Flatten(path: "onNewUser") {
-              Fetch(service: "SubgraphB") {
-                {
-                  ... on User {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on User {
-                    address
-                  }
+          Primary: {
+            Fetch(service: "SubgraphA") {
+              {
+                onNewUser {
+                  __typename
+                  id
+                  name
                 }
+              }
+            },
+          },
+          Rest: {
+            Sequence {
+              Flatten(path: "onNewUser") {
+                Fetch(service: "SubgraphB") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      address
+                    }
+                  }
+                },
               },
             },
-          },},
+          },
         },
       }
       "###
@@ -115,24 +119,28 @@ fn basic_subscription_with_single_subgraph() {
         @r###"
       QueryPlan {
         Subscription {
-          Primary: {Fetch(service: "SubgraphA") {
-                  subscription MySubscription__SubgraphA__0 {
-              onNewUser {
-                id
-                name
+          Primary: {
+            Fetch(service: "SubgraphA") {
+              {
+                onNewUser {
+                  id
+                  name
+                }
               }
-            }
-          },},
+            },
+          },
         },
       }
       "###
     );
 }
 
+// TODO(@TylerBloom): Currently, all defer directives are stripped out, so this does not panic
+// quite as expected. Instead, it panics because the snapshots doesn't match. Once this behavior is
+// changed, this should panic with an error along the lines of "@defer can't be used with
+// subscriptions".
 #[test]
-// TODO: This panic should say something along the line os "@defer is not supported on subscriptions" but
-// defer is currently `todo!`. Change this error message once defer is implemented.
-#[should_panic(expected = "not yet implemented: @defer not implemented")]
+#[should_panic(expected = "snapshot assertion")]
 fn trying_to_use_defer_with_a_subcription_results_in_an_error() {
     let config = QueryPlannerConfig {
         incremental_delivery: QueryPlanIncrementalDeliveryConfig { enable_defer: true },
