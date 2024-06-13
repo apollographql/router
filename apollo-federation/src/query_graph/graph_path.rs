@@ -2511,7 +2511,7 @@ impl OpGraphPath {
                                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
                             );
                             if is_operation_field_type_leaf
-                                && self.has_an_entity_implementation_with_shareable_field(
+                                || !self.has_an_entity_implementation_with_shareable_field(
                                     &tail_weight.source,
                                     tail_type_pos.field(
                                         operation_field.data().field_position.field_name().clone(),
