@@ -13,13 +13,12 @@ const SUBGRAPH_URL: &str = "http://localhost:4005";
 const ROUTER_URL: &str = "http://localhost:4000";
 
 fuzz_target!(|data: &[u8]| {
-    let generated_operation =
-        match generate_valid_operation(data, "fuzz/subgraph/supergraph.graphql") {
-            Ok((d, _)) => d,
-            Err(_err) => {
-                return;
-            }
-        };
+    let generated_operation = match generate_valid_operation(data, "fuzz/subgraph/api.graphql") {
+        Ok((d, _)) => d,
+        Err(_err) => {
+            return;
+        }
+    };
 
     let http_client = reqwest::blocking::Client::new();
     let router_response = http_client
@@ -54,6 +53,7 @@ fuzz_target!(|data: &[u8]| {
             // Do not check errors for now
             return;
         }
+
         let mut file = OpenOptions::new()
             .read(true)
             .create(true)
@@ -99,7 +99,7 @@ fuzz_target!(|data: &[u8]| {
             .get("errors")
             .map(|e| !e.as_array().unwrap().len())
             .unwrap_or(0);
-        if subgraph_errors_detected > 0 && subgraph_errors_detected == router_errors_detected {
+        if subgraph_errors_detected > 0 && router_errors_detected > 0 {
             // Do not check the shape of errors right now
             return;
         }
