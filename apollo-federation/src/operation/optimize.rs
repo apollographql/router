@@ -855,10 +855,11 @@ impl Selection {
                         Ok(expanded_sub_selections.into())
                     } else {
                         // Create an inline fragment since type condition is necessary.
-                        let inline = InlineFragmentSelection::from_fragment_spread_selection(
+                        let inline = InlineFragmentSelection::from_selection_set(
                             parent_type.clone(),
-                            fragment,
-                        )?;
+                            expanded_sub_selections,
+                            fragment.spread.data().directives.clone(),
+                        );
                         Ok(Selection::from(inline).into())
                     }
                 }
@@ -895,7 +896,7 @@ impl SelectionSet {
     fn retain_fragments(
         &self,
         fragments_to_keep: &NamedFragments,
-    ) -> Result<Self, FederationError> {
+    ) -> Result<SelectionSet, FederationError> {
         self.lazy_map(fragments_to_keep, |selection| {
             Ok(selection
                 .retain_fragments(&self.type_position, fragments_to_keep)?
@@ -1022,6 +1023,7 @@ impl NamedFragments {
                 Self::update_usages(&mut usages, fragment, usage_count);
             }
         }
+
         self.retain(|name, _fragment| {
             let usage_count = usages.get(name).copied().unwrap_or_default();
             usage_count >= min_usage_to_optimize
