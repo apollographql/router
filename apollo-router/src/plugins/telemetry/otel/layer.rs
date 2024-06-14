@@ -1154,15 +1154,10 @@ mod tests {
     use opentelemetry::trace::noop;
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::StringValue;
-    use otel::SpanId;
     use tracing_subscriber::prelude::*;
-    use tracing_subscriber::Registry;
 
     use super::*;
-    use crate::plugins::telemetry::dynamic_attribute::DynSpanAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
-    use crate::plugins::telemetry::reload::SampledSpan;
-    use crate::tracer::TraceId;
 
     #[derive(Debug, Clone)]
     struct TestTracer(Arc<Mutex<Option<OtelData>>>);
