@@ -1410,8 +1410,18 @@ impl Telemetry {
                 }
             } else {
                 let traces = Self::subgraph_ftv1_traces(context);
-                let per_type_stat =
-                    Self::per_type_stat(&traces, field_level_instrumentation_ratio, field_lengths);
+                let mut per_type_stat =
+                    Self::per_type_stat(&traces, field_level_instrumentation_ratio);
+
+                // Merge field lengths into `per_type_stat`, filling in with default entries in case the ftv1 didn't capture a field
+                for (ty, mut type_list_lengths) in field_lengths.drain() {
+                    let type_stat = per_type_stat.entry(ty).or_default();
+                    for (field, list_lengths) in type_list_lengths.drain() {
+                        let field_stat = type_stat.per_field_stat.entry(field).or_default();
+                        field_stat.length += list_lengths;
+                    }
+                }
+
                 let root_error_stats = Self::per_path_error_stats(&traces);
                 let limits_stats = context.extensions().with_lock(|guard| {
                     let strategy = guard.get::<demand_control::strategy::Strategy>();
@@ -1522,16 +1532,14 @@ impl Telemetry {
     fn per_type_stat(
         traces: &[(ByteString, proto::reports::Trace)],
         field_level_instrumentation_ratio: f64,
-        field_lengths: &mut HashMap<String, HashMap<String, ListLengthHistogram>>,
     ) -> HashMap<String, SingleTypeStat> {
         fn recur(
             per_type: &mut HashMap<String, SingleTypeStat>,
             field_execution_weight: f64,
             node: &proto::reports::trace::Node,
-            field_lengths: &mut HashMap<String, HashMap<String, ListLengthHistogram>>,
         ) {
             for child in &node.child {
-                recur(per_type, field_execution_weight, child, field_lengths)
+                recur(per_type, field_execution_weight, child)
             }
             let response_name = if let Some(ResponseName(response_name)) = &node.id {
                 response_name
@@ -1571,16 +1579,6 @@ impl Telemetry {
             field_stat.observed_execution_count += 1;
             field_stat.errors_count += node.error.len() as u64;
 
-            // The `field_lengths` histogram should have data for all list fields in the response.
-            // Here, we are iterating over ftv1 traces, which may not exist for every list field.
-            // If that's the case, we'll be dropping list length data here.
-            if let Some(histogram) = field_lengths
-                .get_mut(&node.parent_type)
-                .and_then(|entry| entry.remove(field_name))
-            {
-                field_stat.length += histogram;
-            }
-
             if !node.error.is_empty() {
                 field_stat.requests_with_errors_count += 1;
             }
@@ -1596,7 +1594,7 @@ impl Telemetry {
         let mut per_type = HashMap::new();
         for (_subgraph_name, trace) in traces {
             if let Some(node) = &trace.root {
-                recur(&mut per_type, field_execution_weight, node, field_lengths)
+                recur(&mut per_type, field_execution_weight, node)
             }
         }
         per_type
