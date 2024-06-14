@@ -773,7 +773,7 @@ where
             match sampled_span {
                 // It's not the root span
                 Some(SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _)) => {
-                    opentelemetry_api::trace::TraceId::from_u128(trace_id.to_u128())
+                    opentelemetry_api::trace::TraceId::from(trace_id.to_u128())
                 }
                 // It's probably the root span
                 None => self.tracer.new_trace_id(),
