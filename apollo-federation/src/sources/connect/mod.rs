@@ -7,6 +7,7 @@ use apollo_compiler::ast::Name;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
+pub mod expand;
 mod json_selection;
 mod models;
 pub(crate) mod spec;
@@ -42,6 +43,23 @@ pub struct ConnectId {
     pub label: String,
     pub subgraph_name: NodeStr,
     pub directive: ObjectOrInterfaceFieldDirectivePosition,
+}
+
+impl ConnectId {
+    /// Create a synthetic name for this connect ID
+    ///
+    /// Until we have a source-aware query planner, we'll need to split up connectors into
+    /// their own subgraphs when doing planning. Each subgraph will need a name, so we
+    /// synthesize one using metadata present on the directive.
+    pub(crate) fn synthetic_name(&self) -> String {
+        format!(
+            "{}_{}_{}_{}",
+            self.subgraph_name,
+            self.directive.field.type_name(),
+            self.directive.field.field_name(),
+            self.directive.directive_index
+        )
+    }
 }
 
 impl PartialEq for ConnectId {

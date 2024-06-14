@@ -40,7 +40,10 @@ pub(crate) fn extract_source_directive_arguments(
         return Ok(vec![]);
     };
 
-    let schema_directive_pos = directive_refs.schema.as_ref().unwrap();
+    // If we don't have any sources, then just short out
+    let Some(schema_directive_pos) = directive_refs.schema.as_ref() else {
+        return Ok(Vec::new());
+    };
 
     let schema_def = schema_directive_pos.get(schema.schema());
 

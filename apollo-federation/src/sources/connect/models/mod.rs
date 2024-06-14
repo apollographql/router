@@ -149,13 +149,6 @@ impl HttpJsonTransport {
             return Err(FederationError::internal("missing http method"));
         };
 
-        let base_url = if let Some(base_url) = source.as_ref().map(|source| source.base_url.clone())
-        {
-            base_url
-        } else {
-            todo!("get base url from path")
-        };
-
         let mut headers = source
             .as_ref()
             .map(|source| source.headers.0.clone())
@@ -163,8 +156,14 @@ impl HttpJsonTransport {
         headers.extend(http.headers.0.clone());
 
         Ok(Self {
-            base_url,
-            path_template: URLPathTemplate::parse(path).expect("path template"),
+            base_url: source
+                .map(|s| s.base_url.clone())
+                .ok_or(FederationError::internal(
+                    "@connect must have a source with a base URL",
+                ))?,
+            path_template: URLPathTemplate::parse(path).map_err(|e| {
+                FederationError::internal(format!("could not parse URL template: {e}"))
+            })?,
             method,
             headers,
             body: http.body.clone(),

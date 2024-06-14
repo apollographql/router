@@ -2,6 +2,8 @@ mod directives;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
 
+use std::sync::Arc;
+
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Name;
 use apollo_compiler::name;
@@ -63,12 +65,16 @@ impl ConnectSpecDefinition {
 
     pub(crate) fn get_from_schema(
         schema: &Schema,
-    ) -> Result<Option<&'static ConnectSpecDefinition>, FederationError> {
+    ) -> Result<Option<(&'static ConnectSpecDefinition, Arc<Link>)>, FederationError> {
         let metadata = links_metadata(schema)?;
         Ok(metadata
             .as_ref()
             .and_then(|metadata| metadata.for_identity(&ConnectSpecDefinition::identity()))
-            .and_then(|link| CONNECT_VERSIONS.find(&link.url.version)))
+            .and_then(|link| {
+                CONNECT_VERSIONS
+                    .find(&link.url.version)
+                    .map(|v| (v, link.clone()))
+            }))
     }
 
     pub(crate) fn get_from_federation_schema(
