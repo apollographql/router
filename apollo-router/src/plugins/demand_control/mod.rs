@@ -43,6 +43,7 @@ pub(crate) struct CostContext {
     pub(crate) estimated: f64,
     pub(crate) actual: f64,
     pub(crate) result: &'static str,
+    pub(crate) strategy: &'static str,
 }
 
 impl Default for CostContext {
@@ -51,6 +52,7 @@ impl Default for CostContext {
             estimated: 0.0,
             actual: 0.0,
             result: "COST_OK",
+            strategy: "COST_STRATEGY_UNKNOWN",
         }
     }
 }

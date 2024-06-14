@@ -140,6 +140,17 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    /// The operation name from the query.
+    OperationName {
+        /// The operation name from the query.
+        operation_name: OperationName,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
     /// A value from baggage.
     Baggage {
         /// The name of the baggage item.
@@ -617,6 +628,23 @@ impl Selector for RouterSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = response.context.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
@@ -657,6 +685,23 @@ impl Selector for RouterSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
             _ => None,
         }
     }
@@ -2010,6 +2055,39 @@ mod test {
                     .unwrap(),
             ),
             Some("env_value".into())
+        );
+    }
+
+    #[test]
+    fn router_operation_name_string() {
+        let selector = RouterSelector::OperationName {
+            operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("defaulted".into())
+        );
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("topProducts".into())
+        );
+        assert_eq!(
+            selector.on_error(&BoxError::from(String::from("my error")), &context),
+            Some("topProducts".into())
         );
     }
 
