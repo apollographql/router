@@ -32,7 +32,8 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 
 | Selector           | Defaultable | Values                                    | Description                          |
 |--------------------|-------------|-------------------------------------------|--------------------------------------|
-| `trace_id`         | Yes         | `open_telemetry`\|`datadog`              | The trace ID                         |
+| `trace_id`         | Yes         | `open_telemetry`\|`datadog`               | The trace ID                         |
+| `operation_name`   | Yes         | `string`|`hash`                           | The operation name from the query    |
 | `studio_operation_id` | Yes      | `true`|`false`                            | The Apollo Studio operation id       |
 | `request_header`   | Yes         |                                           | The name of the request header       |
 | `response_header`  | Yes         |                                           | The name of a response header        |
