@@ -82,6 +82,7 @@ use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::graphql::ResponseVisitor;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
@@ -118,7 +119,6 @@ use crate::plugins::telemetry::tracing::TracingConfigurator;
 use crate::plugins::telemetry::utils::TracingUtils;
 use crate::query_planner::OperationKind;
 use crate::register_plugin;
-use crate::response::ResponseVisitor;
 use crate::router_factory::Endpoint;
 use crate::services::execution;
 use crate::services::router;
@@ -1413,8 +1413,7 @@ impl Telemetry {
                 let per_type_stat =
                     Self::per_type_stat(&traces, field_level_instrumentation_ratio, field_lengths);
                 let root_error_stats = Self::per_path_error_stats(&traces);
-                let limits_stats = {
-                    let guard = context.extensions().lock();
+                let limits_stats = context.extensions().with_lock(|guard| {
                     let strategy = guard.get::<demand_control::strategy::Strategy>();
                     let cost_ctx = guard.get::<demand_control::CostContext>();
                     SingleLimitsStats {
@@ -1429,7 +1428,7 @@ impl Telemetry {
                         alias_count: 0,
                         root_field_count: 0,
                     }
-                };
+                });
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use crate::graphql::ResponseVisitor;
 use crate::plugins::telemetry::metrics::apollo::list_length_histogram::ListLengthHistogram;
-use crate::response::ResponseVisitor;
 
 pub(crate) struct FieldLengthRecorder {
     // Maps type -> field -> histogram (of lengths)
