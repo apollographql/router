@@ -208,8 +208,8 @@ Start following the steps below to start a release PR.  The process is **not ful
     > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
 
     ```
-    cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
-    cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
+    cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}" &&
+      cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}${APOLLO_ROUTER_PRERELEASE_SUFFIX}"
     ```
 
 ### Preparing the final release
@@ -401,9 +401,8 @@ Start following the steps below to start a release PR.  The process is **not ful
     ```
     APOLLO_RECONCILE_PR_URL=$(gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr list --state open --base dev --head main --json url --jq '.[-1] | .url')
     test -n "${APOLLO_RECONCILE_PR_URL}" && \
-      gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge "${APOLLO_RECONCILE_PR_URL}"
+      gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --auto "${APOLLO_RECONCILE_PR_URL}"
     ```
-
 
 12. 🗣️ **Solicit approval from the Router team, wait for the PR to pass CI and auto-merge into `dev`**
 
@@ -446,12 +445,13 @@ Start following the steps below to start a release PR.  The process is **not ful
     gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" release edit v"${APOLLO_ROUTER_RELEASE_VERSION}" -F ./this_release.md
     ```
 
-18. Finally, publish the Crate from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
+18. Finally, publish the Crates (`apollo-federation` followed by `apollo-router`) from your local computer from the `main` branch (this also needs to be moved to CI, but requires changing the release containers to be Rust-enabled and to restore the caches):
 
     > Note: This command may appear unnecessarily specific, but it will help avoid publishing a version to Crates.io that doesn't match what you're currently releasing. (e.g., in the event that you've changed branches in another window) 
 
     ```
-    cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}"
+    cargo publish -p apollo-federation@"${APOLLO_ROUTER_RELEASE_VERSION}" &&
+      cargo publish -p apollo-router@"${APOLLO_ROUTER_RELEASE_VERSION}"
     ```
 
 19. (Optional) To have a "social banner" for this release, run [this `htmlq` command](https://crates.io/crates/htmlq) (`cargo install htmlq`, or on MacOS `brew install htmlq`; its `jq` for HTML), open the link it produces, copy the image to your clipboard:

@@ -26,8 +26,6 @@ const SUBGRAPH: &str = r#"
 "#;
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn works_when_unset() {
     // This test is mostly a sanity check to make sure that "by default", we do have 16 plans
     // (all combination of the 2 choices for 4 fields). It's not entirely impossible that
@@ -67,12 +65,10 @@ fn works_when_unset() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 16);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 16);
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn allows_setting_down_to_1() {
     let max_evaluated_plans = NonZeroU32::new(1).unwrap();
     let planner = planner!(
@@ -123,12 +119,10 @@ fn allows_setting_down_to_1() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 16);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn can_be_set_to_an_arbitrary_number() {
     let max_evaluated_plans = NonZeroU32::new(10).unwrap();
     let planner = planner!(
@@ -173,7 +167,7 @@ fn can_be_set_to_an_arbitrary_number() {
     // Note that in this particular example, since we have binary choices only and due to the way
     // we cut branches when we're above the max, the number of evaluated plans can only be a power
     // of 2. Here, we just want it to be the nearest power of 2 below our limit.
-    assert_eq!(plan.statistics.evaluated_plan_count, 8);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 8);
 }
 
 #[test]
@@ -396,8 +390,6 @@ fn does_not_error_on_some_complex_fetch_group_dependencies() {
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure
 fn does_not_evaluate_plans_relying_on_a_key_field_to_fetch_that_same_field() {
     let planner = planner!(
         Subgraph1: r#"
@@ -472,7 +464,7 @@ fn does_not_evaluate_plans_relying_on_a_key_field_to_fetch_that_same_field() {
     // this test ensure this is not considered anymore (considering that later plan
     // was not incorrect, but it was adding to the options to evaluate which in some
     // cases could impact query planning performance quite a bit).
-    assert_eq!(plan.statistics.evaluated_plan_count, 1);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 }
 
 #[test]
@@ -546,5 +538,108 @@ fn avoid_considering_indirect_paths_from_the_root_when_a_more_direct_one_exists(
     // As said above, we legit have 2 options for `id` and `v0`, and we cannot know which are best before we evaluate the
     // plans completely. But for the multiple `v1`, we should recognize that going through the 1st subgraph (and taking a
     // key) is never exactly a good idea.
-    assert_eq!(plan.statistics.evaluated_plan_count, 4);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 4);
+}
+
+/// https://apollographql.atlassian.net/browse/FED-301
+#[test]
+fn multiplication_overflow_in_reduce_options_if_needed() {
+    let planner = planner!(
+        // default config
+        Subgraph1: SUBGRAPH,
+        Subgraph2: SUBGRAPH,
+    );
+    let plan = assert_plan!(
+        &planner,
+        r#"
+        {
+          t {
+            f00: id  f01: id  f02: id  f03: id  f04: id  f05: id  f06: id  f07: id
+            f08: id  f09: id  f10: id  f11: id  f12: id  f13: id  f14: id  f15: id
+            f16: id  f17: id  f18: id  f19: id  f20: id  f21: id  f22: id  f23: id
+            f24: id  f25: id  f26: id  f27: id  f28: id  f29: id  f30: id  f31: id
+            f32: id  f33: id  f34: id  f35: id  f36: id  f37: id  f38: id  f39: id
+            f40: id  f41: id  f42: id  f43: id  f44: id  f45: id  f46: id  f47: id
+            f48: id  f49: id  f50: id  f51: id  f52: id  f53: id  f54: id  f55: id
+            f56: id  f57: id  f58: id  f59: id  f60: id  f61: id  f62: id  f63: id
+          }
+        }
+        "#,
+        @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              t {
+                f14: id
+                f15: id
+                f16: id
+                f17: id
+                f18: id
+                f19: id
+                f20: id
+                f21: id
+                f22: id
+                f23: id
+                f24: id
+                f25: id
+                f26: id
+                f27: id
+                f28: id
+                f29: id
+                f30: id
+                f31: id
+                f32: id
+                f33: id
+                f34: id
+                f35: id
+                f36: id
+                f37: id
+                f38: id
+                f39: id
+                f40: id
+                f41: id
+                f42: id
+                f43: id
+                f44: id
+                f45: id
+                f46: id
+                f47: id
+                f48: id
+                f49: id
+                f50: id
+                f51: id
+                f52: id
+                f53: id
+                f54: id
+                f55: id
+                f56: id
+                f57: id
+                f58: id
+                f59: id
+                f60: id
+                f61: id
+                f62: id
+                f63: id
+                f00: id
+                f13: id
+                f01: id
+                f02: id
+                f03: id
+                f04: id
+                f05: id
+                f06: id
+                f07: id
+                f08: id
+                f09: id
+                f10: id
+                f11: id
+                f12: id
+              }
+            }
+          },
+        }
+        "###
+    );
+    // max_evaluated_plans defaults to 10_000
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 8192);
 }

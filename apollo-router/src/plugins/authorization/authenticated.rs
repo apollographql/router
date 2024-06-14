@@ -1661,11 +1661,13 @@ mod tests {
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
         headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
-        context.extensions().lock().insert(ClientRequestAccepts {
-            multipart_defer: true,
-            multipart_subscription: true,
-            json: true,
-            wildcard: true,
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(ClientRequestAccepts {
+                multipart_defer: true,
+                multipart_subscription: true,
+                json: true,
+                wildcard: true,
+            })
         });
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id } ... @defer { nonNullId } } }")

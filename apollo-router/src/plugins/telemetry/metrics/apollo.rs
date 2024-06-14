@@ -1,7 +1,6 @@
 //! Apollo metrics
 use std::sync::atomic::AtomicBool;
 use std::sync::atomic::Ordering;
-use std::sync::OnceLock;
 use std::time::Duration;
 
 use opentelemetry::runtime;
@@ -14,8 +13,8 @@ use sys_info::hostname;
 use tonic::metadata::MetadataMap;
 use tower::BoxError;
 use url::Url;
-use uuid::Uuid;
 
+use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
@@ -36,9 +35,6 @@ fn default_buckets() -> Vec<f64> {
         0.001, 0.005, 0.015, 0.05, 0.1, 0.2, 0.3, 0.4, 0.5, 1.0, 5.0, 10.0,
     ]
 }
-
-// Random unique UUID for the Router. This doesn't actually identify the router, it just allows disambiguation between multiple routers with the same metadata.
-static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
 
 impl MetricsConfigurator for Config {
     fn enabled(&self) -> bool {
@@ -136,10 +132,7 @@ impl Config {
             .apollo_meter_provider_builder
             .with_reader(reader)
             .with_resource(Resource::new([
-                KeyValue::new(
-                    "apollo.router.id",
-                    ROUTER_ID.get_or_init(Uuid::new_v4).to_string(),
-                ),
+                KeyValue::new("apollo.router.id", router_id()),
                 KeyValue::new("apollo.graph.ref", reference.to_string()),
                 KeyValue::new("apollo.schema.id", schema_id.to_string()),
                 KeyValue::new(

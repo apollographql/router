@@ -1,7 +1,0 @@
----
-source: apollo-router/src/response.rs
-expression: visitor
----
-licenseNumber: 2
-name: 2
-users: 1

@@ -16,6 +16,7 @@ use super::instruments::CustomInstruments;
 use super::instruments::Increment;
 use super::instruments::InstrumentsConfig;
 use super::instruments::METER_NAME;
+use crate::graphql::ResponseVisitor;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -29,7 +30,6 @@ use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrum
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
-use crate::response::ResponseVisitor;
 use crate::services::supergraph;
 use crate::Context;
 
@@ -455,7 +455,9 @@ pub(crate) mod test {
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();
         let context = Context::new();
-        context.extensions().lock().insert(query);
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert(query));
 
         context
     }

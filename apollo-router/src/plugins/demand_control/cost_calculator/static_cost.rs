@@ -17,13 +17,13 @@ use super::directives::RequiresDirective;
 use super::directives::SkipDirective;
 use super::DemandControlError;
 use crate::graphql::Response;
+use crate::graphql::ResponseVisitor;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
 use crate::query_planner::Primary;
 use crate::query_planner::QueryPlan;
-use crate::response::ResponseVisitor;
 
 pub(crate) struct StaticCostCalculator {
     list_size: u32,
@@ -68,12 +68,12 @@ impl StaticCostCalculator {
             return Ok(0.0);
         }
 
-        let ty = field
-            .inner_type_def(schema)
-            .ok_or(DemandControlError::QueryParseFailure(format!(
+        let ty = field.inner_type_def(schema).ok_or_else(|| {
+            DemandControlError::QueryParseFailure(format!(
                 "Field {} was found in query, but its type is missing from the schema.",
                 field.name
-            )))?;
+            ))
+        })?;
 
         // Determine how many instances we're scoring. If there's no user-provided
         // information, assume lists have 100 items.
@@ -137,12 +137,12 @@ impl StaticCostCalculator {
         executable: &ExecutableDocument,
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
-        let fragment = fragment_spread.fragment_def(executable).ok_or(
+        let fragment = fragment_spread.fragment_def(executable).ok_or_else(|| {
             DemandControlError::QueryParseFailure(format!(
                 "Parsed operation did not have a definition for fragment {}",
                 fragment_spread.fragment_name
-            )),
-        )?;
+            ))
+        })?;
         self.score_selection_set(
             &fragment.selection_set,
             parent_type,
@@ -469,7 +469,8 @@ mod tests {
             .unwrap();
 
         let ctx = Context::new();
-        ctx.extensions().lock().insert::<ParsedDocument>(query);
+        ctx.extensions()
+            .with_lock(|mut lock| lock.insert::<ParsedDocument>(query));
 
         let planner_res = planner
             .call(QueryPlannerRequest::new(query_str.to_string(), None, ctx))
