@@ -20,6 +20,7 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 use multimap::MultiMap;
 use petgraph::stable_graph::EdgeIndex;
 use petgraph::stable_graph::NodeIndex;
@@ -1206,21 +1207,20 @@ impl FetchDependencyGraph {
             if condition.is_interface_type() {
                 // Lastly, we just need to check that we're coming from a subgraph
                 // that has the type as an interface object in its schema.
-                Ok(self.parents_of(node_index).any(|p| {
-                    let Ok(p_node) = self.node_weight(p) else {
-                        return false;
-                    };
-                    let p_subgraph_name = &p_node.subgraph_name;
-                    let Ok(p_subgraph_schema) = get_subgraph_schema(p_subgraph_name) else {
-                        return false;
-                    };
-                    let Ok(type_in_parent) =
-                        p_subgraph_schema.get_type(condition.type_name().clone())
-                    else {
-                        return false;
-                    };
-                    type_in_parent.is_interface_object_type(&p_subgraph_schema)
-                }))
+                Ok(self
+                    .parents_of(node_index)
+                    .map(|p| {
+                        let p_node = self.node_weight(p)?;
+                        let p_subgraph_name = &p_node.subgraph_name;
+                        let p_subgraph_schema = get_subgraph_schema(p_subgraph_name)?;
+                        let Ok(type_in_parent) =
+                            p_subgraph_schema.get_type(condition.type_name().clone())
+                        else {
+                            return Ok(false);
+                        };
+                        p_subgraph_schema.is_interface_object_type(type_in_parent)
+                    })
+                    .process_results(|mut iter| iter.any(|b| b))?)
             } else {
                 Ok(false)
             }
@@ -3062,7 +3062,15 @@ fn compute_nodes_for_key_resolution<'a>(
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
     // We shouldn't have a key on a non-composite type
     let source_type: CompositeTypeDefinitionPosition = source.type_.clone().try_into()?;
+    let source_schema: ValidFederationSchema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&source.source)?
+        .clone();
     let dest_type: CompositeTypeDefinitionPosition = dest.type_.clone().try_into()?;
+    let dest_schema: ValidFederationSchema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&dest.source)?
+        .clone();
     let path_in_parent = &stack_item.node_path.path_in_node;
     let updated_defer_context = stack_item.defer_context.after_subgraph_jump();
     // Note that we use the name of `dest_type` for the inputs parent type, which can seem strange,
@@ -3140,20 +3148,16 @@ fn compute_nodes_for_key_resolution<'a>(
             input_selections,
             new_context,
         ),
-        compute_input_rewrites_on_key_fetch(
-            &dependency_graph.supergraph_schema,
-            input_type.type_name(),
-            &dest_type,
-        )
-        .into_iter()
-        .flatten(),
+        compute_input_rewrites_on_key_fetch(input_type.type_name(), &dest_type, &dest_schema)?
+            .into_iter()
+            .flatten(),
     )?;
 
     // We also ensure to get the __typename of the current type in the "original" node.
     let node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
     let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
-        &dependency_graph.supergraph_schema,
+        &source_schema,
         &source_type,
         None,
     )));
@@ -3563,17 +3567,19 @@ fn create_fetch_initial_path(
 }
 
 fn compute_input_rewrites_on_key_fetch(
-    supergraph_schema: &ValidFederationSchema,
     input_type_name: &NodeStr,
     dest_type: &CompositeTypeDefinitionPosition,
-) -> Option<Vec<Arc<FetchDataRewrite>>> {
+    dest_schema: &ValidFederationSchema,
+) -> Result<Option<Vec<Arc<FetchDataRewrite>>>, FederationError> {
     // When we send a fetch to a subgraph, the inputs __typename must essentially match `dest_type`
     // so the proper __resolveReference is called. If `dest_type` is a "normal" object type, that's
     // going to be fine by default, but if `dest_type` is an interface in the supergraph (meaning
     // that it is either an interface or an interface object), then the underlying object might
     // have a __typename that is the concrete implementation type of the object, and we need to
     // rewrite it.
-    if dest_type.is_interface_type() || dest_type.is_interface_object_type(supergraph_schema) {
+    if dest_type.is_interface_type()
+        || dest_schema.is_interface_object_type(dest_type.clone().into())?
+    {
         // rewrite path: [ ... on <input_type_name>, __typename ]
         let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());
         let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD.into());
@@ -3581,9 +3587,9 @@ fn compute_input_rewrites_on_key_fetch(
             path: vec![type_cond, typename_field_elem],
             set_value_to: dest_type.type_name().to_string().into(),
         });
-        Some(vec![Arc::new(rewrite)])
+        Ok(Some(vec![Arc::new(rewrite)]))
     } else {
-        None
+        Ok(None)
     }
 }
 
@@ -3651,6 +3657,10 @@ fn handle_requires(
     let head = dependency_graph
         .federated_query_graph
         .edge_head_weight(query_graph_edge_id)?;
+    let entity_type_schema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&head.source)?
+        .clone();
     let QueryGraphNodeType::SchemaType(OutputTypeDefinitionPosition::Object(entity_type_position)) =
         head.type_.clone()
     else {
@@ -3912,6 +3922,7 @@ fn handle_requires(
         add_post_require_inputs(
             dependency_graph,
             &path_for_parent,
+            &entity_type_schema,
             entity_type_position.clone(),
             query_graph_edge_id,
             context,
@@ -3988,6 +3999,7 @@ fn handle_requires(
         add_post_require_inputs(
             dependency_graph,
             fetch_node_path,
+            &entity_type_schema,
             entity_type_position.clone(),
             query_graph_edge_id,
             context,
@@ -4125,9 +4137,12 @@ fn inputs_for_require(
     }
 }
 
+// Yes, many arguments, but this is an internal function with no obvious grouping
+#[allow(clippy::too_many_arguments)]
 fn add_post_require_inputs(
     dependency_graph: &mut FetchDependencyGraph,
     require_node_path: &FetchDependencyGraphNodePath,
+    entity_type_schema: &ValidFederationSchema,
     entity_type_position: ObjectTypeDefinitionPosition,
     query_graph_edge_id: EdgeIndex,
     context: &OpGraphPathContext,
@@ -4144,10 +4159,10 @@ fn add_post_require_inputs(
     // Note that `compute_input_rewrites_on_key_fetch` will return `None` in general, but if `entity_type_position` is an interface/interface object,
     // then we need those rewrites to ensure the underlying fetch is valid.
     let input_rewrites = compute_input_rewrites_on_key_fetch(
-        &dependency_graph.supergraph_schema,
         &entity_type_position.type_name.clone(),
         &entity_type_position.into(),
-    );
+        entity_type_schema,
+    )?;
     let post_require_node =
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, post_require_node_id)?;
     post_require_node.add_inputs(&inputs, input_rewrites.into_iter().flatten())?;
