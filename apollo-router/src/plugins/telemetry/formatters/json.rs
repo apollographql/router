@@ -405,7 +405,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(otel::layer()),
+                .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root", dd.trace_id = "1234");
                 let _root_span = root_span.enter();
@@ -420,7 +420,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynSpanAttributeLayer)
-                .with(otel::layer()),
+                .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root");
                 root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
@@ -437,7 +437,7 @@ mod test {
             Registry::default()
                 .with(RequiresDatadogLayer)
                 .with(DynSpanAttributeLayer)
-                .with(otel::layer()),
+                .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root");
                 let _root_span = root_span.enter();

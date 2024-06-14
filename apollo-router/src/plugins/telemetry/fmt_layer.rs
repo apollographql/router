@@ -566,7 +566,9 @@ subgraph:
         .boxed();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             || {
                 let test_span = info_span!(
                     "test",
@@ -613,7 +615,9 @@ subgraph:
         .boxed();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             || {
                 let test_span = info_span!(
                     "test",
@@ -662,7 +666,9 @@ subgraph:
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             move || {
                 let test_span = info_span!(
                     "test",
@@ -795,7 +801,9 @@ subgraph:
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             move || {
                 let test_span = info_span!(
                     "test",

@@ -223,22 +223,26 @@ impl EventDynAttribute for ::tracing::Span {
                         if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
                             return;
                         }
-                        let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<OtelData>() {
-                            Some(otel_data) => match &mut otel_data.event_attributes {
-                                Some(attributes) => {
-                                    attributes.insert(key, value);
-                                }
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => match &mut otel_data.event_attributes {
+                                    Some(attributes) => {
+                                        attributes.insert(key, value);
+                                    }
+                                    None => {
+                                        let mut order_map = OrderMap::new();
+                                        order_map.insert(key, value);
+                                        otel_data.event_attributes = Some(order_map);
+                                    }
+                                },
                                 None => {
-                                    let mut order_map = OrderMap::new();
-                                    order_map.insert(key, value);
-                                    otel_data.event_attributes = Some(order_map);
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no OtelData, this is a bug");
                                 }
-                            },
-                            None => {
-                                // Can't use ::tracing::error! because it could create deadlock on extensions
-                                eprintln!("no OtelData, this is a bug");
                             }
+                        } else {
+                            // FIXME: we should put event attributes somewhere else to make it work even if it's not sampled like we did with LogAttributes
                         }
                     }
                 };
@@ -258,23 +262,27 @@ impl EventDynAttribute for ::tracing::Span {
                 match reg.span(id) {
                     None => eprintln!("no spanref, this is a bug"),
                     Some(s) => {
-                        let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<OtelData>() {
-                            Some(otel_data) => match &mut otel_data.event_attributes {
-                                Some(event_attributes) => {
-                                    event_attributes
-                                        .extend(attributes.map(|kv| (kv.key, kv.value)));
-                                }
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => match &mut otel_data.event_attributes {
+                                    Some(event_attributes) => {
+                                        event_attributes
+                                            .extend(attributes.map(|kv| (kv.key, kv.value)));
+                                    }
+                                    None => {
+                                        otel_data.event_attributes = Some(OrderMap::from_iter(
+                                            attributes.map(|kv| (kv.key, kv.value)),
+                                        ));
+                                    }
+                                },
                                 None => {
-                                    otel_data.event_attributes = Some(OrderMap::from_iter(
-                                        attributes.map(|kv| (kv.key, kv.value)),
-                                    ));
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no OtelData, this is a bug");
                                 }
-                            },
-                            None => {
-                                // Can't use ::tracing::error! because it could create deadlock on extensions
-                                eprintln!("no OtelData, this is a bug");
                             }
+                        } else {
+                            // FIXME: we should put event attributes somewhere else to make it work even if it's not sampled like we did with LogAttributes
                         }
                     }
                 };

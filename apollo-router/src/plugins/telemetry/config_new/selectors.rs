@@ -1846,7 +1846,16 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             let _context_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             assert_eq!(
@@ -1884,6 +1893,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(
@@ -1895,6 +1912,7 @@ mod test {
                 "defaulted".into()
             );
             let _outer_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             let span = span!(tracing::Level::INFO, "test");
@@ -1922,6 +1940,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(&crate::services::SubgraphRequest::fake_builder().build())
@@ -1930,6 +1956,7 @@ mod test {
             );
             let _outer_guard = Context::new()
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .with_remote_span_context(span_context)
                 .attach();
 
             let span = span!(tracing::Level::INFO, "test");
@@ -1963,7 +1990,7 @@ mod test {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
                 SpanId::from_u64(42),
-                TraceFlags::default(),
+                TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),
             );
