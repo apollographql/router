@@ -22,6 +22,7 @@ impl StrategyImpl for StaticEstimated {
             .and_then(|cost| {
                 request.context.extensions().with_lock(|mut lock| {
                     let cost_result = lock.get_or_default_mut::<CostContext>();
+                    cost_result.strategy = "static_estimated";
                     cost_result.estimated = cost;
                     if cost > self.max {
                         Err(
