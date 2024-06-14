@@ -196,25 +196,30 @@ impl QueryAnalysisLayer {
         match res {
             Ok((context, doc)) => {
                 request.context.extend(&context);
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
 
-                if matches!(
+                let extended_ref_stats = if matches!(
                     self.metrics_reference_mode,
                     ApolloMetricsReferenceMode::Extended
                 ) {
-                    let extended_reference_stats = generate_extended_references(
+                    Some(generate_extended_references(
                         doc.executable.clone(),
                         op_name,
                         self.schema.api_schema(),
                         &request.supergraph_request.body().variables.clone(),
-                    );
-                    request.context.extensions().with_lock(|mut lock| {
-                        lock.insert::<ExtendedReferenceStats>(extended_reference_stats)
+                    ))
+                } else {
+                    None
+                };
+
+                request
+                    .context
+                    .extensions()
+                    .with_lock(|mut lock| {
+                        lock.insert::<ParsedDocument>(doc.clone());
+                        if let Some(stats) = extended_ref_stats {
+                            lock.insert::<ExtendedReferenceStats>(stats);
+                        }
                     });
-                }
 
                 Ok(SupergraphRequest {
                     supergraph_request: request.supergraph_request,

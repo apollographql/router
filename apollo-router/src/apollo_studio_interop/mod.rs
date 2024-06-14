@@ -141,7 +141,7 @@ impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
                 None => {
                     self.referenced_enums
                         .insert(enum_name.to_string(), HashMap::new());
-                    self.referenced_enums.get_mut(enum_name).unwrap()
+                    self.referenced_enums.get_mut(enum_name).expect("value is expected to be in map")
                 }
             };
 
@@ -488,7 +488,7 @@ impl UsageGenerator<'_> {
             None => {
                 self.enums_by_name
                     .insert(enum_name.to_string(), HashSet::new());
-                self.enums_by_name.get_mut(&enum_name).unwrap()
+                self.enums_by_name.get_mut(&enum_name).expect("value is expected to be in map")
             }
         };
 
@@ -508,7 +508,7 @@ impl UsageGenerator<'_> {
             None => {
                 self.input_field_references
                     .insert(type_name.to_string(), HashMap::new());
-                self.input_field_references.get_mut(&type_name).unwrap()
+                self.input_field_references.get_mut(&type_name).expect("value is expected to be in map")
             }
         };
 
