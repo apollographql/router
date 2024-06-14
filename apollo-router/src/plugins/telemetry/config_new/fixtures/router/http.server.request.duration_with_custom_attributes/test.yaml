@@ -5,6 +5,9 @@ events:
         method: GET
         body: |
           hello
+    - context:
+        map:
+          operation_name: TestQuery
     - router_response:
         body: |
           hello
