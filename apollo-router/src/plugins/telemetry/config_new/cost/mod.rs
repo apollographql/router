@@ -287,11 +287,11 @@ pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec
         if let Some(cost) = c.get::<CostContext>().cloned() {
             custom_attributes.push(KeyValue::new(
                 APOLLO_PRIVATE_COST_ESTIMATED.clone(),
-                AttributeValue::I64(cost.estimated as i64),
+                AttributeValue::F64(cost.estimated),
             ));
             custom_attributes.push(KeyValue::new(
                 APOLLO_PRIVATE_COST_ACTUAL.clone(),
-                AttributeValue::I64(cost.actual as i64),
+                AttributeValue::F64(cost.actual),
             ));
             custom_attributes.push(KeyValue::new(
                 APOLLO_PRIVATE_COST_RESULT.clone(),

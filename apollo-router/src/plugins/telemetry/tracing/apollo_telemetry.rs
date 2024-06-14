@@ -588,35 +588,6 @@ impl Exporter {
                 )]
             }
             SUPERGRAPH_SPAN_NAME => {
-                let limits = span
-                    .attributes
-                    .get(&APOLLO_PRIVATE_COST_RESULT)
-                    .and_then(extract_string)
-                    .map(|result| {
-                        Limits {
-                            result,
-                            strategy: span
-                                .attributes
-                                .get(&APOLLO_PRIVATE_COST_STRATEGY)
-                                .and_then(extract_string)
-                                .unwrap_or_default(),
-                            cost_estimated: span
-                                .attributes
-                                .get(&APOLLO_PRIVATE_COST_ESTIMATED)
-                                .and_then(extract_u64)
-                                .unwrap_or_default(),
-                            cost_actual: span
-                                .attributes
-                                .get(&APOLLO_PRIVATE_COST_ACTUAL)
-                                .and_then(extract_u64)
-                                .unwrap_or_default(),
-                            // Not extracted yet
-                            depth: 0,
-                            height: 0,
-                            alias_count: 0,
-                            root_field_count: 0,
-                        }
-                    });
                 //Currently some data is in the supergraph span as we don't have the a request hook in plugin.
                 child_nodes.push(TreeData::Supergraph {
                     operation_signature: span
@@ -634,7 +605,7 @@ impl Exporter {
                         .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
                         .and_then(extract_json)
                         .unwrap_or_default(),
-                    limits,
+                    limits: Some(extract_limits(span)),
                 });
                 child_nodes
             }
@@ -816,6 +787,36 @@ impl Exporter {
     }
 }
 
+fn extract_limits(span: &LightSpanData) -> Limits {
+    Limits {
+        result: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_RESULT)
+            .and_then(extract_string)
+            .unwrap_or_default(),
+        strategy: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_STRATEGY)
+            .and_then(extract_string)
+            .unwrap_or_default(),
+        cost_estimated: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_ESTIMATED)
+            .and_then(extract_f64)
+            .unwrap_or_default() as u64,
+        cost_actual: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_ACTUAL)
+            .and_then(extract_f64)
+            .unwrap_or_default() as u64,
+        // TODO fill these out
+        depth: 0,
+        height: 0,
+        alias_count: 0,
+        root_field_count: 0,
+    }
+}
+
 fn extract_json<T: DeserializeOwned>(v: &Value) -> Option<T> {
     extract_string(v)
         .map(|v| serde_json::from_str(&v))
@@ -868,13 +869,9 @@ pub(crate) fn extract_i64(v: &Value) -> Option<i64> {
     }
 }
 
-pub(crate) fn extract_u64(v: &Value) -> Option<u64> {
-    if let Value::I64(v) = v {
-        if *v > 0 {
-            Some(*v as u64)
-        } else {
-            None
-        }
+pub(crate) fn extract_f64(v: &Value) -> Option<f64> {
+    if let Value::F64(v) = v {
+        Some(*v)
     } else {
         None
     }
@@ -1195,14 +1192,18 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
+    use std::time::SystemTime;
     use opentelemetry::Value;
+    use opentelemetry_api::KeyValue;
+    use opentelemetry_api::trace::{SpanId, SpanKind, TraceId};
+    use opentelemetry_sdk::trace::EvictedHashMap;
     use serde_json::json;
     use crate::plugins::telemetry::apollo::ErrorConfiguration;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData, LightSpanData, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_STRATEGY, extract_limits};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1542,5 +1543,39 @@ mod test {
         assert_eq!(error_count, 0);
         assert!(node.error.is_empty());
         assert!(node.child[0].error.is_empty());
+    }
+
+    #[test]
+    fn test_extract_limits() {
+        let mut span = LightSpanData {
+            trace_id: TraceId::from_u128(0),
+            span_id: SpanId::from_u64(1),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Client,
+            name: Default::default(),
+            start_time: SystemTime::now(),
+            end_time: SystemTime::now(),
+            attributes: EvictedHashMap::new(10, 10),
+            status: Default::default(),
+        };
+
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_COST_RESULT,
+            Value::String("OK".into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_COST_ESTIMATED,
+            Value::F64(9.2),
+        ));
+        span.attributes
+            .insert(KeyValue::new(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9)));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_COST_STRATEGY,
+            Value::String("static_estimated".into()),
+        ));
+        let limits = extract_limits(&span);
+        assert_eq!(limits.result, "OK");
+        assert_eq!(limits.cost_estimated, 9);
+        assert_eq!(limits.cost_actual, 6);
     }
 }
