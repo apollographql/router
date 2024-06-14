@@ -44,7 +44,8 @@ expression: results
             "alias_count": 0,
             "root_field_count": 0
           },
-          "per_type_stat": {}
+          "per_type_stat": {},
+          "local_per_type_stat": {}
         },
         "referenced_fields_by_type": {}
       }

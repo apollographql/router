@@ -1325,7 +1325,8 @@ expression: aggregated_metrics
               "height": 4,
               "alias_count": 0,
               "root_field_count": 1
-            }
+            },
+            "local_per_type_stat": {}
           }
         ]
       ],

@@ -37,6 +37,7 @@ pub(crate) struct SingleContextualizedStats {
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
     pub(crate) limits_stats: SingleLimitsStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
+    pub(crate) local_per_type_stat: HashMap<String, LocalTypeStat>,
 }
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
@@ -66,7 +67,7 @@ pub(crate) struct SingleTypeStat {
     pub(crate) per_field_stat: HashMap<String, SingleFieldStat>,
 }
 
-#[derive(Debug, Default, Serialize)]
+#[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleFieldStat {
     pub(crate) return_type: String,
     pub(crate) errors_count: u64,
@@ -86,6 +87,7 @@ pub(crate) struct ContextualizedStats {
     query_latency_stats: QueryLatencyStats,
     per_type_stat: HashMap<String, TypeStat>,
     limits_stats: Option<LimitsStats>,
+    local_per_type_stat: HashMap<String, LocalTypeStat>,
 }
 
 impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
@@ -99,6 +101,9 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
         }
         for (k, v) in stats.per_type_stat {
             *self.per_type_stat.entry(k).or_default() += v;
+        }
+        for (k, v) in stats.local_per_type_stat {
+            *self.local_per_type_stat.entry(k).or_default() += v;
         }
     }
 }
@@ -170,7 +175,7 @@ impl AddAssign<SingleTypeStat> for TypeStat {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Default, Debug, Serialize)]
 pub(crate) struct FieldStat {
     return_type: String,
     errors_count: u64,
@@ -208,7 +213,11 @@ impl From<ContextualizedStats>
             context: Some(stats.context),
             extended_references: None,
             limits_stats: stats.limits_stats.map(|ls| ls.into()),
-            local_per_type_stat: HashMap::new(),
+            local_per_type_stat: stats
+                .local_per_type_stat
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
             operation_count: 0,
         }
     }
@@ -376,6 +385,57 @@ pub(crate) struct SingleLimitsStats {
     pub(crate) root_field_count: u64,
 }
 
+#[derive(Clone, Debug, Default, Serialize)]
+pub(crate) struct LocalTypeStat {
+    pub(crate) local_per_field_stat: HashMap<String, LocalFieldStat>,
+}
+
+impl From<LocalTypeStat>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::LocalTypeStat
+{
+    fn from(value: LocalTypeStat) -> Self {
+        Self {
+            local_per_field_stat: value
+                .local_per_field_stat
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        }
+    }
+}
+
+impl AddAssign<LocalTypeStat> for LocalTypeStat {
+    fn add_assign(&mut self, rhs: LocalTypeStat) {
+        for (k, v) in rhs.local_per_field_stat {
+            *self.local_per_field_stat.entry(k).or_default() += v;
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub(crate) struct LocalFieldStat {
+    pub(crate) return_type: String,
+    pub(crate) list_lengths: ListLengthHistogram,
+}
+
+impl From<LocalFieldStat>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::LocalFieldStat
+{
+    fn from(value: LocalFieldStat) -> Self {
+        Self {
+            return_type: value.return_type,
+            array_size: value.list_lengths.to_vec(),
+        }
+    }
+}
+
+impl AddAssign<LocalFieldStat> for LocalFieldStat {
+    fn add_assign(&mut self, rhs: LocalFieldStat) {
+        self.return_type = rhs.return_type;
+        self.list_lengths += rhs.list_lengths;
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -508,6 +568,7 @@ mod test {
                                 },
                             ),
                         ]),
+                        local_per_type_stat: HashMap::new(), // TODO: Put some data in here
                     },
                     referenced_fields_by_type: HashMap::from([(
                         "type1".into(),

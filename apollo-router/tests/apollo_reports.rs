@@ -273,14 +273,18 @@ fn has_metrics(r: &&Report) -> bool {
         .is_empty()
 }
 
-async fn get_metrics_report(reports: Arc<Mutex<Vec<Report>>>, request: router::Request) -> Report {
+async fn get_metrics_report(
+    reports: Arc<Mutex<Vec<Report>>>,
+    request: router::Request,
+    demand_control: bool,
+) -> Report {
     get_report(
         get_router_service,
         reports,
         false,
         false,
         request,
-        false,
+        demand_control,
         has_metrics,
     )
     .await
@@ -595,7 +599,7 @@ async fn test_stats() {
         .unwrap();
     let req: router::Request = request.try_into().expect("could not convert request");
     let reports = Arc::new(Mutex::new(vec![]));
-    let report = get_metrics_report(reports, req).await;
+    let report = get_metrics_report(reports, req, false).await;
     assert_report!(report);
 }
 
@@ -644,6 +648,18 @@ async fn test_stats_mocked() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_demand_control_stats() {
+    let request = supergraph::Request::fake_builder()
+        .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
+        .build()
+        .unwrap();
+    let req: router::Request = request.try_into().expect("could not convert request");
+    let reports = Arc::new(Mutex::new(vec![]));
+    let report = get_metrics_report(reports, req, true).await;
+    assert_report!(report);
+}
+
+#[test_log::test(tokio::test(flavor = "multi_thread"))]
 async fn test_demand_control_trace() {
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()

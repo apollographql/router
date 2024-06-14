@@ -34,7 +34,7 @@ use crate::Context;
 use crate::ListenAddr;
 
 pub(crate) mod apollo;
-pub(crate) mod field_length;
+pub(crate) mod local_type_stats;
 pub(crate) mod otlp;
 pub(crate) mod prometheus;
 pub(crate) mod span_metrics_exporter;

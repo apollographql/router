@@ -2,21 +2,23 @@ use std::collections::HashMap;
 
 use crate::graphql::ResponseVisitor;
 use crate::plugins::telemetry::metrics::apollo::list_length_histogram::ListLengthHistogram;
+use crate::plugins::telemetry::metrics::apollo::studio::LocalFieldStat;
+use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 
-pub(crate) struct FieldLengthRecorder {
-    // Maps type -> field -> histogram (of lengths)
-    pub(crate) field_lengths: HashMap<String, HashMap<String, ListLengthHistogram>>,
+#[derive(Clone, Debug, Default)]
+pub(crate) struct LocalTypeStatRecorder {
+    pub(crate) local_type_stats: HashMap<String, LocalTypeStat>,
 }
 
-impl FieldLengthRecorder {
+impl LocalTypeStatRecorder {
     pub(crate) fn new() -> Self {
         Self {
-            field_lengths: Default::default(),
+            local_type_stats: Default::default(),
         }
     }
 }
 
-impl ResponseVisitor for FieldLengthRecorder {
+impl ResponseVisitor for LocalTypeStatRecorder {
     fn visit_field(
         &mut self,
         request: &apollo_compiler::ExecutableDocument,
@@ -26,11 +28,22 @@ impl ResponseVisitor for FieldLengthRecorder {
     ) {
         match value {
             serde_json_bytes::Value::Array(items) => {
-                self.field_lengths
+                tracing::info!(
+                    "Recording {} -> {} -> {}",
+                    ty.to_string(),
+                    field.name.to_string(),
+                    items.len()
+                );
+                self.local_type_stats
                     .entry(ty.to_string())
                     .or_default()
+                    .local_per_field_stat
                     .entry(field.name.to_string())
-                    .or_default()
+                    .or_insert_with(|| LocalFieldStat {
+                        return_type: field.ty().inner_named_type().to_string(),
+                        list_lengths: ListLengthHistogram::new(),
+                    })
+                    .list_lengths
                     .record(items.len());
 
                 for item in items {

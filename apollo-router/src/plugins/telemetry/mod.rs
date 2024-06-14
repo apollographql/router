@@ -21,7 +21,7 @@ use http::HeaderValue;
 use http::StatusCode;
 use metrics::apollo::list_length_histogram::ListLengthHistogram;
 use metrics::apollo::studio::SingleLimitsStats;
-use metrics::field_length::FieldLengthRecorder;
+use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
@@ -481,7 +481,7 @@ impl Plugin for Telemetry {
                                     // the query is invalid, we did not parse the operation kind
                                     OperationKind::Query,
                                     None,
-                                    &mut Default::default(),
+                                    &Default::default(),
                                 );
                             }
 
@@ -1257,7 +1257,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         operation_subtype,
-                        &mut Default::default(),
+                        &Default::default(),
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1297,13 +1297,13 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
-                        &mut Default::default(),
+                        &Default::default(),
                     );
                 }
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
-                    let mut field_lengths = FieldLengthRecorder::new();
+                    let mut local_stat_recorder = LocalTypeStatRecorder::new();
 
                     response_stream
                         .enumerate()
@@ -1312,7 +1312,8 @@ impl Telemetry {
 
                             if !matches!(sender, Sender::Noop) {
                                 if let Some(query) = &ctx.unsupported_executable_document() {
-                                    field_lengths.visit(query, &response);
+                                    // Aggregate the per-type/per-field stats on each response. They'll be submitted after the last response in the stream
+                                    local_stat_recorder.visit(query, &response);
                                 }
 
                                 if operation_kind == OperationKind::Subscription {
@@ -1328,7 +1329,7 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
-                                                &mut field_lengths.field_lengths,
+                                                &local_stat_recorder,
                                             );
                                         }
                                     } else {
@@ -1344,7 +1345,7 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
-                                            &mut field_lengths.field_lengths,
+                                            &local_stat_recorder,
                                         );
                                     }
                                 } else {
@@ -1358,7 +1359,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
-                                            &mut field_lengths.field_lengths,
+                                            &local_stat_recorder,
                                         );
                                     }
                                 }
@@ -1381,7 +1382,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
-        field_lengths: &mut HashMap<String, HashMap<String, ListLengthHistogram>>,
+        local_type_stat_recorder: &LocalTypeStatRecorder,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .extensions()
@@ -1410,18 +1411,7 @@ impl Telemetry {
                 }
             } else {
                 let traces = Self::subgraph_ftv1_traces(context);
-                let mut per_type_stat =
-                    Self::per_type_stat(&traces, field_level_instrumentation_ratio);
-
-                // Merge field lengths into `per_type_stat`, filling in with default entries in case the ftv1 didn't capture a field
-                for (ty, mut type_list_lengths) in field_lengths.drain() {
-                    let type_stat = per_type_stat.entry(ty).or_default();
-                    for (field, list_lengths) in type_list_lengths.drain() {
-                        let field_stat = type_stat.per_field_stat.entry(field).or_default();
-                        field_stat.length += list_lengths;
-                    }
-                }
-
+                let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
                 let limits_stats = context.extensions().with_lock(|guard| {
                     let strategy = guard.get::<demand_control::strategy::Strategy>();
@@ -1485,6 +1475,9 @@ impl Telemetry {
                                     ..Default::default()
                                 },
                                 per_type_stat,
+                                local_per_type_stat: local_type_stat_recorder
+                                    .local_type_stats
+                                    .clone(),
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
