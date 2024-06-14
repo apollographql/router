@@ -70,6 +70,7 @@ impl NamedFragments {
     /// - Expands all nested fragments
     /// - Applies the provided `mapper` to each selection set of the expanded fragments.
     /// - Finally, re-fragments the nested fragments.
+    /// - `mapper` must return a fragment-spread-free selection set.
     fn map_to_expanded_selection_sets(
         &self,
         mut mapper: impl FnMut(&SelectionSet) -> Result<SelectionSet, FederationError>,
@@ -84,6 +85,7 @@ impl NamedFragments {
                 NormalizeSelectionOption::NormalizeRecursively,
             )?;
             let mut mapped_selection_set = mapper(&expanded_selection_set)?;
+            // `mapped_selection_set` must be fragment-spread-free.
             mapped_selection_set.optimize_at_root(&result)?;
             let updated = Fragment {
                 selection_set: mapped_selection_set,
@@ -162,6 +164,8 @@ impl NamedFragments {
             return Ok(self.clone());
         }
         let updated = self.map_to_expanded_selection_sets(|ss| {
+            // Note: Since `ss` won't have any fragment spreads, `add_typename_field_for_abstract_types`'s return
+            // value won't have any fragment spreads.
             ss.add_typename_field_for_abstract_types(/*parent_type_if_abstract*/ None)
         })?;
         // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
@@ -365,6 +369,7 @@ struct FieldsConflictValidator {
 }
 
 impl FieldsConflictValidator {
+    /// `selection_set` must be fragment-spread-free.
     fn from_selection_set(selection_set: &SelectionSet) -> Self {
         Self::for_level(&selection_set.fields_in_set())
     }
@@ -1363,6 +1368,7 @@ impl SelectionSet {
 
     /// Specialized version of `optimize` for top-level sub-selections under Operation
     /// or Fragment.
+    /// - `self` must be fragment-spread-free.
     pub(crate) fn optimize_at_root(
         &mut self,
         fragments: &NamedFragments,
@@ -1424,6 +1430,7 @@ impl Operation {
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
     /// `fragments` - rebased fragment definitions for the operation's subgraph
+    /// - `self.selection_set` must be fragment-spread-free.
     fn optimize_internal(
         &mut self,
         fragments: &NamedFragments,

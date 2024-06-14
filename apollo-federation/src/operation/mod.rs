@@ -3032,6 +3032,7 @@ impl SelectionSet {
         self.selections.values().any(|s| s.has_defer())
     }
 
+    /// - `self` must be fragment-spread-free.
     pub(crate) fn add_aliases_for_non_merging_fields(
         &self,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
@@ -3145,6 +3146,7 @@ impl SelectionSet {
         })
     }
 
+    /// - `self.selections` must be fragment-spread-free.
     pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
         let mut fields = Vec::new();
 
@@ -3336,6 +3338,7 @@ struct FieldInPath {
     field: Arc<FieldSelection>,
 }
 
+/// - `selections` must be fragment-spread-free.
 fn compute_aliases_for_non_merging_fields(
     selections: Vec<SelectionSetAtPath>,
     alias_collector: &mut Vec<FieldToAlias>,
@@ -3343,6 +3346,7 @@ fn compute_aliases_for_non_merging_fields(
 ) -> Result<(), FederationError> {
     let mut seen_response_names: HashMap<Name, SeenResponseName> = HashMap::new();
 
+    /// - `s.selections` must be fragment-spread-free.
     fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
         s.selections.iter().flat_map(|s2| {
             s2.fields_in_set()
