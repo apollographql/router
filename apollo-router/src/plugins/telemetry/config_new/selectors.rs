@@ -24,6 +24,7 @@ use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::spec::operation_limits::OperationLimits;
 use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -61,6 +62,22 @@ pub(crate) enum ErrorRepr {
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
+    /// The raw query kind.
+    String,
+    /// The query aliases.
+    Aliases,
+    /// The query depth.
+    Depth,
+    /// The query height.
+    Height,
+    /// The query root fields.
+    RootFields,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[cfg_attr(test, derive(PartialEq))]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum SubgraphQuery {
     /// The raw query kind.
     String,
 }
@@ -213,8 +230,6 @@ pub(crate) enum SupergraphSelector {
     },
     Query {
         /// The graphql query.
-        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
-        #[allow(dead_code)]
         query: Query,
         #[serde(skip)]
         #[allow(dead_code)]
@@ -369,9 +384,7 @@ pub(crate) enum SubgraphSelector {
     },
     SubgraphQuery {
         /// The graphql query to the subgraph.
-        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
-        #[allow(dead_code)]
-        subgraph_query: Query,
+        subgraph_query: SubgraphQuery,
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
@@ -470,8 +483,6 @@ pub(crate) enum SubgraphSelector {
     },
     SupergraphQuery {
         /// The supergraph query to the subgraph.
-        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
-        #[allow(dead_code)]
         supergraph_query: Query,
         #[serde(skip)]
         #[allow(dead_code)]
@@ -804,6 +815,26 @@ impl Selector for SupergraphSelector {
 
     fn on_response(&self, response: &supergraph::Response) -> Option<opentelemetry::Value> {
         match self {
+            SupergraphSelector::Query { query, .. } => {
+                let limits_opt = response
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                match query {
+                    Query::Aliases => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
+                    }
+                    Query::Depth => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
+                    }
+                    Query::Height => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
+                    }
+                    Query::RootFields => limits_opt
+                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
+                    Query::String => None,
+                }
+            }
             SupergraphSelector::ResponseHeader {
                 response_header,
                 default,
@@ -984,13 +1015,36 @@ impl Selector for SubgraphSelector {
                 .flatten()
                 .map(opentelemetry::Value::from),
 
-            SubgraphSelector::SupergraphQuery { default, .. } => request
-                .supergraph_request
-                .body()
-                .query
-                .clone()
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphQuery {
+                default,
+                supergraph_query,
+                ..
+            } => {
+                let limits_opt = request
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                match supergraph_query {
+                    Query::Aliases => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
+                    }
+                    Query::Depth => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
+                    }
+                    Query::Height => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
+                    }
+                    Query::RootFields => limits_opt
+                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
+                    Query::String => request
+                        .supergraph_request
+                        .body()
+                        .query
+                        .clone()
+                        .or_else(|| default.clone())
+                        .map(opentelemetry::Value::from),
+                }
+            }
             SubgraphSelector::SubgraphQuery { default, .. } => request
                 .subgraph_request
                 .body()
@@ -1210,12 +1264,14 @@ mod test {
     use crate::plugins::telemetry::config_new::selectors::Query;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphQuery;
     use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::spec::operation_limits::OperationLimits;
 
     #[test]
     fn router_static() {
@@ -2382,6 +2438,89 @@ mod test {
         );
     }
 
+    fn create_select_and_context(query: Query) -> (SupergraphSelector, crate::Context) {
+        let selector = SupergraphSelector::Query {
+            query,
+            redact: None,
+            default: Some("default".to_string()),
+        };
+        let limits = OperationLimits {
+            aliases: 1,
+            depth: 2,
+            height: 3,
+            root_fields: 4,
+        };
+        let context = crate::Context::new();
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert::<OperationLimits<u32>>(limits));
+        (selector, context)
+    }
+
+    #[test]
+    fn supergraph_query_aliases() {
+        let (selector, context) = create_select_and_context(Query::Aliases);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            1.into()
+        );
+    }
+
+    #[test]
+    fn supergraph_query_depth() {
+        let (selector, context) = create_select_and_context(Query::Depth);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            2.into()
+        );
+    }
+
+    #[test]
+    fn supergraph_query_height() {
+        let (selector, context) = create_select_and_context(Query::Height);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            3.into()
+        );
+    }
+
+    #[test]
+    fn supergraph_query_root_fields() {
+        let (selector, context) = create_select_and_context(Query::RootFields);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            4.into()
+        );
+    }
+
     #[test]
     fn subgraph_supergraph_query() {
         let selector = SubgraphSelector::SupergraphQuery {
@@ -2415,7 +2554,7 @@ mod test {
     #[test]
     fn subgraph_subgraph_query() {
         let selector = SubgraphSelector::SubgraphQuery {
-            subgraph_query: Query::String,
+            subgraph_query: SubgraphQuery::String,
             redact: None,
             default: Some("default".to_string()),
         };

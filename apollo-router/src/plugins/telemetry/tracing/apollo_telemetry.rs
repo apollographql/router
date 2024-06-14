@@ -61,10 +61,18 @@ use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ACTUAL;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ESTIMATED;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_RESULT;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_STRATEGY;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
 use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
@@ -97,14 +105,6 @@ const APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS: Key =
     Key::from_static_str("apollo_private.http.response_headers");
 pub(crate) const APOLLO_PRIVATE_OPERATION_SIGNATURE: Key =
     Key::from_static_str("apollo_private.operation_signature");
-pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
-    Key::from_static_str("apollo_private.cost.estimated");
-pub(crate) const APOLLO_PRIVATE_COST_ACTUAL: Key =
-    Key::from_static_str("apollo_private.cost.actual");
-pub(crate) const APOLLO_PRIVATE_COST_STRATEGY: Key =
-    Key::from_static_str("apollo_private.cost.strategy");
-pub(crate) const APOLLO_PRIVATE_COST_RESULT: Key =
-    Key::from_static_str("apollo_private.cost.result");
 pub(crate) const APOLLO_PRIVATE_FTV1: Key = Key::from_static_str("apollo_private.ftv1");
 const PATH: Key = Key::from_static_str("graphql.path");
 const SUBGRAPH_NAME: Key = Key::from_static_str("apollo.subgraph.name");
@@ -809,11 +809,26 @@ fn extract_limits(span: &LightSpanData) -> Limits {
             .get(&APOLLO_PRIVATE_COST_ACTUAL)
             .and_then(extract_f64)
             .unwrap_or_default() as u64,
-        // TODO fill these out
-        depth: 0,
-        height: 0,
-        alias_count: 0,
-        root_field_count: 0,
+        depth: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_DEPTH)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
+        height: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_HEIGHT)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
+        alias_count: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_ALIASES)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
+        root_field_count: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_ROOT_FIELDS)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
     }
 }
 

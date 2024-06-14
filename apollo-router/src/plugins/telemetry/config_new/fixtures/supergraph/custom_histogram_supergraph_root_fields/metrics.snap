@@ -1,0 +1,23 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Query Root Fields histogram with value from context
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        supergraph:
+          query.root_fields:
+            description: The root_fields of the query
+            value:
+              query: root_fields
+            unit: unit
+            type: histogram
+---
+- name: query.root_fields
+  description: The root_fields of the query
+  unit: unit
+  data:
+    datapoints:
+      - sum: 4
+        attributes: {}

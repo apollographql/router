@@ -126,6 +126,7 @@ use crate::services::SubgraphRequest;
 use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::operation_limits::OperationLimits;
 use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
@@ -173,6 +174,15 @@ static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
     HeaderName::from_static(DEFAULT_EXPOSE_TRACE_ID_HEADER);
 static FTV1_HEADER_NAME: HeaderName = HeaderName::from_static("apollo-federation-include-trace");
 static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
+
+pub(crate) const APOLLO_PRIVATE_QUERY_ALIASES: Key =
+    Key::from_static_str("apollo_private.query.aliases");
+pub(crate) const APOLLO_PRIVATE_QUERY_DEPTH: Key =
+    Key::from_static_str("apollo_private.query.depth");
+pub(crate) const APOLLO_PRIVATE_QUERY_HEIGHT: Key =
+    Key::from_static_str("apollo_private.query.height");
+pub(crate) const APOLLO_PRIVATE_QUERY_ROOT_FIELDS: Key =
+    Key::from_static_str("apollo_private.query.root_fields");
 
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
@@ -597,6 +607,7 @@ impl Plugin for Telemetry {
                     async move {
                         let span = Span::current();
                         let mut result: Result<SupergraphResponse, BoxError> = fut.await;
+                        add_query_attributes(&ctx, &mut custom_attributes);
                         add_cost_attributes(&ctx, &mut custom_attributes);
                         span.set_span_dyn_attributes(custom_attributes);
                         match &result {
@@ -1929,6 +1940,29 @@ impl TextMapPropagator for CustomTraceIdPropagator {
     fn fields(&self) -> FieldIter<'_> {
         FieldIter::new(self.fields.as_ref())
     }
+}
+
+pub(crate) fn add_query_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
+    context.extensions().with_lock(|c| {
+        if let Some(limits) = c.get::<OperationLimits<u32>>() {
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_ALIASES.clone(),
+                AttributeValue::I64(limits.aliases.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_DEPTH.clone(),
+                AttributeValue::I64(limits.depth.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_HEIGHT.clone(),
+                AttributeValue::I64(limits.height.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_QUERY_ROOT_FIELDS.clone(),
+                AttributeValue::I64(limits.root_fields.into()),
+            ));
+        }
+    });
 }
 
 #[derive(Clone)]
