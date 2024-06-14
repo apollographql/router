@@ -1,6 +1,8 @@
-use insta::{assert_debug_snapshot, assert_snapshot};
+use insta::assert_debug_snapshot;
+use insta::assert_snapshot;
 
-use crate::sources::connect::expand::{expand_connectors, ExpansionResult};
+use crate::sources::connect::expand::expand_connectors;
+use crate::sources::connect::expand::ExpansionResult;
 
 #[test]
 fn it_expands_a_supergraph() {

@@ -53,7 +53,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         .extract_subgraphs()?
         .into_iter()
         .partition_map(|(_, sub)| {
-            match ConnectSpecDefinition::get_from_schema(&sub.schema.schema()) {
+            match ConnectSpecDefinition::get_from_schema(sub.schema.schema()) {
                 Ok(Some((_, link))) if contains_connectors(&link, &sub) => {
                     either::Either::Left((link, sub))
                 }
@@ -113,7 +113,7 @@ fn split_subgraph(
     let connector_map =
         Connector::from_valid_schema(&subgraph.schema, NodeStr::new(&subgraph.name))?;
 
-    let expander = helpers::Expander::new(&link, &subgraph);
+    let expander = helpers::Expander::new(link, &subgraph);
     connector_map
         .into_iter()
         .map(|(id, connector)| {
@@ -207,10 +207,10 @@ mod helpers {
             let mut schema = new_empty_fed_2_subgraph_schema()?;
 
             // Add the parent type for this connector
-            let ref field = connector.id.directive.field;
+            let field = &connector.id.directive.field;
             match field {
                 ObjectOrInterfaceFieldDefinitionPosition::Object(o) => {
-                    self.expand_object(&mut schema, o, &connector)?
+                    self.expand_object(&mut schema, o, connector)?
                 }
                 ObjectOrInterfaceFieldDefinitionPosition::Interface(i) => {
                     todo!("not yet done for interface {i}")
