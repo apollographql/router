@@ -3,7 +3,7 @@
 Adds support for four new attributes for the supergraph Query instrument:
  - aliases (the number of aliases in the query)
  - depth (the depth of the query)
- - geight (the height of the query)
+ - height (the height of the query)
  - root_fields (the number of root_fields in the query)
 
 You can use this data to understand how your graph is used and to help determine where to set limits, if desired.
