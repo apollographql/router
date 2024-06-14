@@ -849,6 +849,10 @@ In versions of the Apollo Router prior to 1.17, this limit was defined via the c
 
 </Note>
 
+### Demand control
+
+See [Demand Control](../executing-operations/demand-control) to learn how to analyze the cost of operations and to reject requests with operations that exceed customizable cost limits. 
+
 ### Early cancel
 
 Up until [Apollo Router 1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the Router introduced a new behaviour in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.

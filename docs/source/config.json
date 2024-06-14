@@ -82,6 +82,13 @@
           "enterprise"
         ]
       ],
+      "Demand Control" : [
+        "/executing-operations/demand-control",
+        [
+          "enterprise",
+          "preview"
+        ]
+      ],
       "GraphQL Subscriptions": {
         "Subscriptions Setup": [
           "/executing-operations/subscription-support",
