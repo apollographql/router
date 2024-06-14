@@ -174,11 +174,6 @@ fn only_uses_an_interface_object_if_it_can() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Cannot add selection of field \"I.__typename\" to selection set of parent type \"I\" that is potentially an interface object type at runtime"
-)]
-// TODO: investigate this failure
-// - Fails to rebase on an interface object type in a subgraph.
 fn does_not_rely_on_an_interface_object_directly_for_typename() {
     let planner = planner!(
         S1: SUBGRAPH1,
