@@ -659,7 +659,7 @@ async fn test_demand_control_stats() {
     assert_report!(report);
 }
 
-#[test_log::test(tokio::test(flavor = "multi_thread"))]
+#[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_trace() {
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
