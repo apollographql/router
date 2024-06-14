@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use axum::headers::HeaderName;
+use derivative::Derivative;
 use opentelemetry::sdk::metrics::new_view;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::Instrument;
@@ -243,6 +244,19 @@ pub(crate) enum TraceIdFormat {
     Decimal,
 }
 
+/// Apollo usage report signature normalization algorithm
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ApolloSignatureNormalizationAlgorithm {
+    /// Use the algorithm that matches the JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
+    /// edge cases from the JS implementation that affected normalization.
+    Enhanced,
+}
+
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
 /// along with any exporter you configure.
 #[derive(Clone, Default, Debug, Deserialize, JsonSchema)]
@@ -379,9 +393,27 @@ pub(crate) enum AttributeValue {
     Array(AttributeArray),
 }
 
+impl From<String> for AttributeValue {
+    fn from(value: String) -> Self {
+        AttributeValue::String(value)
+    }
+}
+
 impl From<&'static str> for AttributeValue {
     fn from(value: &'static str) -> Self {
         AttributeValue::String(value.to_string())
+    }
+}
+
+impl From<bool> for AttributeValue {
+    fn from(value: bool) -> Self {
+        AttributeValue::Bool(value)
+    }
+}
+
+impl From<f64> for AttributeValue {
+    fn from(value: f64) -> Self {
+        AttributeValue::F64(value)
     }
 }
 
@@ -399,6 +431,19 @@ impl std::fmt::Display for AttributeValue {
             AttributeValue::F64(val) => write!(f, "{val}"),
             AttributeValue::String(val) => write!(f, "{val}"),
             AttributeValue::Array(val) => write!(f, "{val}"),
+        }
+    }
+}
+
+impl PartialOrd for AttributeValue {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        match (self, other) {
+            (AttributeValue::Bool(b1), AttributeValue::Bool(b2)) => b1.partial_cmp(b2),
+            (AttributeValue::F64(f1), AttributeValue::F64(f2)) => f1.partial_cmp(f2),
+            (AttributeValue::I64(i1), AttributeValue::I64(i2)) => i1.partial_cmp(i2),
+            (AttributeValue::String(s1), AttributeValue::String(s2)) => s1.partial_cmp(s2),
+            // Arrays and mismatched types are incomparable
+            _ => None,
         }
     }
 }

@@ -1,6 +1,7 @@
 ---
-title: Writing native Rust plugins for the Apollo Router
-description: Extend the Apollo Router with custom Rust code
+title: Writing Native Rust Plugins for the Apollo Router
+subtitle: Extend the Apollo Router with custom Rust code
+description: Extend the Apollo Router with custom Rust code. Plan, build, and register plugins. Define plugin configuration and implement lifecycle hooks.
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
@@ -100,8 +101,8 @@ impl Plugin for HelloWorld {
 
     fn supergraph_service(
         &self,
-        service: router::BoxService,
-    ) -> router::BoxService {
+        service: supergraph::BoxService,
+    ) -> supergraph::BoxService {
         service
     }
 
@@ -205,6 +206,16 @@ context.upsert("key1", |v: u32| v + 1)?;
 Use `upsert` if you might need to resolve multiple simultaneous writes to a single `context` key (this is most likely for the `subgraph_service` hook, because it might be called by multiple threads in parallel). Rust is multithreaded, and you will get unexpected results if multiple threads write to `context` at the same time. This function prevents issues by guaranteeing that modifications happen serially.
 
 Note: `upsert` requires v to implement `Default`.
+
+#### `enter_active_request`
+
+```rust
+let _guard = context.enter_active_request();
+http_client.request().await;
+drop(_guard);
+```
+
+The Router measures how much time it spends working on a request, by subtracting the time spent waiting on network calls, like subgraphs or coprocessors. The result is reported in the `apollo_router_processing_time` metric. If the native plugin is performing network calls, then they should be taken into account in this metric. It is done by calling the `enter_active_request` method, which returns a guard value. Until that value is dropped, the Router will consider that a network request is happening.
 
 ### 6. Register your plugin
 

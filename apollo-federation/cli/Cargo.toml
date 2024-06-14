@@ -1,0 +1,9 @@
+[package]
+name = "apollo-federation-cli"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+apollo-compiler.workspace = true
+apollo-federation = { path = ".." }
+clap = { version = "4.5.1", features = ["derive"] }

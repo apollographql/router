@@ -66,13 +66,10 @@ impl BridgeQueryPlannerPool {
             let sdl = schema.clone();
             let configuration = configuration.clone();
 
-            if let Some(old_planner) = old_planners_iterator.next() {
-                join_set.spawn(async move {
-                    BridgeQueryPlanner::new_from_planner(old_planner, sdl, configuration).await
-                });
-            } else {
-                join_set.spawn(async move { BridgeQueryPlanner::new(sdl, configuration).await });
-            }
+            let old_planner = old_planners_iterator.next();
+            join_set.spawn(async move {
+                BridgeQueryPlanner::new(sdl, configuration, old_planner).await
+            });
         });
 
         let mut bridge_query_planners = Vec::new();
@@ -200,8 +197,7 @@ impl tower::Service<QueryPlannerRequest> for BridgeQueryPlannerPool {
             f64_histogram!(
                 "apollo.router.query_planning.total.duration",
                 "Duration of the time the router waited for a query plan, including both the queue time and planning time.",
-                start.elapsed().as_secs_f64(),
-                []
+                start.elapsed().as_secs_f64()
             );
 
             res

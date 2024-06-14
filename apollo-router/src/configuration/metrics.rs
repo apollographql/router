@@ -53,6 +53,22 @@ impl Metrics {
 }
 
 impl InstrumentData {
+    fn get_first_key_from_path(
+        attributes: &mut HashMap<String, opentelemetry::Value>,
+        attr_name: &str,
+        path: &str,
+        value: &Value,
+    ) {
+        if let Ok(json_path) = JsonPathInst::from_str(path) {
+            let value_at_path = json_path.find_slice(value).into_iter().next();
+            if let Some(Value::Object(children)) = value_at_path.as_deref() {
+                if let Some(first_key) = children.keys().next() {
+                    attributes.insert(attr_name.to_string(), first_key.clone().into());
+                }
+            }
+        }
+    }
+
     fn get_value_from_path(
         attributes: &mut HashMap<String, opentelemetry::Value>,
         attr_name: &str,
@@ -322,6 +338,8 @@ impl InstrumentData {
             "$..instruments.supergraph",
             opt.instruments.subgraph,
             "$..instruments.subgraph",
+            opt.instruments.graphql,
+            "$..instruments.graphql",
             opt.instruments.default_attribute_requirement_level,
             "$..instruments.default_attribute_requirement_level",
             opt.spans,
@@ -355,6 +373,27 @@ impl InstrumentData {
             opt.limits.max_files,
             "$.limits.max_files"
         );
+
+        populate_config_instrument!(
+            apollo.router.config.demand_control,
+            "$.preview_demand_control[?(@.enabled == true)]",
+            opt.mode,
+            "$.mode"
+        );
+
+        // We need to update the entry we just made because the selected strategy is a named object in the config.
+        // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
+        if let Some((_, demand_control_attributes)) = self
+            .data
+            .get_mut(&"apollo.router.config.demand_control".to_string())
+        {
+            Self::get_first_key_from_path(
+                demand_control_attributes,
+                "opt.strategy",
+                "$.preview_demand_control[?(@.enabled == true)].strategy",
+                yaml,
+            );
+        }
     }
 
     fn populate_env_instrument(&mut self) {

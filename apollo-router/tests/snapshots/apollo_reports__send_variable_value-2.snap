@@ -185,6 +185,7 @@ traces_per_query:
                         registered_operation: false
                         forbidden_operation: false
                         field_execution_weight: 1
+                        limits: ~
                       sent_time_offset: "[sent_time_offset]"
                       sent_time:
                         seconds: "[seconds]"
@@ -428,6 +429,7 @@ traces_per_query:
                               registered_operation: false
                               forbidden_operation: false
                               field_execution_weight: 1
+                              limits: ~
                             sent_time_offset: "[sent_time_offset]"
                             sent_time:
                               seconds: "[seconds]"
@@ -535,6 +537,7 @@ traces_per_query:
                               registered_operation: false
                               forbidden_operation: false
                               field_execution_weight: 1
+                              limits: ~
                             sent_time_offset: "[sent_time_offset]"
                             sent_time:
                               seconds: "[seconds]"
@@ -548,6 +551,7 @@ traces_per_query:
         registered_operation: false
         forbidden_operation: false
         field_execution_weight: 1
+        limits: ~
     stats_with_context: []
     referenced_fields_by_type: {}
     query_metadata: ~
@@ -555,3 +559,4 @@ end_time: "[end_time]"
 operation_count: 0
 operation_count_by_type: []
 traces_pre_aggregated: true
+extended_references_enabled: false

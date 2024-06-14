@@ -28,43 +28,40 @@ executors:
     resource_class: xlarge
     environment:
       CARGO_BUILD_JOBS: 4
-      RUST_TEST_THREADS: 6
   arm_linux_build: &arm_linux_build_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.large
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
   arm_linux_test: &arm_linux_test_executor
     machine:
       image: ubuntu-2004:2024.01.1
     resource_class: arm.xlarge
     environment:
       CARGO_BUILD_JOBS: 8
-      RUST_TEST_THREADS: 8
   macos_build: &macos_build_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: 14.2
+      xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: 14.2
+      xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
-      image: "windows-server-2019-vs2019:2022.08.1"
+      image: "windows-server-2019-vs2019:2024.02.21"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
   windows_test: &windows_test_executor
     machine:
-      image: "windows-server-2019-vs2019:2022.08.1"
+      image: "windows-server-2019-vs2019:2024.02.21"
     resource_class: windows.xlarge
     shell: bash.exe --login -eo pipefail
 
@@ -201,7 +198,7 @@ commands:
             find xtask/src -type f | while read name; do md5sum $name; done | sort -k 2 | md5sum > ~/.xtask_version
             # The closest common ancestor to the default branch, so that test jobs can take advantage previous compiles
             git remote set-head origin -a
-            TARGET_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD)    
+            TARGET_BRANCH=$(git rev-parse --abbrev-ref origin/HEAD)
             echo "Target branch is ${TARGET_BRANCH}"
             COMMON_ANCESTOR_REF=$(git merge-base HEAD "${TARGET_BRANCH}")
             echo "Common ancestor is ${COMMON_ANCESTOR_REF}"
@@ -366,6 +363,10 @@ commands:
               cargo install --locked --version 0.12.0 cargo-fuzz
             fi
 
+            if [[ ! -f "$HOME/.cargo/bin/cargo-nextest$EXECUTABLE_SUFFIX" ]]; then
+              cargo install --locked --version 0.9.70 cargo-nextest
+            fi
+
   fetch_dependencies:
     steps:
       - run:
@@ -488,7 +489,10 @@ commands:
             - "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
       - run:
           name: Run tests
-          command: xtask test --workspace --locked
+          environment:
+            # Use the settings from the "ci" profile in nextest configuration.
+            NEXTEST_PROFILE: ci
+          command: xtask test --workspace --locked --features ci
       - run:
           name: Delete large files from cache
           command: |
@@ -498,10 +502,13 @@ commands:
           condition:
             equal: [ "dev", "<< pipeline.git.branch >>" ]
           steps:
-          - save_cache:
-              key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
-              paths:
-                - target
+            - save_cache:
+                key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
+                paths:
+                  - target
+      - store_test_results:
+          # The results from nextest that power the CircleCI Insights.
+          path: ./target/nextest/ci/junit.xml
   fuzz_build:
     steps:
       - run: cargo +nightly fuzz build
@@ -530,7 +537,7 @@ jobs:
     steps:
       - when:
           condition:
-            equal: [*amd_linux_helm_executor, << parameters.platform >>]
+            equal: [ *amd_linux_helm_executor, << parameters.platform >> ]
           steps:
             - checkout
             - xtask_check_helm
@@ -737,8 +744,8 @@ jobs:
                   # save containers for analysis
                   mkdir built-containers
                   docker save -o built-containers/router_${VERSION}-debug.tar ${ROUTER_TAG}:${VERSION}-debug
-                  docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}  
-                 
+                  docker save -o built-containers/router_${VERSION}.tar ${ROUTER_TAG}:${VERSION}
+
             - persist_to_workspace:
                 root: .
                 paths:
@@ -828,7 +835,7 @@ jobs:
             not:
               equal: [ "https://github.com/apollographql/router", << pipeline.project.git_url >> ]
           steps:
-             - run:
+            - run:
                 command: >
                   echo "Not publishing any github release."
       - when:
@@ -993,8 +1000,8 @@ workflows:
           # Disables all PR comments from this job
           do-pr-comments: false
           # Scan job will return 1 if findings violating the Wiz policy are found.
-          # Toggle off to prevent any CI failures OR 
-          # contact Apollo's Security team to adjust what violates the 
+          # Toggle off to prevent any CI failures OR
+          # contact Apollo's Security team to adjust what violates the
           # Wiz policy used in this scan.
           fail-on-findings: true
           # Configure scan job to use a policy specific to apollo-router.
@@ -1091,7 +1098,7 @@ workflows:
               ignore: /.*/
             tags:
               only: /v.*/
-  
+
   security-scans:
     when:
       not: << pipeline.parameters.nightly >>

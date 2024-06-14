@@ -1,0 +1,31 @@
+name: Update Apollo Protobuf
+run-name: ${{ github.actor }} is updating the Apollo Protobuf 🚀
+on:
+  workflow_dispatch:
+  schedule:
+    # On the 5 of every hour
+    - cron:  '5 * * * *'
+jobs:
+  Update-Protobuf-Schema:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+      - name: Make changes to pull request
+        run: |
+          curl -f https://usage-reporting.api.apollographql.com/proto/reports.proto > ./apollo-router/src/plugins/telemetry/proto/reports.proto
+      - name: Create Pull Request
+        id: cpr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          commit-message: Update Apollo Protobuf schema
+          committer: GitHub <noreply@github.com>
+          author: ${{ github.actor }} <${{ github.actor }}@users.noreply.github.com>
+          branch: create-pull-request/apollo-proto-updates
+          team-reviewers: |
+            router
+          add-paths: |
+            apollo-router/src/plugins/telemetry/proto/reports.proto
+          delete-branch: true
+          title: 'chore: Update Apollo Protobuf'
+          body: |
+            This updates the copy of `reports.proto` which this repository relies on with the latest copy fetched via our public endpoint.

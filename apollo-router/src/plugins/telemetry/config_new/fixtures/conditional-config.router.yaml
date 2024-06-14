@@ -1,0 +1,15 @@
+# This config has a conditional in that will be validated by the project config files.
+# The json schema for conditionals should validate this as OK.
+telemetry:
+  instrumentation:
+    spans:
+      mode: deprecated
+      router:
+        attributes:
+          "http.request.header.x-my-header-condition":
+            request_header: "x-my-header"
+            condition:
+              eq:
+                - response_header: "head"
+                - "test"
+

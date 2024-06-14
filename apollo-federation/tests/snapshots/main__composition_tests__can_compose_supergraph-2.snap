@@ -1,0 +1,25 @@
+---
+source: apollo-federation/tests/composition_tests.rs
+expression: print_sdl(&supergraph.to_api_schema())
+---
+enum E {
+  V1
+  V2
+}
+
+type Query {
+  t: T
+}
+
+type S {
+  x: Int
+}
+
+type T {
+  k: ID
+  a: Int
+  b: String
+}
+
+union U = S | T
+

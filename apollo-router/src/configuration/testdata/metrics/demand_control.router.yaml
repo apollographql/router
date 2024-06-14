@@ -1,0 +1,7 @@
+preview_demand_control:
+  enabled: true
+  mode: measure
+  strategy:
+    static_estimated:
+      list_size: 30
+      max: 256

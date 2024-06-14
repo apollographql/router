@@ -22,6 +22,7 @@ use http::StatusCode;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
+use opentelemetry::metrics::MetricsError;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
@@ -65,7 +66,6 @@ use self::config_new::events::SupergraphEvents;
 use self::config_new::instruments::Instrumented;
 use self::config_new::instruments::RouterInstruments;
 use self::config_new::instruments::SubgraphInstruments;
-use self::config_new::instruments::SupergraphCustomInstruments;
 use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
@@ -92,6 +92,8 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::config::TracingCommon;
+use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
+use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
@@ -129,6 +131,7 @@ use crate::ListenAddr;
 
 pub(crate) mod apollo;
 pub(crate) mod apollo_exporter;
+pub(crate) mod apollo_otlp_exporter;
 pub(crate) mod config;
 pub(crate) mod config_new;
 pub(crate) mod dynamic_attribute;
@@ -455,17 +458,14 @@ impl Plugin for Telemetry {
                                 }
                             }
 
-                            if response
-                                .context
-                                .extensions()
-                                .lock()
-                                .get::<Arc<UsageReporting>>()
-                                .map(|u| {
-                                    u.stats_report_key == "## GraphQLValidationFailure\n"
-                                        || u.stats_report_key == "## GraphQLParseFailure\n"
-                                })
-                                .unwrap_or(false)
-                            {
+                            if response.context.extensions().with_lock(|lock| {
+                                lock.get::<Arc<UsageReporting>>()
+                                    .map(|u| {
+                                        u.stats_report_key == "## GraphQLValidationFailure\n"
+                                            || u.stats_report_key == "## GraphQLParseFailure\n"
+                                    })
+                                    .unwrap_or(false)
+                            }) {
                                 Self::update_apollo_metrics(
                                     &response.context,
                                     field_level_instrumentation_ratio,
@@ -486,7 +486,12 @@ impl Plugin for Telemetry {
                         } else if let Err(err) = &response {
                             span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
                             span.set_span_dyn_attributes(
-                                config.instrumentation.spans.router.attributes.on_error(err),
+                                config
+                                    .instrumentation
+                                    .spans
+                                    .router
+                                    .attributes
+                                    .on_error(err, &ctx),
                             );
                             custom_instruments.on_error(err, &ctx);
                             custom_events.on_error(err, &ctx);
@@ -516,12 +521,7 @@ impl Plugin for Telemetry {
             ))
             .map_response(move |mut resp: SupergraphResponse| {
                 let config = config_map_res_first.clone();
-                if let Some(usage_reporting) = {
-                    let extensions = resp.context.extensions().lock();
-                    let urp = extensions.get::<Arc<UsageReporting>>();
-                    urp.cloned()
-                }
-                {
+                if let Some(usage_reporting) = resp.context.extensions().with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned()) {
                     // Record the operation signature on the router span
                     Span::current().record(
                         APOLLO_PRIVATE_OPERATION_SIGNATURE.as_str(),
@@ -573,17 +573,22 @@ impl Plugin for Telemetry {
                 move |req: &SupergraphRequest| {
                     let custom_attributes = config.instrumentation.spans.supergraph.attributes.on_request(req);
                     Self::populate_context(config.clone(), field_level_instrumentation_ratio, req);
-                    let custom_instruments = SupergraphCustomInstruments::new(
-                        &config.instrumentation.instruments.supergraph.custom,
-                    );
+                    let custom_instruments = config
+                        .instrumentation
+                        .instruments
+                        .new_supergraph_instruments();
                     custom_instruments.on_request(req);
+                    let custom_graphql_instruments:GraphQLInstruments = (&config
+                        .instrumentation
+                        .instruments).into();
+                    custom_graphql_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
                     supergraph_events.on_request(req);
 
-                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events)
+                    (req.context.clone(), custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments)
                 },
-                move |(ctx, custom_instruments, custom_attributes, supergraph_events): (Context, SupergraphCustomInstruments, Vec<KeyValue>, SupergraphEvents), fut| {
+                move |(ctx, custom_instruments, custom_attributes, supergraph_events, custom_graphql_instruments): (Context, SupergraphInstruments, Vec<KeyValue>, SupergraphEvents, GraphQLInstruments), fut| {
                     let config = config_map_res.clone();
                     let sender = metrics_sender.clone();
                     let start = Instant::now();
@@ -597,11 +602,13 @@ impl Plugin for Telemetry {
                                 span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_response(resp));
                                 custom_instruments.on_response(resp);
                                 supergraph_events.on_response(resp);
+                                custom_graphql_instruments.on_response(resp);
                             },
                             Err(err) => {
-                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err));
+                                span.set_span_dyn_attributes(config.instrumentation.spans.supergraph.attributes.on_error(err, &ctx));
                                 custom_instruments.on_error(err, &ctx);
                                 supergraph_events.on_error(err, &ctx);
+                                custom_graphql_instruments.on_error(err, &ctx);
                             },
                         }
                         result = Self::update_otel_metrics(
@@ -609,6 +616,9 @@ impl Plugin for Telemetry {
                             ctx.clone(),
                             result,
                             start.elapsed(),
+                            custom_instruments,
+                            supergraph_events,
+                            custom_graphql_instruments,
                         )
                         .await;
                         Self::update_metrics_on_response_events(
@@ -631,13 +641,20 @@ impl Plugin for Telemetry {
                     .map(|op| *op.kind());
 
                 match operation_kind {
-                    Some(operation_kind) => {
-                        info_span!(
+                    Some(operation_kind) => match operation_kind {
+                        OperationKind::Subscription => info_span!(
                             EXECUTION_SPAN_NAME,
                             "otel.kind" = "INTERNAL",
-                            "graphql.operation.type" = operation_kind.as_apollo_operation_type()
-                        )
-                    }
+                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                            "apollo_private.operation.subtype" =
+                                OperationSubType::SubscriptionRequest.as_str(),
+                        ),
+                        _ => info_span!(
+                            EXECUTION_SPAN_NAME,
+                            "otel.kind" = "INTERNAL",
+                            "graphql.operation.type" = operation_kind.as_apollo_operation_type(),
+                        ),
+                    },
                     None => {
                         info_span!(EXECUTION_SPAN_NAME, "otel.kind" = "INTERNAL",)
                     }
@@ -726,7 +743,11 @@ impl Plugin for Telemetry {
                                 span.record(OTEL_STATUS_CODE, OTEL_STATUS_CODE_ERROR);
 
                                 span.set_span_dyn_attributes(
-                                    conf.instrumentation.spans.subgraph.attributes.on_error(err),
+                                    conf.instrumentation
+                                        .spans
+                                        .subgraph
+                                        .attributes
+                                        .on_error(err, &context),
                                 );
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
@@ -920,22 +941,21 @@ impl Telemetry {
         context: Context,
         result: Result<SupergraphResponse, BoxError>,
         request_duration: Duration,
+        custom_instruments: SupergraphInstruments,
+        custom_events: SupergraphEvents,
+        custom_graphql_instruments: GraphQLInstruments,
     ) -> Result<SupergraphResponse, BoxError> {
-        let mut metric_attrs = {
-            context
-                .extensions()
-                .lock()
-                .get::<MetricsAttributes>()
-                .cloned()
-        }
-        .map(|attrs| {
-            attrs
-                .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                .collect::<Vec<KeyValue>>()
-        })
-        .unwrap_or_default();
+        let mut metric_attrs = context
+            .extensions()
+            .with_lock(|lock| lock.get::<MetricsAttributes>().cloned())
+            .map(|attrs| {
+                attrs
+                    .0
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         let res = match result {
             Ok(response) => {
                 metric_attrs.push(KeyValue::new(
@@ -943,8 +963,30 @@ impl Telemetry {
                     response.response.status().as_u16().to_string(),
                 ));
 
+                let ctx = context.clone();
                 // Wait for the first response of the stream
                 let (parts, stream) = response.response.into_parts();
+                let config_cloned = config.clone();
+                let stream = stream.inspect(move |resp| {
+                    let has_errors = !resp.errors.is_empty();
+                    // Useful for selector in spans/instruments/events
+                    ctx.insert_json_value(
+                        CONTAINS_GRAPHQL_ERROR,
+                        serde_json_bytes::Value::Bool(has_errors),
+                    );
+                    let span = Span::current();
+                    span.set_span_dyn_attributes(
+                        config_cloned
+                            .instrumentation
+                            .spans
+                            .supergraph
+                            .attributes
+                            .on_response_event(resp, &ctx),
+                    );
+                    custom_instruments.on_response_event(resp, &ctx);
+                    custom_events.on_response_event(resp, &ctx);
+                    custom_graphql_instruments.on_response_event(resp, &ctx);
+                });
                 let (first_response, rest) = stream.into_future().await;
 
                 let attributes = config
@@ -1037,10 +1079,11 @@ impl Telemetry {
 
         let _ = context
             .extensions()
-            .lock()
-            .insert(MetricsAttributes(attributes));
+            .with_lock(|mut lock| lock.insert(MetricsAttributes(attributes)));
         if rand::thread_rng().gen_bool(field_level_instrumentation_ratio) {
-            context.extensions().lock().insert(EnableSubgraphFtv1);
+            context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(EnableSubgraphFtv1));
         }
     }
 
@@ -1098,8 +1141,8 @@ impl Telemetry {
         sub_request
             .context
             .extensions()
-            .lock()
-            .insert(SubgraphMetricsAttributes(attributes)); //.unwrap();
+            .with_lock(|mut lock| lock.insert(SubgraphMetricsAttributes(attributes)));
+        //.unwrap();
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1110,21 +1153,17 @@ impl Telemetry {
         now: Instant,
         result: &Result<Response, BoxError>,
     ) {
-        let mut metric_attrs = {
-            context
-                .extensions()
-                .lock()
-                .get::<SubgraphMetricsAttributes>()
-                .cloned()
-        }
-        .map(|attrs| {
-            attrs
-                .0
-                .into_iter()
-                .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
-                .collect::<Vec<KeyValue>>()
-        })
-        .unwrap_or_default();
+        let mut metric_attrs = context
+            .extensions()
+            .with_lock(|lock| lock.get::<SubgraphMetricsAttributes>().cloned())
+            .map(|attrs| {
+                attrs
+                    .0
+                    .into_iter()
+                    .map(|(attr_name, attr_value)| KeyValue::new(attr_name, attr_value))
+                    .collect::<Vec<KeyValue>>()
+            })
+            .unwrap_or_default();
         metric_attrs.push(subgraph_attribute);
         // Fill attributes from context
         metric_attrs.extend(
@@ -1259,11 +1298,6 @@ impl Telemetry {
                         .enumerate()
                         .map(move |(idx, response)| {
                             let has_errors = !response.errors.is_empty();
-                            // Useful for selector in spans/instruments/events
-                            ctx.insert_json_value(
-                                CONTAINS_GRAPHQL_ERROR,
-                                serde_json_bytes::Value::Bool(has_errors),
-                            );
 
                             if !matches!(sender, Sender::Noop) {
                                 if operation_kind == OperationKind::Subscription {
@@ -1329,11 +1363,10 @@ impl Telemetry {
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
     ) {
-        let metrics = if let Some(usage_reporting) = {
-            let lock = context.extensions().lock();
-            let urp = lock.get::<Arc<UsageReporting>>();
-            urp.cloned()
-        } {
+        let metrics = if let Some(usage_reporting) = context
+            .extensions()
+            .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
+        {
             let licensed_operation_count =
                 licensed_operation_count(&usage_reporting.stats_report_key);
             let persisted_query_hit = context
@@ -1380,6 +1413,7 @@ impl Telemetry {
                         SingleStats {
                             stats_with_context: SingleContextualizedStats {
                                 context: StatsContext {
+                                    result: "".to_string(),
                                     client_name: context
                                         .get(CLIENT_NAME)
                                         .unwrap_or_default()
@@ -1767,7 +1801,13 @@ fn handle_error_internal<T: Into<opentelemetry::global::Error>>(
                 ::tracing::error!("OpenTelemetry trace error occurred: {}", err)
             }
             opentelemetry::global::Error::Metric(err) => {
-                ::tracing::error!("OpenTelemetry metric error occurred: {}", err)
+                if let MetricsError::Other(msg) = &err {
+                    if msg.contains("Warning") {
+                        ::tracing::warn!("OpenTelemetry metric warning occurred: {}", msg);
+                        return;
+                    }
+                }
+                ::tracing::error!("OpenTelemetry metric error occurred: {}", err);
             }
             opentelemetry::global::Error::Other(err) => {
                 ::tracing::error!("OpenTelemetry error occurred: {}", err)
@@ -1785,8 +1825,7 @@ fn request_ftv1(mut req: SubgraphRequest) -> SubgraphRequest {
     if req
         .context
         .extensions()
-        .lock()
-        .contains_key::<EnableSubgraphFtv1>()
+        .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
         && Span::current().context().span().span_context().is_sampled()
     {
         req.subgraph_request
@@ -1801,8 +1840,7 @@ fn store_ftv1(subgraph_name: &ByteString, resp: SubgraphResponse) -> SubgraphRes
     if resp
         .context
         .extensions()
-        .lock()
-        .contains_key::<EnableSubgraphFtv1>()
+        .with_lock(|lock| lock.contains_key::<EnableSubgraphFtv1>())
     {
         if let Some(serde_json_bytes::Value::String(ftv1)) =
             resp.response.body().extensions.get("ftv1")
@@ -1843,9 +1881,10 @@ impl CustomTraceIdPropagator {
 
     fn extract_span_context(&self, extractor: &dyn Extractor) -> Option<SpanContext> {
         let trace_id = extractor.get(&self.header_name)?;
+        let trace_id = trace_id.replace('-', "");
 
         // extract trace id
-        let trace_id = match opentelemetry::trace::TraceId::from_hex(trace_id) {
+        let trace_id = match opentelemetry::trace::TraceId::from_hex(&trace_id) {
             Ok(trace_id) => trace_id,
             Err(err) => {
                 ::tracing::error!("cannot generate custom trace_id: {err}");
@@ -1902,6 +1941,7 @@ struct EnableSubgraphFtv1;
 //
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::fmt::Debug;
     use std::ops::DerefMut;
     use std::sync::Arc;
@@ -1932,6 +1972,7 @@ mod tests {
     use tracing_subscriber::Layer;
 
     use super::apollo::ForwardHeaders;
+    use super::CustomTraceIdPropagator;
     use super::Telemetry;
     use crate::error::FetchError;
     use crate::graphql;
@@ -2956,5 +2997,19 @@ mod tests {
         .with_subscriber(tracing_subscriber::registry().with(test_layer.clone()))
         .await;
         test_layer.assert_log_entry_count("other error", 2);
+    }
+
+    #[tokio::test]
+    async fn test_custom_trace_id_propagator_strip_dashes_in_trace_id() {
+        let header = String::from("x-trace-id");
+        let trace_id = String::from("04f9e396-465c-4840-bc2b-f493b8b1a7fc");
+        let expected_trace_id = String::from("04f9e396465c4840bc2bf493b8b1a7fc");
+
+        let propagator = CustomTraceIdPropagator::new(header.clone());
+        let mut headers: HashMap<String, String> = HashMap::new();
+        headers.insert(header, trace_id);
+        let span = propagator.extract_span_context(&headers);
+        assert!(span.is_some());
+        assert_eq!(span.unwrap().trace_id().to_string(), expected_trace_id);
     }
 }

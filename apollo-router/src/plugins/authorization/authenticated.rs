@@ -354,11 +354,10 @@ impl<'a> transform::Visitor for AuthenticatedVisitor<'a> {
         let is_field_list = field_def.ty.is_list();
 
         let field_requires_authentication = self.is_field_authenticated(field_def);
-
         self.current_path
-            .push(PathElement::Key(field_name.as_str().into()));
+            .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
-            self.current_path.push(PathElement::Flatten);
+            self.current_path.push(PathElement::Flatten(None));
         }
 
         let implementors_with_different_requirements =
@@ -646,7 +645,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -669,7 +668,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -692,7 +691,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -712,7 +711,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -737,7 +736,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -762,7 +761,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -789,7 +788,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -815,7 +814,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -838,7 +837,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -864,7 +863,7 @@ mod tests {
 
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -928,7 +927,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -951,7 +950,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             result: doc,
             paths
@@ -1019,7 +1018,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1044,7 +1043,7 @@ mod tests {
 
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             result: doc,
             paths
@@ -1109,7 +1108,7 @@ mod tests {
 
         let (doc, paths) = filter(UNION_MEMBERS_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1197,7 +1196,7 @@ mod tests {
 
         let (doc, paths) = filter(RENAMED_SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1358,7 +1357,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             result: doc,
             paths
@@ -1378,7 +1377,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY2);
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             result: doc,
             paths
@@ -1662,11 +1661,13 @@ mod tests {
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
         headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
-        context.extensions().lock().insert(ClientRequestAccepts {
-            multipart_defer: true,
-            multipart_subscription: true,
-            json: true,
-            wildcard: true,
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(ClientRequestAccepts {
+                multipart_defer: true,
+                multipart_subscription: true,
+                json: true,
+                wildcard: true,
+            })
         });
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id } ... @defer { nonNullId } } }")

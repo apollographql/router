@@ -1,0 +1,31 @@
+description: Field length
+events:
+  - - response_field:
+        typed_value:
+          string:
+            value: "product1"
+            field_name: "name"
+            field_type: "String"
+            type_name: "Product"
+    - response_field:
+        typed_value:
+          list:
+            values:
+              - string:
+                  value: "product2"
+                  type_name: "Product"
+                  field_type: "String"
+                  field_name: "name"
+              - string:
+                  value: "product3"
+                  type_name: "Product"
+                  field_type: "String"
+                  field_name: "name"
+              - string:
+                  value: "product4"
+                  type_name: "Product"
+                  field_type: "String"
+                  field_name: "name"
+            field_name: "products"
+            field_type: "Product"
+            type_name: "Query"

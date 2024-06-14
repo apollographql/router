@@ -4,7 +4,6 @@ coprocessor:
   timeout: 2s # The timeout for all coprocessor requests. Defaults to 1 second (1s)
   router: # This coprocessor hooks into the `RouterService`
     request: # By including this key, the `RouterService` sends a coprocessor request whenever it first receives a client request.
-      detached: false # optional. if set to true, the router will handle the request without waiting for the coprocessor to respond
       headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
       body: false
       context: false
@@ -13,7 +12,6 @@ coprocessor:
       method: false
       url: "http://example.com/router-request-coprocessor-url"
     response: # By including this key, the `RouterService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
-      detached: false # optional. if set to true, the router will handle the response without waiting for the coprocessor to respond
       headers: true
       body: false
       context: false
@@ -22,7 +20,6 @@ coprocessor:
       url: "http://example.com/router-response-coprocessor-url"
   supergraph: # This coprocessor hooks into the `SupergraphService`
     request: # By including this key, the `SupergraphService` sends a coprocessor request whenever it first receives a client request.
-      detached: false # optional. if set to true, the router will handle the request without waiting for the coprocessor to respond
       headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
       body: false
       context: false
@@ -30,7 +27,6 @@ coprocessor:
       method: false
       url: "http://example.com/supergraph-request-coprocessor-url"
     response: # By including this key, the `SupergraphService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
-      detached: false # optional. if set to true, the router will handle the response without waiting for the coprocessor to respond
       headers: true
       body: false
       context: false
@@ -39,7 +35,6 @@ coprocessor:
       url: "http://example.com/supergraph-response-coprocessor-url"
   execution: # This coprocessor hooks into the `ExecutionService`
     request: # By including this key, the `ExecutionService` sends a coprocessor request whenever it first receives a client request.
-      detached: false # optional. if set to true, the router will handle the request without waiting for the coprocessor to respond
       headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
       body: false
       context: false
@@ -48,7 +43,6 @@ coprocessor:
       query_plan: false
       url: "http://example.com/execution-request-coprocessor-url"
     response: # By including this key, the `ExecutionService` sends a coprocessor request whenever it's about to send response data to a client (including incremental data via @defer).
-      detached: false # optional. if set to true, the router will handle the response without waiting for the coprocessor to respond
       headers: true
       body: false
       context: false
@@ -58,7 +52,6 @@ coprocessor:
   subgraph:
     all:
       request: # By including this key, the `SubgraphService` sends a coprocessor request whenever it is about to make a request to a subgraph.
-        detached: false # optional. if set to true, the router will handle the request without waiting for the coprocessor to respond
         headers: true # These boolean properties indicate which request data to include in the coprocessor request. All are optional and false by default.
         body: false
         context: false
@@ -67,7 +60,6 @@ coprocessor:
         service_name: false
         url: "http://example.com/subgraph-request-coprocessor-url"
       response: # By including this key, the `SubgraphService` sends a coprocessor request whenever receives a subgraph response.
-        detached: false # optional. if set to true, the router will handle the response without waiting for the coprocessor to respond
         headers: true
         body: false
         context: false

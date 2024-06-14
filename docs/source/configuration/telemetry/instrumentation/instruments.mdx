@@ -17,10 +17,18 @@ You can configure instruments in `router.yaml` with `telemetry.instrumentation.i
 
 OpenTelemetry specifies multiple [standard metric instruments](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/) that are available in the router:
 
-* `http.server.active_requests` - The number of active requests in flight.
-* `http.server.request.body.size` - A histogram of request body sizes for requests handled by the router.
-* `http.server.request.duration` - A histogram of request durations for requests handled by the router.
-* `http.server.response.body.size` - A histogram of response body sizes for requests handled by the router.
++ In the [router service](#router-request-lifecycle-services):
+
+  * `http.server.active_requests` - The number of active requests in flight.
+  * `http.server.request.body.size` - A histogram of request body sizes for requests handled by the router.
+  * `http.server.request.duration` - A histogram of request durations for requests handled by the router.
+
++ In the [subgraph service](#router-request-lifecycle-services):
+
+  * `http.client.request.body.size` - A histogram of request body sizes for requests handled by subgraphs.
+  * `http.client.request.duration` - A histogram of request durations for requests handled by subgraphs.
+  * `http.client.response.body.size` - A histogram of response body sizes for requests handled by subgraphs.
+
 
 These instruments are configurable in `router.yaml`:
 
@@ -32,7 +40,10 @@ telemetry:
         http.server.active_requests: true # (default false)
         http.server.request.body.size: true # (default false)
         http.server.request.duration: true # (default false)
-        http.server.response.body.size: true # (default false)
+      subgraph:
+        http.client.request.body.size: true # (default false)
+        http.client.request.duration: true # (default false)
+        http.client.response.body.size: true # (default false)
 ```
 
 They can be customized by attaching or removing attributes. See [attributes](#attributes) to learn more about configuring attributes.
@@ -46,6 +57,10 @@ telemetry:
         http.server.active_requests: 
           attributes:
             http.request.method: true
+      subgraph:
+        http.client.request.duration:
+          attributes:
+            subgraph.name: true
 ```
 
 ### Apollo standard instruments
@@ -199,6 +214,9 @@ The `value` of an instrument is the value which will be drawn from. This can be 
 * `duration` - the duration of the pipeline service.
 * `unit` - the number of times the pipeline service has been executed.
 * `custom` - a custom value extracted from the pipeline service. See [selectors](./selectors) for more information.
+* `event_duration` - the duration of an event in the pipeline service.
+* `event_unit` - the number of times an event in the pipeline service has been executed.
+* `event_custom` - a custom value extracted from the event in the pipeline service. See [selectors](./selectors) for more information.
 
 ```yaml title="future.router.yaml"
 telemetry:
@@ -209,6 +227,8 @@ telemetry:
           # ...
           value: duration
 ```
+
+> `event_*` are mandantory when you want to use a [selector](./selectors) on the supergraph response body (`response_data` and `response_errors`).
 
 Values of custom metrics can be extracted from the pipeline using custom attributes. For example, to sum the contents of a request header, create a counter with value set as the request header:
 
@@ -336,6 +356,18 @@ telemetry:
             "my_attribute":
               # ...
               response_header: "x-my-header"
+      subgraph:
+        requests.timeout:
+          value: unit
+          type: counter
+          unit: request
+          description: "subgraph requests containing subgraph timeout"
+          attributes:
+            subgraph.name: true
+          condition:
+            eq:
+              - "request timed out"
+              - error: reason
 ```
 
 ### Instrument configuration reference

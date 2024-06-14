@@ -1,6 +1,7 @@
 ---
-title: Rhai scripts for the Apollo Router
-description: Add custom functionality directly to your router
+title: Rhai Scripts for the Apollo Router
+subtitle: Add custom functionality directly to your router
+description: Customize Apollo Router functionality with Rhai scripts. Manipulate strings, process headers and more for enhanced performance.
 ---
 
 You can customize the Apollo Router's behavior with scripts that use the [Rhai scripting language](https://rhai.rs/book/). In a Rust-based project, Rhai is ideal for performing common scripting tasks such as manipulating strings and processing headers. Your Rhai scripts can also hook into multiple stages of the router's [request handling lifecycle](#router-request-lifecycle).
@@ -187,12 +188,15 @@ Each Apollo Router service has a corresponding function that a Rhai script can d
 
 ##### `RouterService`
 
+`router_service`
 </td>
 <td>
 
 Runs at the very beginning and very end of the HTTP request lifecycle.
 
 For example, [JWT authentication](../configuration/authn-jwt) is performed within the `RouterService`.
+
+Define `router_service` if your customization needs to interact with HTTP `context` and `headers`. It doesn't support access to the `body` property (see [this GitHub issue](https://github.com/apollographql/router/issues/3642) for details).
 
 </td>
 </tr>

@@ -21,14 +21,16 @@ use crate::error::SchemaError;
 #[cfg(unix)]
 #[test]
 fn schema_generation() {
-    let settings = SchemaSettings::draft2019_09().with(|s| {
-        s.option_nullable = true;
-        s.option_add_null_type = false;
-        s.inline_subschemas = true;
+    let schema = generate_config_schema();
+    insta::with_settings!({sort_maps => true}, {
+        assert_json_snapshot!(&schema)
     });
-    let gen = settings.into_generator();
-    let schema = gen.into_root_schema_for::<Configuration>();
-    assert_json_snapshot!(&schema)
+    let json_schema =
+        serde_json::to_string_pretty(&schema).expect("must be able to deserialize schema");
+    assert!(
+        json_schema.len() < 500 * 1024,
+        "schema must be less than 500kb"
+    );
 }
 
 #[test]
@@ -691,12 +693,16 @@ fn visit_schema(path: &str, schema: &Value, errors: &mut Vec<String>) {
                     for (k, v) in properties {
                         let path = format!("{path}.{k}");
                         if v.as_object().and_then(|o| o.get("description")).is_none() {
-                            errors.push(format!("{path} was missing a description"));
+                            // Enum type does not get a description
+                            if k != "type" {
+                                errors.push(format!("{path} was missing a description"));
+                            }
                         }
                         visit_schema(&path, v, errors)
                     }
                 } else {
-                    visit_schema(path, v, errors)
+                    let path = format!("{path}.{k}");
+                    visit_schema(&path, v, errors)
                 }
             }
         }
@@ -1141,4 +1147,28 @@ fn it_prevents_reuse_and_generate_query_fragments_simultaneously() {
 
     assert!(conf.supergraph.generate_query_fragments);
     assert_eq!(conf.supergraph.reuse_query_fragments, Some(false));
+}
+
+#[test]
+fn it_requires_rust_apollo_metrics_generation_for_enhanced_signature_normalization() {
+    let mut plugins_config = serde_json::Map::new();
+    plugins_config.insert(
+        "telemetry".to_string(),
+        serde_json::json! {{
+            "apollo": {
+                "experimental_apollo_signature_normalization_algorithm": "enhanced"
+            }
+        }},
+    );
+
+    let error = Configuration::builder()
+        .experimental_apollo_metrics_generation_mode(ApolloMetricsGenerationMode::Both)
+        .apollo_plugins(plugins_config)
+        .build()
+        .expect_err("Must have an error because we have conflicting config options");
+
+    assert_eq!(
+        error.to_string(),
+        String::from("`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`: either change to the legacy signature normalization mode, or change to new metrics generation")
+    );
 }

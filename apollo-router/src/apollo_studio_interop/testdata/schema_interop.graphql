@@ -146,6 +146,10 @@ type Mutation
   @join__type(graph: MAIN)
 {
   noInputMutation: EverythingResponse!
+  graph(id: ID!): TestGraphResponse!
+  mutation2(id: ID!): TestGraphResponse2!
+  mutation3(id: ID!): TestGraphResponse3!
+  mutation4(id1: ID!, id2: ID!): ID!
 }
 
 input NestedEnumInputType
@@ -183,6 +187,8 @@ type Query
   defaultArgQuery(stringInput: String! = "default", inputType: AnotherInputType = {anotherInput: "inputDefault"}): BasicResponse!
   inputTypeDefaultQuery(input: InputTypeWithDefault): BasicResponse!
   sortQuery(listInput: [String!]!, stringInput: String!, nullableStringInput: String, INTInput: Int!, floatInput: Float!, boolInput: Boolean!, enumInput: SomeEnum, idInput: ID!): SortResponse!
+  manyArgsQuery(arg1: String, arg2: String, arg3: String, arg4: String, arg5: String, arg6: String, arg7: String): EverythingResponse!
+  underscoreQuery(arg_: String, _arg2: String, _arg3_: String): UnderscoreResponse
 }
 
 enum SomeEnum
@@ -201,6 +207,33 @@ type SortResponse
   zzz: Int
   aaa: Int
   CCC: Int
+}
+
+type TestGraphResponse
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(downgradeDefaultValueChange: Boolean, downgradeStaticChecks: Boolean): Int!
+}
+
+type TestGraphResponse2
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(arg1: Boolean, arg2: Boolean): Int!
+}
+
+type TestGraphResponse3
+  @join__type(graph: MAIN)
+{
+  updateCheckConfiguration(arg1: String, arg2: String, arg3: String): Int!
+}
+
+type UnderscoreResponse
+  @join__type(graph: MAIN)
+{
+  _: String
+  _name: String
+  _name_: String
+  name_: String
 }
 
 type Subscription

@@ -17,7 +17,6 @@ use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
-use crate::response;
 use crate::services::execution;
 
 /// What information is passed to a router request/response stage
@@ -36,8 +35,6 @@ pub(super) struct ExecutionRequestConf {
     pub(super) method: bool,
     /// Send the query plan
     pub(super) query_plan: bool,
-    /// Handles the request without waiting for the coprocessor to respond
-    pub(super) detached: bool,
     /// The url you'd like to offload processing to
     #[schemars(with = "String")]
     pub(super) url: Option<Url>,
@@ -57,8 +54,6 @@ pub(super) struct ExecutionResponseConf {
     pub(super) sdl: bool,
     /// Send the HTTP status
     pub(super) status_code: bool,
-    /// Handles the response without waiting for the coprocessor to respond
-    pub(super) detached: bool,
     /// The url you'd like to offload processing to
     #[schemars(with = "String")]
     pub(super) url: Option<Url>,
@@ -246,22 +241,6 @@ where
         .and_query_plan(query_plan)
         .build();
 
-    if request_config.detached {
-        tokio::task::spawn(async move {
-            tracing::debug!(?payload, "externalized output");
-            let start = Instant::now();
-            let _ = payload.call(http_client, &coprocessor_url).await;
-            let duration = start.elapsed().as_secs_f64();
-            tracing::info!(
-                histogram.apollo.router.operations.coprocessor.duration = duration,
-                coprocessor.stage = %PipelineStep::ExecutionRequest,
-            );
-        });
-
-        request.supergraph_request = http::Request::from_parts(parts, body);
-        return Ok(ControlFlow::Continue(request));
-    }
-
     tracing::debug!(?payload, "externalized output");
     let guard = request.context.enter_active_request();
     let start = Instant::now();
@@ -359,7 +338,7 @@ async fn process_execution_response_stage<C>(
     http_client: C,
     coprocessor_url: Url,
     sdl: Arc<String>,
-    mut response: execution::Response,
+    response: execution::Response,
     response_config: ExecutionResponseConf,
 ) -> Result<execution::Response, BoxError>
 where
@@ -375,7 +354,7 @@ where
 
     // we split the body (which is a stream) into first response + rest of responses,
     // for which we will implement mapping later
-    let (first, rest): (Option<response::Response>, graphql::ResponseStream) =
+    let (first, rest): (Option<graphql::Response>, graphql::ResponseStream) =
         body.into_future().await;
 
     // If first is None, we return an error
@@ -407,72 +386,6 @@ where
         .and_has_next(first.has_next)
         .build();
 
-    if response_config.detached {
-        let http_client2 = http_client.clone();
-        let coprocessor_url2 = coprocessor_url.clone();
-        tokio::task::spawn(async move {
-            tracing::debug!(?payload, "externalized output");
-            let start = Instant::now();
-            let _ = payload.call(http_client, &coprocessor_url).await;
-            let duration = start.elapsed().as_secs_f64();
-            tracing::info!(
-                histogram.apollo.router.operations.coprocessor.duration = duration,
-                coprocessor.stage = %PipelineStep::ExecutionResponse,
-            );
-        });
-
-        let map_context = response.context.clone();
-        // Map the rest of our body to process subsequent chunks of response
-        let mapped_stream = rest.map(move |deferred_response| {
-            let generator_client = http_client2.clone();
-            let generator_coprocessor_url = coprocessor_url2.clone();
-            let generator_map_context = map_context.clone();
-            let generator_sdl_to_send = sdl_to_send.clone();
-            let generator_id = map_context.id.clone();
-
-            let body_to_send = response_config.body.then(|| {
-                serde_json::to_value(&deferred_response).expect("serialization will not fail")
-            });
-            let context_to_send = response_config
-                .context
-                .then(|| generator_map_context.clone());
-
-            // Note: We deliberately DO NOT send headers or status_code even if the user has
-            // requested them. That's because they are meaningless on a deferred response and
-            // providing them will be a source of confusion.
-            let payload = Externalizable::execution_builder()
-                .stage(PipelineStep::ExecutionResponse)
-                .id(generator_id)
-                .and_body(body_to_send)
-                .and_context(context_to_send)
-                .and_sdl(generator_sdl_to_send)
-                .and_has_next(deferred_response.has_next)
-                .build();
-            tokio::task::spawn(async move {
-                // Second, call our co-processor and get a reply.
-                tracing::debug!(?payload, "externalized output");
-                let start = Instant::now();
-                let _ = payload
-                    .call(generator_client, &generator_coprocessor_url)
-                    .await;
-                let duration = start.elapsed().as_secs_f64();
-                tracing::info!(
-                    histogram.apollo.router.operations.coprocessor.duration = duration,
-                    coprocessor.stage = %PipelineStep::ExecutionResponse,
-                );
-            });
-
-            deferred_response
-        });
-
-        // Create our response stream which consists of our first body chained with the
-        // rest of the responses in our mapped stream.
-        let stream = once(ready(first)).chain(mapped_stream).boxed();
-
-        response.response = http::Response::from_parts(parts, stream);
-        return Ok(response);
-    }
-
     // Second, call our co-processor and get a reply.
     tracing::debug!(?payload, "externalized output");
     let guard = response.context.enter_active_request();
@@ -494,7 +407,7 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body: crate::response::Response = match co_processor_output.body {
+    let new_body: graphql::Response = match co_processor_output.body {
         Some(value) => serde_json::from_value(value)?,
         None => first,
     };
@@ -550,17 +463,12 @@ where
 
                 // Second, call our co-processor and get a reply.
                 tracing::debug!(?payload, "externalized output");
-                let start = Instant::now();
                 let guard = generator_map_context.enter_active_request();
                 let co_processor_result = payload
                     .call(generator_client, &generator_coprocessor_url)
                     .await;
-                let duration = start.elapsed().as_secs_f64();
                 drop(guard);
-                tracing::info!(
-                    histogram.apollo.router.operations.coprocessor.duration = duration,
-                    coprocessor.stage = %PipelineStep::ExecutionResponse,
-                );
+                tracing::debug!(?co_processor_result, "co-processor returned");
                 let co_processor_output = co_processor_result?;
 
                 validate_coprocessor_output(&co_processor_output, PipelineStep::ExecutionResponse)?;
@@ -569,11 +477,10 @@ where
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response: crate::response::Response =
-                    match co_processor_output.body {
-                        Some(value) => serde_json::from_value(value)?,
-                        None => deferred_response,
-                    };
+                let new_deferred_response: graphql::Response = match co_processor_output.body {
+                    Some(value) => serde_json::from_value(value)?,
+                    None => deferred_response,
+                };
 
                 if let Some(context) = co_processor_output.context {
                     for (key, value) in context.try_into_iter()? {
@@ -585,11 +492,11 @@ where
                 Ok(new_deferred_response)
             }
         })
-        .map(|res: Result<response::Response, BoxError>| match res {
+        .map(|res: Result<graphql::Response, BoxError>| match res {
             Ok(response) => response,
             Err(e) => {
                 tracing::error!("coprocessor error handling deferred execution response: {e}");
-                response::Response::builder()
+                graphql::Response::builder()
                     .error(
                         Error::builder()
                             .message("Internal error handling deferred response")
@@ -641,32 +548,6 @@ mod tests {
             mock_http_client.expect_clone().returning(move || {
                 let mut mock_http_client = MockHttpClientService::new();
                 mock_http_client.expect_call().returning(callback);
-                mock_http_client
-            });
-            mock_http_client
-        });
-
-        mock_http_client
-    }
-
-    #[allow(clippy::type_complexity)]
-    pub(crate) fn mock_with_detached_response_callback(
-        callback: fn(
-            hyper::Request<Body>,
-        ) -> BoxFuture<'static, Result<hyper::Response<Body>, BoxError>>,
-    ) -> MockHttpClientService {
-        let mut mock_http_client = MockHttpClientService::new();
-        mock_http_client.expect_clone().returning(move || {
-            let mut mock_http_client = MockHttpClientService::new();
-
-            mock_http_client.expect_clone().returning(move || {
-                let mut mock_http_client = MockHttpClientService::new();
-                //mock_http_client.expect_call().returning(callback);
-                mock_http_client.expect_clone().returning(move || {
-                    let mut mock_http_client = MockHttpClientService::new();
-                    mock_http_client.expect_call().returning(callback);
-                    mock_http_client
-                });
                 mock_http_client
             });
             mock_http_client
@@ -894,60 +775,6 @@ mod tests {
                 .message
                 .as_str(),
             "my error message"
-        );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_execution_request_async() {
-        let execution_stage = ExecutionStage {
-            request: ExecutionRequestConf {
-                body: true,
-                detached: true,
-                ..Default::default()
-            },
-            response: Default::default(),
-        };
-
-        // This will never be called because we will fail at the coprocessor.
-        let mut mock_execution_service = MockExecutionService::new();
-
-        mock_execution_service
-            .expect_call()
-            .returning(|req: execution::Request| {
-                Ok(execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-
-        let mock_http_client =
-            mock_with_callback(move |_: hyper::Request<Body>| Box::pin(async { panic!() }));
-
-        let service = execution_stage.as_service(
-            mock_http_client,
-            mock_execution_service.boxed(),
-            Url::parse("http://test").unwrap(),
-            Arc::new("".to_string()),
-        );
-
-        let request = execution::Request::fake_builder().build();
-
-        assert_eq!(
-            serde_json_bytes::json!({ "test": 1234_u32 }),
-            service
-                .oneshot(request)
-                .await
-                .unwrap()
-                .response
-                .into_body()
-                .next()
-                .await
-                .unwrap()
-                .data
-                .unwrap()
         );
     }
 
@@ -1186,58 +1013,6 @@ mod tests {
         assert_eq!(
             serde_json::to_value(&body).unwrap(),
             json!({ "data": { "test": 3, "has_next": false }, "hasNext": false }),
-        );
-    }
-
-    #[tokio::test]
-    async fn external_plugin_execution_response_async() {
-        let execution_stage = ExecutionStage {
-            response: ExecutionResponseConf {
-                headers: true,
-                context: true,
-                body: true,
-                sdl: true,
-                detached: true,
-                ..Default::default()
-            },
-            request: Default::default(),
-        };
-
-        let mut mock_execution_service = MockExecutionService::new();
-
-        mock_execution_service
-            .expect_call()
-            .returning(|req: execution::Request| {
-                Ok(execution::Response::builder()
-                    .data(json!({ "test": 1234_u32 }))
-                    .errors(Vec::new())
-                    .extensions(crate::json_ext::Object::new())
-                    .context(req.context)
-                    .build()
-                    .unwrap())
-            });
-
-        let mock_http_client =
-            mock_with_detached_response_callback(move |_res: hyper::Request<Body>| {
-                Box::pin(async { panic!() })
-            });
-
-        let service = execution_stage.as_service(
-            mock_http_client,
-            mock_execution_service.boxed(),
-            Url::parse("http://test").unwrap(),
-            Arc::new("".to_string()),
-        );
-
-        let request = execution::Request::fake_builder().build();
-
-        let mut res = service.oneshot(request).await.unwrap();
-
-        let body = res.response.body_mut().next().await.unwrap();
-        // the body should have changed:
-        assert_eq!(
-            serde_json::to_value(&body).unwrap(),
-            json!({ "data": { "test": 1234_u32 } }),
         );
     }
 }

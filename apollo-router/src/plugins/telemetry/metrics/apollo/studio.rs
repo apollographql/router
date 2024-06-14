@@ -194,6 +194,10 @@ impl From<ContextualizedStats>
                 .collect(),
             query_latency_stats: Some(stats.query_latency_stats.into()),
             context: Some(stats.context),
+            extended_references: None,
+            limits_stats: None,
+            local_per_type_stat: HashMap::new(),
+            operation_count: 0,
         }
     }
 }
@@ -329,6 +333,7 @@ mod test {
                 SingleStats {
                     stats_with_context: SingleContextualizedStats {
                         context: StatsContext {
+                            result: "".to_string(),
                             client_name: client_name.to_string(),
                             client_version: client_version.to_string(),
                             operation_type: String::new(),

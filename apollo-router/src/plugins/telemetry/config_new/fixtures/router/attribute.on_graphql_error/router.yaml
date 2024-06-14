@@ -1,0 +1,9 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      router:
+        http.server.request.duration:
+          attributes:
+            on.graphql.error:
+              on_graphql_error: true

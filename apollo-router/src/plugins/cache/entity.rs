@@ -163,11 +163,11 @@ impl Plugin for EntityCache {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
-                if let Some(cache_control) = {
-                    let lock = response.context.extensions().lock();
-                    let cache_control = lock.get::<CacheControl>().cloned();
-                    cache_control
-                } {
+                if let Some(cache_control) = response
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<CacheControl>().cloned())
+                {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
@@ -437,7 +437,10 @@ async fn cache_lookup_root(
 
     match cache_result {
         Some(value) => {
-            request.context.extensions().lock().insert(value.0.control);
+            request
+                .context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(value.0.control));
 
             Ok(ControlFlow::Break(
                 subgraph::Response::builder()
@@ -519,12 +522,14 @@ async fn cache_lookup_entities(
 }
 
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
-    if let Some(c) = context.extensions().lock().get_mut::<CacheControl>() {
-        *c = c.merge(cache_control);
-        return;
-    }
-    //FIXME: race condition. We need an Entry API for private entries
-    context.extensions().lock().insert(cache_control.clone());
+    context.extensions().with_lock(|mut lock| {
+        if let Some(c) = lock.get_mut::<CacheControl>() {
+            *c = c.merge(cache_control);
+        } else {
+            //FIXME: race condition. We need an Entry API for private entries
+            lock.insert(cache_control.clone());
+        }
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -926,7 +931,7 @@ async fn insert_entities_in_result(
                         .as_ref()
                         .map(|path| {
                             path.starts_with(&Path(vec![
-                                PathElement::Key(ENTITIES.to_string()),
+                                PathElement::Key(ENTITIES.to_string(), None),
                                 PathElement::Index(entity_idx),
                             ]))
                         })

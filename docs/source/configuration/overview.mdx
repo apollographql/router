@@ -1,6 +1,7 @@
 ---
 title: Configuring the Apollo Router
-description: Command arguments and YAML config
+subtitle: With environment variables, command-line options, and YAML file configuration
+description: Learn how to configure the Apollo Router with environment variables, command-line options and commands, and YAML configuration files.
 ---
 
 import RedisTLS from '../../shared/redis-tls.mdx'
@@ -835,6 +836,28 @@ Note that the router calculates the recursion depth for each operation and fragm
 In versions of the Apollo Router prior to 1.17, this limit was defined via the config option `experimental_parser_recursion_limit`.
 
 </Note>
+
+### Demand control
+
+See [Demand Control](../executing-operations/demand-control) to learn how to analyze the cost of queries and to reject requests with queries that exceed customizable cost limits. 
+
+### Early cancel
+
+Up until [Apollo Router 1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the Router introduced a new behaviour in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
+To go back to the previous behaviour of immediately cancelling the request, the following configuration can be used:
+
+```yaml
+supergraph:
+  early_cancel: true
+```
+
+Additionally, since 1.43.1, the Apollo Router can show a log when it detects that the client canceled the request. This log can be activated with:
+
+```yaml title="router.yaml"
+supergraph:
+  experimental_log_on_broken_pipe: true
+```
+
 
 ### Plugins
 

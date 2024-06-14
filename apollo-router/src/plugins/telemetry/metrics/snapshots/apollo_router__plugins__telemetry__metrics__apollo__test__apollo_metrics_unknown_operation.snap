@@ -12,7 +12,8 @@ expression: results
             "client_name": "test_client",
             "client_version": "1.0-test",
             "operation_type": "query",
-            "operation_subtype": ""
+            "operation_subtype": "",
+            "result": ""
           },
           "query_latency_stats": {
             "latency": {

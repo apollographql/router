@@ -1,0 +1,17 @@
+query VariableScalarInputQuery($idInput: ID!, $boolInput: Boolean!, $floatInput: Float!, $intInput: Int!, $listInput: [String!]!, $stringInput: String!, $nullableStringInput: String) {
+    sortQuery(
+        idInput: $idInput
+        boolInput: $boolInput
+        floatInput: $floatInput
+        INTInput: $intInput
+        listInput: $listInput
+        stringInput: $stringInput
+        nullableStringInput: $nullableStringInput
+    ) {
+        zzz
+        CCC
+        nullableId
+        aaa
+        id
+    }
+}

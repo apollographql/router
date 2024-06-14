@@ -1,0 +1,32 @@
+---
+source: tests/composition_tests.rs
+expression: print_sdl(&supergraph.to_api_schema())
+---
+"""A cool schema"""
+schema {
+  query: Query
+}
+
+"""The foo directive description"""
+directive @foo(url: String) on FIELD
+
+"""An enum"""
+enum E {
+  """The A value"""
+  A
+  """The B value"""
+  B
+}
+
+"""
+Available queries
+Not much yet
+"""
+type Query {
+  """Returns tea"""
+  t(
+    """An argument that is very important"""
+    x: String!,
+  ): String
+}
+

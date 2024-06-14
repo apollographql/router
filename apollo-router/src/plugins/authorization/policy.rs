@@ -475,11 +475,10 @@ impl<'a> transform::Visitor for PolicyFilteringVisitor<'a> {
 
         let implementors_with_different_field_requirements =
             self.implementors_with_different_field_requirements(parent_type, node);
-
         self.current_path
-            .push(PathElement::Key(field_name.as_str().into()));
+            .push(PathElement::Key(field_name.as_str().into(), None));
         if is_field_list {
-            self.current_path.push(PathElement::Flatten);
+            self.current_path.push(PathElement::Flatten(None));
         }
 
         let res = if is_authorized
@@ -793,7 +792,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -808,7 +807,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["profile".to_string(), "internal".to_string()]
@@ -829,7 +828,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: [
@@ -854,7 +853,7 @@ mod tests {
             .into_iter()
             .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: [
@@ -883,7 +882,7 @@ mod tests {
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -909,7 +908,7 @@ mod tests {
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -934,7 +933,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -956,7 +955,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -983,7 +982,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1010,7 +1009,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1039,7 +1038,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1054,7 +1053,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["read user".to_string(), "read username".to_string()]
@@ -1085,7 +1084,7 @@ mod tests {
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1106,7 +1105,7 @@ mod tests {
 
         let extracted_policies = extract(BASIC_SCHEMA, QUERY);
         let (doc, paths) = filter(BASIC_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1121,7 +1120,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["read user".to_string(), "internal".to_string()]
@@ -1136,7 +1135,7 @@ mod tests {
             QUERY,
             ["read user".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["read user".to_string(),].into_iter().collect(),
@@ -1151,7 +1150,7 @@ mod tests {
                 .into_iter()
                 .collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["admin".to_string(), "read user".to_string()]
@@ -1216,7 +1215,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1229,7 +1228,7 @@ mod tests {
             QUERY,
             ["itf".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["itf".to_string()].into_iter().collect(),
@@ -1253,7 +1252,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_SCHEMA, QUERY2, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1266,7 +1265,7 @@ mod tests {
             QUERY2,
             ["itf".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: ["itf".to_string()].into_iter().collect(),
@@ -1279,7 +1278,7 @@ mod tests {
             QUERY2,
             ["itf".to_string(), "a".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: ["itf".to_string(), "a".to_string()].into_iter().collect(),
@@ -1346,7 +1345,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_FIELD_SCHEMA, QUERY);
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1372,7 +1371,7 @@ mod tests {
 
         let extracted_policies = extract(INTERFACE_FIELD_SCHEMA, QUERY2);
         let (doc, paths) = filter(INTERFACE_FIELD_SCHEMA, QUERY2, HashSet::new());
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY2,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1440,7 +1439,7 @@ mod tests {
             QUERY,
             ["a".to_string()].into_iter().collect(),
         );
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: ["a".to_string()].into_iter().collect(),
@@ -1520,7 +1519,7 @@ mod tests {
         let extracted_policies = extract(RENAMED_SCHEMA, QUERY);
         let (doc, paths) = filter(RENAMED_SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(TestResult {
+        insta::assert_snapshot!(TestResult {
             query: QUERY,
             extracted_policies: &extracted_policies,
             successful_policies: Vec::new(),
@@ -1600,7 +1599,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY, HashSet::new());
 
-        insta::assert_display_snapshot!(doc);
+        insta::assert_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
 
         static QUERY2: &str = r#"
@@ -1617,7 +1616,7 @@ mod tests {
 
         let (doc, paths) = filter(SCHEMA, QUERY2, HashSet::new());
 
-        insta::assert_display_snapshot!(doc);
+        insta::assert_snapshot!(doc);
         insta::assert_debug_snapshot!(paths);
     }
 }

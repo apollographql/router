@@ -1,0 +1,217 @@
+---
+source: apollo-router/tests/integration/type_conditions.rs
+expression: response
+---
+{
+  "data": {
+    "search": [
+      {
+        "id": "a7052397-b605-414a-aba4-408d51c8eef0",
+        "sections": [
+          {
+            "artwork": "articleResultEnabled artwork",
+            "title": "d0182b8a-a671-4244-ba1c-905274b0d198 title"
+          },
+          {
+            "artwork": "articleResultEnabled artwork",
+            "title": "e6eec2fc-05ce-40a2-956b-f1335e615204 title"
+          }
+        ]
+      },
+      {
+        "id": "3a7b08c9-d8c0-4c55-b55d-596a272392e0",
+        "sections": [
+          {
+            "artwork": "articleResultEnabled artwork",
+            "title": "f44f584e-5d3d-4466-96f5-9afc3f5d5a54 title"
+          },
+          {
+            "artwork": "articleResultEnabled artwork"
+          }
+        ]
+      },
+      {
+        "sections": [
+          {
+            "id": "d9077ad2-d79a-45b5-b5ee-25ded226f03c",
+            "title": "d9077ad2-d79a-45b5-b5ee-25ded226f03c title",
+            "artwork": "movieResultEnabled artwork"
+          },
+          {
+            "id": "9f1f1ebb-21d3-4afe-bb7d-6de706f78f02",
+            "title": "9f1f1ebb-21d3-4afe-bb7d-6de706f78f02 title",
+            "artwork": "movieResultEnabled artwork"
+          }
+        ],
+        "id": "c5f4985f-8fb6-4414-a3f5-56f7f58dd043"
+      },
+      {
+        "sections": [
+          {
+            "id": "24cea0de-2ac8-4cbe-85b6-8b1b80647c12",
+            "title": "24cea0de-2ac8-4cbe-85b6-8b1b80647c12 title",
+            "artwork": "movieResultEnabled artwork"
+          },
+          {
+            "artwork": "movieResultEnabled artwork",
+            "id": "2f772201-42ca-4376-9871-2252cc052262"
+          }
+        ],
+        "id": "ff140d35-ce5d-48fe-bad7-1cfb2c3e310a"
+      }
+    ]
+  },
+  "extensions": {
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Fetch",
+              "serviceName": "searchSubgraph",
+              "variableUsages": [],
+              "operation": "query Search__searchSubgraph__0{search{__typename ...on MovieResult{sections{__typename ...on EntityCollectionSection{__typename id}...on GallerySection{__typename id}}id}...on ArticleResult{id sections{__typename ...on GallerySection{__typename id}...on EntityCollectionSection{__typename id}}}}}",
+              "operationName": "Search__searchSubgraph__0",
+              "operationKind": "query",
+              "id": null,
+              "inputRewrites": null,
+              "outputRewrites": null,
+              "schemaAwareHash": "33216530c735d3601818de5f4f8bd7b474cd307887b074b3ec64c9d20ee9e55a",
+              "authorization": {
+                "is_authenticated": false,
+                "scopes": [],
+                "policies": []
+              }
+            },
+            {
+              "kind": "Parallel",
+              "nodes": [
+                {
+                  "kind": "Flatten",
+                  "path": [
+                    "",
+                    "search",
+                    "@|[MovieResult]",
+                    "sections",
+                    "@"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "artworkSubgraph",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "EntityCollectionSection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "GallerySection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [
+                      "movieResultParam"
+                    ],
+                    "operation": "query Search__artworkSubgraph__1($representations:[_Any!]!$movieResultParam:String){_entities(representations:$representations){...on EntityCollectionSection{title artwork(params:$movieResultParam)}...on GallerySection{artwork(params:$movieResultParam)}}}",
+                    "operationName": "Search__artworkSubgraph__1",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "schemaAwareHash": "a83103bd9c249b3af3044e23ac10b15a3c891114c6c37f7b7edf4a45d8bc2e26",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                },
+                {
+                  "kind": "Flatten",
+                  "path": [
+                    "",
+                    "search",
+                    "@|[ArticleResult]",
+                    "sections",
+                    "@"
+                  ],
+                  "node": {
+                    "kind": "Fetch",
+                    "serviceName": "artworkSubgraph",
+                    "requires": [
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "GallerySection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      },
+                      {
+                        "kind": "InlineFragment",
+                        "typeCondition": "EntityCollectionSection",
+                        "selections": [
+                          {
+                            "kind": "Field",
+                            "name": "__typename"
+                          },
+                          {
+                            "kind": "Field",
+                            "name": "id"
+                          }
+                        ]
+                      }
+                    ],
+                    "variableUsages": [
+                      "articleResultParam"
+                    ],
+                    "operation": "query Search__artworkSubgraph__2($representations:[_Any!]!$articleResultParam:String){_entities(representations:$representations){...on GallerySection{artwork(params:$articleResultParam)}...on EntityCollectionSection{artwork(params:$articleResultParam)title}}}",
+                    "operationName": "Search__artworkSubgraph__2",
+                    "operationKind": "query",
+                    "id": null,
+                    "inputRewrites": null,
+                    "outputRewrites": null,
+                    "schemaAwareHash": "78b6282588e7eebce133e67c0bf3783d2042cfa7fff8f305dbcaf9d74f767a85",
+                    "authorization": {
+                      "is_authenticated": false,
+                      "scopes": [],
+                      "policies": []
+                    }
+                  }
+                }
+              ]
+            }
+          ]
+        }
+      },
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"searchSubgraph\") {\n      {\n        search {\n          __typename\n          ... on MovieResult {\n            sections {\n              __typename\n              ... on EntityCollectionSection {\n                __typename\n                id\n              }\n              ... on GallerySection {\n                __typename\n                id\n              }\n            }\n            id\n          }\n          ... on ArticleResult {\n            id\n            sections {\n              __typename\n              ... on GallerySection {\n                __typename\n                id\n              }\n              ... on EntityCollectionSection {\n                __typename\n                id\n              }\n            }\n          }\n        }\n      }\n    },\n    Parallel {\n      Flatten(path: \".search.@|[MovieResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n            ... on GallerySection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on EntityCollectionSection {\n              title\n              artwork(params: $movieResultParam)\n            }\n            ... on GallerySection {\n              artwork(params: $movieResultParam)\n            }\n          }\n        },\n      },\n      Flatten(path: \".search.@|[ArticleResult].sections.@\") {\n        Fetch(service: \"artworkSubgraph\") {\n          {\n            ... on GallerySection {\n              __typename\n              id\n            }\n            ... on EntityCollectionSection {\n              __typename\n              id\n            }\n          } =>\n          {\n            ... on GallerySection {\n              artwork(params: $articleResultParam)\n            }\n            ... on EntityCollectionSection {\n              artwork(params: $articleResultParam)\n              title\n            }\n          }\n        },\n      },\n    },\n  },\n}"
+    }
+  }
+}

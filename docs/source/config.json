@@ -7,8 +7,8 @@
     "Introduction": "/",
     "Quickstart": "/quickstart",
     "Moving from @apollo/gateway": "/migrating-from-gateway",
-    "Federation version support": "/federation-version-support",
-    "Enterprise features": [
+    "Federation Version Support": "/federation-version-support",
+    "Enterprise Features": [
       "/enterprise-features",
       [
         "enterprise"
@@ -17,14 +17,14 @@
     "Configuring the Router": {
       "Overview": "/configuration/overview",
       "Caching": {
-        "In-memory caching": "/configuration/in-memory-caching",
-        "Distributed caching": [
+        "In-Memory Caching": "/configuration/in-memory-caching",
+        "Distributed Caching": [
           "/configuration/distributed-caching",
           [
             "enterprise"
           ]
         ],
-        "Entity caching": [
+        "Entity Caching": [
           "/configuration/entity-caching",
           [
             "enterprise",
@@ -35,15 +35,15 @@
       "Debugging": {
         "Errors": "/errors",
         "Telemetry": "/configuration/telemetry/overview",
-        "Subgraph error inclusion": "/configuration/subgraph-error-inclusion"
+        "Subgraph Error Inclusion": "/configuration/subgraph-error-inclusion"
       },
       "Networking": {
-        "Header propagation": "/configuration/header-propagation",
-        "Traffic shaping": "/configuration/traffic-shaping"
+        "Header Propagation": "/configuration/header-propagation",
+        "Traffic Shaping": "/configuration/traffic-shaping"
       },
       "Security": {
         "CORS": "/configuration/cors",
-        "CSRF prevention": "/configuration/csrf",
+        "CSRF Prevention": "/configuration/csrf",
         "JWT Authentication": [
           "/configuration/authn-jwt",
           [
@@ -57,62 +57,69 @@
           ]
         ],
         "Subgraph Authentication": "/configuration/authn-subgraph",
-        "Operation limits": [
+        "Operation Limits": [
           "/configuration/operation-limits",
           [
             "enterprise"
           ]
         ],
-        "Safelisting with persisted queries": [
+        "Safelisting with Persisted Queries": [
           "/configuration/persisted-queries",
           [
             "enterprise"
           ]
         ],
-        "Privacy and data collection": "/privacy"
+        "Privacy and Data Collection": "/privacy"
       }
     },
     "Executing Operations": {
-      "Build and run queries": "/executing-operations/build-run-queries",
-      "@defer support": "/executing-operations/defer-support",
-      "Request format": "/executing-operations/requests",
-      "Query batching": [
+      "Build and Run Queries": "/executing-operations/build-run-queries",
+      "@defer Support": "/executing-operations/defer-support",
+      "Request Format": "/executing-operations/requests",
+      "Query Batching": [
         "/executing-operations/query-batching",
         [
           "enterprise"
         ]
       ],
       "GraphQL Subscriptions": {
-        "Subscriptions setup": [
+        "Subscriptions Setup": [
           "/executing-operations/subscription-support",
           [
             "enterprise"
           ]
         ],
-        "Subgraph protocol: HTTP callback": [
+        "Subgraph Protocol: HTTP Callback": [
           "/executing-operations/subscription-callback-protocol",
           [
             "enterprise",
             "preview"
           ]
         ],
-        "Client protocol: HTTP multipart": [
+        "Client Protocol: HTTP Multipart": [
           "/executing-operations/subscription-multipart-protocol",
           [
             "enterprise"
           ]
         ]
-      }
+      },
+      "Demand Control" : [
+        "/executing-operations/demand-control",
+        [
+          "enterprise",
+          "preview"
+        ]
+      ]
     },
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",
-      "GraphOS reporting": "/configuration/telemetry/apollo-telemetry",
-      "Client awareness": "/managed-federation/client-awareness",
-      "Log exporters": {
+      "GraphOS Reporting": "/configuration/telemetry/apollo-telemetry",
+      "Client Awareness": "/managed-federation/client-awareness",
+      "Log Exporters": {
         "Configuration": "/configuration/telemetry/exporters/logging/overview",
         "Stdout": "/configuration/telemetry/exporters/logging/stdout"
       },
-      "Metrics exporters": {
+      "Metrics Exporters": {
         "Configuration": "/configuration/telemetry/exporters/metrics/overview",
         "Datadog": "/configuration/telemetry/exporters/metrics/datadog",
         "New Relic": "/configuration/telemetry/exporters/metrics/new-relic",
@@ -130,39 +137,40 @@
       "Instrumentation": {
         "Instruments": "/configuration/telemetry/instrumentation/instruments",
         "Events": "/configuration/telemetry/instrumentation/events",
+        "Conditions": "/configuration/telemetry/instrumentation/conditions",
         "Spans": "/configuration/telemetry/instrumentation/spans",
         "Selectors": "/configuration/telemetry/instrumentation/selectors",
-        "Standard attributes": "/configuration/telemetry/instrumentation/standard-attributes",
-        "Standard instruments": "/configuration/telemetry/instrumentation/standard-instruments"
+        "Standard Attributes": "/configuration/telemetry/instrumentation/standard-attributes",
+        "Standard Instruments": "/configuration/telemetry/instrumentation/standard-instruments"
       }
     },
     "Containerization": {
       "Overview": "/containerization/overview",
       "Deploy on Kubernetes": "/containerization/kubernetes",
       "Run with Docker": "/containerization/docker",
-      "Health checks": "/configuration/health-checks"
+      "Health Checks": "/configuration/health-checks"
     },
     "Managed Federation": {
       "Overview": "https://www.apollographql.com/docs/federation/managed-federation/overview",
       "Setup": "https://www.apollographql.com/docs/federation/managed-federation/setup",
-      "GraphOS Studio features": "https://www.apollographql.com/docs/graphos/graphs/federated-graphs"
+      "GraphOS Studio Features": "https://www.apollographql.com/docs/graphos/graphs/federated-graphs"
     },
     "Customizations": {
       "Overview": "/customizations/overview",
-      "Rhai scripts": "/customizations/rhai",
-      "Rhai API reference": "/customizations/rhai-api",
-      "External coprocessing": [
+      "Rhai Scripts": "/customizations/rhai",
+      "Rhai API Reference": "/customizations/rhai-api",
+      "External Coprocessing": [
         "/customizations/coprocessor",
         [
           "enterprise"
         ]
       ],
-      "Native Rust plugins": "/customizations/native",
-      "Custom router binary": "/customizations/custom-binary"
+      "Native Rust Plugins": "/customizations/native",
+      "Custom Router Binary": "/customizations/custom-binary"
     },
     "Subgraph Support": {
-      "Subgraph-compatible libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
-      "Subgraph specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
+      "Subgraph-Compatible Libraries": "https://www.apollographql.com/docs/federation/v2/other-servers/",
+      "Subgraph Specification": "https://www.apollographql.com/docs/federation/v2/federation-spec/"
     }
   }
 }

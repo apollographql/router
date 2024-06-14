@@ -379,6 +379,10 @@ impl LicenseEnforcementReport {
                 .name("Advanced telemetry")
                 .build(),
             ConfigurationRestriction::builder()
+                .path("$.telemetry..graphql")
+                .name("Advanced telemetry")
+                .build(),
+            ConfigurationRestriction::builder()
                 .path("$.preview_file_uploads")
                 .name("File uploads plugin")
                 .build(),
@@ -387,7 +391,7 @@ impl LicenseEnforcementReport {
                 .name("Batching support")
                 .build(),
             ConfigurationRestriction::builder()
-                .path("$.experimental_demand_control")
+                .path("$.preview_demand_control")
                 .name("Demand control plugin")
                 .build(),
         ]
@@ -398,6 +402,19 @@ impl LicenseEnforcementReport {
             SchemaRestriction::Spec {
                 name: "authenticated".to_string(),
                 spec_url: "https://specs.apollo.dev/authenticated".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::Exact,
+                        major: 0,
+                        minor: 1.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+            },
+            SchemaRestriction::Spec {
+                name: "context".to_string(),
+                spec_url: "https://specs.apollo.dev/context".to_string(),
                 version_req: semver::VersionReq {
                     comparators: vec![semver::Comparator {
                         op: semver::Op::Exact,
@@ -435,6 +452,21 @@ impl LicenseEnforcementReport {
                     }],
                 },
                 explanation: "The `overrideLabel` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@override` directive with the `label` argument in one or more of your subgraphs.".to_string()
+            },
+            SchemaRestriction::DirectiveArgument {
+                name: "field".to_string(),
+                argument: "contextArguments".to_string(),
+                spec_url: "https://specs.apollo.dev/join".to_string(),
+                version_req: semver::VersionReq {
+                    comparators: vec![semver::Comparator {
+                        op: semver::Op::GreaterEq,
+                        major: 0,
+                        minor: 5.into(),
+                        patch: 0.into(),
+                        pre: semver::Prerelease::EMPTY,
+                    }],
+                },
+                explanation: "The `contextArguments` argument on the join spec's @field directive is restricted to Enterprise users. This argument exists in your supergraph as a result of using the `@fromContext` directive in one or more of your subgraphs.".to_string()
             },
         ]
     }
@@ -776,6 +808,20 @@ mod test {
         let report = check(
             include_str!("testdata/oss.router.yaml"),
             include_str!("testdata/progressive_override.graphql"),
+        );
+
+        assert!(
+            !report.restricted_schema_in_use.is_empty(),
+            "should have found restricted features"
+        );
+        assert_snapshot!(report.to_string());
+    }
+
+    #[test]
+    fn set_context() {
+        let report = check(
+            include_str!("testdata/oss.router.yaml"),
+            include_str!("testdata/set_context.graphql"),
         );
 
         assert!(

@@ -281,7 +281,7 @@ async fn test_span_customization() -> Result<(), BoxError> {
         router.assert_started().await;
 
         let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-        let (id, _) = router.execute_query(&query).await;
+        let (id, _res) = router.execute_query(&query).await;
         validate_trace(
             id,
             &query,
@@ -345,7 +345,6 @@ async fn find_valid_trace(
     // * The correct spans
     // * All spans are parented
     // * Required attributes of 'router' span has been set
-
     let trace: Value = reqwest::get(url)
         .await
         .map_err(|e| anyhow!("failed to contact jaeger; {}", e))?
@@ -380,7 +379,6 @@ fn verify_router_span_fields(
 ) -> Result<(), BoxError> {
     let router_span = trace.select_path("$..spans[?(@.operationName == 'router')]")?[0];
     // We can't actually assert the values on a span. Only that a field has been set.
-
     assert_eq!(
         router_span
             .select_path("$.tags[?(@.key == 'client.name')].value")?
@@ -405,6 +403,22 @@ fn verify_router_span_fields(
                 .select_path("$.tags[?(@.key == 'http.request.header.x-not-present')].value")?
                 .first(),
             Some(&&Value::String("nope".to_string()))
+        );
+        assert_eq!(
+            router_span
+                .select_path(
+                    "$.tags[?(@.key == 'http.request.header.x-my-header-condition')].value"
+                )?
+                .first(),
+            Some(&&Value::String("test".to_string()))
+        );
+        assert_eq!(
+            router_span
+                .select_path("$.tags[?(@.key == 'studio.operation.id')].value")?
+                .first(),
+            Some(&&Value::String(
+                "f60e643d7f52ecda23216f86409d7e2e5c3aa68c".to_string()
+            ))
         );
     }
 

@@ -86,23 +86,21 @@ async fn test_reload_config_with_broken_plugin() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_reload_config_with_broken_plugin_recovery() -> Result<(), BoxError> {
-    for i in 0..3 {
-        println!("iteration {i}");
-        let mut router = IntegrationTest::builder()
-            .config(HAPPY_CONFIG)
-            .build()
-            .await;
-        router.start().await;
-        router.assert_started().await;
-        router.execute_default_query().await;
-        router.update_config(BROKEN_PLUGIN_CONFIG).await;
-        router.assert_not_reloaded().await;
-        router.execute_default_query().await;
-        router.update_config(HAPPY_CONFIG).await;
-        router.assert_reloaded().await;
-        router.execute_default_query().await;
-        router.graceful_shutdown().await;
-    }
+    let mut router = IntegrationTest::builder()
+        .config(HAPPY_CONFIG)
+        .build()
+        .await;
+    router.start().await;
+    router.assert_started().await;
+    router.execute_default_query().await;
+    router.update_config(BROKEN_PLUGIN_CONFIG).await;
+    router.assert_not_reloaded().await;
+    router.execute_default_query().await;
+    router.update_config(HAPPY_CONFIG).await;
+    router.assert_reloaded().await;
+    router.execute_default_query().await;
+    router.graceful_shutdown().await;
+
     Ok(())
 }
 
@@ -177,7 +175,7 @@ async fn test_shutdown_with_idle_connection() -> Result<(), BoxError> {
         .await;
     router.start().await;
     router.assert_started().await;
-    let _conn = std::net::TcpStream::connect(router.bind_address).unwrap();
+    let _conn = std::net::TcpStream::connect(router.bind_address()).unwrap();
     router.execute_default_query().await;
     tokio::time::timeout(Duration::from_secs(1), router.graceful_shutdown())
         .await

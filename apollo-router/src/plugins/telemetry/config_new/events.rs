@@ -46,15 +46,18 @@ impl Events {
             .router
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
+            .filter_map(|(event_name, event_cfg)| match &event_cfg.level {
+                EventLevel::Off => None,
+                _ => Some(CustomEvent {
+                    inner: Mutex::new(CustomEventInner {
+                        name: event_name.clone(),
+                        level: event_cfg.level,
+                        event_on: event_cfg.on,
+                        message: event_cfg.message.clone(),
+                        selectors: event_cfg.attributes.clone().into(),
+                        condition: event_cfg.condition.clone(),
+                        attributes: Vec::new(),
+                    }),
                 }),
             })
             .collect();
@@ -72,15 +75,18 @@ impl Events {
             .supergraph
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
+            .filter_map(|(event_name, event_cfg)| match &event_cfg.level {
+                EventLevel::Off => None,
+                _ => Some(CustomEvent {
+                    inner: Mutex::new(CustomEventInner {
+                        name: event_name.clone(),
+                        level: event_cfg.level,
+                        event_on: event_cfg.on,
+                        message: event_cfg.message.clone(),
+                        selectors: event_cfg.attributes.clone().into(),
+                        condition: event_cfg.condition.clone(),
+                        attributes: Vec::new(),
+                    }),
                 }),
             })
             .collect();
@@ -98,15 +104,18 @@ impl Events {
             .subgraph
             .custom
             .iter()
-            .map(|(event_name, event_cfg)| CustomEvent {
-                inner: Mutex::new(CustomEventInner {
-                    name: event_name.clone(),
-                    level: event_cfg.level,
-                    event_on: event_cfg.on,
-                    message: event_cfg.message.clone(),
-                    selectors: event_cfg.attributes.clone().into(),
-                    condition: event_cfg.condition.clone(),
-                    attributes: Vec::new(),
+            .filter_map(|(event_name, event_cfg)| match &event_cfg.level {
+                EventLevel::Off => None,
+                _ => Some(CustomEvent {
+                    inner: Mutex::new(CustomEventInner {
+                        name: event_name.clone(),
+                        level: event_cfg.level,
+                        event_on: event_cfg.on,
+                        message: event_cfg.message.clone(),
+                        selectors: event_cfg.attributes.clone().into(),
+                        condition: event_cfg.condition.clone(),
+                        attributes: Vec::new(),
+                    }),
                 }),
             })
             .collect();
@@ -149,6 +158,7 @@ impl Instrumented
 {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
@@ -251,6 +261,7 @@ impl Instrumented
 {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
@@ -290,8 +301,7 @@ impl Instrumented
             request
                 .context
                 .extensions()
-                .lock()
-                .insert(SupergraphEventResponseLevel(self.response));
+                .with_lock(|mut lock| lock.insert(SupergraphEventResponseLevel(self.response)));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -301,6 +311,12 @@ impl Instrumented
     fn on_response(&self, response: &Self::Response) {
         for custom_event in &self.custom {
             custom_event.on_response(response);
+        }
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        for custom_event in &self.custom {
+            custom_event.on_response_event(response, ctx);
         }
     }
 
@@ -321,21 +337,20 @@ impl Instrumented
 {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
         if self.request != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .lock()
-                .insert(SubgraphEventRequestLevel(self.request));
+                .with_lock(|mut lock| lock.insert(SubgraphEventRequestLevel(self.request)));
         }
         if self.response != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .lock()
-                .insert(SubgraphEventResponseLevel(self.response));
+                .with_lock(|mut lock| lock.insert(SubgraphEventResponseLevel(self.response)));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -446,6 +461,8 @@ pub(crate) enum EventOn {
     Request,
     /// Log the event on response
     Response,
+    /// Log the event on every chunks in the response
+    EventResponse,
     /// Log the event on error
     Error,
 }
@@ -472,13 +489,16 @@ where
     attributes: Vec<opentelemetry_api::KeyValue>,
 }
 
-impl<A, T, Request, Response> Instrumented for CustomEvent<Request, Response, A, T>
+impl<A, T, Request, Response, EventResponse> Instrumented for CustomEvent<Request, Response, A, T>
 where
-    A: Selectors<Request = Request, Response = Response> + Default,
-    T: Selector<Request = Request, Response = Response> + Debug + Debug,
+    A: Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
+    T: Selector<Request = Request, Response = Response, EventResponse = EventResponse>
+        + Debug
+        + Debug,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) {
         let mut inner = self.inner.lock();
@@ -515,13 +535,30 @@ where
         inner.send_event();
     }
 
-    fn on_error(&self, error: &BoxError, _ctx: &Context) {
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        let mut inner = self.inner.lock();
+        if inner.event_on != EventOn::EventResponse {
+            return;
+        }
+
+        if !inner.condition.evaluate_event_response(response, ctx) {
+            return;
+        }
+        if let Some(selectors) = &inner.selectors {
+            let mut new_attributes = selectors.on_response_event(response, ctx);
+            inner.attributes.append(&mut new_attributes);
+        }
+
+        inner.send_event();
+    }
+
+    fn on_error(&self, error: &BoxError, ctx: &Context) {
         let mut inner = self.inner.lock();
         if inner.event_on != EventOn::Error {
             return;
         }
         if let Some(selectors) = &inner.selectors {
-            let mut new_attributes = selectors.on_error(error);
+            let mut new_attributes = selectors.on_error(error, ctx);
             inner.attributes.append(&mut new_attributes);
         }
 

@@ -57,6 +57,8 @@ type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
 type MixedClient = HTTPClient;
 
+pub(crate) const HTTP_REQUEST_SPAN_NAME: &str = "http_request";
+
 // interior mutability is not a concern here, the value is never modified
 #[allow(clippy::declare_interior_mutable_const)]
 static ACCEPTED_ENCODINGS: HeaderValue = HeaderValue::from_static("gzip, br, deflate");
@@ -257,7 +259,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let path = schema_uri.path();
 
-        let http_req_span = tracing::info_span!("http_request",
+        let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",
             "net.peer.name" = %host,
             "net.peer.port" = %port,
@@ -294,9 +296,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let signing_params = context
             .extensions()
-            .lock()
-            .get::<SigningParamsConfig>()
-            .cloned();
+            .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
 
         Box::pin(async move {
             let http_request = if let Some(signing_params) = signing_params {

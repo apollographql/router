@@ -1695,9 +1695,11 @@ async fn reconstruct_deferred_query_under_interface() {
 
 fn subscription_context() -> Context {
     let context = Context::new();
-    context.extensions().lock().insert(ClientRequestAccepts {
-        multipart_subscription: true,
-        ..Default::default()
+    context.extensions().with_lock(|mut lock| {
+        lock.insert(ClientRequestAccepts {
+            multipart_subscription: true,
+            ..Default::default()
+        })
     });
 
     context
@@ -1705,9 +1707,11 @@ fn subscription_context() -> Context {
 
 fn defer_context() -> Context {
     let context = Context::new();
-    context.extensions().lock().insert(ClientRequestAccepts {
-        multipart_defer: true,
-        ..Default::default()
+    context.extensions().with_lock(|mut lock| {
+        lock.insert(ClientRequestAccepts {
+            multipart_defer: true,
+            ..Default::default()
+        })
     });
 
     context
@@ -3548,4 +3552,77 @@ async fn abstract_types_in_requires() {
 
     let mut stream = service.oneshot(request).await.unwrap();
     insta::assert_json_snapshot!(stream.next_response().await.unwrap());
+}
+
+const ENUM_SCHEMA: &str = r#"schema
+        @core(feature: "https://specs.apollo.dev/core/v0.1")
+        @core(feature: "https://specs.apollo.dev/join/v0.1")
+        @core(feature: "https://specs.apollo.dev/inaccessible/v0.1")
+         {
+        query: Query
+   }
+   directive @core(feature: String!) repeatable on SCHEMA
+   directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet) on FIELD_DEFINITION
+   directive @join__type(graph: join__Graph!, key: join__FieldSet) repeatable on OBJECT | INTERFACE
+   directive @join__owner(graph: join__Graph!) on OBJECT | INTERFACE
+   directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+   directive @inaccessible on OBJECT | FIELD_DEFINITION | INTERFACE | UNION
+   scalar join__FieldSet
+   enum join__Graph {
+       USER @join__graph(name: "user", url: "http://localhost:4001/graphql")
+       ORGA @join__graph(name: "orga", url: "http://localhost:4002/graphql")
+   }
+   type Query {
+      test(input: InputEnum): String @join__field(graph: USER)
+   }
+
+   enum InputEnum {
+    A
+    B
+  }"#;
+
+#[tokio::test]
+async fn invalid_input_enum() {
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(ENUM_SCHEMA)
+        //.extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query("query { test(input: C) }")
+        .context(defer_context())
+        // Request building here
+        .build()
+        .unwrap();
+    let response = service
+        .clone()
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    let request = supergraph::Request::fake_builder()
+        .query("query($input: InputEnum) { test(input: $input) }")
+        .variable("input", "INVALID")
+        .context(defer_context())
+        // Request building here
+        .build()
+        .unwrap();
+    let response = service
+        .oneshot(request)
+        .await
+        .unwrap()
+        .next_response()
+        .await
+        .unwrap();
+
+    insta::assert_json_snapshot!(response);
 }

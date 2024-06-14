@@ -1,0 +1,24 @@
+[profile.ci]
+# Print out output for failing tests as soon as they fail, and also at the end
+# of the run (for easy scrollability).
+failure-output = "immediate-final"
+
+# Repeat non-pass status at the end so they’re easier to find.
+final-status-level = "skip"
+
+# Do not cancel the test run on the first failure.
+fail-fast = false
+
+# Each test should take much less than 2 minute
+slow-timeout = { period = "30s", terminate-after = 4 }
+
+# Write to output for persistence to CircleCI
+[profile.ci.junit]
+path = "junit.xml"
+
+# Integration tests require more than one thread. The default setting of 1 will cause too many integration tests to run
+# at the same time and causes tests to fail where timing is involved.
+# This filter applies only to to the integration tests in the apollo-router package.
+[[profile.ci.overrides]]
+filter = 'test(/^apollo-router::/)'
+threads-required = 4

@@ -7,6 +7,7 @@ context:
   client_version: ""
   operation_type: query
   operation_subtype: ""
+  result: ""
 query_latency_stats:
   latency_count: "[latency_count]"
   request_count: 1
@@ -440,4 +441,7 @@ per_type_stat:
           - 0
           - 0
           - 1
-
+extended_references: ~
+local_per_type_stat: {}
+limits_stats: ~
+operation_count: 0

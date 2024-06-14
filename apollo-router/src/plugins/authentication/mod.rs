@@ -3,6 +3,7 @@
 use std::collections::HashMap;
 use std::ops::ControlFlow;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::SystemTime;
 use std::time::UNIX_EPOCH;
@@ -412,21 +413,23 @@ impl Plugin for AuthenticationPlugin {
     async fn new(init: PluginInit<Self::Config>) -> Result<Self, BoxError> {
         let subgraph = if let Some(config) = init.config.subgraph {
             let all = if let Some(config) = &config.all {
-                Some(subgraph::make_signing_params(config, "all").await?)
+                Some(Arc::new(
+                    subgraph::make_signing_params(config, "all").await?,
+                ))
             } else {
                 None
             };
 
-            let mut subgraphs: HashMap<String, SigningParamsConfig> = Default::default();
+            let mut subgraphs: HashMap<String, Arc<SigningParamsConfig>> = Default::default();
             for (subgraph_name, config) in &config.subgraphs {
                 subgraphs.insert(
                     subgraph_name.clone(),
-                    subgraph::make_signing_params(config, subgraph_name.as_str()).await?,
+                    Arc::new(subgraph::make_signing_params(config, subgraph_name.as_str()).await?),
                 );
             }
 
             Some(SubgraphAuth {
-                signing_params: { SigningParams { all, subgraphs } },
+                signing_params: Arc::new(SigningParams { all, subgraphs }),
             })
         } else {
             None

@@ -1,4 +1,5 @@
 use std::any::type_name;
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -21,6 +22,7 @@ use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::Context;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
@@ -132,16 +134,37 @@ where
     }
 
     fn json_schema(gen: &mut SchemaGenerator) -> Schema {
-        let mut attributes = gen.subschema_for::<A>();
+        // Extendable json schema is composed of and anyOf of A and additional properties of E
+        // To allow this to happen we need to generate a schema that contains all the properties of A
+        // and a schema ref to A.
+        // We can then add additional properties to the schema of type E.
+
+        let attributes = gen.subschema_for::<A>();
         let custom = gen.subschema_for::<HashMap<String, E>>();
-        if let Schema::Object(schema) = &mut attributes {
-            if let Some(object) = &mut schema.object {
-                object.additional_properties =
-                    custom.into_object().object().additional_properties.clone();
+
+        // Get a list of properties from the attributes schema
+        let attribute_schema = gen
+            .dereference(&attributes)
+            .expect("failed to dereference attributes");
+        let mut properties = BTreeMap::new();
+        if let Schema::Object(schema_object) = attribute_schema {
+            if let Some(object_validation) = &schema_object.object {
+                for key in object_validation.properties.keys() {
+                    properties.insert(key.clone(), Schema::Bool(true));
+                }
             }
         }
-
-        attributes
+        let mut schema = attribute_schema.clone();
+        if let Schema::Object(schema_object) = &mut schema {
+            if let Some(object_validation) = &mut schema_object.object {
+                object_validation.additional_properties = custom
+                    .into_object()
+                    .object
+                    .expect("could not get obejct validation")
+                    .additional_properties;
+            }
+        }
+        schema
     }
 }
 
@@ -157,13 +180,14 @@ where
     }
 }
 
-impl<A, E, Request, Response> Selectors for Extendable<A, E>
+impl<A, E, Request, Response, EventResponse> Selectors for Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response>,
-    E: Selector<Request = Request, Response = Response>,
+    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
@@ -189,8 +213,45 @@ where
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
-        self.attributes.on_error(error)
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_error(error, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_error(error, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_response_event(response, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_response_event(response, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
+    }
+
+    fn on_response_field(
+        &self,
+        attrs: &mut Vec<KeyValue>,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
+        self.attributes
+            .on_response_field(attrs, ty, field, value, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, v)| {
+            v.on_response_field(ty, field, value, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
     }
 }
 
@@ -234,7 +295,8 @@ mod test {
             SupergraphAttributes {
                 graphql_document: None,
                 graphql_operation_name: Some(true),
-                graphql_operation_type: Some(true)
+                graphql_operation_type: Some(true),
+                cost: Default::default()
             }
         );
         assert_eq!(

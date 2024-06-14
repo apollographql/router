@@ -2,3 +2,5 @@ Keep in mind that the amount of telemetry you add can impact your router's perfo
 
 - Custom metrics, events, and attributes consume more processing resources than standard metrics. Adding too many (standard or custom) can slow your router down.
 - Configurations such as `events.*.request|error|response` that produce output for all router lifecycle services should only be used for development or debugging, not for production.
+
+For properly logged telemetry, you should use a log verbosity of `info`. Set the values of `RUST_LOG` or `APOLLO_ROUTER_LOG` environment variables and the `--log` CLI option to `info`. Using less verbose logging, such as `error`, can cause some attributes to be dropped.

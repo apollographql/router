@@ -1,0 +1,11 @@
+---
+source: apollo-router/src/configuration/metrics.rs
+expression: "&metrics.non_zero()"
+---
+- name: apollo.router.config.demand_control
+  data:
+    datapoints:
+      - value: 1
+        attributes:
+          opt.mode: measure
+          opt.strategy: static_estimated

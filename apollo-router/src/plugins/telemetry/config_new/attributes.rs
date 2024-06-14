@@ -31,14 +31,13 @@ use opentelemetry_semantic_conventions::trace::URL_SCHEME;
 use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
 use schemars::JsonSchema;
 use serde::Deserialize;
-#[cfg(test)]
-use serde::Serialize;
 use tower::BoxError;
 use tracing::Span;
 
 use crate::axum_factory::utils::ConnectionInfo;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::plugins::telemetry::config_new::cost::SupergraphCostAttributes;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -49,6 +48,7 @@ use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::Context;
 
 pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
 pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
@@ -114,7 +114,7 @@ impl DefaultForLevel for RouterAttributes {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
-#[cfg_attr(test, derive(Serialize, PartialEq))]
+#[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct SupergraphAttributes {
     /// The GraphQL document being executed.
@@ -137,6 +137,10 @@ pub(crate) struct SupergraphAttributes {
     /// Requirement level: Recommended
     #[serde(rename = "graphql.operation.type")]
     pub(crate) graphql_operation_type: Option<bool>,
+
+    /// Cost attributes for the operation being executed
+    #[serde(flatten)]
+    pub(crate) cost: SupergraphCostAttributes,
 }
 
 impl DefaultForLevel for SupergraphAttributes {
@@ -514,6 +518,7 @@ impl DefaultForLevel for HttpServerAttributes {
 impl Selectors for RouterAttributes {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = self.common.on_request(request);
@@ -551,9 +556,9 @@ impl Selectors for RouterAttributes {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
-        let mut attrs = self.common.on_error(error);
-        attrs.extend(self.server.on_error(error));
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.common.on_error(error, ctx);
+        attrs.extend(self.server.on_error(error, ctx));
         attrs
     }
 }
@@ -561,6 +566,7 @@ impl Selectors for RouterAttributes {
 impl Selectors for HttpCommonAttributes {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -654,7 +660,7 @@ impl Selectors for HttpCommonAttributes {
         attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
         if let Some(true) = &self.error_type {
             attrs.push(KeyValue::new(
@@ -678,6 +684,7 @@ impl Selectors for HttpCommonAttributes {
 impl Selectors for HttpServerAttributes {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -808,7 +815,7 @@ impl Selectors for HttpServerAttributes {
         Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 }
@@ -854,6 +861,7 @@ impl HttpServerAttributes {
 impl Selectors for SupergraphAttributes {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &supergraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -890,11 +898,23 @@ impl Selectors for SupergraphAttributes {
         attrs
     }
 
-    fn on_response(&self, _response: &supergraph::Response) -> Vec<KeyValue> {
-        Vec::default()
+    fn on_response(&self, response: &supergraph::Response) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        attrs.append(&mut self.cost.on_response(response));
+        attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_response_event(
+        &self,
+        response: &Self::EventResponse,
+        context: &Context,
+    ) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        attrs.append(&mut self.cost.on_response_event(response, context));
+        attrs
+    }
+
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 }
@@ -902,6 +922,7 @@ impl Selectors for SupergraphAttributes {
 impl Selectors for SubgraphAttributes {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &subgraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -944,7 +965,7 @@ impl Selectors for SubgraphAttributes {
         Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 }
@@ -1292,7 +1313,7 @@ mod test {
             )
         );
 
-        let attributes = common.on_error(&anyhow!("test error").into());
+        let attributes = common.on_error(&anyhow!("test error").into(), &Default::default());
         assert_eq!(
             attributes
                 .iter()
@@ -1400,7 +1421,7 @@ mod test {
             Some(&(StatusCode::BAD_REQUEST.as_u16() as i64).into())
         );
 
-        let attributes = common.on_error(&anyhow!("test error").into());
+        let attributes = common.on_error(&anyhow!("test error").into(), &Default::default());
         assert_eq!(
             attributes
                 .iter()

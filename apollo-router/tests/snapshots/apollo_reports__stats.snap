@@ -19,6 +19,7 @@ traces_per_query:
           client_version: ""
           operation_type: query
           operation_subtype: ""
+          result: ""
         query_latency_stats:
           latency_count: "[latency_count]"
           request_count: 1
@@ -101,6 +102,10 @@ traces_per_query:
                 estimated_execution_count: 2
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
+        extended_references: ~
+        local_per_type_stat: {}
+        limits_stats: ~
+        operation_count: 0
     referenced_fields_by_type:
       Product:
         field_names:
@@ -127,3 +132,4 @@ operation_count_by_type:
     subtype: ""
     operation_count: 1
 traces_pre_aggregated: true
+extended_references_enabled: false

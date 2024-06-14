@@ -1,0 +1,44 @@
+telemetry:
+  exporters:
+    tracing:
+      propagation:
+        trace_context: true
+    metrics:
+      prometheus:
+        enabled: true
+  instrumentation:
+    instruments:
+      graphql:
+        field.execution: true
+        list.length: true
+        "custom_counter":
+          description: "count of name field"
+          type: counter
+          unit: "unit"
+          value: field_unit
+          attributes:
+            graphql.type.name: true
+            graphql.field.type: true
+            graphql.field.name: true
+          condition:
+            eq:
+              - field_name: string
+              - "name"
+        "custom.histogram":
+          description: "histogram of review length"
+          type: histogram
+          unit: "unit"
+          attributes:
+            graphql.type.name: true
+            graphql.field.type: true
+            graphql.field.name: true
+          value:
+            field_custom:
+              list_length: value
+          condition:
+            eq:
+              - field_name: string
+              - "topProducts"
+
+
+

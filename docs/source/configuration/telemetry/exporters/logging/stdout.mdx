@@ -154,8 +154,7 @@ Example `text` output:
 
 | Option                      | Values                         | Default   | Description                                                             |
 |-----------------------------|--------------------------------|-----------|-------------------------------------------------------------------------|
-| `flavor`                    | `default`\|`compact`\|`pretty` | `default` | The overall output formatting.                                          |
-| `ansi_escape_codes`         | `true`\|`false`                | `false`   | Use ansi terminal escape codes.                                         |
+| `ansi_escape_codes`         | `true`\|`false`                | `true`   | Use ansi terminal escape codes.                                         |
 | `display_filename`          | `true`\|`false`                | `false`   | The filename where the log event was raised.                            |
 | `display_level`             | `true`\|`false`                | `true`    | The level of the log event, e.g. INFO, WARN, ERROR, TRACE.              |
 | `display_line_number`       | `true`\|`false`                | `false`   | The line number where the event was raised.                             |
@@ -167,6 +166,8 @@ Example `text` output:
 | `display_service_namespace` | `true`\|`false`                | `false`   | The service namespace as configured in metrics common.                  |
 | `display_trace_id`          | `true`\|`false`                | `false`   | The trace id of the span in which the event was raised.                 |
 | `display_span_id`           | `true`\|`false`                | `false`   | The span ID of the span in which the event was raised.                  |
+| `display_span_list`         | `true`\|`false`                | `true`    | A list of all spans to root in which the event was raised and all of their attributes. |
+| `display_current_span`      | `true`\|`false`                | `true`   | The span in which the event was raised and all of its' attributes.                     |
 
 
 ### `json`
@@ -362,15 +363,15 @@ telemetry:
 
 | Option                | Values            | Default | Event Field   | Description                                                                            |
 |-----------------------|-------------------|---------|:--------------|----------------------------------------------------------------------------------------|
-| `current_span`        | `true`\|`false`   | `false` | `span`        | The span in which the event was raised and all of its' attributes.                     |
+| `display_current_span`| `true`\|`false`   | `false` | `span`        | The span in which the event was raised and all of its' attributes.                     |
 | `display_filename`    | `true`\|`false`   | `false` | `filename`    | The filename where the log event was raised.                                           |
 | `display_level`       | `true`\|`false`   | `true`  | `level`       | The level of the log event, e.g. INFO, WARN, ERROR, TRACE.                             |
 | `display_line_number` | `true`\|`false`   | `false` | `line_number` | The line number where the event was raised.                                            |
-| `display_target`      | `true`\|`false`   | `false` | `target`      | The module name where the event was raised.                                            |
+| `display_target`      | `true`\|`false`   | `true`  | `target`      | The module name where the event was raised.                                            |
 | `display_thread_id`   | `true`\|`false`   | `false` | `thread_id`   | The id of the thread where the event was raised.                                       |
 | `display_thread_name` | `true`\|`false`   | `false` | `thread_name` | The name of the thread where the event was raised.                                     |
 | `display_timestamp`   | `true`\|`false`   | `true`  | `timestamp`   | The timestamp of when the event was raised.                                            |
-| `display_span_list`   | `true`\|`false`   | `false` | `spans`       | A list of all spans to root in which the event was raised and all of their attributes. |
+| `display_span_list`   | `true`\|`false`   | `true`  | `spans`       | A list of all spans to root in which the event was raised and all of their attributes. |
 | `display_resource`    | `true`\|`false`   | `true`  | `resource`    | The resource as configured in tracing common.                                          |
 | `display_trace_id`    | `true`\|`false`   | `true`  | `trace_id`    | The trace id of the span in which the event was raised.                                |
 | `display_span_id`     | `true`\|`false`   | `true`  | `span_id`     | The span id of the span in which the event was raised.                                 |

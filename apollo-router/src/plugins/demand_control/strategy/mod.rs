@@ -14,6 +14,7 @@ use crate::plugins::demand_control::Mode;
 use crate::plugins::demand_control::StrategyConfig;
 use crate::services::execution;
 use crate::services::subgraph;
+use crate::Context;
 
 mod static_estimated;
 #[cfg(test)]
@@ -59,10 +60,11 @@ impl Strategy {
     }
     pub(crate) fn on_execution_response(
         &self,
+        context: &Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError> {
-        match self.inner.on_execution_response(request, response) {
+        match self.inner.on_execution_response(context, request, response) {
             Err(e) if self.mode == Mode::Enforce => Err(e),
             _ => Ok(()),
         }
@@ -91,9 +93,12 @@ impl StrategyFactory {
 
     pub(crate) fn create(&self) -> Strategy {
         let strategy: Arc<dyn StrategyImpl> = match &self.config.strategy {
-            StrategyConfig::StaticEstimated { max } => Arc::new(StaticEstimated {
+            StrategyConfig::StaticEstimated { list_size, max } => Arc::new(StaticEstimated {
                 max: *max,
-                cost_calculator: StaticCostCalculator::new(self.subgraph_schemas.clone()),
+                cost_calculator: StaticCostCalculator::new(
+                    self.subgraph_schemas.clone(),
+                    *list_size,
+                ),
             }),
             #[cfg(test)]
             StrategyConfig::Test { stage, error } => Arc::new(test::Test {
@@ -119,6 +124,7 @@ pub(crate) trait StrategyImpl: Send + Sync {
     ) -> Result<(), DemandControlError>;
     fn on_execution_response(
         &self,
+        context: &Context,
         request: &ExecutableDocument,
         response: &graphql::Response,
     ) -> Result<(), DemandControlError>;
