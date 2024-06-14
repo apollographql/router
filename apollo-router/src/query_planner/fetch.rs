@@ -8,8 +8,6 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use apollo_federation::sources;
 use indexmap::IndexSet;
-use router_bridge::planner::PlanSuccess;
-use router_bridge::planner::Planner;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
@@ -27,10 +25,8 @@ use super::selection::Selection;
 use super::subgraph_context::ContextualArguments;
 use super::subgraph_context::SubgraphContext;
 use super::PlanNode;
-use super::QueryPlanResult;
 use crate::error::Error;
 use crate::error::FetchError;
-use crate::error::QueryPlannerError;
 use crate::error::ValidationErrors;
 use crate::graphql;
 use crate::graphql::Request;
@@ -41,8 +37,6 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::connectors::finder_field_for_fetch_node;
-use crate::plugins::connectors::Connector;
 use crate::services::subgraph::BoxService;
 use crate::services::SubgraphRequest;
 use crate::spec::query::change::QueryHashVisitor;
@@ -190,12 +184,6 @@ pub(crate) struct SubgraphOperation {
 }
 
 impl SubgraphOperation {
-    pub(crate) fn replace(&self, from: &str, to: &str) -> Self {
-        let serialized = self.serialized.replace(from, to);
-
-        Self::from_string(serialized)
-    }
-
     pub(crate) fn from_string(serialized: impl Into<String>) -> Self {
         Self {
             serialized: serialized.into(),
@@ -783,86 +771,6 @@ impl FetchNode {
         }
 
         Ok((value, errors))
-    }
-
-    pub(crate) async fn generate_connector_plan(
-        &mut self,
-        schema: &Schema,
-        subgraph_planners: &HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>,
-        connectors: &Arc<HashMap<Arc<String>, Connector>>,
-    ) -> Result<Option<(PlanSuccess<QueryPlanResult>, RestProtocolWrapper)>, QueryPlannerError>
-    {
-        if let Some(planner) = subgraph_planners.get(&self.service_name.to_string()) {
-            tracing::debug!(
-                "planning for subgraph '{}' and query '{}'",
-                self.service_name,
-                self.operation
-            );
-
-            let connectors_in_subgraph = connectors
-                .iter()
-                .filter_map(|(_, connector)| {
-                    if *connector.origin_subgraph == self.service_name.as_str() {
-                        Some(connector)
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>();
-
-            let (operation, rest_protocol_wrapper) = if let Some(rest_protocol_wrapper) =
-                finder_field_for_fetch_node(
-                    schema,
-                    &connectors_in_subgraph,
-                    self.requires.as_slice(),
-                ) {
-                if let Some(mff) = &rest_protocol_wrapper.magic_finder_field {
-                    (
-                        self.operation.replace("_entities", mff),
-                        rest_protocol_wrapper,
-                    )
-                } else {
-                    (self.operation.clone(), rest_protocol_wrapper)
-                }
-            } else {
-                (
-                    self.operation.clone(),
-                    RestProtocolWrapper {
-                        connector_service_name: self.service_name.to_string(),
-                        connector_graph_key: None,
-                        magic_finder_field: None,
-                    },
-                )
-            };
-
-            tracing::debug!(
-                "replaced with operation(magic finder field={:?}): {operation}",
-                rest_protocol_wrapper.magic_finder_field.as_ref()
-            );
-            match planner
-                .plan(
-                    operation.to_string(),
-                    self.operation_name.as_ref().map(|on| on.to_string()),
-                    Default::default(),
-                )
-                .await
-                .map_err(QueryPlannerError::RouterBridgeError)?
-                .into_result()
-            {
-                Ok(mut plan) => {
-                    if let Some(node) = plan.data.query_plan.node.as_mut() {
-                        Arc::make_mut(node)
-                            .update_connector_plan(&self.service_name.to_string(), connectors);
-                    }
-
-                    return Ok(Some((plan, rest_protocol_wrapper)));
-                }
-                Err(err) => {
-                    return Err(QueryPlannerError::from(err));
-                }
-            }
-        }
-        Ok(None)
     }
 
     pub(crate) fn service_name(&self) -> NodeStr {

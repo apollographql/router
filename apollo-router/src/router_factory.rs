@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::NodeStr;
 use axum::response::IntoResponse;
 use http::StatusCode;
 use indexmap::IndexMap;
@@ -26,8 +27,7 @@ use crate::plugin::DynPlugin;
 use crate::plugin::Handler;
 use crate::plugin::PluginFactory;
 use crate::plugin::PluginInit;
-use crate::plugins::connectors::subgraph_connector::SubgraphConnector;
-use crate::plugins::connectors::Connector;
+use crate::plugins::connectors::connector_subgraph_service::SubgraphConnector;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::telemetry::reload::apollo_opentelemetry_initialized;
@@ -367,37 +367,24 @@ impl YamlRouterFactory {
         let span = tracing::info_span!("plugins");
 
         // handle connectors
-        let connector_subgraphs = if let Some(source) = &schema.source {
-            let connector_supergraph = source.supergraph();
-            let connectors = source.connectors();
-            let mut aggregated_connectors: HashMap<Arc<String>, HashMap<Arc<String>, &Connector>> =
-                HashMap::new();
-
-            for (name, connector) in connectors.iter() {
-                let subgraph_name = connector.origin_subgraph.clone();
-
-                aggregated_connectors
-                    .entry(subgraph_name)
-                    .or_default()
-                    .insert(name.clone(), connector);
-            }
-            let mut subgraph_connectors = HashMap::new();
-            for (name, connectors_map) in aggregated_connectors.into_iter() {
-                let connector = SubgraphConnector::for_schema(
-                    Arc::clone(&connector_supergraph),
-                    configuration
-                        .preview_connectors
-                        .subgraphs
-                        .get(name.as_ref()),
-                    connectors_map,
-                )?;
-                subgraph_connectors.insert(name, connector);
-            }
-
-            subgraph_connectors
-        } else {
-            Default::default()
-        };
+        let connector_subgraphs =
+            if let Some(connectors_by_service_name) = &schema.connectors_by_service_name {
+                let mut subgraph_services = HashMap::new();
+                for (name, connector) in connectors_by_service_name {
+                    let service = SubgraphConnector::for_schema(
+                        Arc::new(schema.supergraph_schema().clone()),
+                        configuration
+                            .preview_connectors
+                            .subgraphs
+                            .get(connector.id.subgraph_name.as_str()),
+                        connector,
+                    )?;
+                    subgraph_services.insert(name, service);
+                }
+                subgraph_services
+            } else {
+                Default::default()
+            };
 
         // Process the plugins.
         let plugins: Arc<Plugins> = Arc::new(
@@ -423,7 +410,9 @@ impl YamlRouterFactory {
                 create_subgraph_services(&http_service_factory, &plugins, &configuration).await?;
             builder = builder.with_http_service_factory(http_service_factory);
             for (name, subgraph_service) in subgraph_services {
-                builder = if let Some(connector) = connector_subgraphs.get(&name) {
+                builder = if let Some(connector) =
+                    connector_subgraphs.get(&NodeStr::from(name.clone()))
+                {
                     builder.with_subgraph_service(name.as_str(), connector.clone())
                 } else {
                     builder.with_subgraph_service(&name, subgraph_service)

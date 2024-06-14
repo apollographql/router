@@ -23,7 +23,6 @@ use crate::graphql::Location as ErrorLocation;
 use crate::graphql::Response;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::plugins::connectors::ConnectorSupergraphError;
 use crate::spec::operation_limits::OperationLimits;
 use crate::spec::SpecError;
 
@@ -571,6 +570,7 @@ pub(crate) enum SchemaError {
 }
 
 #[derive(Error, Display, Debug, PartialEq)]
+#[allow(dead_code)]
 pub(crate) enum ConnectorDirectiveError {
     /// Attribute '{1}' is missing for type '{0}'
     MissingAttributeForType(String, String),
@@ -598,8 +598,6 @@ pub(crate) enum ConnectorDirectiveError {
     InvalidHeaderMapping,
     /// Could not generate path from inputs
     PathGenerationError(String),
-    /// The schema is inconsistent: '{0}'
-    InconsistentSchema(ConnectorSupergraphError),
 }
 
 /// Collection of schema validation errors.

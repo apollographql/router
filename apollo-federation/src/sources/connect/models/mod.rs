@@ -80,6 +80,7 @@ impl Connector {
                 let transport = Transport::HttpJson(HttpJsonTransport::from_directive(
                     &connect_http,
                     source_http,
+                    source_name.clone(),
                 )?);
 
                 let parent_type_name = args.position.field.type_name().clone();
@@ -112,6 +113,12 @@ impl Connector {
             })
             .collect()
     }
+
+    pub fn source_name(&self) -> Option<NodeStr> {
+        match &self.transport {
+            Transport::HttpJson(transport) => transport.source_name.clone(),
+        }
+    }
 }
 
 fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Transport) -> String {
@@ -123,6 +130,7 @@ fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Tran
 
 #[derive(Debug, Clone)]
 pub struct HttpJsonTransport {
+    pub source_name: Option<NodeStr>,
     pub base_url: NodeStr,
     pub path_template: URLPathTemplate,
     pub method: HTTPMethod,
@@ -134,6 +142,7 @@ impl HttpJsonTransport {
     fn from_directive(
         http: &ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
+        source_name: Option<NodeStr>,
     ) -> Result<Self, FederationError> {
         let (method, path) = if let Some(path) = &http.get {
             (HTTPMethod::Get, path)
@@ -163,6 +172,7 @@ impl HttpJsonTransport {
         headers.extend(http.headers.0.clone());
 
         Ok(Self {
+            source_name,
             base_url,
             path_template: URLPathTemplate::parse(path).expect("path template"),
             method,

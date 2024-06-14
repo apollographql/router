@@ -15,12 +15,9 @@ use futures::future::BoxFuture;
 use opentelemetry_api::metrics::MeterProvider as _;
 use opentelemetry_api::metrics::ObservableGauge;
 use opentelemetry_api::KeyValue;
-use router_bridge::planner::IncrementalDeliverySupport;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
-use router_bridge::planner::QueryPlannerConfig;
-use router_bridge::planner::QueryPlannerDebugConfig;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
 use serde::Serialize;
@@ -47,8 +44,6 @@ use crate::metrics::meter_provider;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
-use crate::plugins::connectors::connector_subgraph_names;
-use crate::plugins::connectors::Connector;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
@@ -78,8 +73,6 @@ pub(crate) struct BridgeQueryPlanner {
     introspection: Option<Arc<Introspection>>,
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
-    subgraph_planners: Arc<HashMap<Arc<String>, Arc<Planner<QueryPlanResult>>>>,
-    connectors: Option<Arc<HashMap<Arc<String>, Connector>>>,
     _federation_instrument: ObservableGauge<u64>,
 }
 
@@ -390,79 +383,7 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
-        let mut subgraph_schemas = planner.subgraphs().await?;
-
-        let connectors = schema
-            .source
-            .as_ref()
-            .map(|source| source.connectors().clone());
-
-        let subgraph_planners = if let Some(source) = &schema.source {
-            // TODO: arbitrary, going for the js planner until the rust one is ready
-            let planner = match &planner {
-                PlannerMode::Js(planner) => planner.clone(),
-                PlannerMode::Both { js, .. } => js.clone(),
-                PlannerMode::Rust { .. } => {
-                    return Err(ServiceBuildError::ServiceError(
-                        "no support in rust yet".into(),
-                    ))
-                }
-            };
-            let connector_supergraph = source.supergraph();
-            let connectors = source.connectors();
-            let connector_subgraph_names = connector_subgraph_names(&connectors);
-            let connector_supergraph_str = connector_supergraph.serialize().to_string();
-
-            let mut subgraph_planners = HashMap::new();
-
-            let subgraph_planner = Arc::new(
-                planner
-                    .update(
-                        connector_supergraph_str.clone(),
-                        QueryPlannerConfig {
-                            incremental_delivery: Some(IncrementalDeliverySupport {
-                                enable_defer: Some(configuration.supergraph.defer_support),
-                            }),
-                            graphql_validation: false,
-                            reuse_query_fragments: configuration.supergraph.reuse_query_fragments,
-                            debug: Some(QueryPlannerDebugConfig {
-                                bypass_planner_for_single_subgraph: None,
-                                max_evaluated_plans: configuration
-                                    .supergraph
-                                    .query_planning
-                                    .experimental_plans_limit
-                                    .or(Some(10000)),
-                                paths_limit: configuration
-                                    .supergraph
-                                    .query_planning
-                                    .experimental_paths_limit,
-                            }),
-                            generate_query_fragments: Some(
-                                configuration.supergraph.generate_query_fragments,
-                            ),
-                            type_conditioned_fetching: configuration
-                                .experimental_type_conditioned_fetching,
-                        },
-                    )
-                    .await?,
-            );
-
-            for subgraph_name in connector_subgraph_names {
-                subgraph_schemas.insert(subgraph_name.to_string(), connector_supergraph.clone());
-                subgraph_planners.insert(subgraph_name, subgraph_planner.clone());
-            }
-
-            for (name, schema_str) in subgraph_planner.subgraphs().await? {
-                let schema = apollo_compiler::Schema::parse_and_validate(schema_str, "")
-                    .map_err(|errors| SchemaError::Validate(errors.into()))?;
-                subgraph_schemas.insert(name.clone(), Arc::new(schema));
-                subgraph_planners.insert(Arc::new(name), subgraph_planner.clone());
-            }
-
-            subgraph_planners
-        } else {
-            Default::default()
-        };
+        let subgraph_schemas = planner.subgraphs().await?;
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(
@@ -488,8 +409,6 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
-            subgraph_planners: Arc::new(subgraph_planners),
-            connectors,
         })
     }
 
@@ -594,14 +513,6 @@ impl BridgeQueryPlanner {
             .await?;
 
         if let Some(node) = plan_success.data.query_plan.node.as_mut() {
-            Arc::make_mut(node)
-                .generate_connector_plan(
-                    self.schema.as_ref(),
-                    &self.subgraph_planners,
-                    &self.connectors.clone().unwrap_or_default(),
-                )
-                .await?;
-
             tracing::debug!(
                 query = original_query,
                 plan = serde_json::to_string(&node).unwrap()

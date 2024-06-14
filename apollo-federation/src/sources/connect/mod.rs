@@ -7,12 +7,15 @@ use apollo_compiler::ast::Name;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 
+mod expand;
 mod json_selection;
 mod models;
 pub(crate) mod spec;
 mod url_path_template;
 
 use apollo_compiler::name;
+pub use expand::expand_connectors;
+pub use expand::ExpansionResult;
 pub use json_selection::ApplyTo;
 pub use json_selection::ApplyToError;
 pub use json_selection::JSONSelection;
@@ -88,5 +91,16 @@ impl ConnectId {
                 directive_index: index,
             },
         }
+    }
+
+    pub fn derived_subgraph_name(&self) -> NodeStr {
+        format!(
+            "{}_{}_{}_{}",
+            self.subgraph_name,
+            self.directive.field.type_name(),
+            self.directive.field.field_name(),
+            self.directive.directive_index
+        )
+        .into()
     }
 }

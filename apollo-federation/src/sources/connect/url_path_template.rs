@@ -548,7 +548,10 @@ impl Display for VariableExpression {
 }
 
 fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
-    recognize(alt((tag("$this"), nom_parse_identifier)))(input)
+    recognize(alt((
+        alt((tag("$this"), tag("$args"))),
+        nom_parse_identifier,
+    )))(input)
 }
 
 fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {

@@ -9,8 +9,9 @@ use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
+use url::Url;
 
-use super::http_json_transport::http_json_transport::make_request;
+use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
 use crate::services::SubgraphRequest;
 
@@ -62,6 +63,7 @@ pub(crate) fn make_requests(
     request: SubgraphRequest,
     connector: &Connector,
     schema: Arc<Valid<Schema>>,
+    base_url_override: &Option<Url>,
 ) -> Result<Vec<(http::Request<hyper::Body>, ResponseKey)>, MakeRequestError> {
     let request_params = if connector.entity {
         entities_from_request(&request, schema)
@@ -71,20 +73,21 @@ pub(crate) fn make_requests(
         entities_with_fields_from_request(&request, schema)
     }?;
 
-    request_params_to_requests(connector, request_params, &request)
+    request_params_to_requests(connector, request_params, &request, base_url_override)
 }
 
 fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<(ResponseKey, RequestInputs)>,
     _original_request: &SubgraphRequest, // TODO headers
+    base_url_override: &Option<Url>,
 ) -> Result<Vec<(http::Request<hyper::Body>, ResponseKey)>, MakeRequestError> {
     request_params
         .into_iter()
         .map(|(response_key, inputs)| {
             let request = match connector.transport {
                 apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
-                    make_request(transport, inputs.merge())?
+                    make_request(transport, inputs.merge(), base_url_override)?
                 }
             };
 
@@ -1093,6 +1096,7 @@ mod tests {
             ),
             transport: apollo_federation::sources::connect::Transport::HttpJson(
                 HttpJsonTransport {
+                    source_name: None,
                     base_url: "http://localhost/api".into(),
                     path_template: URLPathTemplate::parse("/path").unwrap(),
                     method: HTTPMethod::Get,
@@ -1105,7 +1109,7 @@ mod tests {
             on_root_type: true,
         };
 
-        let requests = super::make_requests(req, &connector, Arc::new(schema)).unwrap();
+        let requests = super::make_requests(req, &connector, Arc::new(schema), &None).unwrap();
 
         assert_debug_snapshot!(requests, @r###"
         [

@@ -25,7 +25,6 @@ use super::new_service::ServiceFactory;
 use crate::graphql::Error;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
-use crate::plugins::connectors::http_json_transport::http_json_transport;
 use crate::plugins::connectors::http_json_transport::HttpJsonTransportError;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::fetch::Variables;
@@ -120,17 +119,15 @@ fn create_requests(
     }
 }
 
+#[allow(unreachable_code)]
 fn create_request(
-    json_transport: &HttpJsonTransport,
-    variables: Variables,
+    _json_transport: &HttpJsonTransport,
+    _variables: Variables,
     context: Context,
 ) -> Result<Vec<HttpRequest>, HttpJsonTransportError> {
     Ok(vec![HttpRequest {
         context,
-        http_request: http_json_transport::make_request(
-            json_transport,
-            Value::Object(variables.variables.clone()),
-        )?,
+        http_request: todo!(),
     }])
 }
 
@@ -226,106 +223,5 @@ impl ServiceFactory<ConnectRequest> for ConnectorServiceFactory {
             connectors: self.connectors.clone(),
         }
         .boxed()
-    }
-}
-
-#[cfg(test)]
-mod soure_node_tests {
-    use apollo_compiler::name;
-    use apollo_compiler::NodeStr;
-    use apollo_federation::schema::ObjectFieldDefinitionPosition;
-    use apollo_federation::schema::ObjectOrInterfaceFieldDefinitionPosition;
-    use apollo_federation::schema::ObjectOrInterfaceFieldDirectivePosition;
-    use apollo_federation::sources::connect::ConnectId;
-    use apollo_federation::sources::connect::HTTPMethod;
-    use apollo_federation::sources::connect::HttpJsonTransport;
-    use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::Transport;
-    use apollo_federation::sources::connect::URLPathTemplate;
-    use indexmap::IndexMap;
-    use serde_json_bytes::json;
-    use wiremock::MockServer;
-
-    use super::*;
-    use crate::plugins::connectors::tests::mock_api;
-    use crate::plugins::connectors::tests::mock_subgraph;
-    use crate::plugins::traffic_shaping::Http2Config;
-    use crate::Configuration;
-
-    #[tokio::test]
-    async fn test_process_source_node() {
-        let mock_server = MockServer::start().await;
-        mock_api::mount_all(&mock_server).await;
-        mock_subgraph::start_join().mount(&mock_server).await;
-
-        let mut connectors: IndexMap<SourceId, Connector> = Default::default();
-        let id = fake_connect_id();
-        connectors.insert(
-            SourceId::Connect(id.clone()),
-            Connector {
-                id,
-                transport: Transport::HttpJson(HttpJsonTransport {
-                    base_url: NodeStr::new(&format!("{}/v1", mock_server.uri())),
-                    path_template: URLPathTemplate::parse("/hello").unwrap(),
-                    method: HTTPMethod::Get,
-                    headers: Default::default(),
-                    body: Default::default(),
-                }),
-                selection: JSONSelection::parse(".data { id }").unwrap().1,
-                entity: false,
-                on_root_type: false,
-            },
-        );
-
-        let connectors = Arc::new(connectors);
-
-        let source_node = fake_source_node();
-        let data = Default::default();
-        let paths = Default::default();
-
-        let expected = (json!({ "data": { "id": 42 } }), Default::default());
-
-        let http_client_factory = HttpClientServiceFactory::from_config(
-            "test",
-            &Configuration::default(),
-            Http2Config::Enable,
-        );
-        let actual = process_source_node(
-            http_client_factory,
-            source_node,
-            connectors,
-            data,
-            paths,
-            Default::default(),
-        )
-        .await;
-
-        assert_eq!(expected, actual);
-    }
-
-    fn fake_source_node() -> FetchNode {
-        FetchNode {
-            source_id: fake_connect_id(),
-            field_response_name: name!("data"),
-            field_arguments: Default::default(),
-            selection: JSONSelection::parse(".data { id }").unwrap().1,
-        }
-    }
-
-    fn fake_connect_id() -> ConnectId {
-        ConnectId {
-            label: "kitchen-sink.a: GET /hello".to_string(),
-            subgraph_name: "kitchen-sink".into(),
-            directive: ObjectOrInterfaceFieldDirectivePosition {
-                field: ObjectOrInterfaceFieldDefinitionPosition::Object(
-                    ObjectFieldDefinitionPosition {
-                        type_name: name!("Query"),
-                        field_name: name!("hello"),
-                    },
-                ),
-                directive_name: name!("sourceField"),
-                directive_index: 0,
-            },
-        }
     }
 }

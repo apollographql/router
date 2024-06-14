@@ -1,0 +1,107 @@
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.4", for: EXECUTION) {
+  query: Query
+}
+
+directive @join__directive(
+  graphs: [join__Graph!]
+  name: String!
+  args: join__DirectiveArguments
+) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(
+  graph: join__Graph
+  requires: join__FieldSet
+  provides: join__FieldSet
+  type: String
+  external: Boolean
+  override: String
+  usedOverridden: Boolean
+  overrideLabel: String
+) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(
+  graph: join__Graph!
+  interface: String!
+) repeatable on OBJECT | INTERFACE
+
+directive @join__type(
+  graph: join__Graph!
+  key: join__FieldSet
+  extension: Boolean! = false
+  resolvable: Boolean! = true
+  isInterfaceObject: Boolean! = false
+) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(
+  graph: join__Graph!
+  member: String!
+) repeatable on UNION
+
+directive @link(
+  url: String
+  as: String
+  for: link__Purpose
+  import: [link__Import]
+) repeatable on SCHEMA
+
+scalar join__DirectiveArguments
+
+scalar join__FieldSet
+
+enum join__Graph {
+  CONNECTORS_QUERY_USER_0_
+    @join__graph(name: "connectors_Query_user_0", url: "none")
+  CONNECTORS_QUERY_USERS_0_
+    @join__graph(name: "connectors_Query_users_0", url: "none")
+  CONNECTORS_USER_D_0_ @join__graph(name: "connectors_User_d_1", url: "none")
+  GRAPHQL @join__graph(name: "graphql", url: "http://localhost:4001")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: CONNECTORS_QUERY_USER_0_)
+  @join__type(graph: CONNECTORS_QUERY_USERS_0_)
+  @join__type(graph: CONNECTORS_USER_D_0_)
+  @join__type(graph: GRAPHQL) {
+  user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0_)
+  users: [User] @join__field(graph: CONNECTORS_QUERY_USERS_0_)
+}
+
+type User
+  @join__type(graph: CONNECTORS_QUERY_USER_0_, key: "id")
+  @join__type(graph: CONNECTORS_QUERY_USERS_0_, key: "id", resolvable: false)
+  @join__type(graph: CONNECTORS_USER_D_0_, key: "__typename")
+  @join__type(graph: GRAPHQL, key: "id")
+  @join__type(graph: GRAPHQL, key: "__typename") {
+  id: ID!
+    @join__field(graph: CONNECTORS_QUERY_USER_0_)
+    @join__field(graph: CONNECTORS_QUERY_USERS_0_)
+    @join__field(graph: GRAPHQL)
+  name: String
+    @join__field(graph: CONNECTORS_QUERY_USER_0_)
+    @join__field(graph: CONNECTORS_QUERY_USERS_0_)
+  username: String @join__field(graph: CONNECTORS_QUERY_USER_0_)
+  c: String
+    @join__field(graph: CONNECTORS_USER_D_0_, external: true)
+    @join__field(graph: GRAPHQL)
+  d: String @join__field(graph: CONNECTORS_USER_D_0_, requires: "c")
+}
