@@ -12,6 +12,8 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 use crate::plugins::telemetry::metrics::apollo::cost_histogram::CostHistogram;
 use crate::plugins::telemetry::metrics::apollo::list_length_histogram::ListLengthHistogram;
 
+pub(crate) const MAX_HISTOGRAM_BUCKETS: usize = 384;
+
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {
     pub(crate) request_id: Uuid,

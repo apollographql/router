@@ -442,7 +442,24 @@ per_type_stat:
           - 0
           - 1
 extended_references: ~
-local_per_type_stat: {}
+local_per_type_stat:
+  Product:
+    local_per_field_stat:
+      reviews:
+        return_type: Review
+        array_size:
+          - 0
+          - 4
+          - 2
+  Query:
+    local_per_field_stat:
+      topProducts:
+        return_type: Product
+        array_size:
+          - 0
+          - 0
+          - 0
+          - 1
 limits_stats:
   strategy: ""
   cost_estimated:

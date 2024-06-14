@@ -3,6 +3,8 @@ use hdrhistogram::RecordError;
 use serde::ser::SerializeSeq;
 use serde::Serialize;
 
+use super::studio::MAX_HISTOGRAM_BUCKETS;
+
 /// A histogram for query costs. Since costs are calculated exponentially (ie. the cost of a list
 /// field is the length multiplied by the cost of its children), they are stored in exponentially
 /// increasing buckets.
@@ -35,7 +37,7 @@ impl CostHistogram {
         self.histogram
             .iter_log(1, 2.0)
             .map(|v| v.count_since_last_iteration() as i64)
-            .take(383)
+            .take(MAX_HISTOGRAM_BUCKETS)
             .collect()
     }
 }

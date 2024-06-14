@@ -4,6 +4,8 @@ use hdrhistogram::Histogram;
 use serde::ser::SerializeSeq;
 use serde::Serialize;
 
+use super::studio::MAX_HISTOGRAM_BUCKETS;
+
 /// A histogram for recording lengths of list fields in GraphQL responses. This implementation is clamped to a maximum
 /// of 386 buckets, a restriction imposed by Studio. The buckets roughly follow order of magnitude of the recorded value,
 /// so lower values are recorded with higher levels of granularity. Each value under 100 has its own integer bucket, values
@@ -17,7 +19,8 @@ impl ListLengthHistogram {
     pub(crate) fn new() -> Self {
         Self {
             // "If you're not sure, use 3" https://docs.rs/hdrhistogram/7.5.4/hdrhistogram/struct.Histogram.html#method.new_with_bounds
-            histogram: Histogram::new_with_bounds(1, 386, 3).expect("sigfig is not greater than 5"),
+            histogram: Histogram::new_with_bounds(1, MAX_HISTOGRAM_BUCKETS as u64, 3)
+                .expect("sigfig is not greater than 5"),
         }
     }
 
@@ -29,10 +32,10 @@ impl ListLengthHistogram {
             90 + value / 10
         } else if value < 10000 {
             180 + value / 100
-        } else if value < 116000 {
+        } else if value < 114000 {
             270 + value / 1000
         } else {
-            386
+            MAX_HISTOGRAM_BUCKETS as u64 - 1
         };
         self.histogram.saturating_record(bucket);
     }
@@ -81,6 +84,8 @@ mod test {
         }
 
         let v = hist.to_vec();
+        assert_eq!(v.len(), 384);
+
         for (i, item) in v.iter().enumerate().take(100) {
             assert_eq!(*item, 1, "testing contents of bucket {}", i);
         }
@@ -90,9 +95,9 @@ mod test {
         for (i, item) in v.iter().enumerate().take(280).skip(190) {
             assert_eq!(*item, 100, "testing contents of bucket {}", i);
         }
-        for (i, item) in v.iter().enumerate().take(386).skip(280) {
+        for (i, item) in v.iter().enumerate().take(383).skip(280) {
             assert_eq!(*item, 1000, "testing contents of bucket {}", i);
         }
-        assert_eq!(v[386], 4000, "testing contents of last bucket");
+        assert_eq!(v[383], 7000, "testing contents of last bucket");
     }
 }
