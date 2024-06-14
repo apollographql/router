@@ -242,6 +242,9 @@ mod tests {
                 },
                 transport: HttpJson(
                     HttpJsonTransport {
+                        source_name: Some(
+                            "json",
+                        ),
                         base_url: "https://jsonplaceholder.typicode.com/",
                         path_template: URLPathTemplate {
                             path: [
@@ -314,6 +317,9 @@ mod tests {
                 },
                 transport: HttpJson(
                     HttpJsonTransport {
+                        source_name: Some(
+                            "json",
+                        ),
                         base_url: "https://jsonplaceholder.typicode.com/",
                         path_template: URLPathTemplate {
                             path: [
