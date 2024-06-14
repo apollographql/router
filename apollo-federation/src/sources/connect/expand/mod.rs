@@ -38,13 +38,10 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
             Err(_) => {
                 // todo log issue?
             }
-            Ok(connectors) if !connectors.is_empty() => {
+            Ok(connectors) => {
                 for (id, connector) in connectors {
                     connectors_by_service_name.insert(id.derived_subgraph_name(), connector);
                 }
-            }
-            _ => {
-                return Ok(ExpansionResult::Unchanged);
             }
         };
     }

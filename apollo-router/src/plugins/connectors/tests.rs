@@ -54,18 +54,16 @@ pub(crate) mod mock_api {
 
     pub(crate) fn users() -> Mock {
         Mock::given(method("GET")).and(path("/users")).respond_with(
-            ResponseTemplate::new(200).set_body_json(serde_json::json!(
-              [
-                {
-                  "id": 1,
-                  "name": "Leanne Graham"
-                },
-                {
-                  "id": 2,
-                  "name": "Ervin Howell",
-                }
-              ]
-            )),
+            ResponseTemplate::new(200).set_body_json(serde_json::json!([
+              {
+                "id": 1,
+                "name": "Leanne Graham"
+              },
+              {
+                "id": 2,
+                "name": "Ervin Howell",
+              }
+            ])),
         )
     }
 
@@ -118,7 +116,7 @@ pub(crate) mod mock_subgraph {
 }
 
 #[tokio::test]
-async fn test_root_field_plus_entity() {
+async fn test_root_field_plus_entity_plus_requires() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
     mock_api::user_1().mount(&mock_server).await;
