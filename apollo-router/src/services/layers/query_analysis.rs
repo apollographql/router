@@ -211,15 +211,12 @@ impl QueryAnalysisLayer {
                     None
                 };
 
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|mut lock| {
-                        lock.insert::<ParsedDocument>(doc.clone());
-                        if let Some(stats) = extended_ref_stats {
-                            lock.insert::<ExtendedReferenceStats>(stats);
-                        }
-                    });
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert::<ParsedDocument>(doc.clone());
+                    if let Some(stats) = extended_ref_stats {
+                        lock.insert::<ExtendedReferenceStats>(stats);
+                    }
+                });
 
                 Ok(SupergraphRequest {
                     supergraph_request: request.supergraph_request,
