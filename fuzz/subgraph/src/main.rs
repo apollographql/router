@@ -17,8 +17,6 @@ use async_graphql_actix_web::GraphQLRequest;
 use crate::model::Mutation;
 use crate::model::Query;
 
-pub(crate) mod delay_for;
-pub(crate) mod ensure_keep_alive;
 mod model;
 
 #[post("/")]
