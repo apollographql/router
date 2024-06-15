@@ -224,13 +224,8 @@ fn does_not_rely_on_an_interface_object_directly_for_typename() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.id" to selection set of parent type "A""#
-    expected = r#"Cannot add selection of field "I.id" to selection set of parent type "A""#
-)]
-// TODO: investigate this failure
-// - Fails to rebase on an interface object type in a subgraph.
-// - Fails to rebase on an interface object type in a subgraph.
+#[should_panic(expected = r#"snapshot assertion"#)]
+// TODO: investigate this failure (missing fetch node for `iFromS2 { ... on I { y } }`)
 fn does_not_rely_on_an_interface_object_directly_if_a_specific_implementation_is_requested() {
     let planner = planner!(
         S1: SUBGRAPH1,
@@ -429,13 +424,8 @@ fn handles_query_of_an_interface_field_for_a_specific_implementation_when_query_
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "I.id" to selection set of parent type "A""#
-    expected = r#"Cannot add selection of field "I.id" to selection set of parent type "A""#
-)]
-// TODO: investigate this failure
-// - Fails to rebase on an interface object type in a subgraph.
-// - Fails to rebase on an interface object type in a subgraph.
+#[should_panic(expected = r#"snapshot assertion"#)]
+// TODO: investigate this failure (missing fetch node for "everything.@ { ... on I { expansiveField } }")
 fn it_avoids_buffering_interface_object_results_that_may_have_to_be_filtered_with_lists() {
     let planner = planner!(
         S1: r#"
