@@ -180,7 +180,7 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
+// TODO: investigate this failure after optimize is merged (reverse order of parallel fetches)
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
         Subgraph1: r#"
