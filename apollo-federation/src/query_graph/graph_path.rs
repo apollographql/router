@@ -3562,12 +3562,18 @@ impl OpPath {
             match element.as_ref() {
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition) = &fragment.data().type_condition_position {
-                        if schema.get_type(type_condition.type_name().clone()).is_ok() {
-                            let updated_fragment = fragment.with_updated_type_condition(None);
-                            filtered
-                                .push(Arc::new(OpPathElement::InlineFragment(updated_fragment)));
+                        if schema.get_type(type_condition.type_name().clone()).is_err() {
+                            if element.directives().is_empty() {
+                                continue; // skip this element
+                            } else {
+                                // Replace this element with an unconditioned inline fragment
+                                let updated_fragment = fragment.with_updated_type_condition(None);
+                                filtered.push(Arc::new(OpPathElement::InlineFragment(
+                                    updated_fragment,
+                                )));
+                            }
                         } else {
-                            continue;
+                            filtered.push(element.clone());
                         }
                     } else {
                         filtered.push(element.clone());
