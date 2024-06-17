@@ -22,9 +22,7 @@ const SUBGRAPH: &str = r#"
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
-// TODO: when QueryPlannerConfig::generate_query_fragments is implemented remove the
-// "not implemented yet" note in its doc comment
+// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn it_respects_generate_query_fragments_option() {
     let planner = planner!(
         config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
@@ -74,7 +72,7 @@ fn it_respects_generate_query_fragments_option() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn it_handles_nested_fragment_generation() {
     let planner = planner!(
         config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
@@ -137,7 +135,7 @@ fn it_handles_nested_fragment_generation() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn it_handles_fragments_with_one_non_leaf_field() {
     let planner = planner!(
         config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
@@ -185,7 +183,7 @@ fn it_handles_fragments_with_one_non_leaf_field() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
     let planner = planner!(
         config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },
@@ -235,7 +233,7 @@ fn it_identifies_and_reuses_equivalent_fragments_that_arent_identical() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: generate_query_fragments (https://apollographql.atlassian.net/browse/FED-76)
 fn fragments_that_share_a_hash_but_are_not_identical_generate_their_own_fragment_definitions() {
     let planner = planner!(
         config = QueryPlannerConfig { generate_query_fragments: true, ..Default::default() },

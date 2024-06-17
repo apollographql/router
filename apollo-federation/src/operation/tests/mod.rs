@@ -1439,9 +1439,7 @@ fn add_at_path_merge_subselections() {
     insta::assert_snapshot!(selection_set, @r#"{ a { b { c { d e(arg: 1) } } } }"#);
 }
 
-// TODO: `.add_at_path` should collapse unnecessary fragments
 #[test]
-#[ignore]
 fn add_at_path_collapses_unnecessary_fragments() {
     let schema =
         apollo_compiler::Schema::parse_and_validate(ADD_AT_PATH_TEST_SCHEMA, "schema.graphql")
