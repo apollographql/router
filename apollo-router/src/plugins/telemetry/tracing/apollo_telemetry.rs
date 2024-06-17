@@ -119,7 +119,7 @@ pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.o
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
-const REPORTS_INCLUDE_ATTRS: [Key; 22] = [
+const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
     APOLLO_PRIVATE_REQUEST,
     APOLLO_PRIVATE_DURATION_NS_KEY,
     APOLLO_PRIVATE_SENT_TIME_OFFSET,
@@ -132,6 +132,10 @@ const REPORTS_INCLUDE_ATTRS: [Key; 22] = [
     APOLLO_PRIVATE_COST_RESULT,
     APOLLO_PRIVATE_COST_ESTIMATED,
     APOLLO_PRIVATE_COST_ACTUAL,
+    APOLLO_PRIVATE_QUERY_ALIASES,
+    APOLLO_PRIVATE_QUERY_DEPTH,
+    APOLLO_PRIVATE_QUERY_HEIGHT,
+    APOLLO_PRIVATE_QUERY_ROOT_FIELDS,
     PATH,
     SUBGRAPH_NAME,
     CLIENT_NAME_KEY,
