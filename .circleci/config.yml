@@ -45,14 +45,14 @@ executors:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: "15.1.0"
+      xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
   macos_test: &macos_test_executor
     macos:
       # See https://circleci.com/docs/xcode-policy along with the support matrix
       # at https://circleci.com/docs/using-macos#supported-xcode-versions.
       # We use the major.minor notation to bring in compatible patches.
-      xcode: "15.1.0"
+      xcode: "14.2.0"
     resource_class: macos.m1.medium.gen1
   windows_build: &windows_build_executor
     machine:
@@ -493,6 +493,8 @@ commands:
             # Use the settings from the "ci" profile in nextest configuration.
             NEXTEST_PROFILE: ci
             RUST_BACKTRACE: full
+            # Disable lib backtrace since it crashing on MacOS, if xcode < 15.1.0
+            RUST_LIB_BACKTRACE: 0
           command: xtask test --workspace --locked --features ci
       - run:
           name: Delete large files from cache
