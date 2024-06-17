@@ -4,6 +4,7 @@ use std::io;
 
 use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
+use opentelemetry::OrderMap;
 use opentelemetry::Value;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
@@ -21,6 +22,7 @@ use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
+use crate::plugins::telemetry::dynamic_attribute::EventAttributes;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
 use crate::plugins::telemetry::otel::OtelData;
@@ -238,8 +240,22 @@ where
                 };
                 let event_attributes = {
                     let mut extensions = span.extensions_mut();
-                    let mut otel_data = extensions.get_mut::<OtelData>();
-                    otel_data.as_mut().and_then(|od| od.event_attributes.take())
+                    let otel_data = extensions.get_mut::<OtelData>();
+                    let attrs = otel_data.and_then(|od| od.event_attributes.take());
+                    match attrs {
+                        Some(attrs) => Some(attrs),
+                        None => {
+                            let event_attributes = extensions.get_mut::<EventAttributes>();
+                            event_attributes.map(|event_attributes| {
+                                OrderMap::from_iter(
+                                    event_attributes
+                                        .take()
+                                        .into_iter()
+                                        .map(|kv| (kv.key, kv.value)),
+                                )
+                            })
+                        }
+                    }
                 };
                 if let Some(event_attributes) = event_attributes {
                     for (key, value) in event_attributes {
@@ -379,7 +395,7 @@ mod test {
     use tracing_subscriber::Layer;
     use tracing_subscriber::Registry;
 
-    use crate::plugins::telemetry::dynamic_attribute::DynSpanAttributeLayer;
+    use crate::plugins::telemetry::dynamic_attribute::DynAttributeLayer;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
     use crate::plugins::telemetry::formatters::json::extract_dd_trace_id;
     use crate::plugins::telemetry::otel;
@@ -419,7 +435,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(DynSpanAttributeLayer)
+                .with(DynAttributeLayer)
                 .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root");
@@ -436,7 +452,7 @@ mod test {
         subscriber::with_default(
             Registry::default()
                 .with(RequiresDatadogLayer)
-                .with(DynSpanAttributeLayer)
+                .with(DynAttributeLayer)
                 .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root");
