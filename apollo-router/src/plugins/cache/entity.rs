@@ -437,18 +437,22 @@ async fn cache_lookup_root(
 
     match cache_result {
         Some(value) => {
-            request
-                .context
-                .extensions()
-                .with_lock(|mut lock| lock.insert(value.0.control));
+            if value.0.control.can_use() {
+                request
+                    .context
+                    .extensions()
+                    .with_lock(|mut lock| lock.insert(value.0.control));
 
-            Ok(ControlFlow::Break(
-                subgraph::Response::builder()
-                    .data(value.0.data)
-                    .extensions(Object::new())
-                    .context(request.context)
-                    .build(),
-            ))
+                Ok(ControlFlow::Break(
+                    subgraph::Response::builder()
+                        .data(value.0.data)
+                        .extensions(Object::new())
+                        .context(request.context)
+                        .build(),
+                ))
+            } else {
+                Ok(ControlFlow::Continue((request, key)))
+            }
         }
         None => Ok(ControlFlow::Continue((request, key))),
     }
@@ -478,7 +482,21 @@ async fn cache_lookup_entities(
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
-        .map(|res| res.into_iter().map(|r| r.map(|v| v.0)).collect())
+        .map(|res| {
+            res.into_iter()
+                .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+                .map(|v| match v {
+                    None => None,
+                    Some(v) => {
+                        if v.control.can_use() {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    }
+                })
+                .collect()
+        })
         .unwrap_or_else(|| std::iter::repeat(None).take(keys.len()).collect());
 
     let representations = body
