@@ -34,9 +34,13 @@ use indexmap::map::Entry::Vacant;
 use indexmap::map::Iter;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 
 use crate::error::FederationError;
+use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
+use crate::ValidFederationSubgraph;
+use crate::ValidFederationSubgraphs;
 
 type MergeWarning = String;
 type MergeError = String;
@@ -82,6 +86,33 @@ impl Debug for MergeFailure {
 
 pub fn merge_subgraphs(subgraphs: Vec<&ValidSubgraph>) -> Result<MergeSuccess, MergeFailure> {
     let mut merger = Merger::new();
+    let mut federation_subgraphs = ValidFederationSubgraphs::new();
+    for subgraph in subgraphs {
+        federation_subgraphs
+            .add(ValidFederationSubgraph {
+                name: subgraph.name.clone(),
+                url: subgraph.url.clone(),
+                schema: ValidFederationSchema::new(subgraph.schema.clone()).map_err(|e| {
+                    MergeFailure {
+                        schema: None,
+                        errors: vec![e.to_string()],
+                        composition_hints: Default::default(),
+                    }
+                })?,
+            })
+            .map_err(|e| MergeFailure {
+                schema: None,
+                errors: vec![e.to_string()],
+                composition_hints: Default::default(),
+            })?;
+    }
+    merger.merge(federation_subgraphs)
+}
+
+pub fn merge_federation_subgraphs(
+    subgraphs: ValidFederationSubgraphs,
+) -> Result<MergeSuccess, MergeFailure> {
+    let mut merger = Merger::new();
     merger.merge(subgraphs)
 }
 
@@ -92,14 +123,18 @@ impl Merger {
             errors: Vec::new(),
         }
     }
-    fn merge(&mut self, mut subgraphs: Vec<&ValidSubgraph>) -> Result<MergeSuccess, MergeFailure> {
+    fn merge(&mut self, subgraphs: ValidFederationSubgraphs) -> Result<MergeSuccess, MergeFailure> {
+        let mut subgraphs = subgraphs
+            .into_iter()
+            .map(|(_, subgraph)| subgraph)
+            .collect_vec();
         subgraphs.sort_by(|s1, s2| s1.name.cmp(&s2.name));
-        let mut subgraphs_and_enum_values: Vec<(&ValidSubgraph, Name)> = Vec::new();
+        let mut subgraphs_and_enum_values: Vec<(&ValidFederationSubgraph, Name)> = Vec::new();
         for subgraph in &subgraphs {
             // TODO: Implement JS codebase's name transform (which always generates a valid GraphQL
             // name and avoids collisions).
             if let Ok(subgraph_name) = Name::new(&subgraph.name.to_uppercase()) {
-                subgraphs_and_enum_values.push((*subgraph, subgraph_name));
+                subgraphs_and_enum_values.push((subgraph, subgraph_name));
             } else {
                 self.errors.push(String::from(
                     "Subgraph name couldn't be transformed into valid GraphQL name",
@@ -125,14 +160,14 @@ impl Merger {
         // create stubs
         for (subgraph, subgraph_name) in &subgraphs_and_enum_values {
             let sources = Arc::make_mut(&mut supergraph.sources);
-            for (key, source) in subgraph.schema.sources.iter() {
+            for (key, source) in subgraph.schema.schema().sources.iter() {
                 sources.entry(*key).or_insert_with(|| source.clone());
             }
 
             self.merge_schema(&mut supergraph, subgraph);
             // TODO merge directives
 
-            for (key, value) in &subgraph.schema.types {
+            for (key, value) in &subgraph.schema.schema().types {
                 if value.is_built_in() || !is_mergeable_type(key) {
                     // skip built-ins and federation specific types
                     continue;
@@ -143,31 +178,31 @@ impl Merger {
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         key.clone(),
-                        value,
+                        &value,
                     ),
                     ExtendedType::InputObject(value) => self.merge_input_object_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         key.clone(),
-                        value,
+                        &value,
                     ),
                     ExtendedType::Interface(value) => self.merge_interface_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         key.clone(),
-                        value,
+                        &value,
                     ),
                     ExtendedType::Object(value) => self.merge_object_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         key.clone(),
-                        value,
+                        &value,
                     ),
                     ExtendedType::Union(value) => self.merge_union_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         key.clone(),
-                        value,
+                        &value,
                     ),
                     ExtendedType::Scalar(_value) => {
                         // DO NOTHING
@@ -176,7 +211,7 @@ impl Merger {
             }
 
             // merge executable directives
-            for (_, directive) in subgraph.schema.directive_definitions.iter() {
+            for (_, directive) in subgraph.schema.schema().directive_definitions.iter() {
                 if is_executable_directive(directive) {
                     merge_directive(&mut supergraph.directive_definitions, directive);
                 }
@@ -213,9 +248,9 @@ impl Merger {
         }
     }
 
-    fn merge_schema(&mut self, supergraph_schema: &mut Schema, subgraph: &ValidSubgraph) {
+    fn merge_schema(&mut self, supergraph_schema: &mut Schema, subgraph: &ValidFederationSubgraph) {
         let supergraph_def = &mut supergraph_schema.schema_definition.make_mut();
-        let subgraph_def = &subgraph.schema.schema_definition;
+        let subgraph_def = &subgraph.schema.schema().schema_definition;
         self.merge_descriptions(&mut supergraph_def.description, &subgraph_def.description);
 
         if subgraph_def.query.is_some() {
@@ -862,7 +897,7 @@ fn link_purpose_enum_type() -> (Name, EnumType) {
 // TODO join spec
 fn add_core_feature_join(
     supergraph: &mut Schema,
-    subgraphs_and_enum_values: &Vec<(&ValidSubgraph, Name)>,
+    subgraphs_and_enum_values: &Vec<(&ValidFederationSubgraph, Name)>,
 ) {
     // @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
     supergraph
@@ -1202,7 +1237,7 @@ fn join_union_member_directive_definition() -> DirectiveDefinition {
 
 /// enum Graph
 fn join_graph_enum_type(
-    subgraphs_and_enum_values: &Vec<(&ValidSubgraph, Name)>,
+    subgraphs_and_enum_values: &Vec<(&ValidFederationSubgraph, Name)>,
 ) -> (Name, EnumType) {
     let join_graph_enum_name = name!("join__Graph");
     let mut join_graph_enum_type = EnumType {
@@ -1257,5 +1292,92 @@ fn merge_directive(
 ) {
     if !supergraph_directives.contains_key(&directive.name.clone()) {
         supergraph_directives.insert(directive.name.clone(), directive.clone());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use apollo_compiler::Schema;
+    use insta::assert_snapshot;
+
+    use super::merge_subgraphs;
+    use crate::subgraph::ValidSubgraph;
+
+    #[test]
+    fn test_steel_thread() {
+        let one_sdl = include_str!("./sources/connect/expand/merge/one.graphql");
+        let two_sdl = include_str!("./sources/connect/expand/merge/two.graphql");
+        let graphql_sdl = include_str!("./sources/connect/expand/merge/graphql.graphql");
+
+        let subgraphs = vec![
+            ValidSubgraph {
+                name: "connector_Query_users_0".to_string(),
+                url: "".to_string(),
+                schema: Schema::parse_and_validate(one_sdl, "./one.graphql").unwrap(),
+            },
+            ValidSubgraph {
+                name: "connector_Query_user_0".to_string(),
+                url: "".to_string(),
+                schema: Schema::parse_and_validate(two_sdl, "./two.graphql").unwrap(),
+            },
+            ValidSubgraph {
+                name: "graphql".to_string(),
+                url: "".to_string(),
+                schema: Schema::parse_and_validate(graphql_sdl, "./graphql.graphql").unwrap(),
+            },
+        ];
+
+        let result = merge_subgraphs(subgraphs.iter().collect()).unwrap();
+        assert_snapshot!(result.schema.serialize(), @r###"
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: EXECUTION) {
+          query: Query
+        }
+
+        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+        enum link__Purpose {
+          """
+          SECURITY features provide metadata necessary to securely resolve fields.
+          """
+          SECURITY
+          """EXECUTION features provide metadata necessary for operation execution."""
+          EXECUTION
+        }
+
+        scalar link__Import
+
+        scalar join__FieldSet
+
+        enum join__Graph {
+          CONNECTOR_QUERY_USER_0 @join__graph(name: "connector_Query_user_0", url: "")
+          CONNECTOR_QUERY_USERS_0 @join__graph(name: "connector_Query_users_0", url: "")
+          GRAPHQL @join__graph(name: "graphql", url: "")
+        }
+
+        type User @join__type(graph: CONNECTOR_QUERY_USER_0, key: "id") @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: GRAPHQL, key: "id") {
+          id: ID!
+          a: String @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0)
+          b: String @join__field(graph: CONNECTOR_QUERY_USER_0)
+          c: String @join__field(graph: GRAPHQL)
+        }
+
+        type Query @join__type(graph: CONNECTOR_QUERY_USER_0) @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: GRAPHQL) {
+          user(id: ID!): User @join__field(graph: CONNECTOR_QUERY_USER_0)
+          users: [User] @join__field(graph: CONNECTOR_QUERY_USERS_0)
+          _: ID @join__field(graph: GRAPHQL) @inaccessible
+        }
+        "###);
     }
 }
