@@ -240,9 +240,10 @@ impl CacheControl {
     }
 
     pub(super) fn no_store() -> Self {
-        let mut control = CacheControl::default();
-        control.no_store = true;
-        control
+        CacheControl {
+            no_store: true,
+            ..Default::default()
+        }
     }
 
     fn update_ttl(&self, ttl: u32, now: u64) -> u32 {
@@ -307,7 +308,7 @@ impl CacheControl {
     }
 
     pub(crate) fn elapsed_inner(&self, now: u64) -> u32 {
-        (now - self.created as u64) as u32
+        (now - self.created) as u32
     }
 
     pub(crate) fn ttl(&self) -> Option<u32> {
