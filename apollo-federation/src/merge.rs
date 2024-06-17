@@ -37,8 +37,11 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
@@ -424,6 +427,18 @@ impl Merger {
             .map(|link| link.directive_name_in_schema(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC))
             .unwrap_or(FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC);
 
+        let requires_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC);
+
+        let provides_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC);
+
+        let external_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC);
+
         let interface_object_directive_name = federation_identity
             .map(|link| {
                 link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
@@ -489,19 +504,30 @@ impl Merger {
                     }
                 }
 
-                let requires_directive_option =
-                    Option::and_then(field.directives.get_all("requires").next(), |p| {
+                let requires_directive_option = Option::and_then(
+                    field.directives.get_all(&requires_directive_name).next(),
+                    |p| {
                         let requires_fields =
                             directive_string_arg_value(p, &name!("fields")).unwrap();
                         Some(requires_fields.as_str())
-                    });
-                let provides_directive_option =
-                    Option::and_then(field.directives.get_all("provides").next(), |p| {
+                    },
+                );
+
+                let provides_directive_option = Option::and_then(
+                    field.directives.get_all(&provides_directive_name).next(),
+                    |p| {
                         let provides_fields =
                             directive_string_arg_value(p, &name!("fields")).unwrap();
                         Some(provides_fields.as_str())
-                    });
-                let external_field = field.directives.get_all("external").next().is_some();
+                    },
+                );
+
+                let external_field = field
+                    .directives
+                    .get_all(&external_directive_name)
+                    .next()
+                    .is_some();
+
                 let join_field_directive = join_field_applied_directive(
                     subgraph_name.clone(),
                     requires_directive_option,
@@ -1338,8 +1364,10 @@ mod tests {
 
     #[test]
     fn test_steel_thread() {
-        let one_sdl = include_str!("./sources/connect/expand/merge/one.graphql");
-        let two_sdl = include_str!("./sources/connect/expand/merge/two.graphql");
+        let one_sdl =
+            include_str!("./sources/connect/expand/merge/connector_Query_users_0.graphql");
+        let two_sdl = include_str!("./sources/connect/expand/merge/connector_Query_user_0.graphql");
+        let three_sdl = include_str!("./sources/connect/expand/merge/connector_User_d_1.graphql");
         let graphql_sdl = include_str!("./sources/connect/expand/merge/graphql.graphql");
 
         let mut subgraphs = ValidFederationSubgraphs::new();
@@ -1348,7 +1376,8 @@ mod tests {
                 name: "connector_Query_users_0".to_string(),
                 url: "".to_string(),
                 schema: ValidFederationSchema::new(
-                    Schema::parse_and_validate(one_sdl, "./one.graphql").unwrap(),
+                    Schema::parse_and_validate(one_sdl, "./connector_Query_users_0.graphql")
+                        .unwrap(),
                 )
                 .unwrap(),
             })
@@ -1358,7 +1387,18 @@ mod tests {
                 name: "connector_Query_user_0".to_string(),
                 url: "".to_string(),
                 schema: ValidFederationSchema::new(
-                    Schema::parse_and_validate(two_sdl, "./two.graphql").unwrap(),
+                    Schema::parse_and_validate(two_sdl, "./connector_Query_user_0.graphql")
+                        .unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "connector_User_d_1".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(three_sdl, "./connector_User_d_1.graphql").unwrap(),
                 )
                 .unwrap(),
             })
@@ -1375,7 +1415,12 @@ mod tests {
             .unwrap();
 
         let result = merge_federation_subgraphs(subgraphs).unwrap();
-        assert_snapshot!(result.schema.serialize(), @r###"
+
+        let schema = result.schema.into_inner();
+        let validation = schema.clone().validate();
+        assert!(validation.is_ok(), "{:?}", validation);
+
+        assert_snapshot!(schema.serialize(), @r###"
         schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
           query: Query
         }
@@ -1410,20 +1455,22 @@ mod tests {
         enum join__Graph {
           CONNECTOR_QUERY_USER_0 @join__graph(name: "connector_Query_user_0", url: "")
           CONNECTOR_QUERY_USERS_0 @join__graph(name: "connector_Query_users_0", url: "")
+          CONNECTOR_USER_D_1 @join__graph(name: "connector_User_d_1", url: "")
           GRAPHQL @join__graph(name: "graphql", url: "")
         }
 
-        type User @join__type(graph: CONNECTOR_QUERY_USER_0, key: "id") @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: GRAPHQL, key: "id") {
+        type User @join__type(graph: CONNECTOR_QUERY_USER_0, key: "id") @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1, key: "__typename") @join__type(graph: GRAPHQL, key: "id") {
           id: ID! @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0) @join__field(graph: GRAPHQL)
           a: String @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0)
           b: String @join__field(graph: CONNECTOR_QUERY_USER_0)
-          c: String @join__field(graph: GRAPHQL)
+          c: String @join__field(graph: CONNECTOR_USER_D_1, external: true) @join__field(graph: GRAPHQL)
+          d: String @join__field(graph: CONNECTOR_USER_D_1, requires: "c")
         }
 
-        type Query @join__type(graph: CONNECTOR_QUERY_USER_0) @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: GRAPHQL) {
+        type Query @join__type(graph: CONNECTOR_QUERY_USER_0) @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1) @join__type(graph: GRAPHQL) {
           user(id: ID!): User @join__field(graph: CONNECTOR_QUERY_USER_0)
           users: [User] @join__field(graph: CONNECTOR_QUERY_USERS_0)
-          _: ID @join__field(graph: GRAPHQL)
+          _: ID @join__field(graph: CONNECTOR_USER_D_1)
         }
         "###);
     }

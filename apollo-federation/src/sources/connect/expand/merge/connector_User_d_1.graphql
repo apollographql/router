@@ -67,15 +67,11 @@ scalar federation__FieldSet
 
 scalar federation__Scope
 
-type User @federation__key(fields: "id") {
-  id: ID!
-  c: String
+type User @federation__key(fields: "__typename") {
+  c: String @federation__external
+  d: String @federation__requires(fields: "c")
 }
 
-union _Entity = User
-
-scalar _Any
-
 type Query {
-  _entities(representations: [_Any!]!): [_Entity]
+  _: ID @federation__shareable @federation__inaccessible
 }
