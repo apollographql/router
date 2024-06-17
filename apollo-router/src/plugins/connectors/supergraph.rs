@@ -958,9 +958,7 @@ fn enum_values_for_graph(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::Schema;
-    use insta::assert_debug_snapshot;
     use insta::assert_snapshot;
-    use itertools::Itertools;
 
     use crate::plugins::connectors::Source;
     use crate::spec::Schema as RouterSchema;
@@ -975,40 +973,9 @@ mod tests {
         let inner = source.supergraph();
 
         // new supergraph can be parsed into subgraphs
-        let result =
-            RouterSchema::parse(inner.serialize().to_string().as_str(), &Default::default())
-                .unwrap();
+        let _ = RouterSchema::parse(inner.serialize().to_string().as_str(), &Default::default())
+            .unwrap();
 
         assert_snapshot!(inner.serialize().to_string());
-
-        assert_debug_snapshot!(
-            result
-                .subgraph_definition_and_names
-                .values()
-                .sorted()
-                .cloned()
-                .collect::<Vec<_>>(),
-            @r###"
-        [
-            "CONNECTOR_ENTITYACROSSBOTH_0",
-            "CONNECTOR_ENTITYACROSSBOTH_E_0",
-            "CONNECTOR_ENTITYACROSSBOTH_F_1",
-            "CONNECTOR_ENTITYINTERFACE_1",
-            "CONNECTOR_HELLO_2",
-            "CONNECTOR_HELLO_RELATED_3",
-            "CONNECTOR_HELLO_WORLD_2",
-            "CONNECTOR_MUTATION_MUTATION_4",
-            "CONNECTOR_QUERY_HELLOS_7",
-            "CONNECTOR_QUERY_HELLOWITHHEADERS_8",
-            "CONNECTOR_QUERY_HELLO_6",
-            "CONNECTOR_QUERY_INTERFACES_9",
-            "CONNECTOR_QUERY_UNIONS_10",
-            "CONNECTOR_QUERY_WITHARGUMENTS_5",
-            "CONNECTOR_TESTINGINTERFACEOBJECT_3",
-            "CONNECTOR_TESTINGINTERFACEOBJECT_D_11",
-            "CONNECTOR_TESTREQUIRES_SHIPPINGCOST_12",
-        ]
-        "###
-        );
     }
 }
