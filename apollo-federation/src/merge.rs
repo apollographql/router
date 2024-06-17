@@ -37,6 +37,10 @@ use indexmap::IndexSet;
 use itertools::Itertools;
 
 use crate::error::FederationError;
+use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::spec::Identity;
+use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
 use crate::ValidFederationSubgraph;
@@ -167,41 +171,45 @@ impl Merger {
             self.merge_schema(&mut supergraph, subgraph);
             // TODO merge directives
 
-            for (key, value) in &subgraph.schema.schema().types {
-                if value.is_built_in() || !is_mergeable_type(key) {
+            let metadata = subgraph.schema.metadata();
+
+            for (type_name, ty) in &subgraph.schema.schema().types {
+                if ty.is_built_in() || !is_mergeable_type(type_name) {
                     // skip built-ins and federation specific types
                     continue;
                 }
 
-                match value {
+                match ty {
                     ExtendedType::Enum(value) => self.merge_enum_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
-                        key.clone(),
+                        type_name.clone(),
                         &value,
                     ),
                     ExtendedType::InputObject(value) => self.merge_input_object_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
-                        key.clone(),
+                        type_name.clone(),
                         &value,
                     ),
                     ExtendedType::Interface(value) => self.merge_interface_type(
                         &mut supergraph.types,
+                        &metadata,
                         subgraph_name.clone(),
-                        key.clone(),
+                        type_name.clone(),
                         &value,
                     ),
                     ExtendedType::Object(value) => self.merge_object_type(
                         &mut supergraph.types,
+                        &metadata,
                         subgraph_name.clone(),
-                        key.clone(),
+                        type_name.clone(),
                         &value,
                     ),
                     ExtendedType::Union(value) => self.merge_union_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
-                        key.clone(),
+                        type_name.clone(),
                         &value,
                     ),
                     ExtendedType::Scalar(_value) => {
@@ -353,15 +361,23 @@ impl Merger {
     fn merge_interface_type(
         &mut self,
         types: &mut IndexMap<NamedType, ExtendedType>,
+        metadata: &Option<&LinksMetadata>,
         subgraph_name: Name,
         interface_name: NamedType,
         interface: &Node<InterfaceType>,
     ) {
+        let federation_identity =
+            metadata.and_then(|m| m.by_identity.get(&Identity::federation_identity()));
+
+        let key_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC);
+
         let existing_type = types
             .entry(interface_name.clone())
             .or_insert(copy_interface_type(interface_name, interface));
         if let ExtendedType::Interface(intf) = existing_type {
-            let key_directives = interface.directives.get_all("key");
+            let key_directives = interface.directives.get_all(&key_directive_name);
             let join_type_directives =
                 join_type_applied_directive(subgraph_name, key_directives, false);
             let mutable_intf = intf.make_mut();
@@ -396,11 +412,25 @@ impl Merger {
     fn merge_object_type(
         &mut self,
         types: &mut IndexMap<NamedType, ExtendedType>,
+        metadata: &Option<&LinksMetadata>,
         subgraph_name: Name,
         object_name: NamedType,
         object: &Node<ObjectType>,
     ) {
-        let is_interface_object = object.directives.has("interfaceObject");
+        let federation_identity =
+            metadata.and_then(|m| m.by_identity.get(&Identity::federation_identity()));
+
+        let key_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC);
+
+        let interface_object_directive_name = federation_identity
+            .map(|link| {
+                link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
+            })
+            .unwrap_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC);
+
+        let is_interface_object = object.directives.has(&interface_object_directive_name);
         let existing_type = types
             .entry(object_name.clone())
             .or_insert(copy_object_type_stub(
@@ -409,9 +439,7 @@ impl Merger {
                 is_interface_object,
             ));
         if let ExtendedType::Object(obj) = existing_type {
-            let key_fields: HashSet<&str> = parse_keys(object.directives.get_all("key"));
-            let is_join_field = !key_fields.is_empty() || object_name == "Query";
-            let key_directives = object.directives.get_all("key");
+            let key_directives = object.directives.get_all(&key_directive_name);
             let join_type_directives =
                 join_type_applied_directive(subgraph_name.clone(), key_directives, false);
             let mutable_object = obj.make_mut();
@@ -423,7 +451,7 @@ impl Merger {
                     .implements_interfaces
                     .insert(intf_name.clone());
                 let join_implements_directive =
-                    join_type_implements(subgraph_name.clone(), intf_name);
+                    join_implements_applied_directive(subgraph_name.clone(), intf_name);
                 mutable_object.directives.push(join_implements_directive);
             });
 
@@ -455,44 +483,44 @@ impl Merger {
                 );
                 for arg in field.arguments.iter() {
                     if let Some(_existing_arg) = supergraph_field.argument_by_name(&arg.name) {
+                        // TODO add args
                     } else {
                         // TODO mismatch no args
                     }
                 }
 
-                if is_join_field {
-                    let is_key_field = key_fields.contains(field_name.as_str());
-                    if !is_key_field {
-                        let requires_directive_option =
-                            Option::and_then(field.directives.get_all("requires").next(), |p| {
-                                let requires_fields =
-                                    directive_string_arg_value(p, &name!("fields")).unwrap();
-                                Some(requires_fields.as_str())
-                            });
-                        let provides_directive_option =
-                            Option::and_then(field.directives.get_all("provides").next(), |p| {
-                                let provides_fields =
-                                    directive_string_arg_value(p, &name!("fields")).unwrap();
-                                Some(provides_fields.as_str())
-                            });
-                        let external_field = field.directives.get_all("external").next().is_some();
-                        let join_field_directive = join_field_applied_directive(
-                            subgraph_name.clone(),
-                            requires_directive_option,
-                            provides_directive_option,
-                            external_field,
-                        );
+                let requires_directive_option =
+                    Option::and_then(field.directives.get_all("requires").next(), |p| {
+                        let requires_fields =
+                            directive_string_arg_value(p, &name!("fields")).unwrap();
+                        Some(requires_fields.as_str())
+                    });
+                let provides_directive_option =
+                    Option::and_then(field.directives.get_all("provides").next(), |p| {
+                        let provides_fields =
+                            directive_string_arg_value(p, &name!("fields")).unwrap();
+                        Some(provides_fields.as_str())
+                    });
+                let external_field = field.directives.get_all("external").next().is_some();
+                let join_field_directive = join_field_applied_directive(
+                    subgraph_name.clone(),
+                    requires_directive_option,
+                    provides_directive_option,
+                    external_field,
+                );
 
-                        supergraph_field
-                            .make_mut()
-                            .directives
-                            .push(Node::new(join_field_directive));
-                    }
-                }
+                supergraph_field
+                    .make_mut()
+                    .directives
+                    .push(Node::new(join_field_directive));
+
+                // TODO: if count of join_field_directives === count of subgraphs
+                // and no directives have requires/provides/external, then remove
+                // all join field directives for space saving?
             }
         } else if let ExtendedType::Interface(intf) = existing_type {
             // TODO support interface object
-            let key_directives = object.directives.get_all("key");
+            let key_directives = object.directives.get_all(&key_directive_name);
             let join_type_directives =
                 join_type_applied_directive(subgraph_name, key_directives, true);
             intf.make_mut().directives.extend(join_type_directives);
@@ -732,7 +760,10 @@ fn join_type_applied_directive<'a>(
         .collect::<Vec<Component<Directive>>>()
 }
 
-fn join_type_implements(subgraph_name: Name, intf_name: &Name) -> Component<Directive> {
+fn join_implements_applied_directive(
+    subgraph_name: Name,
+    intf_name: &Name,
+) -> Component<Directive> {
     Component::new(Directive {
         name: name!("join__implements"),
         arguments: vec![
@@ -1300,8 +1331,10 @@ mod tests {
     use apollo_compiler::Schema;
     use insta::assert_snapshot;
 
-    use super::merge_subgraphs;
-    use crate::subgraph::ValidSubgraph;
+    use crate::merge::merge_federation_subgraphs;
+    use crate::schema::ValidFederationSchema;
+    use crate::ValidFederationSubgraph;
+    use crate::ValidFederationSubgraphs;
 
     #[test]
     fn test_steel_thread() {
@@ -1309,27 +1342,41 @@ mod tests {
         let two_sdl = include_str!("./sources/connect/expand/merge/two.graphql");
         let graphql_sdl = include_str!("./sources/connect/expand/merge/graphql.graphql");
 
-        let subgraphs = vec![
-            ValidSubgraph {
+        let mut subgraphs = ValidFederationSubgraphs::new();
+        subgraphs
+            .add(ValidFederationSubgraph {
                 name: "connector_Query_users_0".to_string(),
                 url: "".to_string(),
-                schema: Schema::parse_and_validate(one_sdl, "./one.graphql").unwrap(),
-            },
-            ValidSubgraph {
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(one_sdl, "./one.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
                 name: "connector_Query_user_0".to_string(),
                 url: "".to_string(),
-                schema: Schema::parse_and_validate(two_sdl, "./two.graphql").unwrap(),
-            },
-            ValidSubgraph {
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(two_sdl, "./two.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
                 name: "graphql".to_string(),
                 url: "".to_string(),
-                schema: Schema::parse_and_validate(graphql_sdl, "./graphql.graphql").unwrap(),
-            },
-        ];
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(graphql_sdl, "./graphql.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
 
-        let result = merge_subgraphs(subgraphs.iter().collect()).unwrap();
+        let result = merge_federation_subgraphs(subgraphs).unwrap();
         assert_snapshot!(result.schema.serialize(), @r###"
-        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) @link(url: "https://specs.apollo.dev/inaccessible/v0.2", for: EXECUTION) {
+        schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
           query: Query
         }
 
@@ -1367,7 +1414,7 @@ mod tests {
         }
 
         type User @join__type(graph: CONNECTOR_QUERY_USER_0, key: "id") @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: GRAPHQL, key: "id") {
-          id: ID!
+          id: ID! @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0) @join__field(graph: GRAPHQL)
           a: String @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0)
           b: String @join__field(graph: CONNECTOR_QUERY_USER_0)
           c: String @join__field(graph: GRAPHQL)
@@ -1376,7 +1423,7 @@ mod tests {
         type Query @join__type(graph: CONNECTOR_QUERY_USER_0) @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: GRAPHQL) {
           user(id: ID!): User @join__field(graph: CONNECTOR_QUERY_USER_0)
           users: [User] @join__field(graph: CONNECTOR_QUERY_USERS_0)
-          _: ID @join__field(graph: GRAPHQL) @inaccessible
+          _: ID @join__field(graph: GRAPHQL)
         }
         "###);
     }
