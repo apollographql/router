@@ -184,7 +184,21 @@ impl Plugin for EntityCache {
     ) -> subgraph::BoxService {
         let storage = match self.storage.clone() {
             Some(storage) => storage,
-            None => return service,
+            None => {
+                return ServiceBuilder::new()
+                    .map_response(move |response: subgraph::Response| {
+                        update_cache_control(
+                            &response.context,
+                            &CacheControl::new(response.response.headers(), None)
+                                .ok()
+                                .unwrap_or_else(CacheControl::no_store),
+                        );
+
+                        response
+                    })
+                    .service(service)
+                    .boxed();
+            }
         };
 
         let (subgraph_ttl, subgraph_enabled, private_id) =
@@ -210,16 +224,40 @@ impl Plugin for EntityCache {
 
         if subgraph_enabled {
             let private_queries = self.private_queries.clone();
-            tower::util::BoxService::new(CacheService(Some(InnerCacheService {
-                service,
-                name: name.to_string(),
-                storage,
-                subgraph_ttl,
-                private_queries,
-                private_id,
-            })))
+            let inner = ServiceBuilder::new()
+                .map_response(move |response: subgraph::Response| {
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(CacheService(Some(InnerCacheService {
+                    service,
+                    name: name.to_string(),
+                    storage,
+                    subgraph_ttl,
+                    private_queries,
+                    private_id,
+                })));
+            tower::util::BoxService::new(inner)
         } else {
-            service
+            ServiceBuilder::new()
+                .map_response(move |response: subgraph::Response| {
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(service)
+                .boxed()
         }
     }
 }
@@ -326,8 +364,6 @@ impl InnerCacheService {
                                 c
                             };
 
-                        update_cache_control(&response.context, &cache_control);
-
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
@@ -342,14 +378,16 @@ impl InnerCacheService {
                             }
                         }
 
-                        cache_store_root_from_response(
-                            self.storage,
-                            self.subgraph_ttl,
-                            &response,
-                            cache_control,
-                            root_cache_key,
-                        )
-                        .await?;
+                        if cache_control.should_store() {
+                            cache_store_root_from_response(
+                                self.storage,
+                                self.subgraph_ttl,
+                                &response,
+                                cache_control,
+                                root_cache_key,
+                            )
+                            .await?;
+                        }
 
                         Ok(response)
                     }
@@ -372,14 +410,18 @@ impl InnerCacheService {
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
 
-                    let cache_control = if response.response.headers().contains_key(CACHE_CONTROL) {
-                        CacheControl::new(response.response.headers(), self.storage.ttl)?
-                    } else {
-                        let mut c = CacheControl::default();
-                        c.no_store = true;
-                        c
-                    };
-                    update_cache_control(&response.context, &cache_control);
+                    let mut cache_control =
+                        if response.response.headers().contains_key(CACHE_CONTROL) {
+                            CacheControl::new(response.response.headers(), self.storage.ttl)?
+                        } else {
+                            let mut c = CacheControl::default();
+                            c.no_store = true;
+                            c
+                        };
+
+                    if let Some(control_from_cached) = cache_result.1 {
+                        cache_control = cache_control.merge(&control_from_cached);
+                    }
 
                     if !is_known_private && cache_control.private() {
                         self.private_queries.write().await.insert(query.to_string());
@@ -389,12 +431,16 @@ impl InnerCacheService {
                         self.storage,
                         self.subgraph_ttl,
                         &mut response,
-                        cache_control,
+                        cache_control.clone(),
                         cache_result.0,
                         is_known_private,
                         private_id,
                     )
                     .await?;
+
+                    // FIXME: will the header be duplicated?
+                    cache_control.to_headers(response.response.headers_mut())?;
+
                     Ok(response)
                 }
             }
@@ -438,18 +484,23 @@ async fn cache_lookup_root(
     match cache_result {
         Some(value) => {
             if value.0.control.can_use() {
+                let control = value.0.control.clone();
                 request
                     .context
                     .extensions()
-                    .with_lock(|mut lock| lock.insert(value.0.control));
+                    .with_lock(|mut lock| lock.insert(control));
 
-                Ok(ControlFlow::Break(
-                    subgraph::Response::builder()
-                        .data(value.0.data)
-                        .extensions(Object::new())
-                        .context(request.context)
-                        .build(),
-                ))
+                let mut response = subgraph::Response::builder()
+                    .data(value.0.data)
+                    .extensions(Object::new())
+                    .context(request.context)
+                    .build();
+
+                value
+                    .0
+                    .control
+                    .to_headers(response.response.headers_mut())?;
+                Ok(ControlFlow::Break(response))
             } else {
                 Ok(ControlFlow::Continue((request, key)))
             }
@@ -458,7 +509,7 @@ async fn cache_lookup_root(
     }
 }
 
-struct EntityCacheResults(Vec<IntermediateResult>);
+struct EntityCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
 async fn cache_lookup_entities(
     name: String,
@@ -508,17 +559,13 @@ async fn cache_lookup_entities(
     let (new_representations, cache_result, cache_control) =
         filter_representations(&name, representations, keys, cache_result)?;
 
-    if let Some(control) = cache_control {
-        update_cache_control(&request.context, &control);
-    }
-
     if !new_representations.is_empty() {
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
 
         Ok(ControlFlow::Continue((
             request,
-            EntityCacheResults(cache_result),
+            EntityCacheResults(cache_result, cache_control),
         )))
     } else {
         let entities = cache_result
@@ -529,13 +576,17 @@ async fn cache_lookup_entities(
         let mut data = Object::default();
         data.insert(ENTITIES, entities.into());
 
-        Ok(ControlFlow::Break(
-            subgraph::Response::builder()
-                .data(data)
-                .extensions(Object::new())
-                .context(request.context)
-                .build(),
-        ))
+        let mut response = subgraph::Response::builder()
+            .data(data)
+            .extensions(Object::new())
+            .context(request.context)
+            .build();
+
+        cache_control
+            .unwrap_or_default()
+            .to_headers(response.response.headers_mut())?;
+
+        Ok(ControlFlow::Break(response))
     }
 }
 
@@ -600,8 +651,6 @@ async fn cache_store_entities_from_response(
     is_known_private: bool,
     private_id: Option<String>,
 ) -> Result<(), BoxError> {
-    update_cache_control(&response.context, &cache_control);
-
     let mut data = response.response.body_mut().data.take();
 
     if let Some(mut entities) = data

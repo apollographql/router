@@ -87,7 +87,9 @@ impl CacheControl {
             result.max_age = Some(duration.as_secs() as u32);
         }
 
+        let mut found = false;
         for header_value in headers.get_all(CACHE_CONTROL) {
+            found = true;
             for value in header_value.to_str()?.split(',') {
                 let mut it = value.trim().split('=');
                 let (k, v) = (it.next(), it.next());
@@ -140,6 +142,10 @@ impl CacheControl {
                     }
                 }
             }
+        }
+
+        if !found {
+            result.no_store = true;
         }
 
         if let Some(value) = headers.get("Age") {
@@ -231,6 +237,12 @@ impl CacheControl {
         }
 
         Ok(())
+    }
+
+    pub(super) fn no_store() -> Self {
+        let mut control = CacheControl::default();
+        control.no_store = true;
+        control
     }
 
     fn update_ttl(&self, ttl: u32, now: u64) -> u32 {
@@ -346,7 +358,7 @@ impl CacheControl {
 
         // FIXME: we don't honor stale-while-revalidate yet
         // !expired || self.stale_while_revalidate
-        !expired
+        !expired && !self.no_store
     }
 
     #[cfg(test)]
