@@ -554,10 +554,10 @@ traces_per_query:
           strategy: ""
           cost_estimated: 0
           cost_actual: 0
-          depth: 0
-          height: 0
+          depth: 4
+          height: 7
           alias_count: 0
-          root_field_count: 0
+          root_field_count: 1
       - start_time:
           seconds: "[seconds]"
           nanos: "[nanos]"
