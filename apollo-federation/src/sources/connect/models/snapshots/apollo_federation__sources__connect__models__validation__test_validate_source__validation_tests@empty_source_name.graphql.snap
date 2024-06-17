@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/models/test_data/empty_source_name.graphql
+---
+[Message { code: EmptySourceName, message: "The value for `@source(name:)` can't be empty.", locations: [Location { line: 5, column: 14 }..Location { line: 5, column: 16 }] }]

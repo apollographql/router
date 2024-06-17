@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/models/test_data/missing_source_import.graphql
+---
+[Message { code: NoSourcesDefined, message: "`@connect(source: \"v2\")` on `Query.resources` specifies a source, but none are defined. Try adding `@connect__source(name: \"v2\")` to the schema.", locations: [Location { line: 9, column: 13 }..Location { line: 9, column: 25 }] }, Message { code: NoSourceImport, message: "The `@source` directive is not imported. Try adding `@source` to `import` for `@link(url: \"https://specs.apollo.dev/connect\")`", locations: [Location { line: 1, column: 0 }..Location { line: 4, column: 1 }] }]

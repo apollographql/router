@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/models/test_data/invalid_chars_in_source_name.graphql
+---
+[Message { code: InvalidSourceName, message: "There are invalid characters in `@source(name: \"u$ers\")`. Only alphanumeric and underscores are allowed.", locations: [Location { line: 5, column: 14 }..Location { line: 5, column: 21 }] }]
