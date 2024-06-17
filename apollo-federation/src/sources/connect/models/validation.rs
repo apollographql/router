@@ -358,8 +358,8 @@ fn validate_field(
                 .collect(),
         });
     }
-    let http_arg_url = if let Some((http_method, url)) = http_methods.first() {
-        Some((
+    let http_arg_url = http_methods.first().map(|(http_method, url)| {
+        (
             url,
             connect_directive_url_coordinate(
                 connect_directive_name,
@@ -367,10 +367,8 @@ fn validate_field(
                 object_name,
                 &field.name,
             ),
-        ))
-    } else {
-        None
-    };
+        )
+    });
     if let Some(source_name) = connect_directive
         .arguments
         .iter()
@@ -703,7 +701,6 @@ impl Location {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[non_exhaustive]
 pub enum Code {
     /// A problem with GraphQL syntax or semantics was found. These will usually be caught before
     /// this validation process.
