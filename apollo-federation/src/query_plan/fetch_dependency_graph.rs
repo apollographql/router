@@ -416,7 +416,7 @@ impl ProcessingState {
         {
             // Remove any of the processed nodes from the unhandled edges of that node.
             // And if there is no remaining edge, that node can be handled.
-            edges.retain(|edge| processed.contains(&edge.parent_node_id));
+            edges.retain(|edge| !processed.contains(&edge.parent_node_id));
             if edges.is_empty() {
                 if !next.contains(&g) {
                     next.push(g);
