@@ -45,8 +45,9 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
 
     let supergraph = Supergraph::new(supergraph_str)?;
     let api_schema = supergraph.to_api_schema(ApiSchemaOptions {
+        // TODO: Get these options from the router?
         include_defer: true,
-        include_stream: true,
+        include_stream: false,
     })?;
 
     let (connect_subgraphs, graphql_subgraphs): (Vec<_>, Vec<_>) = supergraph
@@ -246,16 +247,20 @@ mod helpers {
             Ok(schema)
         }
 
+        /// Expand an object into the schema, copying over fields / types specified by the
+        /// JSONSelection.
+        ///
+        // TODO: This needs to support walking the JSONSelection AST to allow for nested types.
         fn expand_object(
             &self,
             to_schema: &mut FederationSchema,
-            object: &ObjectFieldDefinitionPosition,
+            object_field: &ObjectFieldDefinitionPosition,
             connector: &Connector,
         ) -> Result<(), FederationError> {
-            let field_type = object.get(self.original_schema.schema())?;
+            let field_def = object_field.get(self.original_schema.schema())?;
 
             // We first need to create the type pointed at by the current field
-            let output_name = field_type.ty.inner_named_type().clone();
+            let output_name = field_def.ty.inner_named_type().clone();
             let output_type = self.original_schema.get_type(output_name)?;
             let extended_output_type = output_type.get(self.original_schema.schema())?;
 
@@ -300,19 +305,14 @@ mod helpers {
                 };
             }
 
-            let parent = object.parent();
+            let parent = object_field.parent();
             let parent_type = parent.get(self.original_schema.schema())?;
-            // let parent_directives = parent_type
-            //     .directives
-            //     .into_iter()
-            //     .filter(|d| d.name != source_name && d.name != connect_name)
-            //     .collect();
 
             let field_type = FieldDefinition {
-                description: field_type.description.clone(),
-                name: field_type.name.clone(),
-                arguments: field_type.arguments.clone(),
-                ty: field_type.ty.clone(),
+                description: field_def.description.clone(),
+                name: field_def.name.clone(),
+                arguments: field_def.arguments.clone(),
+                ty: field_def.ty.clone(),
                 directives: ast::DirectiveList::new(),
             };
             let connector_parent_type = ObjectType {
@@ -333,6 +333,16 @@ mod helpers {
         }
 
         /// Inserts a dummy root-level query to the schema to pass validation.
+        ///
+        /// The inserted dummy query looks like the schema below:
+        /// ```graphql
+        /// type Query {
+        ///   _: ID @shareable @inaccessible
+        /// }
+        /// ```
+        ///
+        /// Note: This would probably be better off expanding the query to have
+        /// an __entries vs. adding an inaccessible field.
         fn insert_dummy_query(
             &self,
             to_schema: &mut FederationSchema,

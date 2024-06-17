@@ -156,6 +156,9 @@ impl HttpJsonTransport {
         headers.extend(http.headers.0.clone());
 
         Ok(Self {
+            // TODO: We'll need to eventually support @connect directives without
+            // a corresponding @source...
+            // See: https://apollographql.atlassian.net/browse/CNN-201
             base_url: source
                 .map(|s| s.base_url.clone())
                 .ok_or(FederationError::internal(

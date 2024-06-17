@@ -19,8 +19,6 @@ fn it_expands_a_supergraph() {
     assert_snapshot!(api_schema, @r###"
     directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
 
-    directive @stream(label: String, if: Boolean! = true, initialCount: Int = 0) on FIELD
-
     type Query {
       users: [User]
       user(id: ID!): User
