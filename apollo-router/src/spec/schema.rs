@@ -147,7 +147,7 @@ impl Schema {
                     }
                     #[cfg(not(unix))]
                     Uri::from_str(url)
-                        .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
+                        .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
                 };
 
                 if subgraphs.insert(name.to_string(), url).is_some() {
