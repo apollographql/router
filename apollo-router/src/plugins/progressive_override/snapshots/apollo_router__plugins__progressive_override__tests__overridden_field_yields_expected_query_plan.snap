@@ -24,7 +24,7 @@ expression: query_plan
               "inputRewrites": null,
               "outputRewrites": null,
               "contextRewrites": null,
-              "schemaAwareHash": "8c7c6bfbf470a204464eebf06d7801475c36d6e4f7dcac76b6f2bd2507a7395b",
+              "schemaAwareHash": "d5ed8e0726a1b6f88dcd89ddf57620f3f878eecf169a01a921fa6f4efc2529f5",
               "authorization": {
                 "is_authenticated": false,
                 "scopes": [],
@@ -63,7 +63,7 @@ expression: query_plan
                 "inputRewrites": null,
                 "outputRewrites": null,
                 "contextRewrites": null,
-                "schemaAwareHash": "3ec341b8901c2cbb9bfab1d64f3d121472cddb26c82c2dd7834cb9b1e4b99a6a",
+                "schemaAwareHash": "d9d748cdc6d6e7a1e85d2ad07a24e749b15ccfac02aefe28b8acf6e190796fd4",
                 "authorization": {
                   "is_authenticated": false,
                   "scopes": [],
