@@ -2972,6 +2972,8 @@ mod tests {
     ///
 
     mod test_empty_branch_removal {
+        use apollo_compiler::name;
+
         use super::*;
 
         const TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL: &str = r#"
@@ -2992,85 +2994,188 @@ mod tests {
             }
         "#;
 
-        fn without_empty_branches(query: &str) -> String {
-            let operation =
-                parse_operation(&parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL), query);
+        fn operation_without_empty_branches(operation: &Operation) -> Option<String> {
             operation
                 .selection_set
                 .without_empty_branches()
                 .unwrap()
-                .unwrap()
-                .to_string()
+                .map(|s| s.to_string())
+        }
+
+        fn without_empty_branches(query: &str) -> Option<String> {
+            let operation =
+                parse_operation(&parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL), query);
+            operation_without_empty_branches(&operation)
+        }
+
+        // To test `without_empty_branches` method, we need to test operations with empty selection
+        // sets. However, such operations can't be constructed from strings, since the parser will
+        // reject them. Thus, we first create a valid query with non-empty selection sets and then
+        // clear some of them.
+        // PORT_NOTE: The JS tests use `astSSet` function to construct queries with
+        // empty selection sets using graphql-js's SelectionSetNode API. In Rust version,
+        // instead of re-creating such API, we will selectively clear selection sets.
+
+        fn clear_selection_set_at_path(
+            ss: &mut SelectionSet,
+            path: &[Name],
+        ) -> Result<(), FederationError> {
+            match path.split_first() {
+                None => {
+                    // Base case
+                    Arc::make_mut(&mut ss.selections).clear();
+                    Ok(())
+                }
+
+                Some((first, rest)) => {
+                    let result = Arc::make_mut(&mut ss.selections).get_mut(&SelectionKey::Field {
+                        response_name: (*first).clone(),
+                        directives: Default::default(),
+                    });
+                    let Some(mut value) = result else {
+                        return Err(FederationError::internal("No matching field found"));
+                    };
+                    match value.get_selection_set_mut() {
+                        None => Err(FederationError::internal(
+                            "Sub-selection expected, but not found.",
+                        )),
+                        Some(sub_selection_set) => {
+                            // Recursive case
+                            clear_selection_set_at_path(sub_selection_set, rest)?;
+                            Ok(())
+                        }
+                    }
+                }
+            }
         }
 
         #[test]
         fn operation_not_modified_if_no_empty_branches() {
             let test_vec = vec!["{ t { a } }", "{ t { a b } }", "{ t { a c { x y } } }"];
             for query in test_vec {
-                assert_eq!(without_empty_branches(query), query);
+                assert_eq!(without_empty_branches(query).unwrap(), query);
             }
         }
 
         #[test]
-        // TODO: port `SelectionSetNode`
         fn removes_simple_empty_branches() {
-            //it('removes simple empty branches', () => {
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('a'),
-            //           astField('c', astSSet()),
-            //         ))
-            //       )
-            //     )).toBe('{ t { a } }');
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //           astField('a'),
-            //         ))
-            //       )
-            //     )).toBe('{ t { a } }');
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet())
-            //       )
-            //     )).toBeUndefined();
-            //   });
+            {
+                // query to test: "{ t { a c { } } }"
+                let expected = "{ t { a } }";
+
+                // Since the parser won't accept empty selection set, we first create
+                // a valid query and then clear the selection set.
+                let valid_query = r#"{ t { a c { x } } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                // Note: Unfortunately, this assertion won't work since SelectionSet.to_string() can't
+                // display empty selection set.
+                // assert_eq!(operation.selection_set.to_string(), "{ t { a c { } } }");
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
+
+            {
+                // query to test: "{ t { c { } a } }"
+                let expected = "{ t { a } }";
+
+                let valid_query = r#"{ t { c { x } a } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
+
+            {
+                // query to test: "{ t { } }"
+                let expected = None;
+
+                let valid_query = r#"{ t { a } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(&mut operation.selection_set, &[name!("t")]).unwrap();
+                assert_eq!(operation_without_empty_branches(&operation), expected);
+            }
         }
 
         #[test]
-        // TODO: port `SelectionSetNode`
         fn removes_cascading_empty_branches() {
-            //it('removes cascading empty branches', () => {
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //         ))
-            //       )
-            //     )).toBeUndefined();
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('u'),
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //         ))
-            //       )
-            //     )).toBe('{ u }');
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //         )),
-            //         astField('u'),
-            //       )
-            //     )).toBe('{ u }');
-            //   });
+            {
+                // query to test: "{ t { c { } } }"
+                let expected = None;
+
+                let valid_query = r#"{ t { c { x } } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(operation_without_empty_branches(&operation), expected);
+            }
+
+            {
+                // query to test: "{ u t { c { } } }"
+                let expected = "{ u }";
+
+                let valid_query = r#"{ u t { c { x } } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
+
+            {
+                // query to test: "{ t { c { } } u }"
+                let expected = "{ u }";
+
+                let valid_query = r#"{ t { c { x } } u }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
         }
     }
 }
