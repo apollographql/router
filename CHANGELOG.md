@@ -133,7 +133,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 ### Skip GraphOS tests when Apollo key not present ([PR #5362](https://github.com/apollographql/router/pull/5362))
 
 Some tests require `APOLLO_KEY` and `APOLLO_GRAPH_REF` to execute successfully.
-These are now skipped if these env variables are not present.
+These are now skipped if these env variables are not present allowing external contributors to the router to successfully run the entire test suite.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5362
 
