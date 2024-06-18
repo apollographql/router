@@ -584,10 +584,12 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push(KeyValue::new(
-                    HTTP_REQUEST_BODY_SIZE,
-                    content_length.to_string(),
-                ));
+                if let Ok(content_length) = content_length.parse::<i64>() {
+                    attrs.push(KeyValue::new(
+                        HTTP_REQUEST_BODY_SIZE,
+                        opentelemetry::Value::I64(content_length),
+                    ));
+                }
             }
         }
         if let Some(true) = &self.network_protocol_name {
@@ -630,10 +632,12 @@ impl Selectors for HttpCommonAttributes {
                 .get(&CONTENT_LENGTH)
                 .and_then(|h| h.to_str().ok())
             {
-                attrs.push(KeyValue::new(
-                    HTTP_RESPONSE_BODY_SIZE,
-                    content_length.to_string(),
-                ));
+                if let Ok(content_length) = content_length.parse::<i64>() {
+                    attrs.push(KeyValue::new(
+                        HTTP_RESPONSE_BODY_SIZE,
+                        opentelemetry::Value::I64(content_length),
+                    ));
+                }
             }
         }
 
@@ -1349,7 +1353,7 @@ mod test {
                 .iter()
                 .find(|key_val| key_val.key == HTTP_REQUEST_BODY_SIZE)
                 .map(|key_val| &key_val.value),
-            Some(&"256".into())
+            Some(&256.into())
         );
     }
 
@@ -1374,7 +1378,7 @@ mod test {
                 .iter()
                 .find(|key_val| key_val.key == HTTP_RESPONSE_BODY_SIZE)
                 .map(|key_val| &key_val.value),
-            Some(&"256".into())
+            Some(&256.into())
         );
     }
 

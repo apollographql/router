@@ -23,6 +23,8 @@ use mediatype::names::APPLICATION;
 use mediatype::names::JSON;
 use mediatype::MediaType;
 use mime::APPLICATION_JSON;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
 use tokio::sync::oneshot;
@@ -543,24 +545,31 @@ async fn call_websocket(
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
     if let Some(level) = subgraph_request_event {
-        let mut attrs = HashMap::with_capacity(5);
-        attrs.insert(
-            "http.request.headers".to_string(),
-            format!("{:?}", request.headers()),
-        );
-        attrs.insert(
-            "http.request.method".to_string(),
-            format!("{}", request.method()),
-        );
-        attrs.insert(
-            "http.request.version".to_string(),
-            format!("{:?}", request.version()),
-        );
-        attrs.insert(
-            "http.request.body".to_string(),
-            serde_json::to_string(request.body()).unwrap_or_default(),
-        );
-        attrs.insert("subgraph.name".to_string(), service_name.to_string());
+        let mut attrs = Vec::with_capacity(5);
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.headers"),
+            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.method"),
+            opentelemetry::Value::String(format!("{}", request.method()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.version"),
+            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.body"),
+            opentelemetry::Value::String(
+                serde_json::to_string(request.body())
+                    .unwrap_or_default()
+                    .into(),
+            ),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("subgraph.name"),
+            opentelemetry::Value::String(service_name.clone().into()),
+        ));
         log_event(
             level.0,
             "subgraph.request",
@@ -838,26 +847,29 @@ pub(crate) async fn process_batch(
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
     if let Some(level) = subgraph_response_event {
-        let mut attrs = HashMap::with_capacity(5);
-        attrs.insert(
-            "http.response.headers".to_string(),
-            format!("{:?}", parts.headers),
-        );
-        attrs.insert(
-            "http.response.status".to_string(),
-            format!("{}", parts.status),
-        );
-        attrs.insert(
-            "http.response.version".to_string(),
-            format!("{:?}", parts.version),
-        );
+        let mut attrs = Vec::with_capacity(5);
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.response.headers"),
+            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.response.status"),
+            opentelemetry::Value::String(format!("{}", parts.status).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.response.version"),
+            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+        ));
         if let Some(Ok(b)) = &body {
-            attrs.insert(
-                "http.response.body".to_string(),
-                String::from_utf8_lossy(b).to_string(),
-            );
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.response.body"),
+                opentelemetry::Value::String(String::from_utf8_lossy(b).to_string().into()),
+            ));
         }
-        attrs.insert("subgraph.name".to_string(), service.clone());
+        attrs.push(KeyValue::new(
+            Key::from_static_str("subgraph.name"),
+            opentelemetry::Value::String(service.clone().into()),
+        ));
         log_event(
             level.0,
             "subgraph.response",
@@ -1193,24 +1205,27 @@ pub(crate) async fn call_single_http(
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
     if let Some(level) = subgraph_request_event {
-        let mut attrs = HashMap::with_capacity(5);
-        attrs.insert(
-            "http.request.headers".to_string(),
-            format!("{:?}", request.headers()),
-        );
-        attrs.insert(
-            "http.request.method".to_string(),
-            format!("{}", request.method()),
-        );
-        attrs.insert(
-            "http.request.version".to_string(),
-            format!("{:?}", request.version()),
-        );
-        attrs.insert(
-            "http.request.body".to_string(),
-            format!("{:?}", request.body()),
-        );
-        attrs.insert("subgraph.name".to_string(), service_name.to_string());
+        let mut attrs = Vec::with_capacity(5);
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.headers"),
+            opentelemetry::Value::String(format!("{:?}", request.headers()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.method"),
+            opentelemetry::Value::String(format!("{}", request.method()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.version"),
+            opentelemetry::Value::String(format!("{:?}", request.version()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.request.body"),
+            opentelemetry::Value::String(format!("{:?}", request.body()).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("subgraph.name"),
+            opentelemetry::Value::String(service_name.to_string().into()),
+        ));
 
         log_event(
             level.0,
@@ -1230,26 +1245,29 @@ pub(crate) async fn call_single_http(
         .extensions()
         .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
     if let Some(level) = subgraph_response_event {
-        let mut attrs = HashMap::with_capacity(5);
-        attrs.insert(
-            "http.response.headers".to_string(),
-            format!("{:?}", parts.headers),
-        );
-        attrs.insert(
-            "http.response.status".to_string(),
-            format!("{}", parts.status),
-        );
-        attrs.insert(
-            "http.response.version".to_string(),
-            format!("{:?}", parts.version),
-        );
+        let mut attrs = Vec::with_capacity(5);
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.response.headers"),
+            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.response.status"),
+            opentelemetry::Value::String(format!("{}", parts.status).into()),
+        ));
+        attrs.push(KeyValue::new(
+            Key::from_static_str("http.response.version"),
+            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+        ));
         if let Some(Ok(b)) = &body {
-            attrs.insert(
-                "http.response.body".to_string(),
-                String::from_utf8_lossy(b).to_string(),
-            );
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.response.body"),
+                opentelemetry::Value::String(String::from_utf8_lossy(b).to_string().into()),
+            ));
         }
-        attrs.insert("subgraph.name".to_string(), service_name.to_string());
+        attrs.push(KeyValue::new(
+            Key::from_static_str("subgraph.name"),
+            opentelemetry::Value::String(service_name.to_string().into()),
+        ));
         log_event(
             level.0,
             "subgraph.response",
