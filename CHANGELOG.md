@@ -8,20 +8,6 @@ This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.
 
 ## 🚀 Features
 
-### Warm query plan cache using persisted queries on startup ([Issue #5334](https://github.com/apollographql/router/issues/5334))
-
-Adds support for the router to use [persisted queries](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) to warm the query plan cache upon startup using a new `experimental_prewarm_query_plan_cache` configuration option under `persisted_queries`.
-
-To enable:
-
-```yml
-persisted_queries:
-  enabled: true
-  experimental_prewarm_query_plan_cache: true
-```
-
-By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5340
-
 ### Override tracing span names using custom span selectors ([Issue #5261](https://github.com/apollographql/router/issues/5261))
 
 Adds the ability to override span names by setting the `otel.name` attribute on any custom telemetry [selectors](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors/) .
@@ -52,59 +38,6 @@ It's easy to trip over issues when interacting with Extensions because we inadve
 with_lock() avoids this kind of problem by explicitly restricting the lifetime of the Extensions lock.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5360
-
-### Apollo reporting signature enhancements ([PR #5062](https://github.com/apollographql/router/pull/5061))
-
-Adds a new experimental configuration option to turn on some enhancements for the Apollo reporting stats report key:
-* Signatures will include the full normalized form of input objects
-* Signatures will include aliases
-* Some small normalization improvements
-
-This new configuration (telemetry.apollo.experimental_apollo_signature_normalization_algorithm) only works when in `experimental_apollo_metrics_generation_mode: new` mode and we don't yet recommend enabling it while we continue to verify that the new functionality works as expected.
-
-By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5062
-
-### Add experimental support for sending traces to Studio via OTLP ([PR #4982](https://github.com/apollographql/router/pull/4982))
-
-As the ecosystem around OpenTelemetry (OTel) has been expanding rapidly, we are evaluating a migration of Apollo's internal
-tracing system to use an OTel-based protocol.
-
-In the short-term, benefits include:
-
-- A comprehensive way to visualize the router execution path in GraphOS Studio.
-- Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
-- Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
-
-Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.  
-This will pave the way for future enhancements to more easily plug into the Studio trace visualizer.
-
-#### Configuration
-
-This change adds a new configuration option `experimental_otlp_tracing_sampler`. This can be used to send
-a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
-
-- `always_off` (default): send all traces via Apollo Usage Reporting protocol.
-- `always_on`: send all traces via OTLP.
-- `0.0 - 1.0`: the ratio of traces to send via OTLP (0.5 = 50 / 50).
-
-Note that this sampler is only applied _after_ the common tracing sampler, for example:
-
-#### Sample 1% of traces, send all traces via OTLP:
-
-```yaml
-telemetry:
-  apollo:
-    # Send all traces via OTLP
-    experimental_otlp_tracing_sampler: always_on
-
-  exporters:
-    tracing:
-      common:
-        # Sample traces at 1% of all traffic
-        sampler: 0.01
-```
-
-by [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/4982
 
 ### Add support for `unix_ms_now` in Rhai customizations ([Issue #5182](https://github.com/apollographql/router/issues/5182))
 
@@ -254,6 +187,75 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 Makes title case consistent for page titles and adds subtitles and meta-descriptions are updated for better discoverability.
 
 By [@Meschreiber](https://github.com/@Meschreiber) in https://github.com/apollographql/router/pull/5164
+
+## 🧪 Experimental
+
+### Warm query plan cache using persisted queries on startup ([Issue #5334](https://github.com/apollographql/router/issues/5334))
+
+Adds support for the router to use [persisted queries](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) to warm the query plan cache upon startup using a new `experimental_prewarm_query_plan_cache` configuration option under `persisted_queries`.
+
+To enable:
+
+```yml
+persisted_queries:
+  enabled: true
+  experimental_prewarm_query_plan_cache: true
+```
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5340
+
+### Apollo reporting signature enhancements ([PR #5062](https://github.com/apollographql/router/pull/5061))
+
+Adds a new experimental configuration option to turn on some enhancements for the Apollo reporting stats report key:
+* Signatures will include the full normalized form of input objects
+* Signatures will include aliases
+* Some small normalization improvements
+
+This new configuration (telemetry.apollo.experimental_apollo_signature_normalization_algorithm) only works when in `experimental_apollo_metrics_generation_mode: new` mode and we don't yet recommend enabling it while we continue to verify that the new functionality works as expected.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5062
+
+### Add experimental support for sending traces to Studio via OTLP ([PR #4982](https://github.com/apollographql/router/pull/4982))
+
+As the ecosystem around OpenTelemetry (OTel) has been expanding rapidly, we are evaluating a migration of Apollo's internal
+tracing system to use an OTel-based protocol.
+
+In the short-term, benefits include:
+
+- A comprehensive way to visualize the router execution path in GraphOS Studio.
+- Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
+- Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
+
+Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.  
+This will pave the way for future enhancements to more easily plug into the Studio trace visualizer.
+
+#### Configuration
+
+This change adds a new configuration option `experimental_otlp_tracing_sampler`. This can be used to send
+a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
+
+- `always_off` (default): send all traces via Apollo Usage Reporting protocol.
+- `always_on`: send all traces via OTLP.
+- `0.0 - 1.0`: the ratio of traces to send via OTLP (0.5 = 50 / 50).
+
+Note that this sampler is only applied _after_ the common tracing sampler, for example:
+
+#### Sample 1% of traces, send all traces via OTLP:
+
+```yaml
+telemetry:
+  apollo:
+    # Send all traces via OTLP
+    experimental_otlp_tracing_sampler: always_on
+
+  exporters:
+    tracing:
+      common:
+        # Sample traces at 1% of all traffic
+        sampler: 0.01
+```
+
+by [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/4982
 
 # [1.48.1] - 2024-06-10
 
