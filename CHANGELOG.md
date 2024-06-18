@@ -142,12 +142,6 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5337
 
-### Set Apollo metrics generation mode to `new` by default  ([PR #5265](https://github.com/apollographql/router/pull/5265))
-
-Changes the default value of `experimental_apollo_metrics_generation_mode` to `new`. All metrics are showing that identical signatures are being generated in this mode.
-
-By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5265
-
 ## 🛠 Maintenance
 
 ### Skip GraphOS tests when Apollo key not present ([PR #5362](https://github.com/apollographql/router/pull/5362))
@@ -256,6 +250,14 @@ telemetry:
 ```
 
 by [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/4982
+
+### Set Apollo metrics generation mode to `new` by default ([PR #5265](https://github.com/apollographql/router/pull/5265))
+
+Changes the default value of `experimental_apollo_metrics_generation_mode` to
+`new`. All metrics are showing that identical signatures are being generated in
+this mode.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5265
 
 # [1.48.1] - 2024-06-10
 
