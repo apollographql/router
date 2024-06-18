@@ -801,22 +801,4 @@ mod test_validate_source {
             assert_snapshot!(format!("{:?}", errors));
         });
     }
-
-    // #[test]
-    // fn invalid_entity_arg_on_field() {
-    //     let schema = include_str!("test_data/invalid_entity_arg_on_field.graphql");
-    //     let schema = Schema::parse(schema, "test.graphql").unwrap();
-    //     let errors = validate(schema);
-    //     assert_eq!(errors.len(), 1);
-    //     assert_eq!(errors[0].code, Code::EntityNotOnRootQuery);
-    //     assert_snapshot!(errors[0].message, @r###"`@connect(entity:)` on `User.bestFriend` is invalid. Entities can only be declared on root `Query` fields."###);
-    // }
-
-    // #[test]
-    // fn valid_entity_arg_on_field() {
-    //     let schema = include_str!("test_data/valid_entity_arg_on_field.graphql");
-    //     let schema = Schema::parse(schema, "test.graphql").unwrap();
-    //     let errors = validate(schema);
-    //     assert_eq!(errors.len(), 0);
-    // }
 }
