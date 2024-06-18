@@ -4,6 +4,252 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.49.0] - 2024-06-18
+
+## 🚀 Features
+
+### Warm query plan cache using persisted queries on startup ([Issue #5334](https://github.com/apollographql/router/issues/5334))
+
+Adds support for the router to use [persisted queries](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) to warm the query plan cache upon startup using a new `experimental_prewarm_query_plan_cache` configuration option under `persisted_queries`.
+
+To enable:
+
+```yml
+persisted_queries:
+  enabled: true
+  experimental_prewarm_query_plan_cache: true
+```
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5340
+
+### Override tracing span names using custom span selectors ([Issue #5261](https://github.com/apollographql/router/issues/5261))
+
+Adds the ability to override span names by setting the `otel.name` attribute on any custom telemetry [selectors](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors/) .
+
+This example changes the span name to `router`:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        otel.name:
+           static: router # Override the span name to router 
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5365
+
+### Add description and units to standard instruments ([PR #5407](https://github.com/apollographql/router/pull/5407))
+
+This PR adds description and units to standard instruments available in the router. These descriptions and units have been copy pasted directly from the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/http/http-metrics/) and are needed for better integrations with APMs.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5407
+
+### Add Extensions with_lock() to try and avoid timing issues ([PR #5360](https://github.com/apollographql/router/pull/5360))
+
+It's easy to trip over issues when interacting with Extensions because we inadvertently hold locks for too long. This can be a source of bugs in the router and causes a lot of tests to be flaky.
+
+with_lock() avoids this kind of problem by explicitly restricting the lifetime of the Extensions lock.
+
+By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5360
+
+### Apollo reporting signature enhancements ([PR #5062](https://github.com/apollographql/router/pull/5061))
+
+Adds a new experimental configuration option to turn on some enhancements for the Apollo reporting stats report key:
+* Signatures will include the full normalized form of input objects
+* Signatures will include aliases
+* Some small normalization improvements
+
+This new configuration (telemetry.apollo.experimental_apollo_signature_normalization_algorithm) only works when in `experimental_apollo_metrics_generation_mode: new` mode and we don't yet recommend enabling it while we continue to verify that the new functionality works as expected.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5062
+
+### Add experimental support for sending traces to Studio via OTLP ([PR #4982](https://github.com/apollographql/router/pull/4982))
+
+As the ecosystem around OpenTelemetry (OTel) has been expanding rapidly, we are evaluating a migration of Apollo's internal
+tracing system to use an OTel-based protocol.
+
+In the short-term, benefits include:
+
+- A comprehensive way to visualize the router execution path in GraphOS Studio.
+- Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
+- Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
+
+Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.  
+This will pave the way for future enhancements to more easily plug into the Studio trace visualizer.
+
+#### Configuration
+
+This change adds a new configuration option `experimental_otlp_tracing_sampler`. This can be used to send
+a percentage of traces via OTLP instead of the native Apollo Usage Reporting protocol. Supported values:
+
+- `always_off` (default): send all traces via Apollo Usage Reporting protocol.
+- `always_on`: send all traces via OTLP.
+- `0.0 - 1.0`: the ratio of traces to send via OTLP (0.5 = 50 / 50).
+
+Note that this sampler is only applied _after_ the common tracing sampler, for example:
+
+#### Sample 1% of traces, send all traces via OTLP:
+
+```yaml
+telemetry:
+  apollo:
+    # Send all traces via OTLP
+    experimental_otlp_tracing_sampler: always_on
+
+  exporters:
+    tracing:
+      common:
+        # Sample traces at 1% of all traffic
+        sampler: 0.01
+```
+
+By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/4982
+
+### Add support for `unix_ms_now` in Rhai customizations ([Issue #5182](https://github.com/apollographql/router/issues/5182))
+
+Rhai customizations can now use the `unix_ms_now()` function to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+
+For example:
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_ms_now();
+}
+
+## 🐛 Fixes
+
+### Improve error message produced when subgraphs responses don't include an expected `content-type` header value ([Issue #5359](https://github.com/apollographql/router/issues/5359))
+
+To enhance debuggability when a subgraph response lacks an expected `content-type` header value, the error message now includes additional details.
+
+Examples:
+
+   * ```
+     HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json
+      ```
+   * ```
+     HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json
+      ```
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5223
+
+### Prevent formatting in hot path ([PR #5405](https://github.com/apollographql/router/pull/5405))
+
+Removes unneeded formatting in the hot path for demand control to improve performance.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5405
+
+### Skip hashing the entire schema on every query plan cache lookup ([PR #5374](https://github.com/apollographql/router/pull/5374))
+
+This fixes performance issues when looking up query plans for large schemas.
+
+⚠️ Because this feature changes the query plan cache key, distributed caches will need to be repopulated.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5374
+
+### Optimize GraphQL instruments ([PR #5375](https://github.com/apollographql/router/pull/5375))
+
+When processing selectors for GraphQL instruments, heap allocations should be avoided for optimal performance. This change removes Vec allocations that were previously performed per field, yielding significant performance improvements.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5375
+
+### Log metrics overflow as a warning rather than an error ([Issue #5173](https://github.com/apollographql/router/issues/5173))
+
+If a metric has too high a cardinality, the following is displayed as a warning instead of an error:
+
+`OpenTelemetry metric error occurred: Metrics error: Warning: Maximum data points for metric stream exceeded/ Entry added to overflow`
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5287
+
+### Add support of `response_context selector` when in errors ([PR #5288](https://github.com/apollographql/router/pull/5288))
+
+Provides the ability to configure custom instruments. For example:
+
+```yaml
+http.server.request.timeout:
+  type: counter
+  value: unit
+  description: "request in timeout"
+  unit: request
+  attributes:
+    graphql.operation.name:
+      response_context: operation_name
+  condition:
+    eq:
+    - "request timed out"
+    - error: reason
+
+### Inaccurate `apollo_router_opened_subscriptions` counter ([PR #5363](https://github.com/apollographql/router/pull/5363))
+
+Fixes the `apollo_router_opened_subscriptions` counter which previously only incremented. The counter now also decrements.
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5363
+
+## 📃 Configuration
+
+### Rename trace telemetry selector ([PR #5337](https://github.com/apollographql/router/pull/5337))
+
+[v1.48.0](https://github.com/apollographql/router/releases/tag/v1.48.0) introduced the `apollo` `trace_id` selector. `trace_id` is a misnomer for this metric, since the selector actually represents a GraphOS Studio operation ID. To access this selector, use `studio_operation_id`:
+
+```yaml
+telemetry:
+  instrumentation:
+    spans:
+      router:
+        "studio.operation.id":
+            studio_operation_id: true
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5337
+
+### Set Apollo metrics generation mode to `new` by default  ([PR #5265](https://github.com/apollographql/router/pull/5265))
+
+Changes the default value of `experimental_apollo_metrics_generation_mode` to `new`. All metrics are showing that identical signatures are being generated in this mode.
+
+By [@bonnici](https://github.com/bonnici) in https://github.com/apollographql/router/pull/5265
+
+## 🛠 Maintenance
+
+### Skip GraphOS tests when Apollo key not present ([PR #5362](https://github.com/apollographql/router/pull/5362))
+
+Some tests require `APOLLO_KEY` and `APOLLO_GRAPH_REF` to execute successfully.
+These are now skipped if these env variables are not present.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5362
+
+## 📚 Documentation
+
+### Standard instrument configuration documentation for subgraphs ([PR #5422](https://github.com/apollographql/router/pull/5422))
+
+Added documentation about standard instruments available at the subgraph service level:
+
+  * `http.client.request.body.size` - A histogram of request body sizes for requests handled by subgraphs.
+  * `http.client.request.duration` - A histogram of request durations for requests handled by subgraphs.
+  * `http.client.response.body.size` - A histogram of response body sizes for requests handled by subgraphs.
+
+
+These instruments are configurable in `router.yaml`:
+
+```yaml title="router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        http.client.request.body.size: true # (default false)
+        http.client.request.duration: true # (default false)
+        http.client.response.body.size: true # (default false)
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5422
+
+### Update docs frontmatter for consistency and discoverability ([PR #5164](https://github.com/apollographql/router/pull/5164))
+
+Makes title case consistent for page titles and adds subtitles and meta-descriptions are updated for better discoverability.
+
+By [@Meschreiber](https://github.com/@Meschreiber) in https://github.com/apollographql/router/pull/5164
+
+
+
 # [1.48.1] - 2024-06-10
 
 ## 🐛 Fixes
