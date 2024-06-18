@@ -377,7 +377,7 @@ impl ProcessingState {
             };
 
             // The uhandled are the one that are unhandled on both side.
-            in_edges.retain(|e| !other_node.unhandled_parents.contains(e));
+            in_edges.retain(|e| other_node.unhandled_parents.contains(e));
             other_nodes.remove(other_index);
             in_edges
         }
