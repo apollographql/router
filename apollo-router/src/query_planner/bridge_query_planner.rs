@@ -6,9 +6,8 @@ use std::fmt::Write;
 use std::sync::Arc;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
@@ -241,9 +240,8 @@ impl PlannerMode {
                 })
             }
             PlannerMode::Both { js, rust } => {
-                let operation_name = operation.as_deref().map(NodeStr::from);
                 let mut js_result = js
-                    .plan(filtered_query, operation, plan_options)
+                    .plan(filtered_query, operation.clone(), plan_options)
                     .await
                     .map_err(QueryPlannerError::RouterBridgeError)?
                     .into_result()
@@ -260,7 +258,7 @@ impl PlannerMode {
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),
                     document: doc.executable.clone(),
-                    operation_name,
+                    operation_name: operation,
                     // Exclude usage reporting from the Result sent for comparison
                     js_result: js_result
                         .as_ref()
@@ -1475,7 +1473,7 @@ mod tests {
                         if let Some(node) = &deferred.node {
                             check_query_plan_coverage(
                                 node,
-                                deferred.label.as_ref().map(|l| l.as_str()),
+                                deferred.label.as_deref(),
                                 subselections,
                             )
                         }

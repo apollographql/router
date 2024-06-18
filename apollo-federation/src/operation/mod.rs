@@ -24,11 +24,10 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 
 use apollo_compiler::executable;
-use apollo_compiler::executable::Name;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
@@ -97,7 +96,7 @@ pub struct Operation {
 pub(crate) struct NormalizedDefer {
     pub operation: Operation,
     pub has_defers: bool,
-    pub assigned_defer_labels: HashSet<NodeStr>,
+    pub assigned_defer_labels: HashSet<String>,
     pub defer_conditions: IndexMap<String, IndexSet<String>>,
 }
 
@@ -209,8 +208,8 @@ mod selection_map {
     use std::ops::Deref;
     use std::sync::Arc;
 
-    use apollo_compiler::ast::Name;
     use apollo_compiler::executable;
+    use apollo_compiler::Name;
     use indexmap::IndexMap;
 
     use crate::error::FederationError;
@@ -1070,7 +1069,7 @@ mod field_selection {
 
     use apollo_compiler::ast;
     use apollo_compiler::executable;
-    use apollo_compiler::executable::Name;
+    use apollo_compiler::Name;
     use apollo_compiler::Node;
 
     use crate::error::FederationError;
@@ -1290,7 +1289,7 @@ mod field_selection {
         }
 
         pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
-            FetchDataPathElement::Key(self.data().response_name().into())
+            FetchDataPathElement::Key(self.data().response_name())
         }
 
         pub(crate) fn collect_variables<'selection>(
@@ -1403,7 +1402,7 @@ mod fragment_spread_selection {
     use std::sync::Arc;
 
     use apollo_compiler::executable;
-    use apollo_compiler::executable::Name;
+    use apollo_compiler::Name;
 
     use crate::operation::is_deferred_selection;
     use crate::operation::sort_directives;
@@ -1664,7 +1663,7 @@ mod inline_fragment_selection {
     use std::sync::Arc;
 
     use apollo_compiler::executable;
-    use apollo_compiler::executable::Name;
+    use apollo_compiler::Name;
 
     use super::field_selection::collect_variables_from_directive;
     use crate::error::FederationError;
@@ -1796,7 +1795,7 @@ mod inline_fragment_selection {
             let condition = self.data().type_condition_position.clone()?;
 
             Some(FetchDataPathElement::TypenameEquals(
-                condition.type_name().clone().into(),
+                condition.type_name().clone(),
             ))
         }
 
@@ -3062,7 +3061,7 @@ impl SelectionSet {
                      response_name,
                      alias,
                  }| {
-                    path.push(FetchDataPathElement::Key(alias.into()));
+                    path.push(FetchDataPathElement::Key(alias));
                     Arc::new(FetchDataRewrite::KeyRenamer(FetchDataKeyRenamer {
                         path,
                         rename_key_to: response_name,
@@ -3176,7 +3175,7 @@ impl SelectionSet {
                         .as_ref();
                     let header = match condition {
                         Some(cond) => vec![FetchDataPathElement::TypenameEquals(
-                            cond.type_name().clone().into(),
+                            cond.type_name().clone(),
                         )],
                         None => vec![],
                     };
@@ -3318,7 +3317,7 @@ pub(crate) struct SelectionSetAtPath {
 
 pub(crate) struct FieldToAlias {
     path: Vec<FetchDataPathElement>,
-    response_name: NodeStr,
+    response_name: Name,
     alias: Name,
 }
 
@@ -3394,7 +3393,7 @@ fn compute_aliases_for_non_merging_fields(
                             Some(s) => {
                                 let mut selections = s.clone();
                                 let mut p = path.clone();
-                                p.push(FetchDataPathElement::Key(response_name.clone().into()));
+                                p.push(FetchDataPathElement::Key(response_name.clone()));
                                 selections.push(SelectionSetAtPath {
                                     path: p,
                                     selections: field.selection_set.clone(),
@@ -3420,7 +3419,7 @@ fn compute_aliases_for_non_merging_fields(
                     let selections = match field.selection_set.as_ref() {
                         Some(s) => {
                             let mut p = path.clone();
-                            p.push(FetchDataPathElement::Key(alias.clone().into()));
+                            p.push(FetchDataPathElement::Key(alias.clone()));
                             Some(vec![SelectionSetAtPath {
                                 path: p,
                                 selections: Some(s.clone()),
@@ -3442,7 +3441,7 @@ fn compute_aliases_for_non_merging_fields(
 
                     alias_collector.push(FieldToAlias {
                         path,
-                        response_name: response_name.into(),
+                        response_name,
                         alias,
                     })
                 }
@@ -3451,7 +3450,7 @@ fn compute_aliases_for_non_merging_fields(
                 let selections: Option<Vec<SelectionSetAtPath>> = match field.selection_set.as_ref()
                 {
                     Some(s) => {
-                        path.push(FetchDataPathElement::Key(response_name.clone().into()));
+                        path.push(FetchDataPathElement::Key(response_name.clone()));
                         Some(vec![SelectionSetAtPath {
                             path,
                             selections: Some(s.clone()),
@@ -3483,7 +3482,7 @@ fn compute_aliases_for_non_merging_fields(
 fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenResponseName>) -> Name {
     let mut counter = 0usize;
     loop {
-        if let Ok(name) = Name::try_from(NodeStr::new(&format!("{base_name}__alias_{counter}"))) {
+        if let Ok(name) = Name::try_from(format!("{base_name}__alias_{counter}")) {
             if !unavailable_names.contains_key(&name) {
                 return name;
             }
@@ -4596,7 +4595,7 @@ pub(crate) struct RebasedFragments {
     pub(crate) original_fragments: NamedFragments,
     // JS PORT NOTE: In JS implementation values were optional
     /// Map key: subgraph name
-    rebased_fragments: Arc<HashMap<NodeStr, NamedFragments>>,
+    rebased_fragments: Arc<HashMap<Arc<str>, NamedFragments>>,
 }
 
 impl RebasedFragments {
@@ -4609,7 +4608,7 @@ impl RebasedFragments {
 
     pub(crate) fn for_subgraph(
         &mut self,
-        subgraph_name: impl Into<NodeStr>,
+        subgraph_name: impl Into<Arc<str>>,
         subgraph_schema: &ValidFederationSchema,
     ) -> &NamedFragments {
         Arc::make_mut(&mut self.rebased_fragments)

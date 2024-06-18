@@ -1,7 +1,6 @@
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use router_bridge::planner::PlanOptions;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
@@ -463,9 +462,9 @@ impl PlanNode {
             Self::Subscription { primary, rest } => match rest {
                 Some(rest) => Box::new(
                     rest.service_usage()
-                        .chain(Some(primary.service_name.as_str())),
+                        .chain(Some(primary.service_name.as_ref())),
                 ) as Box<dyn Iterator<Item = &'a str> + 'a>,
-                None => Box::new(Some(primary.service_name.as_str()).into_iter()),
+                None => Box::new(Some(primary.service_name.as_ref()).into_iter()),
             },
             Self::Flatten(flatten) => flatten.node.service_usage(),
             Self::Defer { primary, deferred } => primary
@@ -588,7 +587,7 @@ pub(crate) struct DeferredNode {
     pub(crate) depends: Vec<Depends>,
 
     /// The optional defer label.
-    pub(crate) label: Option<NodeStr>,
+    pub(crate) label: Option<String>,
     /// Path to the @defer this correspond to. `subselection` start at that `path`.
     pub(crate) query_path: Path,
     /// The part of the original query that "selects" the data to send
@@ -603,5 +602,5 @@ pub(crate) struct DeferredNode {
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
-    pub(crate) id: NodeStr,
+    pub(crate) id: String,
 }

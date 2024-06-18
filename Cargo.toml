@@ -75,3 +75,6 @@ sha1 = "0.10.6"
 tempfile = "3.10.0"
 tokio = { version = "1.36.0", features = ["full"] }
 tower = { version = "0.4.13", features = ["full"] }
+
+[patch.crates-io]
+apollo-compiler = { git = "https://github.com/apollographql/apollo-rs", rev = "91f3c93097a7d28e91609571eb1041006401a4f8" }

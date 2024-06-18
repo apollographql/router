@@ -39,7 +39,7 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use apollo_compiler::executable;
-use apollo_compiler::executable::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use super::CollectedFieldInSet;

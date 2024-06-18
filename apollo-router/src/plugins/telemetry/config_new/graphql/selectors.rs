@@ -169,7 +169,7 @@ mod tests {
             list_length: ListLength::Value,
         };
         let result = selector.on_response_field(
-            ty(),
+            &ty(),
             field(),
             &json!(vec![true, true, true]),
             &Context::default(),
@@ -182,7 +182,7 @@ mod tests {
         let selector = GraphQLSelector::FieldName {
             field_name: FieldName::String,
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("field_name".into())));
     }
 
@@ -191,14 +191,14 @@ mod tests {
         let selector = GraphQLSelector::FieldType {
             field_type: FieldType::Name,
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("field_type".into())));
     }
 
     #[test]
     fn field_type_scalar_type() {
-        assert_scalar(ty(), field(), &json!("value"));
-        assert_scalar(ty(), field(), &json!(1));
+        assert_scalar(&ty(), field(), &json!("value"));
+        assert_scalar(&ty(), field(), &json!(1));
     }
 
     fn assert_scalar(ty: &NamedType, field: &Field, value: &serde_json_bytes::Value) {
@@ -214,7 +214,7 @@ mod tests {
         let selector = GraphQLSelector::FieldType {
             field_type: FieldType::Type,
         };
-        let result = selector.on_response_field(ty(), field(), &json!({}), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!({}), &Context::default());
         assert_eq!(result, Some(Value::String("object".into())));
     }
 
@@ -224,7 +224,7 @@ mod tests {
             field_type: FieldType::Type,
         };
         let result =
-            selector.on_response_field(ty(), field(), &json!(vec![true]), &Context::default());
+            selector.on_response_field(&ty(), field(), &json!(vec![true]), &Context::default());
         assert_eq!(result, Some(Value::String("list".into())));
     }
 
@@ -233,7 +233,8 @@ mod tests {
         let selector = GraphQLSelector::TypeName {
             type_name: TypeName::String,
         };
-        let result = selector.on_response_field(ty(), field(), &json!("true"), &Context::default());
+        let result =
+            selector.on_response_field(&ty(), field(), &json!("true"), &Context::default());
         assert_eq!(result, Some(Value::String("type_name".into())));
     }
 
@@ -242,7 +243,7 @@ mod tests {
         let selector = GraphQLSelector::StaticField {
             r#static: "static_value".into(),
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("static_value".into())));
     }
 
@@ -254,7 +255,7 @@ mod tests {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "some-operation".to_string());
-        let result = selector.on_response_field(ty(), field(), &json!(true), &ctx);
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &ctx);
         assert_eq!(result, Some(Value::String("some-operation".into())));
     }
 
@@ -266,7 +267,7 @@ mod tests {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "some-operation".to_string());
-        let result = selector.on_response_field(ty(), field(), &json!(true), &ctx);
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &ctx);
         assert_eq!(
             result,
             Some(Value::String(
@@ -281,7 +282,7 @@ mod tests {
             operation_name: OperationName::String,
             default: Some("no-operation".to_string()),
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("no-operation".into())));
     }
 }

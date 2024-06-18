@@ -211,12 +211,12 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
     if let Some(node) = &plan.node {
         match node {
             TopLevelPlanNode::Fetch(inner) => {
-                if inner.subgraph_name == subgraph_name {
+                if inner.subgraph_name.as_ref() == subgraph_name {
                     fetch_nodes.push(&**inner)
                 }
             }
             TopLevelPlanNode::Subscription(inner) => {
-                if inner.primary.subgraph_name == subgraph_name {
+                if inner.primary.subgraph_name.as_ref() == subgraph_name {
                     fetch_nodes.push(&inner.primary);
                 }
                 visit_node(subgraph_name, &mut fetch_nodes, inner.rest.as_deref())
@@ -261,7 +261,7 @@ pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
             let Some(node) = node else { return };
             match node {
                 PlanNode::Fetch(inner) => {
-                    if inner.subgraph_name == subgraph_name {
+                    if inner.subgraph_name.as_ref() == subgraph_name {
                         fetch_nodes.push(&**inner)
                     }
                 }

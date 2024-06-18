@@ -4,10 +4,9 @@ use std::borrow::Borrow;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 
 use super::fetch::FetchNode;
@@ -30,7 +29,7 @@ const WORKER_THREAD_COUNT: usize = 1;
 pub(crate) struct BothModeComparisonJob {
     pub(crate) rust_planner: Arc<QueryPlanner>,
     pub(crate) document: Arc<Valid<ExecutableDocument>>,
-    pub(crate) operation_name: Option<NodeStr>,
+    pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
 }
 
@@ -67,7 +66,11 @@ impl BothModeComparisonJob {
         // TODO: once the Rust query planner does not use `todo!()` anymore,
         // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
         let rust_result = std::panic::catch_unwind(|| {
-            let name = self.operation_name.clone().map(Name::new).transpose()?;
+            let name = self
+                .operation_name
+                .clone()
+                .map(Name::try_from)
+                .transpose()?;
             USING_CATCH_UNWIND.set(true);
             // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);

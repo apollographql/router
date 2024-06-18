@@ -1322,8 +1322,8 @@ mod lazy_map_tests {
 
 fn field_element(
     schema: &ValidFederationSchema,
-    object: apollo_compiler::schema::Name,
-    field: apollo_compiler::schema::Name,
+    object: apollo_compiler::Name,
+    field: apollo_compiler::Name,
 ) -> OpPathElement {
     OpPathElement::Field(super::Field::new(super::FieldData {
         schema: schema.clone(),

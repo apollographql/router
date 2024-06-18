@@ -3,6 +3,7 @@ use std::collections::HashSet;
 
 use apollo_compiler::executable;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 
@@ -118,7 +119,7 @@ enum Computation<T> {
 /// Recursively measure the given selection set against each limit
 fn count<'a>(
     document: &'a executable::ExecutableDocument,
-    fragment_cache: &mut HashMap<&'a executable::Name, Computation<OperationLimits<u32>>>,
+    fragment_cache: &mut HashMap<&'a Name, Computation<OperationLimits<u32>>>,
     selection_set: &'a executable::SelectionSet,
 ) -> OperationLimits<u32> {
     let mut counts = OperationLimits {

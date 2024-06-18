@@ -193,16 +193,14 @@ checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
 [[package]]
 name = "apollo-compiler"
 version = "1.0.0-beta.17"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a46c3a5e9a23a39089af6bada6fe0976369458434095bd9c26ce94c56f219842"
+source = "git+https://github.com/apollographql/apollo-rs?rev=91f3c93097a7d28e91609571eb1041006401a4f8#91f3c93097a7d28e91609571eb1041006401a4f8"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.7.7 (git+https://github.com/apollographql/apollo-rs?rev=91f3c93097a7d28e91609571eb1041006401a4f8)",
  "ariadne",
  "indexmap 2.2.3",
  "rowan",
  "serde",
  "serde_json_bytes",
- "sptr",
  "thiserror",
  "triomphe",
  "uuid",
@@ -214,7 +212,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee9f27b20841d14923dd5f0714a79f86360b23492d2f98ab5d1651471a56b7a4"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror",
 ]
 
@@ -258,6 +256,16 @@ name = "apollo-parser"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bb7c8a9776825e5524b5ab3a7f478bf091a054180f244dff85814452cb87d90"
+dependencies = [
+ "memchr",
+ "rowan",
+ "thiserror",
+]
+
+[[package]]
+name = "apollo-parser"
+version = "0.7.7"
+source = "git+https://github.com/apollographql/apollo-rs?rev=91f3c93097a7d28e91609571eb1041006401a4f8#91f3c93097a7d28e91609571eb1041006401a4f8"
 dependencies = [
  "memchr",
  "rowan",
@@ -432,7 +440,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "1.48.1"
 dependencies = [
- "apollo-parser",
+ "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -483,7 +491,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "441a51f1055d2eebcda41b55066de925502e11c97097c6d1bab0da5bdeb5c70f"
 dependencies = [
  "apollo-encoder",
- "apollo-parser",
+ "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "arbitrary",
  "once_cell",
  "thiserror",
@@ -1987,7 +1995,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "978747c1d849a7d2ee5e8adc0159961c48fb7e5db2f06af6723b80123bb53856"
 dependencies = [
  "cfg-if",
- "hashbrown 0.14.1",
+ "hashbrown 0.14.5",
  "lock_api",
  "once_cell",
  "parking_lot_core",
@@ -3226,9 +3234,9 @@ checksum = "8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888"
 
 [[package]]
 name = "hashbrown"
-version = "0.14.1"
+version = "0.14.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dfda62a12f55daeae5015f81b0baea145391cb4520f86c248fc615d72640d12"
+checksum = "e5274423e17b7c9fc20b6e7e208532f9b19825d82dfd615708b70edd83df41f1"
 dependencies = [
  "ahash",
  "allocator-api2",
@@ -3561,7 +3569,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "233cf39063f058ea2caae4091bf4a3ef70a653afbc026f5c4a4135d114e3c177"
 dependencies = [
  "equivalent",
- "hashbrown 0.14.1",
+ "hashbrown 0.14.5",
  "serde",
 ]
 
@@ -4055,7 +4063,7 @@ version = "0.12.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "db2c024b41519440580066ba82aab04092b333e09066a5eb86c7c4890df31f22"
 dependencies = [
- "hashbrown 0.14.1",
+ "hashbrown 0.14.5",
 ]
 
 [[package]]
@@ -4850,9 +4858,9 @@ checksum = "14f2252c834a40ed9bb5422029649578e63aa341ac401f74e719dd1afda8394e"
 
 [[package]]
 name = "parking_lot"
-version = "0.12.1"
+version = "0.12.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3742b2c103b9f06bc9fff0a37ff4912935851bee6d36f3c02bcc755bcfec228f"
+checksum = "f1bf18183cf54e8d6059647fc3063646a1801cf30896933ec2311622cc4b9a27"
 dependencies = [
  "lock_api",
  "parking_lot_core",
@@ -5819,7 +5827,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "apollo-compiler",
- "apollo-parser",
+ "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
  "apollo-router",
  "apollo-smith",
  "async-trait",
@@ -6531,12 +6539,6 @@ dependencies = [
  "base64ct",
  "der 0.7.8",
 ]
-
-[[package]]
-name = "sptr"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3b9b39299b249ad65f3b7e96443bad61c02ca5cd3589f46cb6d610a0fd6c0d6a"
 
 [[package]]
 name = "stable_deref_trait"
@@ -7410,9 +7412,9 @@ dependencies = [
 
 [[package]]
 name = "triomphe"
-version = "0.1.9"
+version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0eee8098afad3fb0c54a9007aab6804558410503ad676d4633f9c2559a00ac0f"
+checksum = "e6631e42e10b40c0690bf92f404ebcfe6e1fdb480391d15f17cc8e96eeed5369"
 dependencies = [
  "serde",
  "stable_deref_trait",

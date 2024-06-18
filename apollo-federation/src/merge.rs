@@ -20,14 +20,13 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::InterfaceType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use indexmap::map::Entry::Occupied;
 use indexmap::map::Entry::Vacant;
@@ -432,13 +431,13 @@ impl Merger {
                             Option::and_then(field.directives.get_all("requires").next(), |p| {
                                 let requires_fields =
                                     directive_string_arg_value(p, &name!("fields")).unwrap();
-                                Some(requires_fields.as_str())
+                                Some(requires_fields)
                             });
                         let provides_directive_option =
                             Option::and_then(field.directives.get_all("provides").next(), |p| {
                                 let provides_fields =
                                     directive_string_arg_value(p, &name!("fields")).unwrap();
-                                Some(provides_fields.as_str())
+                                Some(provides_fields)
                             });
                         let external_field = field.directives.get_all("external").next().is_some();
                         let join_field_directive = join_field_applied_directive(
@@ -493,7 +492,7 @@ impl Merger {
                         }),
                         Node::new(Argument {
                             name: name!("member"),
-                            value: Node::new(Value::String(NodeStr::new(union_member))),
+                            value: union_member.as_str().into(),
                         }),
                     ],
                 }));
@@ -637,7 +636,7 @@ fn copy_fields(
     new_fields
 }
 
-fn copy_union_type(union_name: Name, description: Option<NodeStr>) -> ExtendedType {
+fn copy_union_type(union_name: Name, description: Option<Node<str>>) -> ExtendedType {
     ExtendedType::Union(Node::new(UnionType {
         description,
         name: union_name,
@@ -673,7 +672,7 @@ fn join_type_applied_directive<'a>(
             .arguments
             .push(Node::new(Argument {
                 name: name!("key"),
-                value: Node::new(Value::String(NodeStr::new(field_set.as_str()))),
+                value: field_set.into(),
             }));
 
         let resolvable =
@@ -707,7 +706,7 @@ fn join_type_implements(subgraph_name: Name, intf_name: &Name) -> Component<Dire
             }),
             Node::new(Argument {
                 name: name!("interface"),
-                value: Node::new(Value::String(intf_name.to_string().into())),
+                value: intf_name.as_str().into(),
             }),
         ],
     })
@@ -721,10 +720,7 @@ fn directive_arg_value<'a>(directive: &'a Directive, arg_name: &Name) -> Option<
         .map(|arg| arg.value.as_ref())
 }
 
-fn directive_string_arg_value<'a>(
-    directive: &'a Directive,
-    arg_name: &Name,
-) -> Option<&'a NodeStr> {
+fn directive_string_arg_value<'a>(directive: &'a Directive, arg_name: &Name) -> Option<&'a str> {
     match directive_arg_value(directive, arg_name) {
         Some(Value::String(value)) => Some(value),
         _ => None,
@@ -749,9 +745,7 @@ fn add_core_feature_link(supergraph: &mut Schema) {
             name: name!("link"),
             arguments: vec![Node::new(Argument {
                 name: name!("url"),
-                value: Node::new(Value::String(NodeStr::new(
-                    "https://specs.apollo.dev/link/v1.0",
-                ))),
+                value: Node::new("https://specs.apollo.dev/link/v1.0".into()),
             })],
         }));
 
@@ -835,16 +829,16 @@ fn link_purpose_enum_type() -> (Name, EnumType) {
         values: IndexMap::new(),
     };
     let link_purpose_security_value = EnumValueDefinition {
-        description: Some(NodeStr::new(
-            r"SECURITY features provide metadata necessary to securely resolve fields.",
-        )),
+        description: Some(
+            r"SECURITY features provide metadata necessary to securely resolve fields.".into(),
+        ),
         directives: Default::default(),
         value: name!("SECURITY"),
     };
     let link_purpose_execution_value = EnumValueDefinition {
-        description: Some(NodeStr::new(
-            r"EXECUTION features provide metadata necessary for operation execution.",
-        )),
+        description: Some(
+            r"EXECUTION features provide metadata necessary for operation execution.".into(),
+        ),
         directives: Default::default(),
         value: name!("EXECUTION"),
     };
@@ -874,9 +868,7 @@ fn add_core_feature_join(
             arguments: vec![
                 Node::new(Argument {
                     name: name!("url"),
-                    value: Node::new(Value::String(NodeStr::new(
-                        "https://specs.apollo.dev/join/v0.3",
-                    ))),
+                    value: "https://specs.apollo.dev/join/v0.3".into(),
                 }),
                 Node::new(Argument {
                     name: name!("for"),
@@ -1041,19 +1033,19 @@ fn join_field_applied_directive(
     if let Some(required_fields) = requires {
         join_field_directive.arguments.push(Node::new(Argument {
             name: name!("requires"),
-            value: Node::new(Value::String(NodeStr::new(required_fields))),
+            value: required_fields.into(),
         }));
     }
     if let Some(provided_fields) = provides {
         join_field_directive.arguments.push(Node::new(Argument {
             name: name!("provides"),
-            value: Node::new(Value::String(NodeStr::new(provided_fields))),
+            value: provided_fields.into(),
         }));
     }
     if external {
         join_field_directive.arguments.push(Node::new(Argument {
             name: name!("external"),
-            value: Node::new(Value::Boolean(external)),
+            value: external.into(),
         }));
     }
     join_field_directive
@@ -1217,11 +1209,11 @@ fn join_graph_enum_type(
             arguments: vec![
                 (Node::new(Argument {
                     name: name!("name"),
-                    value: Node::new(Value::String(NodeStr::new(s.name.as_str()))),
+                    value: s.name.as_str().into(),
                 })),
                 (Node::new(Argument {
                     name: name!("url"),
-                    value: Node::new(Value::String(NodeStr::new(s.url.as_str()))),
+                    value: s.url.as_str().into(),
                 })),
             ],
         };

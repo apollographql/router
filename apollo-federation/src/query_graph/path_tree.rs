@@ -3,7 +3,6 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use apollo_compiler::NodeStr;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
@@ -104,7 +103,7 @@ impl OpPathTree {
         self.is_all_in_same_subgraph_internal(&node_weight.source)
     }
 
-    fn is_all_in_same_subgraph_internal(&self, target: &NodeStr) -> Result<bool, FederationError> {
+    fn is_all_in_same_subgraph_internal(&self, target: &Arc<str>) -> Result<bool, FederationError> {
         let node_weight = self.graph.node_weight(self.node)?;
         if node_weight.source != *target {
             return Ok(false);
