@@ -104,7 +104,7 @@ telemetry:
         sampler: 0.01
 ```
 
-By [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/4982
+by [@timbotnik](https://github.com/timbotnik) in https://github.com/apollographql/router/pull/4982
 
 ### Add support for `unix_ms_now` in Rhai customizations ([Issue #5182](https://github.com/apollographql/router/issues/5182))
 
@@ -116,6 +116,9 @@ For example:
 fn supergraph_service(service) {
     let now = unix_ms_now();
 }
+```
+
+By [@shaikatzz](https://github.com/shaikatzz ) in https://github.com/apollographql/router/pull/5181
 
 ## 🐛 Fixes
 
@@ -124,13 +127,14 @@ fn supergraph_service(service) {
 To enhance debuggability when a subgraph response lacks an expected `content-type` header value, the error message now includes additional details.
 
 Examples:
+```
+HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json
+```
 
-   * ```
-     HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json
-      ```
-   * ```
-     HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json
-      ```
+```
+HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json
+```
+
 By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5223
 
 ### Prevent formatting in hot path ([PR #5405](https://github.com/apollographql/router/pull/5405))
@@ -178,6 +182,9 @@ http.server.request.timeout:
     eq:
     - "request timed out"
     - error: reason
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5288
 
 ### Inaccurate `apollo_router_opened_subscriptions` counter ([PR #5363](https://github.com/apollographql/router/pull/5363))
 
@@ -247,8 +254,6 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 Makes title case consistent for page titles and adds subtitles and meta-descriptions are updated for better discoverability.
 
 By [@Meschreiber](https://github.com/@Meschreiber) in https://github.com/apollographql/router/pull/5164
-
-
 
 # [1.48.1] - 2024-06-10
 
