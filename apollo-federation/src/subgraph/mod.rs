@@ -28,6 +28,7 @@ use crate::subgraph::spec::FEDERATION_V2_DIRECTIVE_NAMES;
 use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
 use crate::subgraph::spec::SERVICE_SDL_QUERY;
 use crate::subgraph::spec::SERVICE_TYPE;
+use crate::ValidFederationSubgraph;
 
 mod database;
 pub mod spec;
@@ -324,6 +325,16 @@ pub struct ValidSubgraph {
 impl std::fmt::Debug for ValidSubgraph {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, r#"name: {}, url: {}"#, self.name, self.url)
+    }
+}
+
+impl From<ValidFederationSubgraph> for ValidSubgraph {
+    fn from(value: ValidFederationSubgraph) -> Self {
+        Self {
+            name: value.name,
+            url: value.url,
+            schema: value.schema.schema().clone(),
+        }
     }
 }
 
