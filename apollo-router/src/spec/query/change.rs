@@ -360,7 +360,7 @@ impl<'a> QueryHashVisitor<'a> {
         if let Some(value) = t.default_value.as_ref() {
             self.hash_value(value);
         } else {
-            "no default value".hash(self);
+            "^INPUT_VALUE-NO_DEFAULT".hash(self);
         }
         "^INPUT_VALUE-END".hash(self);
         Ok(())
@@ -480,7 +480,7 @@ impl<'a> Visitor for QueryHashVisitor<'a> {
             if let Some(value) = variable.default_value.as_ref() {
                 self.hash_value(value);
             } else {
-                "no default value".hash(self);
+                "^VISIT_OPERATION-NO_DEFAULT".hash(self);
             }
 
             for directive in &variable.directives {
