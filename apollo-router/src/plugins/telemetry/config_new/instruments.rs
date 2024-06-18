@@ -33,13 +33,15 @@ use crate::plugins::telemetry::config_new::cost::CostInstruments;
 use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
-use crate::plugins::telemetry::config_new::graphql::selectors::{GraphQLSelector, GraphQLValue};
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
+use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::RouterValue;
+use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphValue;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::config_new::selectors::{RouterSelector, RouterValue};
-use crate::plugins::telemetry::config_new::selectors::{
-    SubgraphSelector, SubgraphValue, SupergraphValue,
-};
+use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;

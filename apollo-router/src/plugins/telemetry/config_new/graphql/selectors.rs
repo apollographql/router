@@ -8,9 +8,11 @@ use tower::BoxError;
 
 use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
-use crate::plugins::telemetry::config_new::instruments::{InstrumentValue, StandardUnit};
+use crate::plugins::telemetry::config_new::instruments;
+use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::StandardUnit;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
-use crate::plugins::telemetry::config_new::{instruments, Selector};
+use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
