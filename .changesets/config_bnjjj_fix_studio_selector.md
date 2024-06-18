@@ -1,6 +1,6 @@
-### Rename the telemetry selector to get studio operation id ([PR #5337](https://github.com/apollographql/router/pull/5337))
+### Rename trace telemetry selector ([PR #5337](https://github.com/apollographql/router/pull/5337))
 
-We introduced a new `trace_id` selector format in `1.48.0` which has been misnamed because it's not a trace id but the Apollo Studio Operation ID. If you want to access to this selector, here is an example:
+[v1.48.0](https://github.com/apollographql/router/releases/tag/v1.48.0) introduced the `apollo` `trace_id` selector. `trace_id` is a misnomer for this metric, since the selector actually represents a GraphOS Studio operation ID. To access this selector, use `studio_operation_id`:
 
 ```yaml
 telemetry:

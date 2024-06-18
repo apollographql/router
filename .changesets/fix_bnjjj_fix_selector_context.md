@@ -1,4 +1,4 @@
-### Add support of response_context selector when it's in error ([PR #5288](https://github.com/apollographql/router/pull/5288))
+### Add support of `response_context selector` when in errors ([PR #5288](https://github.com/apollographql/router/pull/5288))
 
 Provides the ability to configure custom instruments. For example:
 
@@ -15,6 +15,3 @@ http.server.request.timeout:
     eq:
     - "request timed out"
     - error: reason
-```
-
-By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5288

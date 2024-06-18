@@ -5,11 +5,11 @@ tracing system to use an OTel-based protocol.
 
 In the short-term, benefits include:
 
-- A comprehensive way to visualize the Router execution path in Studio.
+- A comprehensive way to visualize the router execution path in GraphOS Studio.
 - Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
-- Additional metadata such as subgraph fetch details, Router idle / busy timing, and more.
+- Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
 
-Long-term, we see this as a strategic enhancement to consolidate these 2 disparate tracing systems.  
+Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.  
 This will pave the way for future enhancements to more easily plug into the Studio trace visualizer.
 
 #### Configuration

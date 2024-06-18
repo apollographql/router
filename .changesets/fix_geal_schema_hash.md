@@ -1,4 +1,4 @@
-### do not hash the entire schema on every query plan cache lookup ([PR #5374](https://github.com/apollographql/router/pull/5374))
+### Skip hashing the entire schema on every query plan cache lookup ([PR #5374](https://github.com/apollographql/router/pull/5374))
 
 This fixes performance issues when looking up query plans for large schemas.
 

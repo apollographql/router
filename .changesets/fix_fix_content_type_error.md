@@ -1,6 +1,6 @@
 ### Improve error message produced when subgraphs responses don't include an expected `content-type` header value ([Issue #5359](https://github.com/apollographql/router/issues/5359))
 
-To improve a common debuggability challenge when a subgraph response doesn't contain an expected `content-type` header value, the error message produced will include additional details about the error.
+To enhance debuggability when a subgraph response lacks an expected `content-type` header value, the error message now includes additional details.
 
 Examples:
 
