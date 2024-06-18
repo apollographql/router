@@ -35,7 +35,7 @@ impl CostHistogram {
 
     pub(crate) fn to_vec(&self) -> Vec<i64> {
         self.histogram
-            .iter_log(1, 2.0)
+            .iter_log(1, 1.1)
             .map(|v| v.count_since_last_iteration() as i64)
             .take(MAX_HISTOGRAM_BUCKETS)
             .collect()
@@ -55,6 +55,8 @@ impl Serialize for CostHistogram {
 
 #[cfg(test)]
 mod test {
+    use insta::assert_yaml_snapshot;
+
     use super::*;
 
     #[test]
@@ -66,18 +68,6 @@ mod test {
             hist.record(i as f64).unwrap();
         }
         assert_eq!(hist.histogram.len(), 1048575);
-
-        let v = hist.to_vec();
-        assert_eq!(v.len(), 21);
-
-        for (i, item) in v.iter().enumerate().take(21).skip(1) {
-            let pow_of_two = i as u32;
-            assert_eq!(
-                *item,
-                2_i64.pow(pow_of_two - 1),
-                "testing count of bucket {}",
-                i
-            );
-        }
+        assert_yaml_snapshot!(hist.to_vec());
     }
 }
