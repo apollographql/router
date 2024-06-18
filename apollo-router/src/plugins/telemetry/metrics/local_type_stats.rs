@@ -28,17 +28,35 @@ impl ResponseVisitor for LocalTypeStatRecorder {
     ) {
         match value {
             serde_json_bytes::Value::Array(items) => {
-                self.local_type_stats
-                    .entry(ty.to_string())
-                    .or_default()
-                    .local_per_field_stat
-                    .entry(field.name.to_string())
-                    .or_insert_with(|| LocalFieldStat {
-                        return_type: field.ty().inner_named_type().to_string(),
-                        list_lengths: ListLengthHistogram::new(),
-                    })
-                    .list_lengths
-                    .record(items.len());
+                let stat = match self.local_type_stats.get_mut(ty.as_str()) {
+                    Some(map) => map,
+                    None => {
+                        self.local_type_stats
+                            .insert(ty.to_string(), LocalTypeStat::default());
+                        self.local_type_stats
+                            .get_mut(ty.as_str())
+                            .expect("already inserted")
+                    }
+                };
+
+                let local_field_stat = match stat.local_per_field_stat.get_mut(field.name.as_str())
+                {
+                    Some(st) => st,
+                    None => {
+                        stat.local_per_field_stat.insert(
+                            field.name.to_string(),
+                            LocalFieldStat {
+                                return_type: field.ty().inner_named_type().to_string(),
+                                list_lengths: ListLengthHistogram::new(),
+                            },
+                        );
+                        stat.local_per_field_stat
+                            .get_mut(field.name.as_str())
+                            .expect("already inserted")
+                    }
+                };
+
+                local_field_stat.list_lengths.record(items.len());
 
                 for item in items {
                     self.visit_list_item(request, field.ty().inner_named_type(), field, item);
