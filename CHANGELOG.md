@@ -31,11 +31,11 @@ This PR adds description and units to standard instruments available in the rout
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5407
 
-### Add Extensions with_lock() to try and avoid timing issues ([PR #5360](https://github.com/apollographql/router/pull/5360))
+### Add `with_lock()` method to `Extensions` to facilitate avoidance of timing issues ([PR #5360](https://github.com/apollographql/router/pull/5360))
 
-It's easy to trip over issues when interacting with Extensions because we inadvertently hold locks for too long. This can be a source of bugs in the router and causes a lot of tests to be flaky.
+In the case that you necessitated writing custom Rust plugins, we've introduced [`with_lock()`](https://docs.rs/apollo-router/1.49.0/apollo_router/struct.ExtensionsMutex.html#method.with_lock) which explicitly restricts the lifetime of the `Extensions` lock.
 
-with_lock() avoids this kind of problem by explicitly restricting the lifetime of the Extensions lock.
+Without this method, it was too easy to run into issues interacting with the [`Extensions`](https://docs.rs/apollo-router/1.49.0-rc.1/apollo_router/struct.ExtensionsMutex.html) since we would inadvertently hold locks for too long. This was a source of bugs in the router and caused a lot of tests to be flaky.
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5360
 
