@@ -1348,6 +1348,9 @@ impl Telemetry {
                                             &local_stat_recorder,
                                         );
                                     }
+
+                                    // we need a new recorder on each event
+                                    local_stat_recorder = LocalTypeStatRecorder::new();
                                 } else {
                                     // If it's the last response
                                     if !response.has_next.unwrap_or(false) {
