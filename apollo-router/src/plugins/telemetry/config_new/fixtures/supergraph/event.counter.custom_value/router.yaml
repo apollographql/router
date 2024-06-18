@@ -7,7 +7,6 @@ telemetry:
           description: "count of requests"
           type: counter
           unit: "unit"
-          value: event_unit
-          attributes:
-            on.graphql.error:
-              on_graphql_error: true
+          value:
+            event_custom:
+              response_data: "$.price"

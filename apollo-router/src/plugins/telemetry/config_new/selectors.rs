@@ -211,21 +211,14 @@ pub(crate) enum RouterSelector {
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
 pub(crate) enum SupergraphValue {
     Standard(Standard),
-    Chunk(ChunkHolder),
+    Event(Event<SupergraphSelector>),
     Custom(SupergraphSelector),
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum ChunkHolder {
-    Chunk(ChunkValue),
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum ChunkValue {
-    Standard(Standard),
-    Custom(SupergraphSelector),
+pub(crate) enum EventHolder {
+    EventCustom(SupergraphSelector),
 }
 
 impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
@@ -233,15 +226,7 @@ impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
         match value {
             SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
             SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
-            SupergraphValue::Chunk(ChunkHolder::Chunk(ChunkValue::Standard(Standard::Unit))) => {
-                InstrumentValue::Chunked(Event::Unit)
-            }
-            SupergraphValue::Chunk(ChunkHolder::Chunk(ChunkValue::Standard(
-                Standard::Duration,
-            ))) => InstrumentValue::Chunked(Event::Duration),
-            SupergraphValue::Chunk(ChunkHolder::Chunk(ChunkValue::Custom(s))) => {
-                InstrumentValue::Chunked(Event::Custom(s.clone()))
-            }
+            SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
         }
     }
 }
