@@ -59,7 +59,7 @@ impl HttpClientServiceFactory {
         .unwrap();
 
         HttpClientServiceFactory {
-            service: service,
+            service,
             plugins: Arc::new(IndexMap::new()),
         }
     }
