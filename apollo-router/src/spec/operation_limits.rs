@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::collections::HashSet;
-use std::ops::AddAssign;
 
 use apollo_compiler::executable;
 use apollo_compiler::ExecutableDocument;
@@ -15,17 +14,6 @@ pub(crate) struct OperationLimits<T> {
     pub(crate) height: T,
     pub(crate) root_fields: T,
     pub(crate) aliases: T,
-}
-
-impl AddAssign for OperationLimits<u32> {
-    fn add_assign(&mut self, other: Self) {
-        *self = Self {
-            depth: self.depth + other.depth,
-            height: self.height + other.height,
-            root_fields: self.root_fields + other.root_fields,
-            aliases: self.aliases + other.aliases,
-        };
-    }
 }
 
 /// If it swims like a burrito and quacks like a burrito…
@@ -68,7 +56,7 @@ impl OperationLimits<bool> {
 
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
-    context_opt: &Option<crate::Context>,
+    query_metrics_in: &mut OperationLimits<u32>,
     configuration: &Configuration,
     query: &str,
     document: &ExecutableDocument,
@@ -90,13 +78,9 @@ pub(crate) fn check(
 
     let mut fragment_cache = HashMap::new();
     let measured = count(document, &mut fragment_cache, &operation.selection_set);
-    // If we have a context let's store measured for later use in metrics
-    if let Some(context) = context_opt {
-        context.extensions().with_lock(|mut lock| {
-            let current = lock.get_or_default_mut::<OperationLimits<u32>>();
-            *current += measured;
-        });
-    }
+
+    // Keep a record of the measurements
+    *query_metrics_in = measured;
 
     // If we don't have a configured limit, we can just return Ok
     if !max.map(|limit| limit.is_some()).any() {
