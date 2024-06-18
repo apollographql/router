@@ -544,7 +544,7 @@ impl SimultaneousPaths {
         match self.0.as_slice() {
             [] => f.write("<no path>"),
 
-            [first] => f.write_fmt(format_args!("{{ {first} }}")),
+            [first] => f.write_fmt(format_args!("{first}")),
 
             _ => {
                 f.write("{")?;
@@ -3031,7 +3031,13 @@ impl Display for OpGraphPath {
                     let node = &self.graph.graph()[tail];
                     let edge = &self.graph.graph()[e];
                     let label = edge.transition.to_string();
-                    write!(f, " --[{label}]--> {node}")
+                    if let Some(conditions) = &edge.conditions {
+                        write!(f, " --[{conditions} ⊢ {label}]--> {node}")
+                    } else if !matches!(edge.transition, QueryGraphEdgeTransition::SubgraphEnteringTransition) {
+                        write!(f, " --[{label}]--> {node}")
+                    } else {
+                        core::fmt::Result::Ok(())
+                    }
                 }
                 None => write!(f, " ({}) ", self.edge_triggers[i].as_ref()),
             })?;
