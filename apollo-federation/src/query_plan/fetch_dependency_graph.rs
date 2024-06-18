@@ -3856,6 +3856,7 @@ fn handle_requires(
             let inputs = inputs_for_require(
                 dependency_graph,
                 entity_type_position.clone(),
+                entity_type_schema,
                 query_graph_edge_id,
                 context,
                 false,
@@ -4028,6 +4029,7 @@ fn defer_context_for_conditions(base_context: &DeferContext) -> DeferContext {
 fn inputs_for_require(
     fetch_dependency_graph: &mut FetchDependencyGraph,
     entity_type_position: ObjectTypeDefinitionPosition,
+    entity_type_schema: ValidFederationSchema,
     query_graph_edge_id: EdgeIndex,
     context: &OpGraphPathContext,
     include_key_inputs: bool,
@@ -4112,7 +4114,7 @@ fn inputs_for_require(
         // should just use `entity_type` (that @interfaceObject type), not input type which will be an implementation the
         // subgraph does not know in that particular case.
         let mut key_inputs =
-            SelectionSet::for_composite_type(edge_conditions.schema.clone(), input_type.clone());
+            SelectionSet::for_composite_type(entity_type_schema, entity_type_position.into());
         key_inputs.add_selection_set(&key_condition)?;
 
         Ok((
@@ -4152,6 +4154,7 @@ fn add_post_require_inputs(
     let (inputs, key_inputs) = inputs_for_require(
         dependency_graph,
         entity_type_position.clone(),
+        entity_type_schema.clone(),
         query_graph_edge_id,
         context,
         true,
