@@ -567,7 +567,8 @@ pub(crate) enum SchemaError {
     Api(String),
 
     /// Connector error(s): {0}
-    Connector(String),
+    #[from(ignore)]
+    Connector(FederationError),
 }
 
 #[derive(Error, Display, Debug, PartialEq)]

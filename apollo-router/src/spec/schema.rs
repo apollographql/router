@@ -8,7 +8,13 @@ use std::time::Instant;
 use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::NodeStr;
+use apollo_federation::error::FederationError;
+use apollo_federation::sources::connect::expand::expand_connectors;
+use apollo_federation::sources::connect::expand::ExpansionResult;
+use apollo_federation::sources::connect::Connector;
 use http::Uri;
+use indexmap::IndexMap;
 use semver::Version;
 use semver::VersionReq;
 use sha2::Digest;
@@ -31,12 +37,12 @@ pub(crate) struct Schema {
     api_schema: Option<ApiSchema>,
     pub(crate) schema_id: Arc<String>,
 
-    #[allow(dead_code)]
-    pub(crate) subgraph_definition_and_names: HashMap<String, String>,
-
     /// If the schema contains connectors, we'll extract them and the inner
     /// supergraph schema here for use in the router factory and query planner.
     pub(crate) source: Option<Source>,
+
+    #[allow(dead_code)]
+    pub(crate) connectors_by_service_name: Option<IndexMap<NodeStr, Connector>>,
 }
 
 /// TODO: remove and use apollo_federation::Supergraph unconditionally
@@ -83,49 +89,72 @@ impl Schema {
 
     pub(crate) fn parse(sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
+
+        let mut api_schema: Option<ApiSchema> = None;
+        let mut connectors_by_service_name: Option<IndexMap<NodeStr, Connector>> = None;
+        let expansion = expand_connectors(sdl).map_err(SchemaError::Connector)?;
+        let sdl = match expansion {
+            ExpansionResult::Expanded {
+                ref raw_sdl,
+                api_schema: api,
+                connectors_by_service_name: connectors,
+            } => {
+                api_schema = Some(ApiSchema(api));
+                connectors_by_service_name = Some(connectors);
+                raw_sdl
+            }
+            ExpansionResult::Unchanged => sdl,
+        };
+
         let definitions = Self::parse_compiler_schema(sdl)?;
 
         let mut subgraphs = HashMap::new();
-        let mut subgraph_definition_and_names = HashMap::new();
 
         // TODO: error if not found?
         if let Some(join_enum) = definitions.get_enum("join__Graph") {
-            for (subgraph_name, name, url) in join_enum.values.values().filter_map(|value| {
-                let subgraph_name = value.value.to_string();
+            for (name, url) in join_enum.values.values().filter_map(|value| {
                 let join_directive = value
                     .directives
                     .iter()
                     .find(|directive| directive.name.eq_ignore_ascii_case("join__graph"))?;
                 let name = join_directive.argument_by_name("name")?.as_str()?;
                 let url = join_directive.argument_by_name("url")?.as_str()?;
-                Some((subgraph_name, name, url))
+                Some((name, url))
             }) {
-                if url.is_empty() {
-                    return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
-                }
-                #[cfg(unix)]
-                // there is no standard for unix socket URLs apparently
-                let url = if let Some(path) = url.strip_prefix("unix://") {
-                    // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
-                    // so a unix:// URL will not be parsed by http::Uri
-                    // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
-                    // It hides the socket path in a hex encoded authority that the unix socket connector will
-                    // know how to decode
-                    hyperlocal::Uri::new(path, "/").into()
+                let is_connector = connectors_by_service_name
+                    .as_ref()
+                    .map(|connectors| connectors.contains_key(&NodeStr::from(name)))
+                    .unwrap_or_default();
+
+                let url = if is_connector {
+                    Uri::from_static("http://unused")
                 } else {
+                    if url.is_empty() {
+                        return Err(SchemaError::MissingSubgraphUrl(name.to_string()));
+                    }
+                    #[cfg(unix)]
+                    // there is no standard for unix socket URLs apparently
+                    if let Some(path) = url.strip_prefix("unix://") {
+                        // there is no specified format for unix socket URLs (cf https://github.com/whatwg/url/issues/577)
+                        // so a unix:// URL will not be parsed by http::Uri
+                        // To fix that, hyperlocal came up with its own Uri type that can be converted to http::Uri.
+                        // It hides the socket path in a hex encoded authority that the unix socket connector will
+                        // know how to decode
+                        hyperlocal::Uri::new(path, "/").into()
+                    } else {
+                        Uri::from_str(url)
+                            .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
+                    }
+                    #[cfg(not(unix))]
                     Uri::from_str(url)
                         .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?
                 };
-                #[cfg(not(unix))]
-                let url = Uri::from_str(url)
-                    .map_err(|err| SchemaError::UrlParse(name.to_string(), err))?;
 
                 if subgraphs.insert(name.to_string(), url).is_some() {
                     return Err(SchemaError::Api(format!(
                         "must not have several subgraphs with same name '{name}'"
                     )));
                 }
-                subgraph_definition_and_names.insert(subgraph_name, name.to_string());
             }
         }
 
@@ -137,8 +166,11 @@ impl Schema {
 
         let implementers_map = definitions.implementers_map();
 
-        let source = Source::new(&definitions)
-            .map_err(|e| SchemaError::Connector(format!("Failed to create connectors: {}", e)))?;
+        let source = Source::new(&definitions).map_err(|_| {
+            SchemaError::Connector(FederationError::internal(
+                "TODO remove when we remove Source",
+            ))
+        })?;
 
         let legacy_only = config.experimental_query_planner_mode == QueryPlannerMode::Legacy
             && config.experimental_api_schema_generation_mode == ApiSchemaMode::Legacy;
@@ -155,10 +187,10 @@ impl Schema {
             supergraph,
             subgraphs,
             implementers_map,
-            api_schema: None,
+            api_schema,
             schema_id,
-            subgraph_definition_and_names,
             source,
+            connectors_by_service_name,
         })
     }
 
