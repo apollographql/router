@@ -17,6 +17,7 @@ use serde_json_bytes::Value;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
+use self::body::RouterBody;
 use self::service::MULTIPART_DEFER_CONTENT_TYPE_HEADER_VALUE;
 use self::service::MULTIPART_SUBSCRIPTION_CONTENT_TYPE_HEADER_VALUE;
 use super::supergraph;
@@ -30,9 +31,11 @@ use crate::Context;
 pub type BoxService = tower::util::BoxService<Request, Response, BoxError>;
 pub type BoxCloneService = tower::util::BoxCloneService<Request, Response, BoxError>;
 pub type ServiceResult = Result<Response, BoxError>;
+//#[deprecated]
 pub type Body = hyper::Body;
 pub type Error = hyper::Error;
 
+pub mod body;
 pub(crate) mod service;
 #[cfg(test)]
 mod tests;
@@ -159,11 +162,14 @@ impl TryFrom<supergraph::Request> for Request {
                 .parse()
                 .map_err(ParseError::InvalidUri)?;
 
-            http::Request::from_parts(parts, Body::empty())
+            http::Request::from_parts(parts, RouterBody::empty().into_inner())
         } else {
             http::Request::from_parts(
                 parts,
-                Body::from(serde_json::to_vec(&request).map_err(ParseError::SerializationError)?),
+                RouterBody::from(
+                    serde_json::to_vec(&request).map_err(ParseError::SerializationError)?,
+                )
+                .into_inner(),
             )
         };
         Ok(Self {
@@ -196,6 +202,7 @@ impl Response {
         self.response.body_mut().next().await
     }
 
+    #[deprecated]
     pub fn map<F>(self, f: F) -> Response
     where
         F: FnOnce(Body) -> Body,
@@ -245,7 +252,7 @@ impl Response {
 
         // let response = builder.body(once(ready(res)).boxed())?;
 
-        let response = builder.body(hyper::Body::from(serde_json::to_vec(&res)?))?;
+        let response = builder.body(RouterBody::from(serde_json::to_vec(&res)?).into_inner())?;
 
         Ok(Self { response, context })
     }
@@ -308,9 +315,7 @@ impl Response {
         }
 
         let response = builder
-            .body(hyper::Body::from(
-                serde_json::to_vec(&res).expect("can't fail"),
-            ))
+            .body(RouterBody::from(serde_json::to_vec(&res).expect("can't fail")).into_inner())
             .expect("can't fail");
 
         Self { response, context }
