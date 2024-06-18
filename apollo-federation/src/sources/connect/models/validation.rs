@@ -383,12 +383,12 @@ fn validate_field(
             && category != ObjectCategory::Query
         {
             errors.push(Message {
-            code: Code::EntityNotOnRootQuery,
-            message: format!("{coordinate} is invalid. Entities can only be declared on root `Query` fields.", coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, object_name, &field.name)),
-            locations: Location::from_node(entity_arg.location(), source_map)
-                .into_iter()
-                .collect(),
-        })
+                code: Code::EntityNotOnRootQuery,
+                message: format!("{coordinate} is invalid. Entities can only be declared on root `Query` fields.", coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, object_name, &field.name)),
+                locations: Location::from_node(entity_arg.location(), source_map)
+                    .into_iter()
+                    .collect(),
+            })
         }
     }
 
