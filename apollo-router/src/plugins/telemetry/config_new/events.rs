@@ -63,9 +63,9 @@ impl Events {
             .collect();
 
         RouterEvents {
-            request: self.router.attributes.request,
-            response: self.router.attributes.response,
-            error: self.router.attributes.error,
+            request: self.router.attributes.request.clone(),
+            response: self.router.attributes.response.clone(),
+            error: self.router.attributes.error.clone(),
             custom: custom_events,
         }
     }
@@ -92,9 +92,9 @@ impl Events {
             .collect();
 
         SupergraphEvents {
-            request: self.supergraph.attributes.request,
-            response: self.supergraph.attributes.response,
-            error: self.supergraph.attributes.error,
+            request: self.supergraph.attributes.request.clone(),
+            response: self.supergraph.attributes.response.clone(),
+            error: self.supergraph.attributes.error.clone(),
             custom: custom_events,
         }
     }
@@ -121,9 +121,9 @@ impl Events {
             .collect();
 
         SubgraphEvents {
-            request: self.subgraph.attributes.request,
-            response: self.subgraph.attributes.response,
-            error: self.subgraph.attributes.error,
+            request: self.subgraph.attributes.request.clone(),
+            response: self.subgraph.attributes.response.clone(),
+            error: self.subgraph.attributes.error.clone(),
             custom: custom_events,
         }
     }
@@ -147,9 +147,9 @@ where
     Attributes: Selectors<Request = Request, Response = Response> + Default,
     Sel: Selector<Request = Request, Response = Response> + Debug,
 {
-    request: EventLevel,
-    response: EventLevel,
-    error: EventLevel,
+    request: StandardEvent<Sel>,
+    response: StandardEvent<Sel>,
+    error: StandardEvent<Sel>,
     custom: Vec<CustomEvent<Request, Response, Attributes, Sel>>,
 }
 
@@ -161,7 +161,12 @@ impl Instrumented
     type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
-        if self.request != EventLevel::Off {
+        if self.request.level() != EventLevel::Off {
+            if let Some(condition) = self.request.condition() {
+                if !condition.evaluate_request_oneshot(request) {
+                    return;
+                }
+            }
             let mut attrs = HashMap::with_capacity(5);
             #[cfg(test)]
             let mut headers: indexmap::IndexMap<String, HeaderValue> = request
@@ -193,7 +198,7 @@ impl Instrumented
                 "http.request.body".to_string(),
                 format!("{:?}", request.router_request.body()),
             );
-            log_event(self.request, "router.request", attrs, "");
+            log_event(self.request.level(), "router.request", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -201,7 +206,12 @@ impl Instrumented
     }
 
     fn on_response(&self, response: &Self::Response) {
-        if self.response != EventLevel::Off {
+        if self.response.level() != EventLevel::Off {
+            if let Some(condition) = self.response.condition() {
+                if !condition.evaluate_response(response) {
+                    return;
+                }
+            }
             let mut attrs = HashMap::with_capacity(4);
 
             #[cfg(test)]
@@ -232,7 +242,7 @@ impl Instrumented
                 "http.response.body".to_string(),
                 format!("{:?}", response.response.body()),
             );
-            log_event(self.response, "router.response", attrs, "");
+            log_event(self.response.level(), "router.response", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_response(response);
@@ -240,10 +250,15 @@ impl Instrumented
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if self.error != EventLevel::Off {
+        if self.error.level() != EventLevel::Off {
+            if let Some(condition) = self.error.condition() {
+                if !condition.evaluate_error(error, ctx) {
+                    return;
+                }
+            }
             let mut attrs = HashMap::with_capacity(1);
             attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "router.error", attrs, "");
+            log_event(self.error.level(), "router.error", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -264,7 +279,7 @@ impl Instrumented
     type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &Self::Request) {
-        if self.request != EventLevel::Off {
+        if self.request.level() != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(5);
             #[cfg(test)]
             let mut headers: indexmap::IndexMap<String, HeaderValue> = request
@@ -295,13 +310,12 @@ impl Instrumented
                 "http.request.body".to_string(),
                 serde_json::to_string(request.supergraph_request.body()).unwrap_or_default(),
             );
-            log_event(self.request, "supergraph.request", attrs, "");
+            log_event(self.request.level(), "supergraph.request", attrs, "");
         }
-        if self.response != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .with_lock(|mut lock| lock.insert(SupergraphEventResponseLevel(self.response)));
+        if self.response.level() != EventLevel::Off {
+            request.context.extensions().with_lock(|mut lock| {
+                lock.insert(SupergraphEventResponseLevel(self.response.level()))
+            });
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -321,10 +335,10 @@ impl Instrumented
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if self.error != EventLevel::Off {
+        if self.error.level() != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(1);
             attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "supergraph.error", attrs, "");
+            log_event(self.error.level(), "supergraph.error", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -340,17 +354,16 @@ impl Instrumented
     type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
-        if self.request != EventLevel::Off {
+        if self.request.level() != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SubgraphEventRequestLevel(self.request)));
+                .with_lock(|mut lock| lock.insert(SubgraphEventRequestLevel(self.request.level())));
         }
-        if self.response != EventLevel::Off {
-            request
-                .context
-                .extensions()
-                .with_lock(|mut lock| lock.insert(SubgraphEventResponseLevel(self.response)));
+        if self.response.level() != EventLevel::Off {
+            request.context.extensions().with_lock(|mut lock| {
+                lock.insert(SubgraphEventResponseLevel(self.response.level()))
+            });
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -364,11 +377,11 @@ impl Instrumented
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
-        if self.error != EventLevel::Off {
+        if self.error.level() != EventLevel::Off {
             let mut attrs = HashMap::with_capacity(1);
 
             attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error, "subgraph.error", attrs, "");
+            log_event(self.error.level(), "subgraph.error", attrs, "");
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -380,11 +393,11 @@ impl Instrumented
 #[serde(deny_unknown_fields, default)]
 struct RouterEventsConfig {
     /// Log the router request
-    request: EventLevel,
+    request: StandardEvent<RouterSelector>,
     /// Log the router response
-    response: EventLevel,
+    response: StandardEvent<RouterSelector>,
     /// Log the router error
-    error: EventLevel,
+    error: StandardEvent<RouterSelector>,
 }
 
 #[derive(Clone)]
@@ -398,22 +411,54 @@ pub(crate) struct SubgraphEventRequestLevel(pub(crate) EventLevel);
 #[serde(deny_unknown_fields, default)]
 struct SupergraphEventsConfig {
     /// Log the supergraph request
-    request: EventLevel,
+    request: StandardEvent<SupergraphSelector>,
     /// Log the supergraph response
-    response: EventLevel,
+    response: StandardEvent<SupergraphSelector>,
     /// Log the supergraph error
-    error: EventLevel,
+    error: StandardEvent<SupergraphSelector>,
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 struct SubgraphEventsConfig {
     /// Log the subgraph request
-    request: EventLevel,
+    request: StandardEvent<SubgraphSelector>,
     /// Log the subgraph response
-    response: EventLevel,
+    response: StandardEvent<SubgraphSelector>,
     /// Log the subgraph error
-    error: EventLevel,
+    error: StandardEvent<SubgraphSelector>,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(untagged)]
+pub(crate) enum StandardEvent<T> {
+    Level(EventLevel),
+    Conditional {
+        level: EventLevel,
+        condition: Condition<T>,
+    },
+}
+
+impl<T> Default for StandardEvent<T> {
+    fn default() -> Self {
+        Self::Level(EventLevel::default())
+    }
+}
+
+impl<T> StandardEvent<T> {
+    pub(crate) fn level(&self) -> EventLevel {
+        match self {
+            Self::Level(level) => *level,
+            Self::Conditional { level, .. } => *level,
+        }
+    }
+
+    pub(crate) fn condition(&self) -> Option<&Condition<T>> {
+        match self {
+            Self::Level(_) => None,
+            Self::Conditional { condition, .. } => Some(condition),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, Default, PartialEq, Copy)]
