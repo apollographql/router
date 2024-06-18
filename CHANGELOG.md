@@ -70,9 +70,9 @@ HTTP fetch failed from 'test': subgraph response does not contain 'content-type'
 
 By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5223
 
-### Prevent formatting in hot path ([PR #5405](https://github.com/apollographql/router/pull/5405))
+### Performance improvements for demand control ([PR #5405](https://github.com/apollographql/router/pull/5405))
 
-Removes unneeded formatting in the hot path for demand control to improve performance.
+Removes unneeded logic in the hot path for our recently released public preview of [demand control](https://www.apollographql.com/docs/router/executing-operations/demand-control) feature to improve performance.
 
 By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5405
 
