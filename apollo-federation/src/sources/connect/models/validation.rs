@@ -19,7 +19,6 @@
 ## @connect
 
 - http:
-  - Has one path (GET, POST, etc)
   - URL path template valid syntax
   - body is valid syntax
 - selection
@@ -68,7 +67,12 @@ use itertools::Itertools;
 use url::Url;
 
 use crate::link::Link;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
@@ -292,11 +296,9 @@ fn validate_field(
         // TODO: return errors when a field is not resolvable by some combination of `@connect`
         return errors;
     };
-    let Some((http_verb, url)) = connect_directive
+    let Some((http_arg, http_arg_location)) = connect_directive
         .argument_by_name(&CONNECT_HTTP_ARGUMENT_NAME)
-        .and_then(
-            |http_arg| http_arg.as_object()?.first(), // TODO: Error if more than one verb is defined
-        )
+        .and_then(|arg| Some((arg.as_object()?, arg.location())))
     else {
         errors.push(Message {
             code: Code::GraphQLError,
@@ -311,12 +313,62 @@ fn validate_field(
         });
         return errors;
     };
-    let url_coordinate = connect_directive_url_coordinate(
-        connect_directive_name,
-        http_verb,
-        object_name,
-        &field.name,
-    );
+    let http_methods: Vec<_> = http_arg
+        .iter()
+        .filter(|(method, _)| {
+            [
+                CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME,
+            ]
+            .contains(method)
+        })
+        .collect();
+    if http_methods.len() > 1 {
+        errors.push(Message {
+            code: Code::MultipleHttpMethods,
+            message: format!(
+                "{coordinate} cannot specify more than one HTTP method.",
+                coordinate = connect_directive_http_coordinate(
+                    connect_directive_name,
+                    object_name,
+                    &field.name
+                ),
+            ),
+            locations: http_methods
+                .iter()
+                .flat_map(|(_, node)| Location::from_node(node.location(), source_map).into_iter())
+                .collect(),
+        });
+    } else if http_methods.is_empty() {
+        errors.push(Message {
+            code: Code::MissingHttpMethod,
+            message: format!(
+                "{coordinate} must specify an HTTP method.",
+                coordinate = connect_directive_http_coordinate(
+                    connect_directive_name,
+                    object_name,
+                    &field.name
+                ),
+            ),
+            locations: Location::from_node(http_arg_location, source_map)
+                .into_iter()
+                .collect(),
+        });
+    }
+    let http_arg_url = http_methods.first().map(|(http_method, url)| {
+        (
+            url,
+            connect_directive_url_coordinate(
+                connect_directive_name,
+                http_method,
+                object_name,
+                &field.name,
+            ),
+        )
+    });
     if let Some(source_name) = connect_directive
         .arguments
         .iter()
@@ -353,31 +405,35 @@ fn validate_field(
                 });
             }
         }
-        if parse_url(url, &url_coordinate, source_map).is_ok() {
-            errors.push(Message {
-                code: Code::AbsoluteConnectUrlWithSource,
-                message: format!(
-                    "{url_coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
-                ),
-                locations: Location::from_node(url.location(), source_map)
-                    .into_iter()
-                    .collect(),
-            });
+        if let Some((url, url_coordinate)) = http_arg_url {
+            if parse_url(url, &url_coordinate, source_map).is_ok() {
+                errors.push(Message {
+                    code: Code::AbsoluteConnectUrlWithSource,
+                    message: format!(
+                        "{url_coordinate} contains the absolute URL {url} while also specifying a `{CONNECT_SOURCE_ARGUMENT_NAME}`. Either remove the `{CONNECT_SOURCE_ARGUMENT_NAME}` argument or change the URL to a path.",
+                    ),
+                    locations: Location::from_node(url.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                });
+            }
         }
-    } else if let Some(err) = parse_url(url, &url_coordinate, source_map).err() {
-        // Attempt to detect if they were using a relative path without a source, no way to be perfect with this
-        if url
-            .as_str()
-            .is_some_and(|url| url.starts_with('/') || url.ends_with('/'))
-        {
-            errors.push(Message {
-                code: Code::RelativeConnectUrlWithoutSource,
-                message: format!(
-                    "{url_coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
-                locations: Location::from_node(url.location(), source_map).into_iter().collect()
-            });
-        } else {
-            errors.push(err);
+    } else if let Some((url, url_coordinate)) = http_arg_url {
+        if let Some(err) = parse_url(url, &url_coordinate, source_map).err() {
+            // Attempt to detect if they were using a relative path without a source, no way to be perfect with this
+            if url
+                .as_str()
+                .is_some_and(|url| url.starts_with('/') || url.ends_with('/'))
+            {
+                errors.push(Message {
+                    code: Code::RelativeConnectUrlWithoutSource,
+                    message: format!(
+                        "{url_coordinate} specifies the relative URL {url}, but no `{CONNECT_SOURCE_ARGUMENT_NAME}` is defined. Either use an absolute URL, or add a `@{source_directive_name}`."),
+                    locations: Location::from_node(url.location(), source_map).into_iter().collect()
+                });
+            } else {
+                errors.push(err);
+            }
         }
     }
     errors
@@ -444,13 +500,21 @@ fn connect_directive_name_coordinate(
     format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object}.{field}`")
 }
 
-fn connect_directive_url_coordinate(
+fn connect_directive_http_coordinate(
     connect_directive_name: &Name,
-    http_verb: &Name,
     object: &Name,
     field: &Name,
 ) -> String {
-    format!("`{http_verb}` in `@{connect_directive_name}({CONNECT_HTTP_ARGUMENT_NAME}:)` on `{object}.{field}`")
+    format!("`@{connect_directive_name}({CONNECT_HTTP_ARGUMENT_NAME}:)` on `{object}.{field}`")
+}
+
+fn connect_directive_url_coordinate(
+    connect_directive_name: &Name,
+    http_method: &Name,
+    object: &Name,
+    field: &Name,
+) -> String {
+    format!("`{http_method}` in `@{connect_directive_name}({CONNECT_HTTP_ARGUMENT_NAME}:)` on `{object}.{field}`")
 }
 
 fn source_name_argument_coordinate(source_directive_name: &DirectiveName) -> String {
@@ -662,6 +726,10 @@ pub enum Code {
     /// The subgraph doesn't import the `@source` directive. This isn't necessarily a problem, but
     /// is likely a mistake.
     NoSourceImport,
+    /// The `@connect` directive has multiple HTTP methods when only one is allowed.
+    MultipleHttpMethods,
+    /// The `@connect` directive is missing an HTTP method.
+    MissingHttpMethod,
 }
 
 impl Code {
@@ -684,176 +752,20 @@ pub enum Severity {
 
 #[cfg(test)]
 mod test_validate_source {
+    use std::fs::read_to_string;
+
     use insta::assert_snapshot;
+    use insta::glob;
 
     use super::*;
 
     #[test]
-    fn unparseable_url() {
-        let schema = include_str!("test_data/invalid_source_url.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @r###"The value "127.0.0.1" for `@source(baseURL:)` is not a valid URL: relative URL without a base."###);
-    }
-
-    #[test]
-    fn incorrect_scheme() {
-        let schema = include_str!("test_data/invalid_source_url_scheme.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @r###"The value "file://data.json" for `@source(baseURL:)` must be http or https, got file."###);
-    }
-
-    #[test]
-    fn invalid_chars_in_source_name() {
-        let schema = include_str!("test_data/invalid_chars_in_source_name.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @r###"There are invalid characters in `@source(name: "u$ers")`. Only alphanumeric and underscores are allowed."###);
-    }
-
-    #[test]
-    fn empty_source_name() {
-        let schema = include_str!("test_data/empty_source_name.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @"The value for `@source(name:)` can't be empty.");
-    }
-
-    #[test]
-    fn duplicate_source_name() {
-        let schema = include_str!("test_data/duplicate_source_name.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @r###"Every `@source(name:)` must be unique. Found duplicate name "v1"."###);
-    }
-
-    #[test]
-    fn multiple_errors() {
-        let schema = include_str!("test_data/multiple_errors.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 2);
-        assert_snapshot!(errors[0].message, @r###"The value "ftp://127.0.0.1" for `@source(baseURL:)` must be http or https, got ftp."###);
-        assert_snapshot!(errors[1].message, @r###"There are invalid characters in `@source(name: "u$ers")`. Only alphanumeric and underscores are allowed."###);
-    }
-
-    #[test]
-    fn source_directive_rename() {
-        let schema = include_str!("test_data/source_directive_rename.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @r###"The value "blahblahblah" for `@api(baseURL:)` is not a valid URL: relative URL without a base."###);
-    }
-
-    #[test]
-    fn connect_source_name_mismatch() {
-        let schema = include_str!("test_data/connect_source_name_mismatch.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @r###"`@connect(source: "v1")` on `Query.resources` does not match any defined sources. Did you mean `@source(name: "v2")`?"###);
-    }
-
-    #[test]
-    fn connect_source_undefined() {
-        let schema = include_str!("test_data/connect_source_undefined.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @r###"`@connect(source: "v1")` on `Query.resources` specifies a source, but none are defined. Try adding `@source(name: "v1")` to the schema."###);
-    }
-
-    #[test]
-    fn subscriptions_with_connectors() {
-        let schema = include_str!("test_data/subscriptions_with_connectors.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_snapshot!(errors[0].message, @"A subscription root type is not supported when using `@connect`.");
-    }
-
-    #[test]
-    fn missing_connect_on_query_field() {
-        let schema = include_str!("test_data/missing_connect_on_query_field.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code, Code::QueryFieldMissingConnect);
-        assert_snapshot!(errors[0].message, @r###"The field `Query.resources` has no `@connect` directive."###);
-    }
-
-    #[test]
-    fn renamed_connect_directive() {
-        let schema = include_str!("test_data/renamed_connect_directive.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code, Code::QueryFieldMissingConnect);
-        assert_snapshot!(errors[0].message, @r###"The field `Query.resources` has no `@data` directive."###);
-    }
-
-    #[test]
-    fn absolute_connect_url_with_source() {
-        let schema = include_str!("test_data/absolute_connect_url_with_source.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code, Code::AbsoluteConnectUrlWithSource);
-        assert_snapshot!(errors[0].message, @r###"`GET` in `@connect(http:)` on `Query.resources` contains the absolute URL "http://127.0.0.1/resources" while also specifying a `source`. Either remove the `source` argument or change the URL to a path."###);
-    }
-
-    #[test]
-    fn invalid_connect_url() {
-        let schema = include_str!("test_data/invalid_connect_url.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code, Code::InvalidUrl);
-        assert_snapshot!(errors[0].message, @r###"The value "127.0.0.1" for `GET` in `@connect(http:)` on `Query.resources` is not a valid URL: relative URL without a base."###);
-    }
-
-    #[test]
-    fn invalid_connect_url_scheme() {
-        let schema = include_str!("test_data/invalid_connect_url_scheme.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code, Code::SourceScheme);
-        assert_snapshot!(errors[0].message, @r###"The value "file://data.json" for `GET` in `@connect(http:)` on `Query.resources` must be http or https, got file."###);
-    }
-
-    #[test]
-    fn relative_connect_url_without_source() {
-        let schema = include_str!("test_data/relative_connect_url_without_source.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 1);
-        assert_eq!(errors[0].code, Code::RelativeConnectUrlWithoutSource);
-        assert_snapshot!(errors[0].message, @r###"`GET` in `@connect(http:)` on `Query.resources` specifies the relative URL "/resources", but no `source` is defined. Either use an absolute URL, or add a `@connect__source`."###);
-    }
-
-    #[test]
-    fn valid_connect_absolute_url() {
-        let schema = include_str!("test_data/valid_connect_absolute_url.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 0);
-    }
-
-    #[test]
-    fn missing_source_import() {
-        let schema = include_str!("test_data/missing_source_import.graphql");
-        let schema = Schema::parse(schema, "test.graphql").unwrap();
-        let errors = validate(schema);
-        assert_eq!(errors.len(), 2);
-        assert_eq!(errors[1].code, Code::NoSourceImport);
-        assert_snapshot!(errors[1].message, @r###"The `@source` directive is not imported. Try adding `@source` to `import` for `@link(url: "https://specs.apollo.dev/connect")`"###);
+    fn validation_tests() {
+        glob!("test_data/*.graphql", |path| {
+            let schema = read_to_string(path).unwrap();
+            let schema = Schema::parse(schema, "test.graphql").unwrap();
+            let errors = validate(schema);
+            assert_snapshot!(format!("{:?}", errors));
+        });
     }
 }

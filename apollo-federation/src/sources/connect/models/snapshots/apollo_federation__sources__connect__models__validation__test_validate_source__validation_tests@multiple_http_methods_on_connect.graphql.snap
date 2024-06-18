@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/models/test_data/multiple_http_methods_on_connect.graphql
+---
+[Message { code: MultipleHttpMethods, message: "`@connect(http:)` on `Query.resources` cannot specify more than one HTTP method.", locations: [Location { line: 10, column: 8 }..Location { line: 10, column: 25 }, Location { line: 11, column: 8 }..Location { line: 11, column: 27 }] }]
