@@ -301,11 +301,11 @@ impl InstrumentData {
             apollo.router.config.entity_cache,
             "$.preview_entity_cache",
             opt.enabled,
-            "$[?(@.enabled)]",
+            "$[?(@.subgraph.all.enabled)]",
             opt.subgraph.enabled,
-            "$[?(@.subgraphs..enabled)]",
+            "$[?(@.subgraph.subgraphs..enabled)]",
             opt.subgraph.ttl,
-            "$[?(@.subgraphs..ttl)]"
+            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]"
         );
         populate_config_instrument!(
             apollo.router.config.telemetry,

@@ -27,6 +27,7 @@ use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
@@ -67,9 +68,8 @@ pub(crate) struct Config {
     /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
     #[serde(default)]
     enabled: Option<bool>,
-    /// Per subgraph configuration
-    #[serde(default)]
-    subgraphs: HashMap<String, Subgraph>,
+
+    subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Entity caching evaluation metrics
     #[serde(default)]
@@ -77,24 +77,21 @@ pub(crate) struct Config {
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Subgraph {
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
-    #[serde(default)]
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    #[serde(default)]
     pub(crate) enabled: Option<bool>,
 
     /// Context key used to separate cache sections per user
-    #[serde(default)]
     pub(crate) private_id: Option<String>,
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -144,7 +141,12 @@ impl Plugin for EntityCache {
         };
 
         if init.config.redis.ttl.is_none()
-            && init.config.subgraphs.values().any(|s| s.ttl.is_none())
+            && init
+                .config
+                .subgraph
+                .subgraphs
+                .values()
+                .any(|s| s.ttl.is_none())
         {
             return Err("a TTL must be configured for all subgraphs or globally"
                 .to_string()
@@ -154,7 +156,7 @@ impl Plugin for EntityCache {
         Ok(Self {
             storage,
             enabled: init.config.enabled,
-            subgraphs: Arc::new(init.config.subgraphs),
+            subgraphs: Arc::new(init.config.subgraph.subgraphs),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
         })

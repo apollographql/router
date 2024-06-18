@@ -56,7 +56,12 @@ preview_entity_cache:
   redis:
     urls:
       - https://example.com
-  enabled: true
+  subgraph:
+    all:
+      enabled: true
+    subgraphs:
+      product:
+        enabled: true
 
 telemetry:
   instrumentation:

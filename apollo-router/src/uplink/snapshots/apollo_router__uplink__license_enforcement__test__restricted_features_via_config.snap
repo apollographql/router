@@ -19,7 +19,7 @@ Configuration yaml:
   .apq.router.cache.redis
 
 * Subgraph entity caching
-  .preview_entity_cache.enabled
+  .preview_entity_cache..enabled
 
 * Federated subscriptions
   .subscription.enabled
