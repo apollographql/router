@@ -187,33 +187,33 @@ impl Merger {
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         type_name.clone(),
-                        &value,
+                        value,
                     ),
                     ExtendedType::InputObject(value) => self.merge_input_object_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         type_name.clone(),
-                        &value,
+                        value,
                     ),
                     ExtendedType::Interface(value) => self.merge_interface_type(
                         &mut supergraph.types,
                         &metadata,
                         subgraph_name.clone(),
                         type_name.clone(),
-                        &value,
+                        value,
                     ),
                     ExtendedType::Object(value) => self.merge_object_type(
                         &mut supergraph.types,
                         &metadata,
                         subgraph_name.clone(),
                         type_name.clone(),
-                        &value,
+                        value,
                     ),
                     ExtendedType::Union(value) => self.merge_union_type(
                         &mut supergraph.types,
                         subgraph_name.clone(),
                         type_name.clone(),
-                        &value,
+                        value,
                     ),
                     ExtendedType::Scalar(_value) => {
                         // DO NOTHING
@@ -540,9 +540,8 @@ impl Merger {
                     .directives
                     .push(Node::new(join_field_directive));
 
-                // TODO: if count of join_field_directives === count of subgraphs
-                // and no directives have requires/provides/external, then remove
-                // all join field directives for space saving?
+                // TODO: implement needsJoinField to avoid adding join__field when unnecessary
+                // https://github.com/apollographql/federation/blob/0d8a88585d901dff6844fdce1146a4539dec48df/composition-js/src/merging/merge.ts#L1648
             }
         } else if let ExtendedType::Interface(intf) = existing_type {
             // TODO support interface object
