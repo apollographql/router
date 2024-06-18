@@ -3033,7 +3033,10 @@ impl Display for OpGraphPath {
                     let label = edge.transition.to_string();
                     if let Some(conditions) = &edge.conditions {
                         write!(f, " --[{conditions} ⊢ {label}]--> {node}")
-                    } else if !matches!(edge.transition, QueryGraphEdgeTransition::SubgraphEnteringTransition) {
+                    } else if !matches!(
+                        edge.transition,
+                        QueryGraphEdgeTransition::SubgraphEnteringTransition
+                    ) {
                         write!(f, " --[{label}]--> {node}")
                     } else {
                         core::fmt::Result::Ok(())
