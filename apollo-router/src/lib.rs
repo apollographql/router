@@ -19,6 +19,7 @@
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
+#![allow(deprecated)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
