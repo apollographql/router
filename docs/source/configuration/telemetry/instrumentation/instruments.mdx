@@ -114,6 +114,14 @@ telemetry:
           type: counter
           unit: count
           description: "my description"
+
+      graphql:
+        acme.graphql.list.lengths:
+          value:
+            list_length: value
+          type: histogram
+          unit: count
+          description: "my description"
 ```
 
 <Note>
@@ -209,14 +217,15 @@ telemetry:
 
 #### `value`
 
-The `value` of an instrument is the value which will be drawn from. This can be one of the following:
+The `value` of an instrument is the value which will be drawn from and is dependent on the stage that the instrument is defined at.
+This can be one of the following:
 
-* `duration` - the duration of the pipeline service.
-* `unit` - the number of times the pipeline service has been executed.
-* `custom` - a custom value extracted from the pipeline service. See [selectors](./selectors) for more information.
-* `event_duration` - the duration of an event in the pipeline service.
-* `event_unit` - the number of times an event in the pipeline service has been executed.
-* `event_custom` - a custom value extracted from the event in the pipeline service. See [selectors](./selectors) for more information.
+* `duration` - the duration of the pipeline service (router/supergraph/subgraph).
+* `unit` - the number of times the pipeline service has been executed (router/supergraph/subgraph/graphql).
+* `custom` - a custom value extracted from the pipeline service. See [selectors](./selectors) for more information. (router/supergraph/subgraph/graphql)
+* `event_duration` - the duration of an event in the pipeline service (supergraph).
+* `event_unit` - the number of times an event in the pipeline service has been executed (supergraph).
+* `event_custom` - a custom value extracted from the event in the pipeline service. See [selectors](./selectors) for more information (supergraph).
 
 ```yaml title="future.router.yaml"
 telemetry:
@@ -368,19 +377,29 @@ telemetry:
             eq:
               - "request timed out"
               - error: reason
+
+      graphql:
+        acme.graphql.list.lengths:
+          value:
+            list_length: value
+          type: histogram
+          unit: count
+          description: "my description"
+          attributes:
+            graphql.type.name: true
 ```
 
 ### Instrument configuration reference
 
-| Option                                | Values                                                                       | Default    | Description                                  |
-|---------------------------------------|------------------------------------------------------------------------------|------------|----------------------------------------------|
-| `<attribute-name>`                    |                                                                              |            | The name of the custom attribute.            |
-| `<instrument-name>`                   |                                                                              |            | The name of the custom instrument.           |
-| `attributes`                          | [standard attributes](./standard-attributes) or [selectors](./selectors)     |            | The attributes of the custom instrument.     |
-| `condition`                           | [conditions](./conditions)                                                   |            | The condition for mutating the instrument.   |
-| `default_requirement_level`           | `required`\|`recommended`                                                    | `required` | The default attribute requirement level.     |
-| `type`                                | `counter`\|`histogram`                                                       |            | The name of the custom instrument.           |
-| `unit`                                |                                                                              |            | A unit name, for example `By` or `{request}`.|
-| `description`                         |                                                                              |            | The description of the custom instrument.    |
-| `value`                               | `unit`\|`duration`\|`<custom>`                                               |            | The value of the instrument.                 |
+| Option                      | Values                                                                         | Default    | Description                                   |
+|-----------------------------|--------------------------------------------------------------------------------|------------|-----------------------------------------------|
+| `<attribute-name>`          |                                                                                |            | The name of the custom attribute.             |
+| `<instrument-name>`         |                                                                                |            | The name of the custom instrument.            |
+| `attributes`                | [standard attributes](./standard-attributes) or [selectors](./selectors)       |            | The attributes of the custom instrument.      |
+| `condition`                 | [conditions](./conditions)                                                     |            | The condition for mutating the instrument.    |
+| `default_requirement_level` | `required`\|`recommended`                                                      | `required` | The default attribute requirement level.      |
+| `type`                      | `counter`\|`histogram`                                                         |            | The name of the custom instrument.            |
+| `unit`                      |                                                                                |            | A unit name, for example `By` or `{request}`. |
+| `description`               |                                                                                |            | The description of the custom instrument.     |
+| `value`                     | `unit`\|`duration`\|`<custom>`\|`event_unit`\|`event_duration`\|`event_custom` |            | The value of the instrument.                  |
 
