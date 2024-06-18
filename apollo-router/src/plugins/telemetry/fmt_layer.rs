@@ -690,7 +690,7 @@ subgraph:
                 let attributes = vec![
                     KeyValue::new(
                         Key::from_static_str("http.response.body.size"),
-                        opentelemetry::Value::String("125".to_string().into()),
+                        opentelemetry::Value::I64(125),
                     ),
                     KeyValue::new(
                         Key::from_static_str("http.response.body"),

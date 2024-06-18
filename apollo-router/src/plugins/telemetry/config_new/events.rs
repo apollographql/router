@@ -619,6 +619,10 @@ where
 #[inline]
 pub(crate) fn log_event(level: EventLevel, kind: &str, attributes: Vec<KeyValue>, message: &str) {
     let span = Span::current();
+    #[cfg(test)]
+    let mut attributes = attributes;
+    #[cfg(test)]
+    attributes.sort_by(|a, b| a.key.partial_cmp(&b.key).unwrap());
     span.set_event_dyn_attributes(attributes);
 
     match level {
