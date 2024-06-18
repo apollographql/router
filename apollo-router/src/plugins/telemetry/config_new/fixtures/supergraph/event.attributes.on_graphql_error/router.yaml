@@ -7,7 +7,8 @@ telemetry:
           description: "count of requests"
           type: counter
           unit: "unit"
-          value: event_unit
+          value:
+            chunk: unit
           attributes:
             on.graphql.error:
               on_graphql_error: true
