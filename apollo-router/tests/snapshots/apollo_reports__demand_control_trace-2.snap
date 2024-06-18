@@ -11,7 +11,7 @@ header:
   uname: "[uname]"
   executable_schema_id: "[executable_schema_id]"
 traces_per_query:
-  "# -\nquery($dontSendValue:Boolean!,$sendValue:Boolean!){topProducts{name reviews@include(if:$sendValue){author{name}}reviews@include(if:$dontSendValue){author{name}}}}":
+  "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}":
     trace:
       - start_time:
           seconds: "[seconds]"
@@ -26,9 +26,7 @@ traces_per_query:
         unexecuted_operation_body: ""
         unexecuted_operation_name: ""
         details:
-          variables_json:
-            dontSendValue: ""
-            sendValue: "true"
+          variables_json: {}
           operation_name: ""
         client_name: ""
         client_version: ""
@@ -552,10 +550,10 @@ traces_per_query:
         forbidden_operation: false
         field_execution_weight: 1
         limits:
-          result: ""
-          strategy: ""
-          cost_estimated: 0
-          cost_actual: 0
+          result: COST_OK
+          strategy: static_estimated
+          cost_estimated: 230
+          cost_actual: 19
           depth: 0
           height: 0
           alias_count: 0
