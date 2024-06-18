@@ -80,7 +80,8 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 
 This fixes performance issues when looking up query plans for large schemas.
 
-⚠️ Because this feature changes the query plan cache key, distributed caches will need to be repopulated.
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5374
 
