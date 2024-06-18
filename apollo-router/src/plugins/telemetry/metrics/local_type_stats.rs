@@ -28,12 +28,6 @@ impl ResponseVisitor for LocalTypeStatRecorder {
     ) {
         match value {
             serde_json_bytes::Value::Array(items) => {
-                tracing::info!(
-                    "Recording {} -> {} -> {}",
-                    ty.to_string(),
-                    field.name.to_string(),
-                    items.len()
-                );
                 self.local_type_stats
                     .entry(ty.to_string())
                     .or_default()
