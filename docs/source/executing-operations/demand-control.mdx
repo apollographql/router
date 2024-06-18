@@ -421,7 +421,7 @@ You should iteratively improve your cost estimation model. Accurate cost estimat
 
 For example, you can generate a histogram for every field in your GraphQL schema: 
 
-```yaml title="Telemetry to generate histogram for every field in GraphQL schema"
+```yaml title="router.yaml"
 telemetry:
   exporters:
     metrics:
@@ -449,7 +449,7 @@ This configuration generates many metrics and may be too costly for your APM. To
 
 For this example, you can set a condition that restricts the instrument to an operation with a certain name. You can also show only histograms of list sizes of GraphQL fields:
 
-```yaml title="Example instrument for list sizes of specific operation"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -488,7 +488,7 @@ You can configure your APM to chart the histogram:
 
 The chart shows that the actual list sizes for the `allProducts` field are at most 100, so you should update your `static_estimated.list_size` to be 100:
 
-```yaml title="Update list_size to measured actual max list size"
+```yaml title="router.yaml"
 preview_demand_control:
   enabled: true
   mode: measure
@@ -525,7 +525,7 @@ After determining the cost estimation model of your operations, you should updat
 
 From the previous step, you can set the maximum cost to a value that allows all operations except `ExceptAll`:
 
-```yaml title="Example enforcing max cost"
+```yaml title="router.yaml"
 preview_demand_control:
   enabled: true
   mode: enforce               # Change measure->enforce 
