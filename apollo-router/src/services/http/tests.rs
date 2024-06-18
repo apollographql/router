@@ -44,6 +44,7 @@ use crate::plugin::PluginPrivate;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::services::http::HttpClientService;
 use crate::services::http::HttpRequest;
+use crate::services::router::body::get_body_bytes;
 use crate::services::supergraph;
 use crate::Configuration;
 use crate::Context;
@@ -134,7 +135,7 @@ async fn tls_self_signed() {
 
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -190,7 +191,7 @@ async fn tls_custom_root() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -300,7 +301,7 @@ async fn tls_client_auth() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -364,7 +365,7 @@ async fn test_subgraph_h2c() {
         .unwrap();
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -376,10 +377,7 @@ async fn test_subgraph_h2c() {
 // starts a local server emulating a subgraph returning compressed response
 async fn emulate_subgraph_compressed_response(listener: TcpListener) {
     async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
-        let body = hyper::body::to_bytes(request.into_body())
-            .await
-            .unwrap()
-            .to_vec();
+        let body = get_body_bytes(request.into_body()).await.unwrap().to_vec();
         let mut decoder = GzipDecoder::new(Vec::new());
         decoder.write_all(&body).await.unwrap();
         decoder.shutdown().await.unwrap();
@@ -445,7 +443,7 @@ async fn test_compressed_request_response_body() {
 
     assert_eq!(
         std::str::from_utf8(
-            &hyper::body::to_bytes(response.http_response.into_parts().1)
+            &get_body_bytes(response.http_response.into_parts().1)
                 .await
                 .unwrap()
         )
@@ -594,7 +592,7 @@ async fn test_unix_socket() {
 
     let make_service = make_service_fn(|_| async {
         Ok::<_, hyper::Error>(service_fn(|mut req: http::Request<Body>| async move {
-            let data = hyper::body::to_bytes(req.body_mut()).await.unwrap();
+            let data = get_body_bytes(req.body_mut()).await.unwrap();
             let body = std::str::from_utf8(&data).unwrap();
             println!("{:?}", body);
             let response = http::Response::builder()
