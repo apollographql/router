@@ -1,0 +1,19 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: result
+---
+statsReportKey: "# SomeQuery\nquery SomeQuery{noInputQuery{enumResponse}...on Query{...{basicResponseQuery{id}}}}"
+referencedFieldsByType:
+  BasicResponse:
+    fieldNames:
+      - id
+    isInterface: false
+  EverythingResponse:
+    fieldNames:
+      - enumResponse
+    isInterface: false
+  Query:
+    fieldNames:
+      - basicResponseQuery
+      - noInputQuery
+    isInterface: false

@@ -579,6 +579,170 @@ The default value of `experimental_parallelism` is `1`.
 In practice, you should tune `experimental_parallelism` based on metrics and benchmarks gathered from your router.
 
 
+<MinVersion version="1.49.0">
+
+### Enhanced operation signature normalization
+
+</MinVersion>
+
+<ExperimentalFeature />
+
+Apollo's legacy operation signature algorithm removes information about certain fields, such as input objects and aliases.
+This removal means some operations may have the same normalized signature though they are distinct operations.
+
+Beginning in v1.49.0, the router supports enhanced operation signature normalization.
+Enhanced normalization incorporates [input types](#input-types) and [aliases](#aliases) in signature generation.
+It also includes other improvements that make it more likely that two operations that only vary slightly have the same signature.
+
+Configure enhanced operation signature normalization in `router.yaml` with the `telemetry.apollo.experimental_apollo_signature_normalization_algorithm` option:
+
+```yaml title="router.yaml"
+telemetry: 
+  apollo:
+    experimental_apollo_signature_normalization_algorithm: enhanced # Default is legacy
+```
+
+Once you enable this configuration, operations with enhanced signatures appear with different operation IDs than they did previously in GraphOS Studio.
+
+#### Input types
+
+Enhanced signatures include input object type shapes, while still redacting any actual values.
+Legacy signatures [replace input object type with `{}`](/graphos/metrics/operation-signatures/#1-transform-in-line-argument-values).
+
+Given the following example operation:
+
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: { 
+      inputString: "foo", 
+      inputInt: 42, 
+      inputBoolean: null, 
+      nestedType: { someFloat: 4.2 }, 
+      enumInput: SOME_VALUE_1, 
+      nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ], 
+      listInput: [1, 2, 3] 
+    }
+  ) {
+    enumResponse
+  }
+}
+```
+
+The legacy normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(input: {}) {
+    enumResponse
+  }
+}
+```
+
+The enhanced normalization algorithm generates the following signature:
+
+```graphql {3-11} showLineNumbers=false
+query InlineInputTypeQuery {
+  inputTypeQuery(
+    input: {
+      inputString: "", 
+      inputInt: 0, 
+      inputBoolean: null, 
+      nestedType: {someFloat: 0}, 
+      enumInput: SOME_VALUE_1, 
+      nestedTypeList: [{someFloat: 0, someNullableFloat: null}], 
+      listInput: []
+    }
+  ) {
+      enumResponse
+  }
+}
+```
+
+#### Aliases
+
+Enhanced signatures include any field aliases used in an operation.
+Legacy signatures [remove aliases completely](/graphos/metrics/operation-signatures/#field-aliases), meaning the signature may be invalid if the same field was used with multiple aliases.
+
+Given the following example operation:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The legacy normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceResponse {
+      sharedField
+    }
+    interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+The enhanced normalization algorithm generates the following signature:
+
+```graphql showLineNumbers=false
+query AliasedQuery {
+  noInputQuery {
+    interfaceAlias1: interfaceResponse {
+      sharedField
+    }
+    interfaceAlias2: interfaceResponse {
+      ... on InterfaceImplementation1 {
+        implementation1Field
+      }
+      ... on InterfaceImplementation2 {
+        implementation2Field
+      }
+    }
+    inputFieldAlias1: objectTypeWithInputField(boolInput: true) {
+      stringField
+    }
+    inputFieldAlias2: objectTypeWithInputField(boolInput: false) {
+      intField
+    }
+  }
+}
+```
+
+
 ### Safelisting with persisted queries
 
 You can enhance your graph's security by maintaining a persisted query list (PQL), an operation safelist made by your first-party apps. As opposed to automatic persisted queries (APQ) where operations are automatically cached, operations must be preregistered to the PQL. Once configured, the router checks incoming requests against the PQL.

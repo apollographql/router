@@ -30,7 +30,6 @@ use strum::IntoEnumIterator;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::database::links_metadata;
-use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec_definition::SpecDefinition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::referencer::EnumTypeReferencers;
@@ -41,6 +40,11 @@ use crate::schema::referencer::Referencers;
 use crate::schema::referencer::ScalarTypeReferencers;
 use crate::schema::referencer::UnionTypeReferencers;
 use crate::schema::FederationSchema;
+
+// This is the "captures" trick for dealing with return position impl trait (RPIT), as noted in
+// https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html#the-captures-trick
+pub(crate) trait Captures<U> {}
+impl<T: ?Sized, U> Captures<U> for T {}
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
@@ -496,15 +500,6 @@ impl CompositeTypeDefinitionPosition {
     ) -> Option<&'schema ExtendedType> {
         self.get(schema).ok()
     }
-
-    pub(crate) fn is_interface_object_type(&self, schema: &Schema) -> bool {
-        let Ok(ExtendedType::Object(obj_type_def)) = self.get(schema) else {
-            return false;
-        };
-        obj_type_def
-            .directives
-            .has(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC.as_str())
-    }
 }
 
 impl TryFrom<CompositeTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
@@ -800,6 +795,23 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
         }
     }
 
+    pub(crate) fn fields<'a>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<
+        Box<dyn Iterator<Item = ObjectOrInterfaceFieldDefinitionPosition> + 'a>,
+        FederationError,
+    > {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
+                Ok(Box::new(type_.fields(schema)?.map(|field| field.into())))
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => {
+                Ok(Box::new(type_.fields(schema)?.map(|field| field.into())))
+            }
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -964,6 +976,13 @@ impl FieldDefinitionPosition {
             FieldDefinitionPosition::Union(field) => field.get(schema),
         }
     }
+
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        self.get(schema).ok()
+    }
 }
 
 impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition {
@@ -1026,6 +1045,13 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         }
     }
 
+    pub(crate) fn try_get<'schema>(
+        &self,
+        schema: &'schema Schema,
+    ) -> Option<&'schema Component<FieldDefinition>> {
+        self.get(schema).ok()
+    }
+
     pub(crate) fn insert_directive(
         &self,
         schema: &mut FederationSchema,
@@ -1041,6 +1067,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
         }
     }
 
+    /// Remove a directive application from this field.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -1112,6 +1139,7 @@ impl SchemaDefinitionPosition {
         Ok(())
     }
 
+    /// Remove directive applications with this name from the schema definition.
     pub(crate) fn remove_directive_name(
         &self,
         schema: &mut FederationSchema,
@@ -1129,6 +1157,7 @@ impl SchemaDefinitionPosition {
         Ok(())
     }
 
+    /// Remove a directive application from the schema definition.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -1378,6 +1407,7 @@ impl SchemaRootDefinitionPosition {
         )
     }
 
+    /// Remove this root definition from the schema.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(root_type) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -1588,6 +1618,7 @@ impl ScalarTypeDefinitionPosition {
         self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
+    /// Remove this scalar type from the schema. Also remove any fields or arguments that directly reference this type.
     pub(crate) fn remove(
         &self,
         schema: &mut FederationSchema,
@@ -1616,6 +1647,7 @@ impl ScalarTypeDefinitionPosition {
         Ok(Some(referencers))
     }
 
+    /// Remove this scalar type from the schema
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -1688,6 +1720,7 @@ impl ScalarTypeDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -1699,6 +1732,7 @@ impl ScalarTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -1795,6 +1829,23 @@ impl ObjectTypeDefinitionPosition {
 
     pub(crate) fn introspection_type_field(&self) -> ObjectFieldDefinitionPosition {
         self.field(name!("__type"))
+    }
+
+    // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
+    // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
+    // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
+    pub(crate) fn fields<'a>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<
+        impl Iterator<Item = ObjectFieldDefinitionPosition> + Captures<&'a ()>,
+        FederationError,
+    > {
+        Ok(self
+            .get(schema)?
+            .fields
+            .keys()
+            .map(|name| self.field(name.clone())))
     }
 
     pub(crate) fn get<'schema>(
@@ -1928,11 +1979,16 @@ impl ObjectTypeDefinitionPosition {
         )
     }
 
+    /// Remove the type from the schema, and remove any direct references to the type.
+    ///
+    /// This may make the schema invalid if a reference to the type is the only element inside the
+    /// reference's type: for example if `self` is the only member of a union `U`, `U` will become
+    /// empty, and thus invalid.
     pub(crate) fn remove(
         &self,
         schema: &mut FederationSchema,
     ) -> Result<Option<ObjectTypeReferencers>, FederationError> {
-        let Some(referencers) = self.remove_internal(schema)? else {
+        let Some(referencers) = schema.referencers.object_types.swap_remove(&self.type_name) else {
             return Ok(None);
         };
         for root in &referencers.schema_roots {
@@ -1947,14 +2003,16 @@ impl ObjectTypeDefinitionPosition {
         for type_ in &referencers.union_types {
             type_.remove_member(schema, &self.type_name);
         }
+        self.remove_internal(schema)?;
         Ok(Some(referencers))
     }
 
+    /// Remove the type from the schema, and recursively remove any references to the type.
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(referencers) = self.remove_internal(schema)? else {
+        let Some(referencers) = schema.referencers.object_types.swap_remove(&self.type_name) else {
             return Ok(());
         };
         for root in referencers.schema_roots {
@@ -1969,27 +2027,17 @@ impl ObjectTypeDefinitionPosition {
         for type_ in referencers.union_types {
             type_.remove_member_recursive(schema, &self.type_name)?;
         }
+        self.remove_internal(schema)?;
         Ok(())
     }
 
-    fn remove_internal(
-        &self,
-        schema: &mut FederationSchema,
-    ) -> Result<Option<ObjectTypeReferencers>, FederationError> {
+    fn remove_internal(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(type_) = self.try_get(&schema.schema) else {
-            return Ok(None);
+            return Ok(());
         };
         self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
         schema.schema.types.shift_remove(&self.type_name);
-        Ok(Some(
-            schema
-                .referencers
-                .object_types
-                .shift_remove(&self.type_name)
-                .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
-                })?,
-        ))
+        Ok(())
     }
 
     pub(crate) fn insert_directive(
@@ -2016,6 +2064,7 @@ impl ObjectTypeDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -2027,6 +2076,7 @@ impl ObjectTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -2377,6 +2427,10 @@ impl ObjectFieldDefinitionPosition {
         Ok(())
     }
 
+    /// Remove the field from its type.
+    ///
+    /// This may make the schema invalid if the field is part of an interface declared by the type,
+    /// or if this is the only field in a type.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(field) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -2390,6 +2444,9 @@ impl ObjectFieldDefinitionPosition {
         Ok(())
     }
 
+    /// Remove the field from its type. If the type becomes empty, remove the type as well.
+    ///
+    /// This may make the schema invalid if the field is part of an interface declared by the type.
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -2429,6 +2486,7 @@ impl ObjectFieldDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -2440,6 +2498,7 @@ impl ObjectFieldDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -2814,6 +2873,9 @@ impl ObjectFieldArgumentDefinitionPosition {
         )
     }
 
+    /// Remove this argument from the field.
+    ///
+    /// This can make the schema invalid if this is an implementing field of an interface.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(argument) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -2851,6 +2913,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -2862,6 +2925,7 @@ impl ObjectFieldArgumentDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -3103,6 +3167,23 @@ impl InterfaceTypeDefinitionPosition {
         self.field(INTROSPECTION_TYPENAME_FIELD_NAME.clone())
     }
 
+    // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
+    // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
+    // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
+    pub(crate) fn fields<'a>(
+        &'a self,
+        schema: &'a Schema,
+    ) -> Result<
+        impl Iterator<Item = InterfaceFieldDefinitionPosition> + Captures<&'a ()>,
+        FederationError,
+    > {
+        Ok(self
+            .get(schema)?
+            .fields
+            .keys()
+            .map(|name| self.field(name.clone())))
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -3234,11 +3315,19 @@ impl InterfaceTypeDefinitionPosition {
         )
     }
 
+    /// Remove this interface from the schema, and any direct references to the interface.
+    ///
+    /// This can make the schema invalid if this interface is referenced by a field that is the only
+    /// field of its type. Removing that reference will make its parent type empty.
     pub(crate) fn remove(
         &self,
         schema: &mut FederationSchema,
     ) -> Result<Option<InterfaceTypeReferencers>, FederationError> {
-        let Some(referencers) = self.remove_internal(schema)? else {
+        let Some(referencers) = schema
+            .referencers
+            .interface_types
+            .swap_remove(&self.type_name)
+        else {
             return Ok(None);
         };
         for type_ in &referencers.object_types {
@@ -3253,14 +3342,20 @@ impl InterfaceTypeDefinitionPosition {
         for field in &referencers.interface_fields {
             field.remove(schema)?;
         }
+        self.remove_internal(schema)?;
         Ok(Some(referencers))
     }
 
+    /// Remove this interface from the schema, and recursively remove references to the interface.
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(referencers) = self.remove_internal(schema)? else {
+        let Some(referencers) = schema
+            .referencers
+            .interface_types
+            .swap_remove(&self.type_name)
+        else {
             return Ok(());
         };
         for type_ in referencers.object_types {
@@ -3275,27 +3370,17 @@ impl InterfaceTypeDefinitionPosition {
         for field in referencers.interface_fields {
             field.remove_recursive(schema)?;
         }
+        self.remove_internal(schema)?;
         Ok(())
     }
 
-    fn remove_internal(
-        &self,
-        schema: &mut FederationSchema,
-    ) -> Result<Option<InterfaceTypeReferencers>, FederationError> {
+    fn remove_internal(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(type_) = self.try_get(&schema.schema) else {
-            return Ok(None);
+            return Ok(());
         };
         self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
         schema.schema.types.shift_remove(&self.type_name);
-        Ok(Some(
-            schema
-                .referencers
-                .interface_types
-                .shift_remove(&self.type_name)
-                .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!("Schema missing referencers for type \"{}\"", self),
-                })?,
-        ))
+        Ok(())
     }
 
     pub(crate) fn insert_directive(
@@ -3322,6 +3407,7 @@ impl InterfaceTypeDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -3333,6 +3419,7 @@ impl InterfaceTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -3613,6 +3700,10 @@ impl InterfaceFieldDefinitionPosition {
         )
     }
 
+    /// Remove this field from its interface.
+    ///
+    /// This may make the schema invalid if the field is required by a parent interface, or if the
+    /// field is the only field on its interface.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(field) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -3626,6 +3717,10 @@ impl InterfaceFieldDefinitionPosition {
         Ok(())
     }
 
+    /// Remove this field from its interface. If this is the only field on its interface, remove
+    /// the interface as well.
+    ///
+    /// This may make the schema invalid if the field is required by a parent interface.
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -3665,6 +3760,7 @@ impl InterfaceFieldDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -3676,6 +3772,7 @@ impl InterfaceFieldDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -4049,6 +4146,11 @@ impl InterfaceFieldArgumentDefinitionPosition {
             &mut schema.referencers,
         )
     }
+
+    /// Remove this argument from its field definition.
+    ///
+    /// This can make the schema invalid if this argument is required and also declared in
+    /// implementers of this interface.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(argument) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -4088,6 +4190,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -4099,6 +4202,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -4458,6 +4562,10 @@ impl UnionTypeDefinitionPosition {
         self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
+    /// Remove this union from the schema, and remove any direct references to the union.
+    ///
+    /// This can make the schema invalid if the fields referencing the union are the only fields of
+    /// their type. That would cause the type definition to become empty.
     pub(crate) fn remove(
         &self,
         schema: &mut FederationSchema,
@@ -4474,6 +4582,7 @@ impl UnionTypeDefinitionPosition {
         Ok(Some(referencers))
     }
 
+    /// Remove this union from the schema, and recursively remove references to the union.
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -4534,6 +4643,7 @@ impl UnionTypeDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -4545,6 +4655,7 @@ impl UnionTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -4906,6 +5017,10 @@ impl EnumTypeDefinitionPosition {
         self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
+    /// Remove this enum from the schema, and remove its direct references.
+    ///
+    /// This can make the schema invalid if a field referencing the enum is the last of field in
+    /// its type. That would cause the type to become empty.
     pub(crate) fn remove(
         &self,
         schema: &mut FederationSchema,
@@ -4934,6 +5049,7 @@ impl EnumTypeDefinitionPosition {
         Ok(Some(referencers))
     }
 
+    /// Remove this enum from the schema, and recursively remove its references.
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -5006,6 +5122,7 @@ impl EnumTypeDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -5017,6 +5134,7 @@ impl EnumTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -5194,6 +5312,10 @@ impl EnumValueDefinitionPosition {
         self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
+    /// Remove this value from the enum definition.
+    ///
+    /// This can make the schema invalid if the enum value is used in any directive applications,
+    /// or if the value is the only value in its enum definition.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(value) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -5207,6 +5329,8 @@ impl EnumValueDefinitionPosition {
         Ok(())
     }
 
+    /// Remove this value from the enum definition. If it is the only value in the enum,
+    /// recursively remove the enum from the schema as well.
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -5246,6 +5370,7 @@ impl EnumValueDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(value) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -5257,6 +5382,7 @@ impl EnumValueDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -5487,6 +5613,9 @@ impl InputObjectTypeDefinitionPosition {
         )
     }
 
+    /// Remove this input type from the schema.
+    ///
+    /// TODO document validity
     pub(crate) fn remove(
         &self,
         schema: &mut FederationSchema,
@@ -5509,6 +5638,9 @@ impl InputObjectTypeDefinitionPosition {
         Ok(Some(referencers))
     }
 
+    /// Remove this input type from the schema.
+    ///
+    /// TODO document validity
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -5575,6 +5707,7 @@ impl InputObjectTypeDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(type_) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -5586,6 +5719,7 @@ impl InputObjectTypeDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -5771,6 +5905,9 @@ impl InputObjectFieldDefinitionPosition {
         )
     }
 
+    /// Remove this field from its input object type.
+    ///
+    /// TODO document validity
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(field) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -5784,6 +5921,9 @@ impl InputObjectFieldDefinitionPosition {
         Ok(())
     }
 
+    /// Remove this field from its input object type.
+    ///
+    /// TODO document validity
     pub(crate) fn remove_recursive(
         &self,
         schema: &mut FederationSchema,
@@ -5823,6 +5963,7 @@ impl InputObjectFieldDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(field) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -5834,6 +5975,7 @@ impl InputObjectFieldDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -6167,6 +6309,7 @@ impl DirectiveDefinitionPosition {
         )
     }
 
+    /// Remove the directive definition and any applications.
     pub(crate) fn remove(
         &self,
         schema: &mut FederationSchema,
@@ -6389,6 +6532,8 @@ impl DirectiveArgumentDefinitionPosition {
         )
     }
 
+    /// Remove this argument definition from its directive. Any applications of the directive that
+    /// use this argument will become invalid.
     pub(crate) fn remove(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
         let Some(argument) = self.try_get(&schema.schema) else {
             return Ok(());
@@ -6426,6 +6571,7 @@ impl DirectiveArgumentDefinitionPosition {
         self.insert_directive_name_references(&mut schema.referencers, &name)
     }
 
+    /// Remove a directive application from this position by name.
     pub(crate) fn remove_directive_name(&self, schema: &mut FederationSchema, name: &str) {
         let Some(argument) = self.try_make_mut(&mut schema.schema) else {
             return;
@@ -6437,6 +6583,7 @@ impl DirectiveArgumentDefinitionPosition {
             .retain(|other_directive| other_directive.name != name);
     }
 
+    /// Remove a directive application.
     pub(crate) fn remove_directive(
         &self,
         schema: &mut FederationSchema,
@@ -6845,5 +6992,82 @@ impl FederationSchema {
             links_metadata: metadata.map(Box::new),
             subgraph_metadata: None,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn remove_type_recursive() {
+        let schema = r#"
+            type User {
+                id: ID!
+                profile: UserProfile
+            }
+            type UserProfile {
+                username: String!
+            }
+            type Query {
+                me: User
+            }
+        "#;
+
+        let mut schema = FederationSchema::new(
+            Schema::parse_and_validate(schema, "schema.graphql")
+                .unwrap()
+                .into_inner(),
+        )
+        .unwrap();
+
+        let position = ObjectTypeDefinitionPosition::new(name!("UserProfile"));
+        position.remove_recursive(&mut schema).unwrap();
+
+        insta::assert_snapshot!(schema.schema(), @r#"
+            type User {
+              id: ID!
+            }
+
+            type Query {
+              me: User
+            }
+        "#);
+    }
+
+    #[test]
+    fn remove_interface_recursive() {
+        let schema = r#"
+            type User {
+                id: ID!
+                profile: UserProfile
+            }
+            interface UserProfile {
+                username: String!
+            }
+            type Query {
+                me: User
+            }
+        "#;
+
+        let mut schema = FederationSchema::new(
+            Schema::parse_and_validate(schema, "schema.graphql")
+                .unwrap()
+                .into_inner(),
+        )
+        .unwrap();
+
+        let position = InterfaceTypeDefinitionPosition::new(name!("UserProfile"));
+        position.remove_recursive(&mut schema).unwrap();
+
+        insta::assert_snapshot!(schema.schema(), @r#"
+            type User {
+              id: ID!
+            }
+
+            type Query {
+              me: User
+            }
+        "#);
     }
 }

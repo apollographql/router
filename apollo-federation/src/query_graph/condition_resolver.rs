@@ -43,7 +43,7 @@ pub(crate) enum UnsatisfiedConditionReason {
 impl ConditionResolution {
     pub(crate) fn no_conditions() -> Self {
         Self::Satisfied {
-            cost: 0,
+            cost: 0.0,
             path_tree: None,
         }
     }
