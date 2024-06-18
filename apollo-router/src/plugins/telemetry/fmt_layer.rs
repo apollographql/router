@@ -578,15 +578,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("another".into(), 2.into());
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
-                let mut attributes = Vec::new();
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body.size"),
-                    opentelemetry::Value::String("125".to_string().into()),
-                ));
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body"),
-                    opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
-                ));
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::String("125".to_string().into()),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
@@ -630,15 +631,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("another".into(), 2.into());
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
-                let mut attributes = Vec::new();
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body.size"),
-                    opentelemetry::Value::String("125".to_string().into()),
-                ));
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body"),
-                    opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
-                ));
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::String("125".to_string().into()),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
@@ -685,15 +687,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
 
-                let mut attributes = Vec::new();
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body.size"),
-                    opentelemetry::Value::String("125".to_string().into()),
-                ));
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body"),
-                    opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
-                ));
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::String("125".to_string().into()),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
@@ -823,15 +826,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
 
-                let mut attributes = Vec::new();
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body.size"),
-                    opentelemetry::Value::String("125".to_string().into()),
-                ));
-                attributes.push(KeyValue::new(
-                    Key::from_static_str("http.response.body"),
-                    opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
-                ));
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::String("125".to_string().into()),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
