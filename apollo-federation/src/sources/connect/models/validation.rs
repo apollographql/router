@@ -67,6 +67,7 @@ use itertools::Itertools;
 use url::Url;
 
 use crate::link::Link;
+use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
@@ -369,6 +370,28 @@ fn validate_field(
             ),
         )
     });
+
+    if let Some(entity_arg) = connect_directive
+        .arguments
+        .iter()
+        .find(|arg| arg.name == CONNECT_ENTITY_ARGUMENT_NAME)
+    {
+        if entity_arg
+            .value
+            .to_bool()
+            .is_some_and(|entity_arg_value| entity_arg_value)
+            && category != ObjectCategory::Query
+        {
+            errors.push(Message {
+                code: Code::EntityNotOnRootQuery,
+                message: format!("{coordinate} is invalid. Entities can only be declared on root `Query` fields.", coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, object_name, &field.name)),
+                locations: Location::from_node(entity_arg.location(), source_map)
+                    .into_iter()
+                    .collect(),
+            })
+        }
+    }
+
     if let Some(source_name) = connect_directive
         .arguments
         .iter()
@@ -498,6 +521,14 @@ fn connect_directive_name_coordinate(
     field: &Name,
 ) -> String {
     format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object}.{field}`")
+}
+
+fn connect_directive_entity_argument_coordinate(
+    connect_directive_entity_argument: &Name,
+    object: &Name,
+    field: &Name,
+) -> String {
+    format!("`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}:)` on `{object}.{field}`")
 }
 
 fn connect_directive_http_coordinate(
@@ -730,6 +761,8 @@ pub enum Code {
     MultipleHttpMethods,
     /// The `@connect` directive is missing an HTTP method.
     MissingHttpMethod,
+    // The `entity` argument should only be used on the root `Query` field
+    EntityNotOnRootQuery,
 }
 
 impl Code {
