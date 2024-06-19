@@ -1,0 +1,9 @@
+description: Entity cache preview configuration format is changing
+actions:
+  - type: move
+    from: preview_entity_cache.enabled
+    to: preview_entity_cache.subgraph.all.enabled
+  - type: move
+    from: preview_entity_cache.subgraphs
+    to: preview_entity_cache.subgraph.subgraphs
+
