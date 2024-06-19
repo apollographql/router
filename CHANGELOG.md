@@ -33,6 +33,9 @@ By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/p
 
 # [1.49.0] - 2024-06-18
 
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
 ## 🚀 Features
 
 ### Override tracing span names using custom span selectors ([Issue #5261](https://github.com/apollographql/router/issues/5261))
@@ -106,9 +109,6 @@ By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographq
 ### Skip hashing the entire schema on every query plan cache lookup ([PR #5374](https://github.com/apollographql/router/pull/5374))
 
 This fixes performance issues when looking up query plans for large schemas.
-
-> [!IMPORTANT]
-> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5374
 
