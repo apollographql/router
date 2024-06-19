@@ -6,6 +6,13 @@ rhai:
   main: test_callbacks.rhai
 include_subgraph_errors:
   all: true
+preview_demand_control:
+  mode: measure
+  enabled: false
+  strategy:
+    static_estimated:
+      max: 1500
+      list_size: 10
 telemetry:
   exporters:
     tracing:

@@ -188,12 +188,20 @@ impl Operation {
 /// - For the type, stores the schema and the position in that schema instead of just the
 ///   `NamedType`.
 /// - Stores selections in a map so they can be normalized efficiently.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct SelectionSet {
     pub(crate) schema: ValidFederationSchema,
     pub(crate) type_position: CompositeTypeDefinitionPosition,
     pub(crate) selections: Arc<SelectionMap>,
 }
+
+impl PartialEq for SelectionSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.selections == other.selections
+    }
+}
+
+impl Eq for SelectionSet {}
 
 mod selection_map {
     use std::borrow::Cow;
