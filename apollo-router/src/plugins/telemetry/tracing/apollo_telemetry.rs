@@ -1222,7 +1222,7 @@ mod test {
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData, LightSpanData, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_STRATEGY, extract_limits};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData, LightSpanData, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_STRATEGY, extract_limits, APOLLO_PRIVATE_QUERY_ALIASES, APOLLO_PRIVATE_QUERY_DEPTH, APOLLO_PRIVATE_QUERY_HEIGHT, APOLLO_PRIVATE_QUERY_ROOT_FIELDS};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1592,9 +1592,29 @@ mod test {
             APOLLO_PRIVATE_COST_STRATEGY,
             Value::String("static_estimated".into()),
         ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_ALIASES,
+            Value::I64(0.into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_DEPTH,
+            Value::I64(5.into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_HEIGHT,
+            Value::I64(7.into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_ROOT_FIELDS,
+            Value::I64(1.into()),
+        ));
         let limits = extract_limits(&span);
         assert_eq!(limits.result, "OK");
         assert_eq!(limits.cost_estimated, 9);
         assert_eq!(limits.cost_actual, 6);
+        assert_eq!(limits.alias_count, 0);
+        assert_eq!(limits.depth, 5);
+        assert_eq!(limits.height, 7);
+        assert_eq!(limits.root_field_count, 1);
     }
 }
