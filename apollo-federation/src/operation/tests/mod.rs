@@ -1,7 +1,8 @@
 use std::sync::Arc;
+
 use apollo_compiler::name;
-use apollo_compiler::ExecutableDocument;
 use apollo_compiler::schema::Schema;
+use apollo_compiler::ExecutableDocument;
 use indexmap::IndexSet;
 
 use super::normalize_operation;

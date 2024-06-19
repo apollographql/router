@@ -1371,8 +1371,8 @@ impl Operation {
 
 #[cfg(test)]
 mod tests {
-    use crate::operation::tests::*;
     use super::*;
+    use crate::operation::tests::*;
 
     macro_rules! assert_without_fragments {
         ($operation: expr, @$expected: literal) => {{
