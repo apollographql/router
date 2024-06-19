@@ -50,7 +50,7 @@ telemetry:
     spans:
       router:
         otel.name:
-           static: router # Override the span name to router 
+           static: router # Override the span name to router
 ```
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5365
@@ -71,7 +71,7 @@ By [@garypen](https://github.com/garypen) in https://github.com/apollographql/ro
 
 ### Add support for `unix_ms_now` in Rhai customizations ([Issue #5182](https://github.com/apollographql/router/issues/5182))
 
-Rhai customizations can now use the `unix_ms_now()` function to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+Rhai customizations can now use the `unix_ms_now()` function to obtain the current Unix timestamp in milliseconds since the Unix epoch.
 
 For example:
 
@@ -233,7 +233,7 @@ In the short-term, benefits include:
 - Additional spans that were previously not included in Studio traces, such as query parsing, planning, execution, and more.
 - Additional metadata such as subgraph fetch details, router idle / busy timing, and more.
 
-Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.  
+Long-term, we see this as a strategic enhancement to consolidate these two disparate tracing systems.
 This will pave the way for future enhancements to more easily plug into the Studio trace visualizer.
 
 #### Configuration
