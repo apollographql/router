@@ -3019,6 +3019,11 @@ impl Display for OpGraphPath {
             return write!(f, "_");
         }
         if head.root_kind.is_some() {
+            // TODO it appears that we are missing this extra edge?
+            // if (isRoot && idx == 0) {
+            //   return edge.tail.toString();
+            // }
+        } else {
             write!(f, "{head}")?;
         }
         self.edges
