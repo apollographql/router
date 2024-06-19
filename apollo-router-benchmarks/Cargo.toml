@@ -1,6 +1,6 @@
 [package]
 name = "apollo-router-benchmarks"
-version = "1.49.1-rc.0"
+version = "1.49.1"
 authors = ["Apollo Graph, Inc. <packages@apollographql.com>"]
 edition = "2021"
 license = "Elastic-2.0"

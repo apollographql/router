@@ -4,6 +4,33 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.49.1] - 2024-06-19
+
+> [!IMPORTANT]
+> If you have enabled [Distributed query plan caching](https://www.apollographql.com/docs/router/configuration/distributed-caching/#distributed-query-plan-caching), this release changes the hashing algorithm used for the cache keys.  On account of this, you should anticipate additional cache regeneration cost when updating between these versions while the new hashing algorithm comes into service.
+
+## 🔒 Security
+
+### Replace dependency included in security advisory ([Issue #5484](https://github.com/apollographql/router/issues/5484))
+
+This removes our use of a dependency that was cited in security advisories [RUSTSEC-2024-0344](https://rustsec.org/advisories/RUSTSEC-2024-0344) and [GHSA-x4gp-pqpj-f43q](https://github.com/advisories/GHSA-x4gp-pqpj-f43q).
+
+We have carefully analyzed our usages and determined that **Apollo Router is not impacted**.  We only relied on different functions from the same dependency that were easily replaced.  Despite lack of impact, we have opted to remove the dependency entirely out of an abundance of caution.  This not only clears the warning on our side immediately, but also provides a clear path forward in the event that this shows up in any of our user's own scans.
+
+Users may upgrade at their own discretion, though as it was determined there is no impact, upgrading is not being explicitly recommended.
+
+See [the corresponding GitHub issue](https://github.com/apollographql/router/issues/5484).
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5483
+
+## 🐛 Fixes
+
+### Update to Federation v2.8.1 ([PR #5483](https://github.com/apollographql/router/pull/5483))
+
+The above security fix was in `router-bridge` which had already received a Federation version bump.  This bump takes Federation to v2.8.1, which fixes a performance-related matter in *composition*.  However, it does **not** impact query planning, which means this particular update is a no-op and this is simply a symbolic bump of the number itself, rather than any functional change.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5483
+
 # [1.49.0] - 2024-06-18
 
 ## 🚀 Features
