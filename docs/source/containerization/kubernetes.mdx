@@ -241,7 +241,7 @@ helm install --namespace <router-namespace> --set managedFederation.apiKey="<gra
 
 ## Deploying in Kubernetes with Istio
 
-The [Istio](https://istio.io/) is a service mesh for Kubernetes which is often installed on a Kubernetes cluster for its traffic-shaping abilities.  While we do not specifically recommend or support Istio, nor do we provide specific instructions for installing the Router in a cluster with Istio, there is a known consideration to make when configuring Istio.
+[Istio](https://istio.io/) is a service mesh for Kubernetes which is often installed on a cluster for its traffic-shaping abilities.  While we do not specifically recommend or support Istio, nor do we provide specific instructions for installing the Router in a cluster with Istio, there is a known consideration to make when configuring Istio.
 
 Consideration and additional configuration may be necessary as a consequence of how Istio does its sidecar injection.  Without additional configuration, Istio may attempt to reconfigure the network interface at the same time the router is starting, which will result in a failure to start.
 
