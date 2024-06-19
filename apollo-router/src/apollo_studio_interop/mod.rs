@@ -30,8 +30,11 @@ use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 
+use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
+use crate::spec::Fragments;
+use crate::spec::Selection as SpecSelection;
 
 /// The stats for a single execution of an input object field.
 #[derive(Clone, Default, Debug, Serialize)]
@@ -55,6 +58,8 @@ pub(crate) struct AggregatedInputObjectFieldStats {
     pub(crate) undefined_reference: u64,
 }
 
+type ReferencedEnums = HashMap<String, HashSet<String>>;
+
 /// The result of the generate_extended_references function which contains input object field and
 /// enum value stats for a single execution.
 #[derive(Clone, Default, Debug, Serialize)]
@@ -62,7 +67,7 @@ pub(crate) struct ExtendedReferenceStats {
     /// A map of parent type to a map of field name to stats
     pub(crate) referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     /// A map of enum name to a set of enum values that were referenced
-    pub(crate) referenced_enums: HashMap<String, HashSet<String>>,
+    pub(crate) referenced_enums: ReferencedEnums,
 }
 
 impl ExtendedReferenceStats {
@@ -160,6 +165,7 @@ impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
 }
 
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
+use crate::spec::Query;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
@@ -277,6 +283,118 @@ pub(crate) fn generate_extended_references(
     };
 
     generator.generate_extended_references()
+}
+
+pub(crate) fn extract_enums_from_response(
+    query: Arc<Query>,
+    operation_name: Option<&str>,
+    schema: &Valid<Schema>,
+    response: &Response,
+    result_set: &mut ReferencedEnums,
+) {
+    if let Some(operation) = query.operation(operation_name) {
+        if let Some(JsonValue::Object(json_object)) = &response.data {
+            extract_enums_from_selection_set(
+                &operation.selection_set,
+                &query.fragments,
+                schema,
+                json_object,
+                result_set,
+            );
+        }
+    }
+}
+
+fn add_enum_value_to_map(
+    enum_name: &Name,
+    enum_value: &JsonValue,
+    referenced_enums: &mut ReferencedEnums,
+) {
+    match enum_value {
+        JsonValue::String(val_str) => {
+            let enum_name_str = enum_name.to_string();
+            // Not using entry API here due to performance impact
+            let enum_name_stats = match referenced_enums.get_mut(&enum_name_str) {
+                Some(existing_stats) => existing_stats,
+                None => {
+                    referenced_enums.insert(enum_name_str.clone(), HashSet::new());
+                    referenced_enums
+                        .get_mut(&enum_name_str)
+                        .expect("value is expected to be in map")
+                }
+            };
+
+            enum_name_stats.insert(val_str.as_str().to_string());
+        }
+        JsonValue::Array(val_list) => {
+            for val in val_list {
+                add_enum_value_to_map(enum_name, val, referenced_enums);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_enums_from_selection_set(
+    selection_set: &[SpecSelection],
+    fragments: &Fragments,
+    schema: &Valid<Schema>,
+    selection_response: &Object,
+    result_set: &mut ReferencedEnums,
+) {
+    for selection in selection_set.iter() {
+        match selection {
+            SpecSelection::Field {
+                name,
+                alias,
+                field_type,
+                selection_set,
+                ..
+            } => {
+                let field_name = alias.as_ref().unwrap_or(name).as_str();
+                if let Some(field_value) = selection_response.get(field_name) {
+                    let field_type_def = schema.types.get(field_type.0.inner_named_type());
+
+                    // If the value is an enum, we want to add all values to the map
+                    if let Some(ExtendedType::Enum(enum_type)) = field_type_def {
+                        add_enum_value_to_map(&enum_type.name, field_value, result_set);
+                    }
+                    // Otherwise if the response value is an object, add any enums from the field's selection set
+                    else if let JsonValue::Object(value_object) = field_value {
+                        if let Some(selection_set) = selection_set {
+                            extract_enums_from_selection_set(
+                                selection_set,
+                                fragments,
+                                schema,
+                                value_object,
+                                result_set,
+                            );
+                        }
+                    }
+                }
+            }
+            SpecSelection::InlineFragment { selection_set, .. } => {
+                extract_enums_from_selection_set(
+                    selection_set,
+                    fragments,
+                    schema,
+                    selection_response,
+                    result_set,
+                );
+            }
+            SpecSelection::FragmentSpread { name, .. } => {
+                if let Some(fragment) = fragments.get(name) {
+                    extract_enums_from_selection_set(
+                        &fragment.selection_set,
+                        fragments,
+                        schema,
+                        selection_response,
+                        result_set,
+                    );
+                }
+            }
+        }
+    }
 }
 
 struct UsageGenerator<'a> {

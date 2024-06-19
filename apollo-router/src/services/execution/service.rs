@@ -31,6 +31,7 @@ use tracing::Instrument;
 use tracing::Span;
 use tracing_core::Level;
 
+use crate::apollo_studio_interop::extract_enums_from_response;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
@@ -313,6 +314,8 @@ impl ExecutionService {
                 }
             }
 
+            let mut referenced_enums = HashMap::new();
+
             if let Some(filtered_query) = query.filtered_query.as_ref() {
                 paths = filtered_query.format_response(
                     &mut response,
@@ -321,7 +324,24 @@ impl ExecutionService {
                     schema.api_schema(),
                     variables_set,
                 );
+
+                extract_enums_from_response(
+                    filtered_query.clone(),
+                    operation_name,
+                    schema.api_schema(),
+                    &response,
+                    &mut referenced_enums,
+                );
             }
+
+            extract_enums_from_response(
+                query.clone(),
+                operation_name,
+                schema.api_schema(),
+                &response,
+                &mut referenced_enums,
+            );
+            println!("enums: {:?}", referenced_enums);
 
             paths.extend(
                 query
@@ -334,6 +354,7 @@ impl ExecutionService {
                     )
                     ,
             );
+
             nullified_paths.extend(paths);
         });
 
