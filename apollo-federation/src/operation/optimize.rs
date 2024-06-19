@@ -1371,48 +1371,8 @@ impl Operation {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::schema::Schema;
-
+    use crate::operation::tests::*;
     use super::*;
-    use crate::schema::ValidFederationSchema;
-
-    fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
-        let schema = Schema::parse_and_validate(schema_doc, "schema.graphql").unwrap();
-        ValidFederationSchema::new(schema).unwrap()
-    }
-
-    fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
-        let executable_document = apollo_compiler::ExecutableDocument::parse_and_validate(
-            schema.schema(),
-            query,
-            "query.graphql",
-        )
-        .unwrap();
-        let operation = executable_document.get_operation(None).unwrap();
-        let named_fragments = NamedFragments::new(&executable_document.fragments, schema);
-        let selection_set =
-            SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
-                .unwrap();
-
-        Operation {
-            schema: schema.clone(),
-            root_kind: operation.operation_type.into(),
-            name: operation.name.clone(),
-            variables: Arc::new(operation.variables.clone()),
-            directives: Arc::new(operation.directives.clone()),
-            selection_set,
-            named_fragments,
-        }
-    }
-
-    fn validate_operation(schema: &ValidFederationSchema, query: &str) {
-        apollo_compiler::ExecutableDocument::parse_and_validate(
-            schema.schema(),
-            query,
-            "query.graphql",
-        )
-        .unwrap();
-    }
 
     macro_rules! assert_without_fragments {
         ($operation: expr, @$expected: literal) => {{
