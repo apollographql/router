@@ -3018,12 +3018,7 @@ impl Display for OpGraphPath {
         if head.root_kind.is_some() && self.edges.is_empty() {
             return write!(f, "_");
         }
-        if head.root_kind.is_some() {
-            // TODO it appears that we are missing this extra edge?
-            // if (isRoot && idx == 0) {
-            //   return edge.tail.toString();
-            // }
-        } else {
+        if head.root_kind.is_none() {
             write!(f, "{head}")?;
         }
         self.edges
@@ -3034,17 +3029,22 @@ impl Display for OpGraphPath {
                 Some(e) => {
                     let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
                     let node = &self.graph.graph()[tail];
-                    let edge = &self.graph.graph()[e];
-                    let label = edge.transition.to_string();
-                    if let Some(conditions) = &edge.conditions {
-                        write!(f, " --[{conditions} ⊢ {label}]--> {node}")
-                    } else if !matches!(
-                        edge.transition,
-                        QueryGraphEdgeTransition::SubgraphEnteringTransition
-                    ) {
-                        write!(f, " --[{label}]--> {node}")
+                    if i == 0 && head.root_kind.is_some() {
+                        write!(f, "{node}")
                     } else {
-                        core::fmt::Result::Ok(())
+                        let edge = &self.graph.graph()[e];
+                        let label = edge.transition.to_string();
+
+                        if let Some(conditions) = &edge.conditions {
+                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
+                        } else if !matches!(
+                            edge.transition,
+                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                        ) {
+                            write!(f, " --[{label}]--> {node}")
+                        } else {
+                            core::fmt::Result::Ok(())
+                        }
                     }
                 }
                 None => write!(f, " ({}) ", self.edge_triggers[i].as_ref()),
