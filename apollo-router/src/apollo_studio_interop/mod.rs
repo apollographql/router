@@ -58,7 +58,7 @@ pub(crate) struct AggregatedInputObjectFieldStats {
     pub(crate) undefined_reference: u64,
 }
 
-type ReferencedEnums = HashMap<String, HashSet<String>>;
+pub(crate) type ReferencedEnums = HashMap<String, HashSet<String>>;
 
 /// The result of the generate_extended_references function which contains input object field and
 /// enum value stats for a single execution.
@@ -68,15 +68,6 @@ pub(crate) struct ExtendedReferenceStats {
     pub(crate) referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     /// A map of enum name to a set of enum values that were referenced
     pub(crate) referenced_enums: ReferencedEnums,
-}
-
-impl ExtendedReferenceStats {
-    pub(crate) fn new() -> Self {
-        ExtendedReferenceStats {
-            referenced_input_fields: HashMap::new(),
-            referenced_enums: HashMap::new(),
-        }
-    }
 }
 
 /// The aggregation of ExtendedReferenceStats across a number of executions.

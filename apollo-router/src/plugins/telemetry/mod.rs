@@ -76,6 +76,7 @@ use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::ReferencedEnums;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
@@ -177,7 +178,7 @@ static FTV1_HEADER_VALUE: HeaderValue = HeaderValue::from_static("ftv1");
 
 #[doc(hidden)] // Only public for integration tests
 pub(crate) struct Telemetry {
-    config: Arc<config::Conf>,
+    pub(crate) config: Arc<config::Conf>,
     custom_endpoints: MultiMap<ListenAddr, Endpoint>,
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
@@ -1396,14 +1397,16 @@ impl Telemetry {
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
 
-                // If extended references are populated, we want to add them to the SingleStatsReport
-                let extended_references = match context
+                // If extended references or enums from responses are populated, we want to add them to the SingleStatsReport
+                let extended_references = context
                     .extensions()
                     .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
-                {
-                    Some(extended_refs) => extended_refs,
-                    None => ExtendedReferenceStats::new(),
-                };
+                    .unwrap_or_default();
+                let enum_responses = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
+                    .unwrap_or_default();
+                println!("enums: {:?}", enum_responses);
 
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
