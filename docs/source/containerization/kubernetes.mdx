@@ -239,6 +239,14 @@ For example, this command deploys with a `common_values.yaml` file applied first
 helm install --namespace <router-namespace> --set managedFederation.apiKey="<graph-api-key>" --set managedFederation.graphRef="<graph-ref>"  oci://ghcr.io/apollographql/helm-charts/router --version <router-version> --values router/values.yaml  --values common_values.yaml --values prod_values.yaml
 ```
 
+## Deploying in Kubernetes with Istio
+
+The [Istio](https://istio.io/) is a service mesh for Kubernetes which is often installed on a Kubernetes cluster for its traffic-shaping abilities.  While we do not specifically recommend or support Istio, nor do we provide specific instructions for installing the Router in a cluster with Istio, there is a known consideration to make when configuring Istio.
+
+Consideration and additional configuration may be necessary as a consequence of how Istio does its sidecar injection.  Without additional configuration, Istio may attempt to reconfigure the network interface at the same time the router is starting, which will result in a failure to start.
+
+This is not specifically a router issue and Istio has instructions on how to manage the matter in a general sense in their [own documentation](https://istio.io/latest/docs/ops/common-problems/injection/#pod-or-containers-start-with-network-issues-if-istio-proxy-is-not-ready).  Their suggestion prevents the startup of all other containers in a pod until Istio itself is ready.  We recommend this approach when using Istio.
+
 ## Configure for migration from gateway
 
 When [migrating from `@apollo/gateway` to the Apollo Router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
