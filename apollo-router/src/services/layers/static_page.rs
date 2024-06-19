@@ -11,7 +11,6 @@ use http::header::CONTENT_TYPE;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::Method;
-use hyper::Body;
 use mediatype::names::HTML;
 use mediatype::names::TEXT;
 use mediatype::MediaType;
@@ -66,7 +65,7 @@ where
                                 CONTENT_TYPE,
                                 HeaderValue::from_static(mime::TEXT_HTML_UTF_8.as_ref()),
                             )
-                            .body(Body::from(page.clone()))
+                            .body(crate::services::router::Body::from(page.clone()))
                             .unwrap();
                         ControlFlow::Break(router::Response {
                             response,
