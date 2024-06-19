@@ -29,10 +29,10 @@ use tracing_subscriber::Layer;
 use super::OtelData;
 use super::PreSampledTracer;
 
-const SPAN_NAME_FIELD: &str = "otel.name";
-const SPAN_KIND_FIELD: &str = "otel.kind";
-const SPAN_STATUS_CODE_FIELD: &str = "otel.status_code";
-const SPAN_STATUS_MESSAGE_FIELD: &str = "otel.status_message";
+pub(crate) const SPAN_NAME_FIELD: &str = "otel.name";
+pub(crate) const SPAN_KIND_FIELD: &str = "otel.kind";
+pub(crate) const SPAN_STATUS_CODE_FIELD: &str = "otel.status_code";
+pub(crate) const SPAN_STATUS_MESSAGE_FIELD: &str = "otel.status_message";
 
 const FIELD_EXCEPTION_MESSAGE: &str = "exception.message";
 const FIELD_EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
@@ -106,7 +106,7 @@ impl WithContext {
     }
 }
 
-fn str_to_span_kind(s: &str) -> Option<otel::SpanKind> {
+pub(crate) fn str_to_span_kind(s: &str) -> Option<otel::SpanKind> {
     match s {
         s if s.eq_ignore_ascii_case("server") => Some(otel::SpanKind::Server),
         s if s.eq_ignore_ascii_case("client") => Some(otel::SpanKind::Client),
@@ -117,7 +117,7 @@ fn str_to_span_kind(s: &str) -> Option<otel::SpanKind> {
     }
 }
 
-fn str_to_status(s: &str) -> otel::Status {
+pub(crate) fn str_to_status(s: &str) -> otel::Status {
     match s {
         s if s.eq_ignore_ascii_case("ok") => otel::Status::Ok,
         s if s.eq_ignore_ascii_case("error") => otel::Status::error(""),
@@ -331,7 +331,9 @@ impl<'a> field::Visit for SpanAttributeVisitor<'a> {
         match field.name() {
             SPAN_NAME_FIELD => self.span_builder.name = value.to_string().into(),
             SPAN_KIND_FIELD => self.span_builder.span_kind = str_to_span_kind(value),
-            SPAN_STATUS_CODE_FIELD => self.span_builder.status = str_to_status(value),
+            SPAN_STATUS_CODE_FIELD => {
+                self.span_builder.status = str_to_status(value);
+            }
             SPAN_STATUS_MESSAGE_FIELD => {
                 self.span_builder.status = otel::Status::error(value.to_string())
             }
@@ -706,6 +708,8 @@ where
             builder,
             parent_cx,
             event_attributes: None,
+            forced_status: None,
+            forced_span_name: None,
         });
     }
 
@@ -880,6 +884,8 @@ where
         if let Some(OtelData {
             mut builder,
             parent_cx,
+            forced_status,
+            forced_span_name,
             ..
         }) = extensions.remove::<OtelData>()
         {
@@ -895,6 +901,12 @@ where
                     attributes.insert(busy_ns, timings.busy.into());
                     attributes.insert(idle_ns, timings.idle.into());
                 }
+            }
+            if let Some(forced_status) = forced_status {
+                builder.status = forced_status;
+            }
+            if let Some(forced_span_name) = forced_span_name {
+                builder.name = forced_span_name.into();
             }
 
             // Assign end time, build and start span, drop span to export
@@ -957,8 +969,11 @@ mod tests {
     use opentelemetry::trace::TraceFlags;
     use opentelemetry::StringValue;
     use tracing_subscriber::prelude::*;
+    use tracing_subscriber::Registry;
 
     use super::*;
+    use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+    use crate::plugins::telemetry::reload::SampledSpan;
 
     #[derive(Debug, Clone)]
     struct TestTracer(Arc<Mutex<Option<OtelData>>>);
@@ -985,6 +1000,8 @@ mod tests {
                 builder,
                 parent_cx: parent_cx.clone(),
                 event_attributes: None,
+                forced_status: None,
+                forced_span_name: None,
             });
             noop::NoopSpan::new()
         }
@@ -1079,6 +1096,41 @@ mod tests {
             .as_ref()
             .map(|b| b.builder.name.clone());
         assert_eq!(recorded_name, Some(dynamic_name.into()))
+    }
+
+    #[test]
+    fn forced_dynamic_span_names() {
+        let dynamic_name = "GET http://example.com".to_string();
+        let forced_dynamic_name = "OVERRIDE GET http://example.com".to_string();
+        let tracer = TestTracer(Arc::new(Mutex::new(None)));
+        let subscriber = tracing_subscriber::registry().with(layer().with_tracer(tracer.clone()));
+
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
+            span.with_subscriber(move |(id, dispatch)| {
+                if let Some(reg) = dispatch.downcast_ref::<Registry>() {
+                    match reg.span(id) {
+                        Some(s) => {
+                            s.extensions_mut().insert(SampledSpan {});
+                        }
+                        None => panic!("should not happen"),
+                    }
+                }
+            });
+            let _entered = span.enter();
+            span.set_span_dyn_attribute(
+                Key::from_static_str("otel.name"),
+                opentelemetry::Value::String(forced_dynamic_name.clone().into()),
+            );
+        });
+
+        let recorded_name = tracer
+            .0
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|b| b.builder.name.clone());
+        assert_eq!(recorded_name, Some(Cow::Owned(forced_dynamic_name)))
     }
 
     #[test]

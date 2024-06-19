@@ -9,7 +9,7 @@ final-status-level = "skip"
 # Do not cancel the test run on the first failure.
 fail-fast = false
 
-# Most tests should take much less than 2 minute (see override below)
+# Each test should take much less than 2 minute
 slow-timeout = { period = "30s", terminate-after = 4 }
 
 # Write to output for persistence to CircleCI
@@ -19,12 +19,6 @@ path = "junit.xml"
 # Integration tests require more than one thread. The default setting of 1 will cause too many integration tests to run
 # at the same time and causes tests to fail where timing is involved.
 # This filter applies only to to the integration tests in the apollo-router package.
-[[profile.default.overrides]]
-filter = 'package(apollo-router) & kind(test)'
-threads-required = 2
-
-# Scaffold test takes all the test threads as it runs rustc, and takes more time.
-[[profile.default.overrides]]
-filter = 'package(apollo-router-scaffold)'
-threads-required = 'num-test-threads'
-slow-timeout = { period = "60s", terminate-after = 10 }
+[[profile.ci.overrides]]
+filter = 'test(/^apollo-router::/)'
+threads-required = 4

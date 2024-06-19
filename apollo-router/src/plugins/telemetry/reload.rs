@@ -46,6 +46,7 @@ use crate::plugins::telemetry::otel;
 use crate::plugins::telemetry::otel::OpenTelemetryLayer;
 use crate::plugins::telemetry::otel::PreSampledTracer;
 use crate::plugins::telemetry::tracing::reload::ReloadTracer;
+use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
 
 pub(crate) type LayeredRegistry =
@@ -237,7 +238,10 @@ where
 
         // we only make the sampling decision on the root span. If we reach here for any other span,
         // it means that the parent span was not enabled, so we should not enable this span either
-        if meta.name() != REQUEST_SPAN_NAME && meta.name() != ROUTER_SPAN_NAME {
+        if meta.name() != REQUEST_SPAN_NAME
+            && meta.name() != ROUTER_SPAN_NAME
+            && meta.name() != SUBSCRIPTION_EVENT_SPAN_NAME
+        {
             return false;
         }
 
@@ -265,7 +269,7 @@ where
     }
 }
 
-struct SampledSpan;
+pub(crate) struct SampledSpan;
 
 pub(crate) trait IsSampled {
     fn is_sampled(&self) -> bool;

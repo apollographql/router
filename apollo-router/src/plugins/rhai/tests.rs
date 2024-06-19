@@ -22,6 +22,7 @@ use super::process_error;
 use super::subgraph;
 use super::PathBuf;
 use super::Rhai;
+use crate::graphql;
 use crate::graphql::Error;
 use crate::graphql::Request;
 use crate::http_ext;
@@ -169,7 +170,7 @@ fn new_rhai_test_engine() -> Engine {
 #[test]
 fn it_logs_messages() {
     let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(&tracing_test::internal::GLOBAL_BUF);
+    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
@@ -209,7 +210,7 @@ fn it_logs_messages() {
 #[test]
 fn it_prints_messages_to_log() {
     let env_filter = "apollo_router=trace";
-    let mock_writer = tracing_test::internal::MockWriter::new(&tracing_test::internal::GLOBAL_BUF);
+    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
     let _guard = tracing::dispatcher::set_default(&subscriber);
@@ -486,7 +487,11 @@ async fn it_can_process_subgraph_response() {
 
     // We must wrap our canned response in Arc<Mutex<Option<>>> to keep the rhai runtime
     // happy
-    let response = Arc::new(Mutex::new(Some(subgraph::Response::fake_builder().build())));
+    let response = Arc::new(Mutex::new(Some(
+        subgraph::Response::fake_builder()
+            .status_code(StatusCode::OK)
+            .build(),
+    )));
 
     // Call our rhai test function. If it return an error, the test failed.
     let result: Result<(), Box<rhai::EvalAltResult>> = block.engine.call_fn(
@@ -573,6 +578,21 @@ fn it_can_create_unix_now() {
     // Always difficult to do timing tests. unix_now() should execute within a second of st,
     // so...
     assert!(st <= unix_now && unix_now <= st + 1);
+}
+
+#[test]
+fn it_can_create_unix_ms_now() {
+    let engine = new_rhai_test_engine();
+    let st = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .expect("can get system time")
+        .as_millis() as i64;
+    let unix_ms_now: i64 = engine
+        .eval(r#"unix_ms_now()"#)
+        .expect("can get unix_ms_now() timestamp");
+    // Always difficult to do timing tests. unix_ms_now() should execute within a second of st,
+    // so...
+    assert!(st <= unix_ms_now && unix_ms_now <= st + 1000);
 }
 
 #[test]
@@ -690,7 +710,7 @@ async fn it_can_process_om_subgraph_forbidden_with_graphql_payload() {
     assert_eq!(
         processed_error.body,
         Some(
-            crate::response::Response::builder()
+            graphql::Response::builder()
                 .errors(vec![{
                     Error::builder()
                         .message("I have raised a 403")
@@ -713,7 +733,7 @@ async fn it_can_process_om_subgraph_200_with_graphql_data() {
     assert_eq!(
         processed_error.body,
         Some(
-            crate::response::Response::builder()
+            graphql::Response::builder()
                 .data(serde_json::json!({ "name": "Ada Lovelace"}))
                 .build()
         )
@@ -725,7 +745,7 @@ async fn it_can_process_string_subgraph_forbidden() {
     if let Err(error) = base_process_function("process_subgraph_response_string").await {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 161, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 170, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");
@@ -751,7 +771,7 @@ async fn it_cannot_process_om_subgraph_missing_message_and_body() {
     {
         let processed_error = process_error(error);
         assert_eq!(processed_error.status, StatusCode::BAD_REQUEST);
-        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 172, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
+        assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: #{\"status\": 400} (line 181, position 5)\nin call to function 'process_subgraph_response_om_missing_message''".to_string()));
     } else {
         // Test failed
         panic!("error processed incorrectly");

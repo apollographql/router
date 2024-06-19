@@ -1,7 +1,14 @@
+use std::collections::HashSet;
 use std::io::Read;
+use std::sync::Mutex;
+use std::sync::OnceLock;
 
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::query_planner::QueryPlannerConfig;
+use apollo_federation::query_plan::FetchNode;
+use apollo_federation::query_plan::PlanNode;
+use apollo_federation::query_plan::QueryPlan;
+use apollo_federation::query_plan::TopLevelPlanNode;
 use apollo_federation::schema::ValidFederationSchema;
 use sha1::Digest;
 
@@ -22,19 +29,31 @@ const IMPLICIT_LINK_DIRECTIVE: &str = r#"@link(url: "https://specs.apollo.dev/fe
 /// This can all be remove when composition is implemented in Rust.
 macro_rules! planner {
     (
-        $( config = $config: expr, )?
-        $( $subgraph_name: ident: $subgraph_schema: expr),+
+        config = $config: expr,
+        $( $subgraph_name: tt: $subgraph_schema: expr),+
         $(,)?
     ) => {{
-        #[allow(unused_mut)]
-        let mut config = Default::default();
-        $( config = $config )?
         $crate::query_plan::build_query_plan_support::api_schema_and_planner(
             insta::_function_name!(),
-            config,
-            &[ $( (stringify!($subgraph_name), $subgraph_schema) ),+ ],
+            $config,
+            &[ $( (subgraph_name!($subgraph_name), $subgraph_schema) ),+ ],
         )
     }};
+    (
+        $( $subgraph_name: tt: $subgraph_schema: expr),+
+        $(,)?
+    ) => {
+        planner!(config = Default::default(), $( $subgraph_name: $subgraph_schema),+)
+    };
+}
+
+macro_rules! subgraph_name {
+    ($x: ident) => {
+        stringify!($x)
+    };
+    ($x: literal) => {
+        $x
+    };
 }
 
 /// Takes a reference to the result of `planner!()`, an operation string, and an expected
@@ -49,17 +68,19 @@ macro_rules! assert_plan {
             "operation.graphql",
         )
         .unwrap();
-        insta::assert_snapshot!(planner.build_query_plan(&document, None).unwrap(), @$expected);
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @$expected);
+        plan
     }};
 }
 
 #[track_caller]
 pub(crate) fn api_schema_and_planner(
-    test_name: &str,
+    function_path: &'static str,
     config: QueryPlannerConfig,
     subgraph_names_and_schemas: &[(&str, &str)],
 ) -> (ValidFederationSchema, QueryPlanner) {
-    let supergraph = compose(test_name, subgraph_names_and_schemas);
+    let supergraph = compose(function_path, subgraph_names_and_schemas);
     let supergraph = apollo_federation::Supergraph::new(&supergraph).unwrap();
     let planner = QueryPlanner::new(&supergraph, config).unwrap();
     let api_schema_config = apollo_federation::ApiSchemaOptions {
@@ -71,7 +92,10 @@ pub(crate) fn api_schema_and_planner(
 }
 
 #[track_caller]
-pub(crate) fn compose(test_name: &str, subgraph_names_and_schemas: &[(&str, &str)]) -> String {
+pub(crate) fn compose(
+    function_path: &'static str,
+    subgraph_names_and_schemas: &[(&str, &str)],
+) -> String {
     let unique_names: std::collections::HashSet<_> = subgraph_names_and_schemas
         .iter()
         .map(|(name, _)| name)
@@ -102,11 +126,22 @@ pub(crate) fn compose(test_name: &str, subgraph_names_and_schemas: &[(&str, &str
     let expected_hash = hex::encode(hasher.finalize());
     let prefix = "# Composed from subgraphs with hash: ";
 
+    let test_name = function_path.rsplit("::").next().unwrap();
+    static SEEN_TEST_NAMES: OnceLock<Mutex<HashSet<&'static str>>> = OnceLock::new();
+    let new = SEEN_TEST_NAMES
+        .get_or_init(Default::default)
+        .lock()
+        .unwrap()
+        .insert(test_name);
+    assert!(
+        new,
+        "planner!() can only be used once in test(s) named '{test_name}'"
+    );
     let supergraph_path = std::path::PathBuf::from(std::env::var_os("CARGO_MANIFEST_DIR").unwrap())
         .join("tests")
         .join("query_plan")
         .join("supergraphs")
-        .join(format!("{}.graphql", test_name.replace("::", "__")));
+        .join(format!("{test_name}.graphql",));
     let supergraph = match std::fs::read_to_string(&supergraph_path) {
         Ok(contents) => {
             if let Some(hash) = contents
@@ -166,4 +201,95 @@ pub(crate) fn compose(test_name: &str, subgraph_names_and_schemas: &[(&str, &str
         std::fs::write(supergraph_path, &supergraph).unwrap();
         supergraph
     })
+}
+
+pub(crate) fn find_fetch_nodes_for_subgraph<'plan>(
+    subgraph_name: &str,
+    plan: &'plan QueryPlan,
+) -> Vec<&'plan FetchNode> {
+    let mut fetch_nodes = Vec::new();
+    if let Some(node) = &plan.node {
+        match node {
+            TopLevelPlanNode::Fetch(inner) => {
+                if inner.subgraph_name == subgraph_name {
+                    fetch_nodes.push(&**inner)
+                }
+            }
+            TopLevelPlanNode::Subscription(inner) => {
+                if inner.primary.subgraph_name == subgraph_name {
+                    fetch_nodes.push(&inner.primary);
+                }
+                visit_node(subgraph_name, &mut fetch_nodes, inner.rest.as_deref())
+            }
+            TopLevelPlanNode::Sequence(inner) => {
+                for item in &inner.nodes {
+                    visit_node(subgraph_name, &mut fetch_nodes, Some(item))
+                }
+            }
+            TopLevelPlanNode::Parallel(inner) => {
+                for item in &inner.nodes {
+                    visit_node(subgraph_name, &mut fetch_nodes, Some(item))
+                }
+            }
+            TopLevelPlanNode::Flatten(inner) => {
+                visit_node(subgraph_name, &mut fetch_nodes, Some(&inner.node))
+            }
+            TopLevelPlanNode::Defer(inner) => {
+                visit_node(
+                    subgraph_name,
+                    &mut fetch_nodes,
+                    inner.primary.node.as_deref(),
+                );
+                for deferred in &inner.deferred {
+                    visit_node(subgraph_name, &mut fetch_nodes, deferred.node.as_deref());
+                }
+            }
+            TopLevelPlanNode::Condition(inner) => {
+                visit_node(subgraph_name, &mut fetch_nodes, inner.if_clause.as_deref());
+                visit_node(
+                    subgraph_name,
+                    &mut fetch_nodes,
+                    inner.else_clause.as_deref(),
+                );
+            }
+        }
+        fn visit_node<'plan>(
+            subgraph_name: &str,
+            fetch_nodes: &mut Vec<&'plan FetchNode>,
+            node: Option<&'plan PlanNode>,
+        ) {
+            let Some(node) = node else { return };
+            match node {
+                PlanNode::Fetch(inner) => {
+                    if inner.subgraph_name == subgraph_name {
+                        fetch_nodes.push(&**inner)
+                    }
+                }
+                PlanNode::Sequence(inner) => {
+                    for item in &inner.nodes {
+                        visit_node(subgraph_name, fetch_nodes, Some(item))
+                    }
+                }
+                PlanNode::Parallel(inner) => {
+                    for item in &inner.nodes {
+                        visit_node(subgraph_name, fetch_nodes, Some(item))
+                    }
+                }
+                PlanNode::Flatten(inner) => {
+                    visit_node(subgraph_name, fetch_nodes, Some(&inner.node))
+                }
+                PlanNode::Defer(inner) => {
+                    visit_node(subgraph_name, fetch_nodes, inner.primary.node.as_deref());
+                    for deferred in &inner.deferred {
+                        visit_node(subgraph_name, fetch_nodes, deferred.node.as_deref());
+                    }
+                }
+                PlanNode::Condition(inner) => {
+                    visit_node(subgraph_name, fetch_nodes, inner.if_clause.as_deref());
+                    visit_node(subgraph_name, fetch_nodes, inner.else_clause.as_deref());
+                }
+            }
+        }
+    }
+    fetch_nodes
 }

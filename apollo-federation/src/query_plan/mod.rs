@@ -13,19 +13,18 @@ pub(crate) mod display;
 pub(crate) mod fetch_dependency_graph;
 pub(crate) mod fetch_dependency_graph_processor;
 pub mod generate;
-pub(crate) mod operation;
 pub mod query_planner;
 pub(crate) mod query_planning_traversal;
 
-pub type QueryPlanCost = i64;
+pub type QueryPlanCost = f64;
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, PartialEq)]
 pub struct QueryPlan {
     pub node: Option<TopLevelPlanNode>,
     pub statistics: QueryPlanningStatistics,
 }
 
-#[derive(Debug, derive_more::From)]
+#[derive(Debug, PartialEq, derive_more::From)]
 pub enum TopLevelPlanNode {
     Subscription(SubscriptionNode),
     #[from(types(FetchNode))]
@@ -38,14 +37,14 @@ pub enum TopLevelPlanNode {
     Condition(Box<ConditionNode>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SubscriptionNode {
     pub primary: Box<FetchNode>,
     // XXX(@goto-bus-stop) Is this not just always a SequenceNode?
     pub rest: Option<Box<PlanNode>>,
 }
 
-#[derive(Debug, Clone, derive_more::From)]
+#[derive(Debug, Clone, PartialEq, derive_more::From)]
 pub enum PlanNode {
     #[from(types(FetchNode))]
     Fetch(Box<FetchNode>),
@@ -57,7 +56,7 @@ pub enum PlanNode {
     Condition(Box<ConditionNode>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FetchNode {
     pub subgraph_name: NodeStr,
     /// Optional identifier for the fetch for defer support. All fetches of a given plan will be
@@ -85,19 +84,22 @@ pub struct FetchNode {
     /// Similar to `input_rewrites`, but for optional "rewrites" to apply to the data that is
     /// received from a fetch (and before it is applied to the current in-memory results).
     pub output_rewrites: Vec<Arc<FetchDataRewrite>>,
+    /// Similar to the other kinds of rewrites. This is a mechanism to convert a contextual path into
+    /// an argument to a resolver
+    pub context_rewrites: Vec<Arc<FetchDataRewrite>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SequenceNode {
     pub nodes: Vec<PlanNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ParallelNode {
     pub nodes: Vec<PlanNode>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FlattenNode {
     pub path: Vec<FetchDataPathElement>,
     pub node: Box<PlanNode>,
@@ -119,7 +121,7 @@ pub struct FlattenNode {
 /// we implement more advanced server-side heuristics to decide if deferring is judicious or not.
 /// This allows the executor of the plan to consistently send a defer-abiding multipart response to
 /// the client.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeferNode {
     /// The "primary" part of a defer, that is the non-deferred part (though could be deferred
     /// itself for a nested defer).
@@ -131,7 +133,7 @@ pub struct DeferNode {
 }
 
 /// The primary block of a `DeferNode`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct PrimaryDeferBlock {
     /// The part of the original query that "selects" the data to send in that primary response
     /// once the plan in `node` completes). Note that if the parent `DeferNode` is nested, then it
@@ -147,7 +149,7 @@ pub struct PrimaryDeferBlock {
 }
 
 /// A deferred block of a `DeferNode`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeferredDeferBlock {
     /// References one or more fetch node(s) (by `id`) within `DeferNode.primary.node`. The plan of
     /// this deferred part should not be started until all such fetches return.
@@ -169,13 +171,13 @@ pub struct DeferredDeferBlock {
     pub node: Option<Box<PlanNode>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DeferredDependency {
     /// A `FetchNode` ID.
     pub id: NodeStr,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct ConditionNode {
     pub condition_variable: Name,
     pub if_clause: Option<Box<PlanNode>>,
@@ -186,14 +188,14 @@ pub struct ConditionNode {
 ///
 /// A rewrite usually identifies some sub-part of the data and some action to perform on that
 /// sub-part.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum FetchDataRewrite {
     ValueSetter(FetchDataValueSetter),
     KeyRenamer(FetchDataKeyRenamer),
 }
 
 /// A rewrite that sets a value at the provided path of the data it is applied to.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FetchDataValueSetter {
     /// Path to the value that is set by this "rewrite".
     pub path: Vec<FetchDataPathElement>,
@@ -203,7 +205,7 @@ pub struct FetchDataValueSetter {
 }
 
 /// A rewrite that renames the key at the provided path of the data it is applied to.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct FetchDataKeyRenamer {
     /// Path to the key that is renamed by this "rewrite".
     pub path: Vec<FetchDataPathElement>,
@@ -235,7 +237,7 @@ pub enum FetchDataPathElement {
 
 /// Vectors of this element match a path in a query. Each element is (1) a field in a query, or (2)
 /// an inline fragment in a query.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum QueryPathElement {
     Field(executable::Field),
     InlineFragment(executable::InlineFragment),

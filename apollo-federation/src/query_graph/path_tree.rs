@@ -10,12 +10,12 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
 use crate::error::FederationError;
+use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::GraphPathItem;
 use crate::query_graph::graph_path::OpGraphPath;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
-use crate::query_plan::operation::SelectionSet;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
 /// node, in which each node of the tree corresponds to a node in the query graph, and a tree's node
@@ -24,7 +24,7 @@ use crate::query_plan::operation::SelectionSet;
 // Typescript doesn't have a native way of associating equality/hash functions with types, so they
 // were passed around manually. This isn't the case with Rust, where we instead implement trigger
 // equality via `PartialEq` and `Hash`.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct PathTree<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -361,6 +361,27 @@ fn merge_conditions(
     }
 }
 
+impl<TTrigger: std::fmt::Debug, TEdge: std::fmt::Debug> std::fmt::Debug
+    for PathTree<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let Self {
+            graph: _, // skip
+            node,
+            local_selection_sets,
+            childs,
+        } = self;
+        f.debug_struct("PathTree")
+            .field("node", node)
+            .field("local_selection_sets", local_selection_sets)
+            .field("childs", childs)
+            .finish()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::Arc;
@@ -371,6 +392,9 @@ mod tests {
     use petgraph::visit::EdgeRef;
 
     use crate::error::FederationError;
+    use crate::operation::normalize_operation;
+    use crate::operation::Field;
+    use crate::operation::FieldData;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::OpGraphPath;
@@ -379,9 +403,6 @@ mod tests {
     use crate::query_graph::path_tree::OpPathTree;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
-    use crate::query_plan::operation::normalize_operation;
-    use crate::query_plan::operation::Field;
-    use crate::query_plan::operation::FieldData;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::ValidFederationSchema;
 
@@ -399,7 +420,7 @@ mod tests {
 
     fn trivial_condition() -> ConditionResolution {
         ConditionResolution::Satisfied {
-            cost: 0,
+            cost: 0.0,
             path_tree: None,
         }
     }
@@ -418,6 +439,7 @@ mod tests {
             // find the edge that matches `field_name`
             let (edge_ref, field_def) = query_graph
                 .out_edges(curr_node_idx)
+                .into_iter()
                 .find_map(|e_ref| {
                     let edge = e_ref.weight();
                     match &edge.transition {

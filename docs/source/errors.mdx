@@ -1,7 +1,7 @@
 ---
 title: Errors
 subtitle: Error and status codes returned by the Apollo Router
-description: Error codes and HTTP response status codes returned by the Apollo Router
+description: Reference for error and HTTP status codes returned by the Apollo Router, including explanations and solutions.
 ---
 
 Learn about error codes and HTTP response status codes returned by the Apollo Router.
@@ -71,3 +71,32 @@ The request was not able to complete within a configured amount of time.  See [c
 You can create Rhai scripts that throw custom status codes. See [Terminating client requests](./customizations/rhai-api#terminating-client-requests) to learn more.
 
 </Note>
+
+## Error codes
+
+### Demand control
+
+Errors returned by the router when [demand control](./executing-operations/demand-control) is enabled.
+
+<PropertyList kind="errCodes">
+<Property name="COST_ESTIMATED_TOO_EXPENSIVE">
+
+The estimated cost of the query was greater than the configured maximum cost.
+
+</Property>
+<Property name="COST_ACTUAL_TOO_EXPENSIVE">
+
+The actual cost of the query was greater than the configured maximum cost.
+
+</Property>
+<Property name="COST_QUERY_PARSE_FAILURE">
+
+The query could not be parsed.
+
+</Property>
+ <Property name="COST_RESPONSE_TYPING_FAILURE">
+
+The response from a subgraph did not match the GraphQL schema.
+
+</Property>
+</PropertyList>

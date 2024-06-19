@@ -48,6 +48,7 @@ use crate::services::router;
 use crate::services::router::Request;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::Context;
 
 pub(crate) const SUBGRAPH_NAME: Key = Key::from_static_str("subgraph.name");
 pub(crate) const SUBGRAPH_GRAPHQL_DOCUMENT: Key = Key::from_static_str("subgraph.graphql.document");
@@ -517,6 +518,7 @@ impl DefaultForLevel for HttpServerAttributes {
 impl Selectors for RouterAttributes {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = self.common.on_request(request);
@@ -554,9 +556,9 @@ impl Selectors for RouterAttributes {
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
-        let mut attrs = self.common.on_error(error);
-        attrs.extend(self.server.on_error(error));
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.common.on_error(error, ctx);
+        attrs.extend(self.server.on_error(error, ctx));
         attrs
     }
 }
@@ -564,6 +566,7 @@ impl Selectors for RouterAttributes {
 impl Selectors for HttpCommonAttributes {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -657,7 +660,7 @@ impl Selectors for HttpCommonAttributes {
         attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
         if let Some(true) = &self.error_type {
             attrs.push(KeyValue::new(
@@ -681,6 +684,7 @@ impl Selectors for HttpCommonAttributes {
 impl Selectors for HttpServerAttributes {
     type Request = router::Request;
     type Response = router::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &router::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -811,7 +815,7 @@ impl Selectors for HttpServerAttributes {
         Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 }
@@ -857,6 +861,7 @@ impl HttpServerAttributes {
 impl Selectors for SupergraphAttributes {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &supergraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -899,7 +904,17 @@ impl Selectors for SupergraphAttributes {
         attrs
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_response_event(
+        &self,
+        response: &Self::EventResponse,
+        context: &Context,
+    ) -> Vec<KeyValue> {
+        let mut attrs = Vec::new();
+        attrs.append(&mut self.cost.on_response_event(response, context));
+        attrs
+    }
+
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 }
@@ -907,6 +922,7 @@ impl Selectors for SupergraphAttributes {
 impl Selectors for SubgraphAttributes {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
+    type EventResponse = ();
 
     fn on_request(&self, request: &subgraph::Request) -> Vec<KeyValue> {
         let mut attrs = Vec::new();
@@ -949,7 +965,7 @@ impl Selectors for SubgraphAttributes {
         Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 }
@@ -1297,7 +1313,7 @@ mod test {
             )
         );
 
-        let attributes = common.on_error(&anyhow!("test error").into());
+        let attributes = common.on_error(&anyhow!("test error").into(), &Default::default());
         assert_eq!(
             attributes
                 .iter()
@@ -1405,7 +1421,7 @@ mod test {
             Some(&(StatusCode::BAD_REQUEST.as_u16() as i64).into())
         );
 
-        let attributes = common.on_error(&anyhow!("test error").into());
+        let attributes = common.on_error(&anyhow!("test error").into(), &Default::default());
         assert_eq!(
             attributes
                 .iter()

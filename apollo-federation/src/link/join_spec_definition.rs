@@ -336,16 +336,13 @@ lazy_static! {
             Version { major: 0, minor: 3 },
             Some(Version { major: 2, minor: 0 }),
         ));
-        definitions
-    };
-
-    /// Versions supported for purpose other than query planning.
-    /// TODO: remove once v0.4 is properly implemented in query planning
-    pub(crate) static ref NON_QUERY_PLANNING_JOIN_VERSIONS: SpecDefinitions<JoinSpecDefinition> = {
-        let mut definitions = JOIN_VERSIONS.clone();
         definitions.add(JoinSpecDefinition::new(
             Version { major: 0, minor: 4 },
             Some(Version { major: 2, minor: 7 }),
+        ));
+        definitions.add(JoinSpecDefinition::new(
+            Version { major: 0, minor: 5 },
+            Some(Version { major: 2, minor: 8 }),
         ));
         definitions
     };

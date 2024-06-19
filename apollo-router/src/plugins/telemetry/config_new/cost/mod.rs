@@ -1,21 +1,23 @@
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry_api::Key;
 use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::instruments::Increment;
 use crate::metrics;
 use crate::plugins::demand_control::CostContext;
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
-use crate::plugins::telemetry::config_new::instruments::Increment::Unit;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::plugins::telemetry::config_new::Selectors;
@@ -23,6 +25,15 @@ use crate::services::supergraph;
 use crate::services::supergraph::Request;
 use crate::services::supergraph::Response;
 use crate::Context;
+
+pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
+    Key::from_static_str("apollo_private.cost.estimated");
+pub(crate) const APOLLO_PRIVATE_COST_ACTUAL: Key =
+    Key::from_static_str("apollo_private.cost.actual");
+pub(crate) const APOLLO_PRIVATE_COST_STRATEGY: Key =
+    Key::from_static_str("apollo_private.cost.strategy");
+pub(crate) const APOLLO_PRIVATE_COST_RESULT: Key =
+    Key::from_static_str("apollo_private.cost.result");
 
 static COST_ESTIMATED: &str = "cost.estimated";
 static COST_ACTUAL: &str = "cost.actual";
@@ -49,14 +60,26 @@ pub(crate) struct SupergraphCostAttributes {
 impl Selectors for SupergraphCostAttributes {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, _request: &Self::Request) -> Vec<KeyValue> {
         Vec::default()
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
+    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
+        Vec::default()
+    }
+
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
+        Vec::default()
+    }
+
+    fn on_response_event(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
-        if let Some(cost_result) = &response.context.extensions().lock().get::<CostContext>() {
+        let cost_result = ctx
+            .extensions()
+            .with_lock(|lock| lock.get::<CostContext>().cloned());
+        if let Some(cost_result) = cost_result {
             if let Some(true) = self.cost_estimated {
                 attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
             }
@@ -71,10 +94,6 @@ impl Selectors for SupergraphCostAttributes {
             }
         }
         attrs
-    }
-
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
-        Vec::default()
     }
 }
 
@@ -148,14 +167,16 @@ impl CostInstrumentsConfig {
                 Some(attributes.clone())
             }
         };
+
         CustomHistogram {
             inner: Mutex::new(CustomHistogramInner {
-                increment: Unit,
+                increment: Increment::EventCustom(None),
                 condition: Condition::True,
                 histogram: Some(meter.f64_histogram(name).init()),
                 attributes: Vec::with_capacity(nb_attributes),
                 selector: Some(Arc::new(selector)),
                 selectors,
+                updated: false,
             }),
         }
     }
@@ -197,6 +218,7 @@ pub(crate) struct CostInstruments {
 impl Instrumented for CostInstruments {
     type Request = supergraph::Request;
     type Response = supergraph::Response;
+    type EventResponse = crate::graphql::Response;
 
     fn on_request(&self, request: &Self::Request) {
         if let Some(cost_estimated) = &self.cost_estimated {
@@ -233,6 +255,18 @@ impl Instrumented for CostInstruments {
             cost_delta.on_error(error, ctx);
         }
     }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        if let Some(cost_estimated) = &self.cost_estimated {
+            cost_estimated.on_response_event(response, ctx);
+        }
+        if let Some(cost_actual) = &self.cost_actual {
+            cost_actual.on_response_event(response, ctx);
+        }
+        if let Some(cost_delta) = &self.cost_delta {
+            cost_delta.on_response_event(response, ctx);
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
@@ -248,8 +282,32 @@ pub(crate) enum CostValue {
     Result,
 }
 
+pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
+    context.extensions().with_lock(|c| {
+        if let Some(cost) = c.get::<CostContext>().cloned() {
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ESTIMATED.clone(),
+                AttributeValue::F64(cost.estimated),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ACTUAL.clone(),
+                AttributeValue::F64(cost.actual),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_RESULT.clone(),
+                AttributeValue::String(cost.result.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_STRATEGY.clone(),
+                AttributeValue::String(cost.strategy.into()),
+            ));
+        }
+    });
+}
+
 #[cfg(test)]
 mod test {
+    use crate::context::OPERATION_NAME;
     use crate::plugins::demand_control::CostContext;
     use crate::plugins::telemetry::config_new::cost::CostInstruments;
     use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
@@ -261,27 +319,36 @@ mod test {
     fn test_default_estimated() {
         let config = config(include_str!("fixtures/cost_estimated.router.yaml"));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0);
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.estimated", 200.0);
     }
 
     #[test]
     fn test_default_actual() {
         let config = config(include_str!("fixtures/cost_actual.router.yaml"));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0);
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.actual", 20.0);
     }
 
     #[test]
     fn test_default_delta() {
         let config = config(include_str!("fixtures/cost_delta.router.yaml"));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.delta", 90.0);
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.delta", 180.0);
     }
 
     #[test]
@@ -290,9 +357,12 @@ mod test {
             "fixtures/cost_estimated_with_attributes.router.yaml"
         ));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.estimated", 100.0, cost.result = "COST_TOO_EXPENSIVE");
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.estimated", 200.0, cost.result = "COST_TOO_EXPENSIVE");
     }
 
     #[test]
@@ -301,9 +371,12 @@ mod test {
             "fixtures/cost_actual_with_attributes.router.yaml"
         ));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
         assert_histogram_sum!("cost.actual", 10.0, cost.result = "COST_TOO_EXPENSIVE");
+        make_request(&instruments);
+
+        assert_histogram_sum!("cost.actual", 20.0, cost.result = "COST_TOO_EXPENSIVE");
     }
 
     #[test]
@@ -312,9 +385,22 @@ mod test {
             "fixtures/cost_delta_with_attributes.router.yaml"
         ));
         let instruments = config.to_instruments();
-        make_request(instruments);
+        make_request(&instruments);
 
-        assert_histogram_sum!("cost.delta", 90.0, cost.result = "COST_TOO_EXPENSIVE");
+        assert_histogram_sum!(
+            "cost.delta",
+            90.0,
+            cost.result = "COST_TOO_EXPENSIVE",
+            graphql.operation.name = "Test"
+        );
+
+        make_request(&instruments);
+        assert_histogram_sum!(
+            "cost.delta",
+            180.0,
+            cost.result = "COST_TOO_EXPENSIVE",
+            graphql.operation.name = "Test"
+        );
     }
 
     fn config(config: &'static str) -> CostInstrumentsConfig {
@@ -325,16 +411,16 @@ mod test {
             .expect("config")
     }
 
-    fn make_request(instruments: CostInstruments) {
+    fn make_request(instruments: &CostInstruments) {
         let context = Context::new();
-        {
-            let mut extensions = context.extensions().lock();
-            extensions.insert(CostContext::default());
-            let cost_result = extensions.get_or_default_mut::<CostContext>();
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(CostContext::default());
+            let cost_result = lock.get_or_default_mut::<CostContext>();
             cost_result.estimated = 100.0;
             cost_result.actual = 10.0;
             cost_result.result = "COST_TOO_EXPENSIVE"
-        }
+        });
+        let _ = context.insert(OPERATION_NAME, "Test".to_string()).unwrap();
         instruments.on_request(
             &supergraph::Request::fake_builder()
                 .context(context.clone())
@@ -343,9 +429,11 @@ mod test {
         );
         instruments.on_response(
             &supergraph::Response::fake_builder()
-                .context(context)
+                .context(context.clone())
                 .build()
                 .expect("response"),
         );
+
+        instruments.on_response_event(&crate::graphql::Response::default(), &context);
     }
 }

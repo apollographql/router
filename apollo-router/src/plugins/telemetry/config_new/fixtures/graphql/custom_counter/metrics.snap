@@ -1,0 +1,22 @@
+---
+source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
+description: Custom counter
+expression: "&metrics.all()"
+info:
+  telemetry:
+    instrumentation:
+      instruments:
+        graphql:
+          custom_counter:
+            description: count of requests
+            type: counter
+            unit: unit
+            value: field_unit
+---
+- name: custom_counter
+  description: count of requests
+  unit: unit
+  data:
+    datapoints:
+      - value: 2
+        attributes: {}

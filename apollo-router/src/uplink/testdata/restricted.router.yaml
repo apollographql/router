@@ -70,6 +70,9 @@ telemetry:
       subgraph:
         attributes:
           subgraph.graphql.document: true
+    instruments:
+      graphql:
+        list.length: true
 
 preview_file_uploads:
   enabled: true
@@ -78,7 +81,7 @@ preview_file_uploads:
       enabled: true
       mode: stream
 
-experimental_demand_control:
+preview_demand_control:
   enabled: true
   mode: measure
   strategy:

@@ -1,0 +1,10 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      supergraph:
+        "custom.histogram.duration":
+          description: "histogram of requests"
+          type: histogram
+          unit: "unit"
+          value: duration

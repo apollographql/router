@@ -50,6 +50,7 @@ use crate::plugin::plugins;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
@@ -222,12 +223,12 @@ pub(crate) enum ApiSchemaMode {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsGenerationMode {
     /// Use the new Rust-based implementation.
+    #[default]
     New,
     /// Use the old JavaScript-based implementation.
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
-    #[default]
     Both,
 }
 
@@ -414,6 +415,27 @@ impl Configuration {
                 .build()
             ).build())
     }
+
+    pub(crate) fn js_query_planner_config(&self) -> router_bridge::planner::QueryPlannerConfig {
+        router_bridge::planner::QueryPlannerConfig {
+            reuse_query_fragments: self.supergraph.reuse_query_fragments,
+            generate_query_fragments: Some(self.supergraph.generate_query_fragments),
+            incremental_delivery: Some(router_bridge::planner::IncrementalDeliverySupport {
+                enable_defer: Some(self.supergraph.defer_support),
+            }),
+            graphql_validation: false,
+            debug: Some(router_bridge::planner::QueryPlannerDebugConfig {
+                bypass_planner_for_single_subgraph: None,
+                max_evaluated_plans: self
+                    .supergraph
+                    .query_planning
+                    .experimental_plans_limit
+                    .or(Some(10000)),
+                paths_limit: self.supergraph.query_planning.experimental_paths_limit,
+            }),
+            type_conditioned_fetching: self.experimental_type_conditioned_fetching,
+        }
+    }
 }
 
 impl Default for Configuration {
@@ -568,6 +590,29 @@ impl Configuration {
             return Err(ConfigurationError::InvalidConfiguration {
                 message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
                 error: "either change to some other query planner mode, or change to new metrics generation".into()
+            });
+        }
+
+        let signature_normalization_algorithm = match self.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<crate::plugins::telemetry::config::Conf>(
+                    telemetry_config.clone(),
+                ) {
+                    Ok(conf) => {
+                        conf.apollo
+                            .experimental_apollo_signature_normalization_algorithm
+                    }
+                    _ => ApolloSignatureNormalizationAlgorithm::default(),
+                }
+            }
+            None => ApolloSignatureNormalizationAlgorithm::default(),
+        };
+        if signature_normalization_algorithm == ApolloSignatureNormalizationAlgorithm::Enhanced
+            && self.experimental_apollo_metrics_generation_mode != ApolloMetricsGenerationMode::New
+        {
+            return Err(ConfigurationError::InvalidConfiguration {
+                message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
+                error: "either change to the legacy signature normalization mode, or change to new metrics generation".into()
             });
         }
 

@@ -22,6 +22,7 @@ use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
+use crate::Context;
 
 /// This struct can be used as an attributes container, it has a custom JsonSchema implementation that will merge the schemas of the attributes and custom fields.
 #[derive(Clone, Debug)]
@@ -179,13 +180,14 @@ where
     }
 }
 
-impl<A, E, Request, Response> Selectors for Extendable<A, E>
+impl<A, E, Request, Response, EventResponse> Selectors for Extendable<A, E>
 where
-    A: Default + Selectors<Request = Request, Response = Response>,
-    E: Selector<Request = Request, Response = Response>,
+    A: Default + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
+    E: Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
 {
     type Request = Request;
     type Response = Response;
+    type EventResponse = EventResponse;
 
     fn on_request(&self, request: &Self::Request) -> Vec<KeyValue> {
         let mut attrs = self.attributes.on_request(request);
@@ -211,8 +213,45 @@ where
         attrs
     }
 
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue> {
-        self.attributes.on_error(error)
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_error(error, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_error(error, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
+    }
+
+    fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
+        let mut attrs = self.attributes.on_response_event(response, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, value)| {
+            value
+                .on_response_event(response, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
+
+        attrs
+    }
+
+    fn on_response_field(
+        &self,
+        attrs: &mut Vec<KeyValue>,
+        ty: &apollo_compiler::executable::NamedType,
+        field: &apollo_compiler::executable::Field,
+        value: &serde_json_bytes::Value,
+        ctx: &Context,
+    ) {
+        self.attributes
+            .on_response_field(attrs, ty, field, value, ctx);
+        let custom_attributes = self.custom.iter().filter_map(|(key, v)| {
+            v.on_response_field(ty, field, value, ctx)
+                .map(|v| KeyValue::new(key.clone(), v))
+        });
+        attrs.extend(custom_attributes);
     }
 }
 

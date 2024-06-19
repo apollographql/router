@@ -1,3 +1,18 @@
+//! ## Usage
+//!
+//! This crate is internal to [Apollo Router](https://www.apollographql.com/docs/router/)
+//! and not intended to be used directly.
+//!
+//! ## Crate versioning
+//!
+//! The  `apollo-federation` crate does **not** adhere to [Semantic Versioning](https://semver.org/).
+//! Any version may have breaking API changes, as this API is expected to only be used by `apollo-router`.
+//! Instead, the version number matches exactly that of the `apollo-router` crate version using it.
+//!
+//! This version number is **not** that of the Apollo Federation specification being implemented.
+//! See [Router documentation](https://www.apollographql.com/docs/router/federation-version-support/)
+//! for which Federation versions are supported by which Router versions.
+
 #![allow(dead_code)] // TODO: This is fine while we're iterating, but should be removed later.
 
 mod api_schema;
@@ -6,9 +21,11 @@ pub mod error;
 mod indented_display;
 pub mod link;
 pub mod merge;
+pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
+pub mod sources;
 pub mod subgraph;
 
 use apollo_compiler::validation::Valid;
@@ -37,15 +54,6 @@ pub(crate) fn validate_supergraph_for_query_planning(
     supergraph_schema: &FederationSchema,
 ) -> Result<SupergraphSpecs, FederationError> {
     validate_supergraph(supergraph_schema, &JOIN_VERSIONS)
-}
-
-pub(crate) fn validate_supergraph_for_non_query_planning(
-    supergraph_schema: &FederationSchema,
-) -> Result<SupergraphSpecs, FederationError> {
-    validate_supergraph(
-        supergraph_schema,
-        &link::join_spec_definition::NON_QUERY_PLANNING_JOIN_VERSIONS,
-    )
 }
 
 /// Checks that required supergraph directives are in the schema, and returns which ones were used.
@@ -92,7 +100,7 @@ impl Supergraph {
         let schema = schema.into_inner();
         let schema = FederationSchema::new(schema)?;
 
-        let _ = validate_supergraph_for_non_query_planning(&schema)?;
+        let _ = validate_supergraph_for_query_planning(&schema)?;
 
         Ok(Self {
             // We know it's valid because the input was.
@@ -103,8 +111,7 @@ impl Supergraph {
     pub fn compose(subgraphs: Vec<&ValidSubgraph>) -> Result<Self, MergeFailure> {
         let schema = merge_subgraphs(subgraphs)?.schema;
         Ok(Self {
-            schema: ValidFederationSchema::new(schema)
-                .map_err(|err| todo!("missing error handling: {err}"))?,
+            schema: ValidFederationSchema::new(schema).map_err(Into::<MergeFailure>::into)?,
         })
     }
 

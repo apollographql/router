@@ -1,0 +1,16 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: false
+        http.server.request.duration: false
+        "custom.histogram":
+          description: "histogram of requests"
+          type: histogram
+          unit: "unit"
+          value: unit
+          # This instrument should be triggered on drop as the condition is true
+          condition:
+            eq:
+              - request_header: "always-true"
+              - static: "true"
