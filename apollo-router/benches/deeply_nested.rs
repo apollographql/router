@@ -130,7 +130,7 @@ async fn graphql_client(nesting_level: usize) -> Result<Value, String> {
         json.push_str("}");
     }
     json.push_str(r#"}"}"#);
-    let request = hyper::Request::post(format!("http://127.0.0.1:{SUPERGRAPH_PORT}"))
+    let request = http::Request::post(format!("http://127.0.0.1:{SUPERGRAPH_PORT}"))
         .header("content-type", "application/json")
         .header("fibonacci-iterations", nesting_level)
         .body(json.into())
@@ -170,8 +170,8 @@ fn spawn_subgraph() -> ShutdownOnDrop {
 }
 
 async fn subgraph(
-    request: hyper::Request<hyper::Body>,
-) -> Result<hyper::Response<hyper::Body>, hyper::Error> {
+    request: http::Request<hyper::Body>,
+) -> Result<http::Response<hyper::Body>, hyper::Error> {
     let nesting_level = request
         .headers()
         .get("fibonacci-iterations")
@@ -203,7 +203,7 @@ async fn subgraph(
         json.push_str("}");
     }
     json.push_str("}}");
-    let mut response = hyper::Response::new(hyper::Body::from(json));
+    let mut response = http::Response::new(hyper::Body::from(json));
     let application_json = hyper::header::HeaderValue::from_static("application/json");
     response
         .headers_mut()
