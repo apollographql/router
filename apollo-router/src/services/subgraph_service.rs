@@ -16,7 +16,6 @@ use http::header::{self};
 use http::response::Parts;
 use http::HeaderValue;
 use http::Request;
-use hyper::Body;
 use hyper_rustls::ConfigBuilderExt;
 use itertools::Itertools;
 use mediatype::names::APPLICATION;
@@ -40,6 +39,7 @@ use uuid::Uuid;
 use super::http::HttpClientServiceFactory;
 use super::http::HttpRequest;
 use super::layers::content_negotiation::GRAPHQL_JSON_RESPONSE_HEADER_VALUE;
+use super::router::body::RouterBody;
 use super::Plugins;
 use crate::batching::assemble_batch;
 use crate::batching::BatchQuery;
@@ -74,6 +74,7 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
+pub(crate) const SUBGRAPH_REQUEST_SPAN_NAME: &str = "subgraph_request";
 const PERSISTED_QUERY_NOT_FOUND_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_FOUND";
 const PERSISTED_QUERY_NOT_SUPPORTED_EXTENSION_CODE: &str = "PERSISTED_QUERY_NOT_SUPPORTED";
 const PERSISTED_QUERY_NOT_FOUND_MESSAGE: &str = "PersistedQueryNotFound";
@@ -528,9 +529,7 @@ async fn call_websocket(
 
     let signing_params = context
         .extensions()
-        .lock()
-        .get::<Arc<SigningParamsConfig>>()
-        .cloned();
+        .with_lock(|lock| lock.get::<Arc<SigningParamsConfig>>().cloned());
 
     let request = if let Some(signing_params) = signing_params {
         signing_params
@@ -542,9 +541,7 @@ async fn call_websocket(
 
     let subgraph_request_event = context
         .extensions()
-        .lock()
-        .get::<SubgraphEventRequestLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
     if let Some(level) = subgraph_request_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -594,7 +591,7 @@ async fn call_websocket(
         }
     });
 
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -769,7 +766,7 @@ pub(crate) async fn process_batch(
     client_factory: HttpClientServiceFactory,
     service: String,
     mut contexts: Vec<Context>,
-    mut request: http::Request<hyper::Body>,
+    mut request: http::Request<RouterBody>,
     listener_count: usize,
 ) -> Result<Vec<SubgraphResponse>, FetchError> {
     // Now we need to "batch up" our data and send it to our subgraphs
@@ -785,7 +782,7 @@ pub(crate) async fn process_batch(
 
     // We can't provide a single operation name in the span (since we may be processing multiple
     // operations). Product decision, use the hard coded value "batch".
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -839,9 +836,7 @@ pub(crate) async fn process_batch(
 
     let subgraph_response_event = batch_context
         .extensions()
-        .lock()
-        .get::<SubgraphEventResponseLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
     if let Some(level) = subgraph_response_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -1026,7 +1021,7 @@ pub(crate) async fn notify_batch_query(
 }
 
 type BatchInfo = (
-    (String, http::Request<Body>, Vec<Context>, usize),
+    (String, http::Request<RouterBody>, Vec<Context>, usize),
     Vec<oneshot::Sender<Result<SubgraphResponse, BoxError>>>,
 );
 
@@ -1104,17 +1099,12 @@ async fn call_http(
     // If we are processing a batch, then we'd like to park tasks here, but we can't park them whilst
     // we have the context extensions lock held. That would be very bad...
     // We grab the (potential) BatchQuery and then operate on it later
-    let opt_batch_query = {
-        let extensions_guard = context.extensions().lock();
-
-        // We need to make sure to remove the BatchQuery from the context as it holds a sender to
-        // the owning batch
-        extensions_guard
-            .get::<Batching>()
+    let opt_batch_query = context.extensions().with_lock(|lock| {
+        lock.get::<Batching>()
             .and_then(|batching_config| batching_config.batch_include(service_name).then_some(()))
-            .and_then(|_| extensions_guard.get::<BatchQuery>().cloned())
+            .and_then(|_| lock.get::<BatchQuery>().cloned())
             .and_then(|bq| (!bq.finished()).then_some(bq))
-    };
+    });
 
     // If we have a batch query, then it's time for batching
     if let Some(query) = opt_batch_query {
@@ -1157,7 +1147,7 @@ pub(crate) async fn call_single_http(
     let (parts, _) = subgraph_request.into_parts();
     let body = serde_json::to_string(&body)?;
     tracing::debug!("our JSON body: {body:?}");
-    let mut request = http::Request::from_parts(parts, Body::from(body));
+    let mut request = http::Request::from_parts(parts, RouterBody::from(body));
 
     request
         .headers_mut()
@@ -1169,7 +1159,7 @@ pub(crate) async fn call_single_http(
     let schema_uri = request.uri();
     let (host, port, path) = get_uri_details(schema_uri);
 
-    let subgraph_req_span = tracing::info_span!("subgraph_request",
+    let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
         "net.peer.name" = %host,
         "net.peer.port" = %port,
@@ -1201,9 +1191,7 @@ pub(crate) async fn call_single_http(
 
     let subgraph_request_event = context
         .extensions()
-        .lock()
-        .get::<SubgraphEventRequestLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
     if let Some(level) = subgraph_request_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -1240,9 +1228,7 @@ pub(crate) async fn call_single_http(
 
     let subgraph_response_event = context
         .extensions()
-        .lock()
-        .get::<SubgraphEventResponseLevel>()
-        .cloned();
+        .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
     if let Some(level) = subgraph_response_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -1294,44 +1280,52 @@ enum ContentType {
 }
 
 fn get_graphql_content_type(service_name: &str, parts: &Parts) -> Result<ContentType, FetchError> {
-    let content_type = parts
-        .headers
-        .get(header::CONTENT_TYPE)
-        .map(|v| v.to_str().map(MediaType::parse));
-    match content_type {
-        Some(Ok(Ok(content_type))) => {
-            if content_type.ty == APPLICATION && content_type.subty == JSON {
+    if let Some(raw_content_type) = parts.headers.get(header::CONTENT_TYPE) {
+        let content_type = raw_content_type
+            .to_str()
+            .ok()
+            .and_then(|str| MediaType::parse(str).ok());
+
+        match content_type {
+            Some(mime) if mime.ty == APPLICATION && mime.subty == JSON => {
                 Ok(ContentType::ApplicationJson)
-            } else if content_type.ty == APPLICATION
-                && content_type.subty == GRAPHQL_RESPONSE
-                && content_type.suffix == Some(JSON)
+            }
+            Some(mime)
+                if mime.ty == APPLICATION
+                    && mime.subty == GRAPHQL_RESPONSE
+                    && mime.suffix == Some(JSON) =>
             {
                 Ok(ContentType::ApplicationGraphqlResponseJson)
-            } else {
-                Err(FetchError::SubrequestHttpError {
-                    status_code: Some(parts.status.as_u16()),
-                    service: service_name.to_string(),
-                    reason: format!("subgraph didn't return JSON (expected content-type: {} or content-type: {}; found content-type: {content_type})", APPLICATION_JSON.essence_str(), GRAPHQL_JSON_RESPONSE_HEADER_VALUE),
-                })
             }
+            Some(mime) => Err(format!(
+                "subgraph response contains unsupported content-type: {}",
+                mime,
+            )),
+            None => Err(format!(
+                "subgraph response contains invalid 'content-type' header value {:?}",
+                raw_content_type,
+            )),
         }
-        None | Some(_) => Err(FetchError::SubrequestHttpError {
-            status_code: Some(parts.status.as_u16()),
-            service: service_name.to_string(),
-            reason: format!(
-                "subgraph didn't return JSON (expected content-type: {} or content-type: {})",
-                APPLICATION_JSON.essence_str(),
-                GRAPHQL_JSON_RESPONSE_HEADER_VALUE
-            ),
-        }),
+    } else {
+        Err("subgraph response does not contain 'content-type' header".to_owned())
     }
+    .map_err(|reason| FetchError::SubrequestHttpError {
+        status_code: Some(parts.status.as_u16()),
+        service: service_name.to_string(),
+        reason: format!(
+            "{}; expected content-type: {} or content-type: {}",
+            reason,
+            APPLICATION_JSON.essence_str(),
+            GRAPHQL_JSON_RESPONSE_HEADER_VALUE
+        ),
+    })
 }
 
 async fn do_fetch(
     mut client: crate::services::http::BoxService,
     context: &Context,
     service_name: &str,
-    request: Request<Body>,
+    request: Request<RouterBody>,
     display_body: bool,
 ) -> Result<
     (
@@ -1362,7 +1356,8 @@ async fn do_fetch(
     let content_type = get_graphql_content_type(service_name, &parts);
 
     let body = if content_type.is_ok() {
-        let body = hyper::body::to_bytes(body)
+        let body = body
+            .to_bytes()
             .instrument(tracing::debug_span!("aggregate_response_data"))
             .await
             .map_err(|err| {
@@ -1383,7 +1378,8 @@ async fn do_fetch(
         Some(body)
     } else {
         if display_body {
-            let body = hyper::body::to_bytes(body)
+            let body = body
+                .to_bytes()
                 .instrument(tracing::debug_span!("aggregate_response_data"))
                 .await
                 .map_err(|err| {
@@ -1577,6 +1573,7 @@ mod tests {
     use crate::protocols::websocket::ServerMessage;
     use crate::protocols::websocket::WebSocketProtocol;
     use crate::query_planner::fetch::OperationKind;
+    use crate::services::router::body::get_body_bytes;
     use crate::Context;
 
     // starts a local server emulating a subgraph returning status code 400
@@ -1698,8 +1695,37 @@ mod tests {
         server.await.unwrap();
     }
 
-    // starts a local server emulating a subgraph returning bad response format
-    async fn emulate_subgraph_bad_response_format(listener: TcpListener) {
+    // starts a local server emulating a subgraph returning response with missing content_type
+    async fn emulate_subgraph_missing_content_type(listener: TcpListener) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            Ok(http::Response::builder()
+                .status(StatusCode::OK)
+                .body(r#"TEST"#.into())
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
+        server.await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph returning response with invalid content_type
+    async fn emulate_subgraph_invalid_content_type(listener: TcpListener) {
+        async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
+            Ok(http::Response::builder()
+                .header(CONTENT_TYPE, "application/json,application/json")
+                .status(StatusCode::OK)
+                .body(r#"TEST"#.into())
+                .unwrap())
+        }
+
+        let make_svc = make_service_fn(|_conn| async { Ok::<_, Infallible>(service_fn(handle)) });
+        let server = Server::from_tcp(listener).unwrap().serve(make_svc);
+        server.await.unwrap();
+    }
+
+    // starts a local server emulating a subgraph returning unsupported content_type
+    async fn emulate_subgraph_unsupported_content_type(listener: TcpListener) {
         async fn handle(_request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             Ok(http::Response::builder()
                 .header(CONTENT_TYPE, "text/html")
@@ -1718,7 +1744,7 @@ mod tests {
     async fn emulate_persisted_query_not_supported_message(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1773,7 +1799,7 @@ mod tests {
     async fn emulate_persisted_query_not_supported_extension_code(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1830,7 +1856,7 @@ mod tests {
     async fn emulate_persisted_query_not_found_message(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1890,7 +1916,7 @@ mod tests {
     async fn emulate_persisted_query_not_found_extension_code(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1950,7 +1976,7 @@ mod tests {
     async fn emulate_expected_apq_enabled_configuration(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -1991,7 +2017,7 @@ mod tests {
     async fn emulate_expected_apq_disabled_configuration(listener: TcpListener) {
         async fn handle(request: http::Request<Body>) -> Result<http::Response<Body>, Infallible> {
             let (_, body) = request.into_parts();
-            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2104,7 +2130,7 @@ mod tests {
                 .get_all(ACCEPT)
                 .iter()
                 .any(|header_value| header_value == CALLBACK_PROTOCOL_ACCEPT));
-            let graphql_request: Result<graphql::Request, &str> = hyper::body::to_bytes(body)
+            let graphql_request: Result<graphql::Request, &str> = get_body_bytes(body)
                 .await
                 .map_err(|_| ())
                 .and_then(|bytes| serde_json::from_reader(bytes.reader()).map_err(|_| ()))
@@ -2568,10 +2594,10 @@ mod tests {
     }
 
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_bad_content_type() {
+    async fn test_missing_content_type() {
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let socket_addr = listener.local_addr().unwrap();
-        tokio::task::spawn(emulate_subgraph_bad_response_format(listener));
+        tokio::task::spawn(emulate_subgraph_missing_content_type(listener));
 
         let subgraph_service = SubgraphService::new(
             "test",
@@ -2601,7 +2627,83 @@ mod tests {
             .unwrap();
         assert_eq!(
             response.response.body().errors[0].message,
-            "HTTP fetch failed from 'test': subgraph didn't return JSON (expected content-type: application/json or content-type: application/graphql-response+json; found content-type: text/html)"
+            "HTTP fetch failed from 'test': subgraph response does not contain 'content-type' header; expected content-type: application/json or content-type: application/graphql-response+json"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_invalid_content_type() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_invalid_content_type(listener));
+
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            None,
+            Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.response.body().errors[0].message,
+            "HTTP fetch failed from 'test': subgraph response contains invalid 'content-type' header value \"application/json,application/json\"; expected content-type: application/json or content-type: application/graphql-response+json"
+        );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_unsupported_content_type() {
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let socket_addr = listener.local_addr().unwrap();
+        tokio::task::spawn(emulate_subgraph_unsupported_content_type(listener));
+
+        let subgraph_service = SubgraphService::new(
+            "test",
+            true,
+            None,
+            Notify::default(),
+            HttpClientServiceFactory::from_config(
+                "test",
+                &Configuration::default(),
+                Http2Config::Enable,
+            ),
+        )
+        .expect("can create a SubgraphService");
+
+        let url = Uri::from_str(&format!("http://{socket_addr}")).unwrap();
+        let response = subgraph_service
+            .oneshot(
+                SubgraphRequest::builder()
+                    .supergraph_request(supergraph_request("query"))
+                    .subgraph_request(subgraph_http_request(url, "query"))
+                    .operation_kind(OperationKind::Query)
+                    .subgraph_name(String::from("test"))
+                    .context(Context::new())
+                    .build(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            response.response.body().errors[0].message,
+            "HTTP fetch failed from 'test': subgraph response contains unsupported content-type: text/html; expected content-type: application/json or content-type: application/graphql-response+json"
         );
     }
 

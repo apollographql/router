@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use serde::Deserialize;
 use serde::Serialize;
@@ -16,7 +17,7 @@ pub(crate) struct Recording {
     pub(crate) supergraph_sdl: String,
     pub(crate) client_request: RequestDetails,
     pub(crate) client_response: ResponseDetails,
-    pub(crate) formatted_query_plan: Option<String>,
+    pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) subgraph_fetches: Option<Subgraphs>,
 }
 

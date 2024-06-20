@@ -119,11 +119,12 @@ Custom events have a level, `trace`, `debug`, `info`, `warn`, `error` or `off` (
 To set the level:
 ```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      acme.event:
-        level: info # trace, debug, info, warn, error, off
-        # ...
+  instrumentation:
+    events:
+      router:
+        acme.event:
+          level: info # trace, debug, info, warn, error, off
+          # ...
 ```
 
 ### `condition`
@@ -134,14 +135,15 @@ In `router.yaml`, set a `condition` with an equality (`eq`) check:
 
 ```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      acme.event:
-        # ...
-        condition:
-          eq:
-            - 200
-            - response_status: Code
+  instrumentation:
+    events:
+      router:
+        acme.event:
+          # ...
+          condition:
+            eq:
+              - 200
+              - response_status: Code
 ```
 
 For more details, see [Conditions](./conditions).
@@ -155,16 +157,17 @@ The attributes available depend on the service of the request lifecycle.
 
 ```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      my.event:
-        # ...
-        attributes:
-          # Standard attributes
-          http.response.status_code: true
-          # Custom attributes
-          "my_attribute":
-            response_header: "x-my-header"
+  instrumentation:
+    events:
+      router:
+        my.event:
+          # ...
+          attributes:
+            # Standard attributes
+            http.response.status_code: true
+            # Custom attributes
+            "my_attribute":
+              response_header: "x-my-header"
 ```
 
 ## Event configuration example
@@ -173,30 +176,31 @@ For example, the router service can be configured with standard events (`request
 
 ```yaml title="future.router.yaml"
 telemetry:
-  events:
-    router:
-      # Standard events
-      request: info
-      response: info
-      error: info
-
-      # Custom events
-      my.event:
-        message: "my event message"
-        level: info
-        on: request
-        attributes:
-          http.response.body.size: false
-        # Only log when the x-log-request header is `log` 
-        condition:
-          eq:
-            - "log"
-            - request_header: "x-log-request"
-        
-    supergraph:
-        # Custom event configuration for supergraph service ...
-    subgraph:
-        # Custom event configuration for subgraph service ...
+  instrumentation:
+    events:
+      router:
+        # Standard events
+        request: info
+        response: info
+        error: info
+  
+        # Custom events
+        my.event:
+          message: "my event message"
+          level: info
+          on: request
+          attributes:
+            http.response.body.size: false
+          # Only log when the x-log-request header is `log` 
+          condition:
+            eq:
+              - "log"
+              - request_header: "x-log-request"
+          
+      supergraph:
+          # Custom event configuration for supergraph service ...
+      subgraph:
+          # Custom event configuration for subgraph service ...
 ```
 
 ## Event configuration reference

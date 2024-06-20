@@ -1,8 +1,6 @@
 mod include_skip;
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO will be fixed with selection set updates in https://apollographql.atlassian.net/browse/FED-241
 fn handles_simple_requires() {
     let planner = planner!(
         Subgraph1: r#"
@@ -68,8 +66,6 @@ fn handles_simple_requires() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
 fn it_handles_multiple_requires_within_the_same_entity_fetch() {
     let planner = planner!(
         Subgraph1: r#"
@@ -184,7 +180,7 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
+// TODO: investigate this failure after optimize is merged (reverse order of parallel fetches)
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
         Subgraph1: r#"
@@ -297,8 +293,6 @@ fn handles_multiple_requires_involving_different_nestedness() {
 
 /// require that depends on another require
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_simple_require_chain() {
     let planner = planner!(
         Subgraph1: r#"
@@ -451,8 +445,6 @@ fn it_handles_simple_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_require_chain_not_ending_in_original_group() {
     // This is somewhat simiar to the 'simple require chain' case, but the chain does not
     // end in the group in which the query start
@@ -638,8 +630,6 @@ fn it_handles_require_chain_not_ending_in_original_group() {
 
 /// a chain of 10 requires
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_longer_require_chain() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1304,8 +1294,6 @@ fn it_handes_diamond_shape_depedencies() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO will be fixed with selection set updates in https://apollographql.atlassian.net/browse/FED-241
 fn it_can_require_at_inaccessible_fields() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1377,8 +1365,6 @@ fn it_can_require_at_inaccessible_fields() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_require_of_multiple_field_when_one_is_also_a_key_to_reach_another() {
     // The specificity of this example is that we `T.v` requires 2 fields `req1`
     // and `req2`, but `req1` is also a key to get `req2`. This dependency was

@@ -55,4 +55,4 @@ Configuration yaml:
   .preview_file_uploads
 
 * Demand control plugin
-  .experimental_demand_control
+  .preview_demand_control
