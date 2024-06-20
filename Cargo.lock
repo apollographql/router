@@ -201,7 +201,7 @@ dependencies = [
  "indexmap 2.2.3",
  "rowan",
  "serde",
- "serde_json_bytes",
+ "serde_json_bytes 0.2.3 (registry+https://github.com/rust-lang/crates.io-index)",
  "sptr",
  "thiserror",
  "triomphe",
@@ -234,7 +234,7 @@ dependencies = [
  "petgraph",
  "serde",
  "serde_json",
- "serde_json_bytes",
+ "serde_json_bytes 0.2.3 (git+https://github.com/BrynCooke/serde_json_bytes.git?branch=bryn/gxhash)",
  "sha1",
  "strum 0.26.2",
  "strum_macros 0.26.1",
@@ -381,7 +381,7 @@ dependencies = [
  "serde",
  "serde_derive_default",
  "serde_json",
- "serde_json_bytes",
+ "serde_json_bytes 0.2.3 (git+https://github.com/BrynCooke/serde_json_bytes.git?branch=bryn/gxhash)",
  "serde_urlencoded",
  "serde_yaml",
  "serial_test",
@@ -578,7 +578,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_json_bytes",
+ "serde_json_bytes 0.2.3 (git+https://github.com/BrynCooke/serde_json_bytes.git?branch=bryn/gxhash)",
  "tokio",
  "tower",
 ]
@@ -5834,7 +5834,7 @@ dependencies = [
  "schemars",
  "serde",
  "serde_json",
- "serde_json_bytes",
+ "serde_json_bytes 0.2.3 (git+https://github.com/BrynCooke/serde_json_bytes.git?branch=bryn/gxhash)",
  "tokio",
  "tower",
 ]
@@ -6233,6 +6233,19 @@ name = "serde_json_bytes"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9eb67259abd83636e3b2f4700ddc3ecfdbfe7b1b89e824da42bfea6530caf03b"
+dependencies = [
+ "bytes",
+ "indexmap 2.2.3",
+ "jsonpath-rust",
+ "regex",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "serde_json_bytes"
+version = "0.2.3"
+source = "git+https://github.com/BrynCooke/serde_json_bytes.git?branch=bryn/gxhash#307177de366870cd2c49caf0da6263871b6ea517"
 dependencies = [
  "bytes",
  "indexmap 2.2.3",
