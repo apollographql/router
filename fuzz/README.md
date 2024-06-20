@@ -4,9 +4,11 @@
 
 ### Router
 
-This target is especially testing if we have differences between gateway 2 responses and router responses. As soon as it detects a difference it panics and write a report in `router_error.txt`.
-Before launching it you have to spawn the docker-compose for federation 2 with `docker-compose -f docker-compose-federation2.yml up` at the root of the router directory and also run a local router listening on port `4000`.
-And then run it with:
+This target is sending the same query to a backend exposing all the types in a schema, and to the router started with a supergraph schema that points to that same backend for each subgraph, and checks that both answers are the same.
+The invariant tested here is that however the schema is cut up, and however many subgraph requests it will take, the router will return the expected answer, as if it was just one API.
+Before launching it, you have to spawn the subgraph in `fuzz/suvbgraph` with `cargo run --release` and start a Router with the schema in `fuzz/subgrgraph/supergraph.graphql`. You can use whatever router configuration you need, allowing you to fuzz the router with specific features activated.
+
+Run the fuzzer with this command:
 
 ```
 # Only works on Linux
