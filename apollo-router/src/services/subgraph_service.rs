@@ -1161,13 +1161,13 @@ pub(crate) async fn call_single_http(
 
     let subgraph_req_span = tracing::info_span!(SUBGRAPH_REQUEST_SPAN_NAME,
         "otel.kind" = "CLIENT",
-        "net.peer.name" = %host,
-        "net.peer.port" = %port,
-        "http.route" = %path,
+        "net.peer.name" = host,
+        "net.peer.port" = port,
+        "http.route" = path,
         "http.url" = %schema_uri,
         "net.transport" = "ip_tcp",
-        "apollo.subgraph.name" = %service_name,
-        "graphql.operation.name" = %operation_name,
+        "apollo.subgraph.name" = service_name,
+        "graphql.operation.name" = operation_name,
     );
 
     // The graphql spec is lax about what strategy to use for processing responses: https://github.com/graphql/graphql-over-http/blob/main/spec/GraphQLOverHTTP.md#processing-the-response

@@ -261,9 +261,9 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let http_req_span = tracing::info_span!(HTTP_REQUEST_SPAN_NAME,
             "otel.kind" = "CLIENT",
-            "net.peer.name" = %host,
-            "net.peer.port" = %port,
-            "http.route" = %path,
+            "net.peer.name" = host,
+            "net.peer.port" = port,
+            "http.route" = path,
             "http.url" = %schema_uri,
             "net.transport" = "ip_tcp",
             //"apollo.subgraph.name" = %service_name,
