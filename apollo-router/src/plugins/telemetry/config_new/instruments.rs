@@ -2760,9 +2760,7 @@ mod tests {
                             }
                         },
                         "acme.request.on_graphql_error": {
-                            "value": {
-                                "event": "unit"
-                            },
+                            "value": "event_unit",
                             "type": "counter",
                             "unit": "error",
                             "description": "my description",
@@ -2781,9 +2779,7 @@ mod tests {
                             }
                         },
                         "acme.request.on_graphql_error_selector": {
-                            "value": {
-                                "event": "unit"
-                            },
+                            "value": "event_unit",
                             "type": "counter",
                             "unit": "error",
                             "description": "my description",
@@ -2802,9 +2798,7 @@ mod tests {
                             }
                         },
                         "acme.request.on_graphql_error_histo": {
-                            "value": {
-                                "event": "unit"
-                            },
+                            "value": "event_unit",
                             "type": "histogram",
                             "unit": "error",
                             "description": "my description",
