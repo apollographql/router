@@ -4,6 +4,7 @@ use std::io::Write;
 use std::path::Path;
 
 use anyhow::Result;
+use console::style;
 use dialoguer::Confirm;
 use dialoguer::Input;
 use dialoguer::Select;
@@ -45,6 +46,7 @@ pub(super) enum Commit {
 
 impl Process {
     pub(crate) fn start(arguments: &Start) -> Result<()> {
+        println!("{}", style("Starting release process").bold().bright());
         // check if a file is already present
         let path = Path::new(STATE_FILE);
         if path.exists() {
@@ -110,7 +112,8 @@ impl Process {
         };
 
         // store the file
-        println!("process: {:#?}", process);
+        println!("{}: {:?}", style("process").bold().bright(), process);
+
         process.save()?;
 
         // start asking questions
@@ -167,7 +170,7 @@ impl Process {
     }
 
     fn state_start(&mut self) -> Result<bool> {
-        println!(">> Setting up the repository");
+        println!("{}", style("Setting up the repository").bold().bright());
 
         let git = which::which("git")?;
 
@@ -207,7 +210,7 @@ impl Process {
     }
 
     fn create_release_pr(&mut self) -> Result<bool> {
-        println!(">> Creating the release PR");
+        println!("{}", style("Creating the release PR").bold().bright());
 
         let gh = which::which("gh")?;
 
@@ -247,7 +250,8 @@ impl Process {
     }
 
     fn choose_pre_release_pr(&mut self) -> Result<bool> {
-        println!("will choose?");
+        println!("{}", style("Select next release step").bold().bright());
+
         if !self.final_pr_prepared {
             let items = vec!["create a prerelease", "create the final release PR"];
 
@@ -290,7 +294,7 @@ impl Process {
     }
 
     fn create_pre_release_pr(&mut self) -> Result<bool> {
-        println!(">> Creating the release PR");
+        println!("{}", style("Creating the pre release PR").bold().bright());
 
         let prerelease_suffix = Input::new()
             .with_prompt(&format!("prerelease suffix? {}-", self.version))
@@ -314,7 +318,11 @@ impl Process {
         }
 
         let new_version = format!("{}-{}", self.version, prerelease_suffix);
-        println!("prerelease version: {new_version}");
+        println!(
+            "{} {new_version}",
+            style("prerelease version: ").bold().bright()
+        );
+
         // step 6
         let prepare = super::Prepare {
             skip_license_check: true,
@@ -335,7 +343,12 @@ impl Process {
         let git = which::which("git")?;
 
         // step 7
-        println!("please check the changes and add them with `git add -up .`");
+        println!(
+            "{}",
+            style("please check the changes and add them with `git add -up .`")
+                .bold()
+                .bright()
+        );
         let _output = std::process::Command::new(&git)
             .args(["add", "-up", "."])
             .status()?;
@@ -381,9 +394,7 @@ impl Process {
                 .status()?;
 
             // step 11
-            println!(
-                "publish the crates:\ncargo publish -p apollo-federation@{prerelease_version}\ncargo publish -p apollo-router@{prerelease_version}"
-            );
+            println!("{}\ncargo publish -p apollo-federation@{prerelease_version}\ncargo publish -p apollo-router@{prerelease_version}", style("publish the crates:").bold().bright());
 
             self.state = State::PreReleasePRChoose;
             self.save()?;
@@ -395,6 +406,8 @@ impl Process {
     }
 
     fn create_final_release_pr(&mut self) -> Result<bool> {
+        println!("{}", style("Creating the final release PR").bold().bright());
+
         let git = which::which("git")?;
 
         // step 4
@@ -424,9 +437,13 @@ impl Process {
         self.state = State::ReleaseFinalPRGitAdd;
         self.save()?;
 
-        println!("prep release branch created.\n**MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.\n This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).");
         println!(
-            r#"Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
+            "{}\n{}",
+            style("prep release branch created").bold().bright(),
+            style("**MANUALLY CHECK AND UPDATE** the `federation-version-support.mdx` to make sure it shows the version of Federation which is included in the `router-bridge` that ships with this version of Router.\n This can be obtained by looking at the version of `router-bridge` in `apollo-router/Cargo.toml` and taking the number after the `+` (e.g., `router-bridge@0.2.0+v2.4.3` means Federation v2.4.3).").bold().bright()
+        );
+
+        println!("{}", style(r#"Make local edits to the newly rendered `CHANGELOG.md` entries to do some initial editoral.
 
         These things should have *ALWAYS* been resolved earlier in the review process of the PRs that introduced the changes, but they must be double checked:
     
@@ -435,8 +452,7 @@ impl Process {
          - Titles stand alone and work without their descriptions.
          - You don't need to read the title for the description to make sense.
          - Grammar is good.  (Or great! But don't let perfect be the enemy of good.)
-         - Formatting looks nice when rendered as markdown and follows common convention."#
-        );
+         - Formatting looks nice when rendered as markdown and follows common convention."#).bold().bright());
 
         Ok(false)
     }
@@ -445,7 +461,13 @@ impl Process {
         let git = which::which("git")?;
 
         // step 11
-        println!("please check the changes and add them with `git add -up .`");
+        println!(
+            "{}",
+            style("please check the changes and add them with `git add -up .`")
+                .bold()
+                .bright()
+        );
+
         let _output = std::process::Command::new(&git)
             .args(["add", "-up", "."])
             .status()?;
@@ -540,6 +562,8 @@ impl Process {
     }
 
     fn merge_final_release_pr(&mut self) -> Result<bool> {
+        println!("{}", style("Merging the final release PR").bold().bright());
+
         let gh = which::which("gh")?;
 
         // step 4
@@ -564,7 +588,12 @@ impl Process {
         self.save()?;
 
         //FIXME: can we check the PR status with the gh command?
-        println!("Wait for the pre PR to merge into the release PR");
+        println!(
+            "{}",
+            style("Wait for the pre PR to merge into the release PR")
+                .bold()
+                .bright()
+        );
 
         Ok(false)
     }
@@ -592,6 +621,7 @@ impl Process {
                 &self.version,
             ])
             .status()?;
+        println!("{}", style("release PR marked as ready").bold().bright());
 
         // step 7
         // gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --body "" -t "release: v${APOLLO_ROUTER_RELEASE_VERSION}" --auto "${APOLLO_ROUTER_RELEASE_VERSION}"
@@ -611,6 +641,13 @@ impl Process {
             ])
             .status()?;
 
+        println!(
+            "{}",
+            style("Wait for the release PR to merge into main")
+                .bold()
+                .bright()
+        );
+
         self.state = State::WaitForMergeToMain;
         self.save()?;
 
@@ -618,6 +655,8 @@ impl Process {
     }
 
     fn tag_and_release(&mut self) -> Result<bool> {
+        println!("{}", style("Tagging and releasing").bold().bright());
+
         let git = which::which("git")?;
 
         // step 9
@@ -660,6 +699,7 @@ impl Process {
               &format!("Follow-up to the v{} being officially released, bringing version bumps and changelog updates into the `dev` branch.", self.version)
             ])
             .status()?;
+        println!("{}", style("dev reconciliation PR created").bold().bright());
 
         // step 11: mark the PR as automerge
         //  APOLLO_RECONCILE_PR_URL=$(gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr list --state open --base dev --head main --json url --jq '.[-1] | .url')
@@ -684,7 +724,11 @@ impl Process {
             ])
             .output()?;
         let url = std::str::from_utf8(&output.stdout)?;
-        println!("reconciliation PR URL: {url}");
+        println!(
+            "{}: {url}",
+            style("reconciliation PR URL: ").bold().bright()
+        );
+
         let _output = std::process::Command::new(&gh)
             .args([
                 "--repo",
@@ -695,8 +739,8 @@ impl Process {
             ])
             .status()?;
 
-        println!("🗣️ **Solicit approval from the Router team, wait for the reconciliation PR to pass CI and auto-merge into `dev`**");
-        println!("⚠️ **Wait for `publish_github_release` on CircleCI to finish on this job before continuing.** ⚠️");
+        println!("{}", style("🗣️ **Solicit approval from the Router team, wait for the reconciliation PR to pass CI and auto-merge into `dev`**").bold().bright());
+        println!("{}", style("⚠️ **Wait for `publish_github_release` on CircleCI to finish on this job before continuing.** ⚠️").bold().bright());
 
         self.state = State::WaitForReleasePublished;
         self.save()?;
@@ -705,6 +749,8 @@ impl Process {
     }
 
     fn update_release_notes(&self) -> Result<bool> {
+        println!("{}", style("Updating release notes").bold().bright());
+
         // step 15
         //FIXME: replace this step with an askama template
         let perl = which::which("perl")?;
@@ -763,7 +809,10 @@ impl Process {
 
         // step 18
         println!(
-            "manually publish the crates:\ncargo publish -p apollo-federation@{}\ncargo publish -p apollo-router@{}", self.version, self.version
+            "{}\ncargo publish -p apollo-federation@{}\ncargo publish -p apollo-router@{}",
+            style("manually publish the crates:").bold().bright(),
+            self.version,
+            self.version
         );
 
         // the release process is now finished, remove the release file
