@@ -3015,10 +3015,11 @@ impl Display for OpGraphPath {
         // If the path is length is 0 return "[]"
         // Traverse the path, getting the of the edge.
         let head = &self.graph.graph()[self.head];
-        if head.is_root_node() && self.edges.is_empty() {
+        let head_is_root_node = head.is_root_node();
+        if head_is_root_node && self.edges.is_empty() {
             return write!(f, "_");
         }
-        if !head.is_root_node() {
+        if !head_is_root_node {
             write!(f, "{head}")?;
         }
         self.edges
@@ -3029,7 +3030,7 @@ impl Display for OpGraphPath {
                 Some(e) => {
                     let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
                     let node = &self.graph.graph()[tail];
-                    if i == 0 && head.is_root_node() {
+                    if i == 0 && head_is_root_node {
                         write!(f, "{node}")
                     } else {
                         let edge = &self.graph.graph()[e];
