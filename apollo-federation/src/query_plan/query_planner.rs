@@ -749,6 +749,19 @@ mod tests {
     use super::*;
     use crate::subgraph::Subgraph;
 
+    fn setup_tracing_subscriber() {
+        let log_file = std::fs::File::create("my_cool_trace.log").expect("create log file");
+        tracing_subscriber::fmt()
+            // .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
+            .json()
+            .flatten_event(true)
+            .with_span_events(FmtSpan::ACTIVE)
+            // .with_file(true)
+            // .with_line_number(true)
+            .with_writer(log_file)
+            .init();
+    }
+
     const TEST_SUPERGRAPH: &str = r#"
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
@@ -920,6 +933,7 @@ type User
         "###);
     }
 
+    // #[test_log::test]
     #[test]
     fn plan_simple_query_for_multiple_subgraphs() {
         let log_file = File::create("my_cool_trace.log").expect("create log file");
