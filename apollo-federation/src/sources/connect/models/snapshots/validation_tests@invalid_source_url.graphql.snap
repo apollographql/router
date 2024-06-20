@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/invalid_source_url.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/invalid_source_url.graphql
 ---
 [Message { code: InvalidUrl, message: "The value \"127.0.0.1\" for `@source(baseURL:)` is not a valid URL: relative URL without a base.", locations: [Location { line: 5, column: 27 }..Location { line: 5, column: 47 }] }]

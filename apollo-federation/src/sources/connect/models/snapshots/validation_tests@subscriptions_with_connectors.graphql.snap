@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/subscriptions_with_connectors.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/subscriptions_with_connectors.graphql
 ---
 [Message { code: SubscriptionInConnectors, message: "A subscription root type is not supported when using `@connect`.", locations: [Location { line: 12, column: 0 }..Location { line: 14, column: 1 }] }]

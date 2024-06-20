@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/multiple_errors.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/multiple_errors.graphql
 ---
 [Message { code: SourceScheme, message: "The value \"ftp://127.0.0.1\" for `@source(baseURL:)` must be http or https, got ftp.", locations: [Location { line: 5, column: 30 }..Location { line: 5, column: 56 }] }, Message { code: InvalidSourceName, message: "There are invalid characters in `@source(name: \"u$ers\")`. Only alphanumeric and underscores are allowed.", locations: [Location { line: 5, column: 14 }..Location { line: 5, column: 21 }] }]

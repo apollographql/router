@@ -761,7 +761,7 @@ pub enum Code {
     MultipleHttpMethods,
     /// The `@connect` directive is missing an HTTP method.
     MissingHttpMethod,
-    // The `entity` argument should only be used on the root `Query` field
+    /// The `entity` argument should only be used on the root `Query` field
     EntityNotOnRootQuery,
 }
 
@@ -794,11 +794,13 @@ mod test_validate_source {
 
     #[test]
     fn validation_tests() {
-        glob!("test_data/*.graphql", |path| {
-            let schema = read_to_string(path).unwrap();
-            let schema = Schema::parse(schema, "test.graphql").unwrap();
-            let errors = validate(schema);
-            assert_snapshot!(format!("{:?}", errors));
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            glob!("test_data", "validation/*.graphql", |path| {
+                let schema = read_to_string(path).unwrap();
+                let schema = Schema::parse(schema, "test.graphql").unwrap();
+                let errors = validate(schema);
+                assert_snapshot!(format!("{:?}", errors));
+            });
         });
     }
 }

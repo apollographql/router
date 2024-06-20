@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/invalid_entity_arg_on_field.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/invalid_entity_arg_on_field.graphql
 ---
 [Message { code: EntityNotOnRootQuery, message: "`@connect(entity:)` on `User.bestFriend` is invalid. Entities can only be declared on root `Query` fields.", locations: [Location { line: 15, column: 61 }..Location { line: 15, column: 73 }] }]
