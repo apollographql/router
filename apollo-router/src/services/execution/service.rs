@@ -340,29 +340,30 @@ impl ExecutionService {
                     variables_set,
                 );
 
-                if matches!(metrics_ref_mode, ApolloMetricsReferenceMode::Extended) {
+                if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
                     extract_enums_from_response(
                         filtered_query.clone(),
                         operation_name,
                         schema.api_schema(),
-                        &response,
+                        response_body,
                         &mut referenced_enums,
                     );
                 }
             }
 
-            if matches!(metrics_ref_mode, ApolloMetricsReferenceMode::Extended) {
+            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
                 extract_enums_from_response(
                     query.clone(),
                     operation_name,
                     schema.api_schema(),
-                    &response,
+                    response_body,
                     &mut referenced_enums,
                 );
-                context
+            }
+
+            context
                     .extensions()
                     .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
-            }
 
             paths.extend(
                 query

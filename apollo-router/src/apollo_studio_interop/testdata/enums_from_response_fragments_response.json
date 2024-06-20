@@ -1,0 +1,36 @@
+{
+  "enumInputQuery": {
+    "enumResponse": "SOME_VALUE_1"
+  },
+  "alias1": {
+    "list": [
+      "SOME_VALUE_4",
+      "SOME_VALUE_5"
+    ],
+    "listOfLists": [
+      [],
+      [
+        "SOME_VALUE_6",
+        "SOME_VALUE_8"
+      ]
+    ],
+    "singleValue": "SOME_VALUE_1"
+  },
+  "alias2": {
+    "nestedObject": {
+      "singleValue": "SOME_VALUE_10",
+      "listOfLists": [
+        [],
+        [
+          "SOME_VALUE_13"
+        ],
+        [
+          "SOME_VALUE_14"
+        ]
+      ],
+      "list": [
+        "SOME_VALUE_11"
+      ]
+    }
+  }
+}

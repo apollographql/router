@@ -30,7 +30,6 @@ use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
 use serde::Serialize;
 
-use crate::graphql::Response;
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
 use crate::spec::Fragments;
@@ -233,6 +232,7 @@ impl ComparableUsageReporting {
 /// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
 /// and referenced fields of an operation. The document used to generate the signature and for the references can be
 /// different to handle cases where the operation has been filtered, but we want to keep the same signature.
+#[tracing::instrument(skip_all, level = "debug")]
 pub(crate) fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
@@ -240,71 +240,65 @@ pub(crate) fn generate_usage_reporting(
     schema: &Valid<Schema>,
     normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
 ) -> ComparableUsageReporting {
-    tracing::debug_span!("generate_usage_reporting").in_scope(|| {
-        let mut generator = UsageGenerator {
-            signature_doc,
-            references_doc,
-            operation_name,
-            schema,
-            normalization_algorithm,
-            variables: &Object::new(),
-            fragments_map: HashMap::new(),
-            fields_by_type: HashMap::new(),
-            fields_by_interface: HashMap::new(),
-            enums_by_name: HashMap::new(),
-            input_field_references: HashMap::new(),
-            fragment_spread_set: HashSet::new(),
-        };
+    let mut generator = UsageGenerator {
+        signature_doc,
+        references_doc,
+        operation_name,
+        schema,
+        normalization_algorithm,
+        variables: &Object::new(),
+        fragments_map: HashMap::new(),
+        fields_by_type: HashMap::new(),
+        fields_by_interface: HashMap::new(),
+        enums_by_name: HashMap::new(),
+        input_field_references: HashMap::new(),
+        fragment_spread_set: HashSet::new(),
+    };
 
-        generator.generate_usage_reporting()
-    })
+    generator.generate_usage_reporting()
 }
 
+#[tracing::instrument(skip_all, level = "debug")]
 pub(crate) fn generate_extended_references(
     doc: Arc<Valid<ExecutableDocument>>,
     operation_name: Option<String>,
     schema: &Valid<Schema>,
     variables: &Object,
 ) -> ExtendedReferenceStats {
-    tracing::debug_span!("generate_extended_references").in_scope(|| {
-        let mut generator = UsageGenerator {
-            signature_doc: &doc,
-            references_doc: &doc,
-            operation_name: &operation_name,
-            schema,
-            normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
-            variables,
-            fragments_map: HashMap::new(),
-            fields_by_type: HashMap::new(),
-            fields_by_interface: HashMap::new(),
-            enums_by_name: HashMap::new(),
-            input_field_references: HashMap::new(),
-            fragment_spread_set: HashSet::new(),
-        };
+    let mut generator = UsageGenerator {
+        signature_doc: &doc,
+        references_doc: &doc,
+        operation_name: &operation_name,
+        schema,
+        normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
+        variables,
+        fragments_map: HashMap::new(),
+        fields_by_type: HashMap::new(),
+        fields_by_interface: HashMap::new(),
+        enums_by_name: HashMap::new(),
+        input_field_references: HashMap::new(),
+        fragment_spread_set: HashSet::new(),
+    };
 
-        generator.generate_extended_references()
-    })
+    generator.generate_extended_references()
 }
 
+#[tracing::instrument(skip_all, level = "debug")]
 pub(crate) fn extract_enums_from_response(
     query: Arc<Query>,
     operation_name: Option<&str>,
     schema: &Valid<Schema>,
-    response: &Response,
+    response_body: &Object,
     result_set: &mut ReferencedEnums,
 ) {
     if let Some(operation) = query.operation(operation_name) {
-        if let Some(JsonValue::Object(json_object)) = &response.data {
-            tracing::debug_span!("extract_enums_from_response").in_scope(|| {
-                extract_enums_from_selection_set(
-                    &operation.selection_set,
-                    &query.fragments,
-                    schema,
-                    json_object,
-                    result_set,
-                );
-            })
-        }
+        extract_enums_from_selection_set(
+            &operation.selection_set,
+            &query.fragments,
+            schema,
+            response_body,
+            result_set,
+        );
     }
 }
 

@@ -178,6 +178,23 @@ type ObjectTypeResponse
   nullableField: String
 }
 
+type NestedEnumResponse
+  @join__type(graph: MAIN)
+{
+  singleValue: SomeEnum
+  list: [SomeEnum]
+  listOfLists: [[SomeEnum]]
+}
+
+type EnumResponse 
+  @join__type(graph: MAIN)
+{
+  singleValue: SomeEnum
+  list: [SomeEnum]
+  listOfLists: [[SomeEnum]]
+  nestedObject: NestedEnumResponse
+}
+
 type Query
   @join__type(graph: MAIN)
 {
@@ -204,6 +221,7 @@ type Query
     enumInputObjectListOfLists: [[EnumInputType]],
     anotherEnumList: [AnotherEnum],
   ): BasicResponse
+  enumResponseQuery: EnumResponse,
 }
 
 enum SomeEnum
