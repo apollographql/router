@@ -79,7 +79,13 @@ When defining a custom instrument, make sure to reference [OpenTelemetry semanti
 
 </Note>
 
-In the example configuration below, three custom instruments are defined (`acme.request.duration`, `acme.graphql.requests`, `acme.graphql.subgraph.errors`), one for each service of the router pipeline respectively (`router`, `supergraph`, `subgraph`):
+In the example configuration below, three custom instruments are defined (`acme.request.duration`, `acme.graphql.requests`, `acme.graphql.subgraph.errors`).
+
+Instruments are defined within one of the following groups which defined when the instrument will be mutated:
+* `router` - The router service
+* `supergraph` - The supergraph service
+* `subgraph` - The subgraph service
+* `graphql` - For each json element returned to the client
 
 ```yaml title="router.yaml"
 telemetry:
