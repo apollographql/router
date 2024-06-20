@@ -1,12 +1,14 @@
-use std::{
-    fs::File,
-    io::{Read, Write},
-    path::Path,
-};
+use std::fs::File;
+use std::io::Read;
+use std::io::Write;
+use std::path::Path;
 
 use anyhow::Result;
-use dialoguer::{Confirm, Input, Select};
-use serde::{Deserialize, Serialize};
+use dialoguer::Confirm;
+use dialoguer::Input;
+use dialoguer::Select;
+use serde::Deserialize;
+use serde::Serialize;
 
 #[derive(Debug, clap::Parser)]
 pub struct Start {
