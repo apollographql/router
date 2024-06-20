@@ -75,7 +75,7 @@ impl tower::Service<FetchRequest> for FetchService {
                 parent_service_name,
                 ..
             }) => (parent_service_name.clone(), connector_service_name.clone()),
-            _ => (service_name_string.clone(), service_name_string),
+            _ => (service_name_string.clone(), service_name_string.clone()),
         };
 
         let uri = self
@@ -148,7 +148,7 @@ impl tower::Service<FetchRequest> for FetchService {
             .expect("we already checked that the service exists during planning; qed");
 
         Box::pin(async move {
-            if let Some(apollo_federation::sources::to_remove::FetchNode::Connect(connect_node)) =
+            if let Some(apollo_federation::sources::to_remove::FetchNode::Connect(_connect_node)) =
                 fetch_node.source_node.as_deref()
             {
                 // TODO: return eventually
@@ -156,12 +156,12 @@ impl tower::Service<FetchRequest> for FetchService {
                     .create()
                     .oneshot(
                         ConnectRequest::builder()
+                            .service_name(service_name_string)
                             .context(context)
-                            .fetch_node(connect_node.clone())
+                            .operation_str(operation.to_string())
                             .supergraph_request(supergraph_request)
                             // TODO: remove clone once it returns
                             .variables(variables.clone())
-                            .current_dir(current_dir.clone())
                             .build(),
                     )
                     .await;

@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
@@ -12,8 +10,8 @@ use serde_json_bytes::Value;
 
 use super::http_json_transport::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use crate::services::connect;
 use crate::services::router::body::RouterBody;
-use crate::services::SubgraphRequest;
 
 const REPRESENTATIONS_VAR: &str = "representations";
 const ENTITIES: &str = "_entities";
@@ -60,9 +58,9 @@ pub(crate) enum ResponseTypeName {
 }
 
 pub(crate) fn make_requests(
-    request: SubgraphRequest,
+    request: connect::Request,
     connector: &Connector,
-    schema: Arc<Valid<Schema>>,
+    schema: &Valid<Schema>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let request_params = if connector.entity {
         entities_from_request(&request, schema)
@@ -78,7 +76,7 @@ pub(crate) fn make_requests(
 fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<(ResponseKey, RequestInputs)>,
-    _original_request: &SubgraphRequest, // TODO headers
+    _original_request: &connect::Request, // TODO headers
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     request_params
         .into_iter()
@@ -136,22 +134,16 @@ pub(crate) enum MakeRequestError {
 /// }
 /// ```
 fn root_fields(
-    request: &SubgraphRequest,
-    schema: Arc<Valid<Schema>>,
+    request: &connect::Request,
+    schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
-    let query = request
-        .subgraph_request
-        .body()
-        .query
-        .clone()
-        .ok_or_else(|| MakeRequestError::InvalidOperation("missing query".into()))?;
-
-    let doc = ExecutableDocument::parse(&schema, query, "op.graphql").map_err(|_| {
-        MakeRequestError::InvalidOperation("cannot parse operation document".into())
-    })?;
+    let doc =
+        ExecutableDocument::parse(schema, &request.operation_str, "op.graphql").map_err(|_| {
+            MakeRequestError::InvalidOperation("cannot parse operation document".into())
+        })?;
 
     let op = doc
-        .get_operation(request.subgraph_request.body().operation_name.as_deref())
+        .get_operation(None)
         .map_err(|_| MakeRequestError::InvalidOperation("no operation found".into()))?;
 
     op.selection_set
@@ -164,15 +156,12 @@ fn root_fields(
                     typename: ResponseTypeName::Concrete(field.ty().inner_named_type().to_string()),
                 };
 
-                let args = graphql_utils::field_arguments_map(
-                    field,
-                    &request.subgraph_request.body().variables,
-                )
-                .map_err(|_| {
-                    MakeRequestError::InvalidArguments(
-                        "cannot get inputs from field arguments".into(),
-                    )
-                })?;
+                let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
+                    .map_err(|_| {
+                        MakeRequestError::InvalidArguments(
+                            "cannot get inputs from field arguments".into(),
+                        )
+                    })?;
 
                 let request_inputs = RequestInputs {
                     args,
@@ -213,28 +202,16 @@ fn root_fields(
 ///
 /// Returns a list of request inputs and the response key (index in the array).
 fn entities_from_request(
-    request: &SubgraphRequest,
-    schema: Arc<Valid<Schema>>,
+    request: &connect::Request,
+    schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
     use MakeRequestError::InvalidRepresentations;
 
-    let Some(representations) = request
-        .subgraph_request
-        .body()
-        .variables
-        .get(REPRESENTATIONS_VAR)
-    else {
+    let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
         return root_fields(request, schema);
     };
 
-    let (_, typename_requested) = graphql_utils::get_entity_fields(
-        request
-            .subgraph_request
-            .body()
-            .query
-            .as_ref()
-            .ok_or_else(|| MakeRequestError::InvalidOperation("missing query".into()))?,
-    )?;
+    let (_, typename_requested) = graphql_utils::get_entity_fields(&request.operation_str)?;
 
     representations
         .as_array()
@@ -300,20 +277,14 @@ fn entities_from_request(
 /// Return a list of request inputs with the response key (index in list and
 /// name/alias of field) for each.
 fn entities_with_fields_from_request(
-    request: &SubgraphRequest,
-    _schema: Arc<Valid<Schema>>,
+    request: &connect::Request,
+    _schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
     use apollo_compiler::ast::Selection;
     use MakeRequestError::*;
 
-    let (entities_field, typename_requested) = graphql_utils::get_entity_fields(
-        request
-            .subgraph_request
-            .body()
-            .query
-            .as_ref()
-            .ok_or_else(|| InvalidOperation("missing query".into()))?,
-    )?;
+    let (entities_field, typename_requested) =
+        graphql_utils::get_entity_fields(&request.operation_str)?;
 
     let types_and_fields = entities_field
         .selection_set
@@ -351,8 +322,7 @@ fn entities_with_fields_from_request(
         .collect::<Result<Vec<_>, _>>()?;
 
     let representations = request
-        .subgraph_request
-        .body()
+        .variables
         .variables
         .get(REPRESENTATIONS_VAR)
         .ok_or_else(|| InvalidRepresentations("missing representations variable".into()))?
@@ -369,11 +339,11 @@ fn entities_with_fields_from_request(
         .flatten()
         .flat_map(|(typename, field)| {
             representations.iter().map(move |(i, representation)| {
-                let args = graphql_utils::ast_field_arguments_map(
-                    field,
-                    &request.subgraph_request.body().variables,
-                )
-                .map_err(|_| InvalidArguments("cannot build inputs from field arguments".into()))?;
+                let args =
+                    graphql_utils::ast_field_arguments_map(field, &request.variables.variables)
+                        .map_err(|_| {
+                            InvalidArguments("cannot build inputs from field arguments".into())
+                        })?;
 
                 // if the fetch node operation doesn't include __typename, then
                 // we're assuming this is for an interface object and we don't want
@@ -410,6 +380,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_compiler::NodeStr;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::Connector;
@@ -419,24 +390,32 @@ mod tests {
     use apollo_federation::sources::connect::URLPathTemplate;
     use insta::assert_debug_snapshot;
 
+    use crate::graphql;
+    use crate::query_planner::fetch::Variables;
+    use crate::Context;
+
     #[test]
     fn test_root_fields_simple() {
         let schema =
             Arc::new(Schema::parse_and_validate("type Query { a: String }", "./").unwrap());
 
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_request(
+        let req = crate::services::connect::Request::builder()
+            .service_name(NodeStr::from("subgraph_Query_a_0"))
+            .context(Context::default())
+            .operation_str("query { a a2: a }".to_string())
+            .variables(Variables {
+                variables: Default::default(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
                 http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query("query { a a2: a }")
-                            .build(),
-                    )
-                    .expect("request builder"),
-            )
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req, schema.clone()), @r###"
+        assert_debug_snapshot!(super::root_fields(&req, &schema), @r###"
         Ok(
             [
                 (
@@ -474,25 +453,28 @@ mod tests {
             Schema::parse_and_validate("type Query {b(var: String): String}", "./").unwrap(),
         );
 
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query("query($var: String) { b(var: \"inline\") b2: b(var: $var) }")
-                            .variables(
-                                serde_json_bytes::json!({ "var": "variable" })
-                                    .as_object()
-                                    .unwrap()
-                                    .clone(),
-                            )
-                            .build(),
-                    )
-                    .expect("request builder"),
+        let req = crate::services::connect::Request::builder()
+            .service_name(NodeStr::from("subgraph_Query_b_0"))
+            .context(Context::default())
+            .operation_str(
+                "query($var: String) { b(var: \"inline\") b2: b(var: $var) }".to_string(),
             )
+            .variables(Variables {
+                variables: serde_json_bytes::json!({ "var": "variable" })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req, schema.clone()), @r###"
+        assert_debug_snapshot!(super::root_fields(&req, &schema), @r###"
         Ok(
             [
                 (
@@ -545,44 +527,47 @@ mod tests {
             "./",
         ).unwrap());
 
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query(r#"
-                              query(
-                                $var1: Int, $var2: Bool, $var3: Float, $var4: ID, $var5: JSON, $var6: [String], $var7: String
-                              ) {
-                                c(var1: $var1, var2: $var2, var3: $var3, var4: $var4, var5: $var5, var6: $var6, var7: $var7)
-                                c2: c(
-                                  var1: 1,
-                                  var2: true,
-                                  var3: 0.9,
-                                  var4: "123",
-                                  var5: { a: 42 },
-                                  var6: ["item"],
-                                  var7: null
-                                )
-                              }
-                            "#)
-                            .variables(
-                                serde_json_bytes::json!({
-                                  "var1": 1, "var2": true, "var3": 0.9,
-                                  "var4": "123", "var5": { "a": 42 }, "var6": ["item"],
-                                  "var7": null
-                                })
-                                .as_object()
-                                .unwrap()
-                                .clone(),
-                            )
-                            .build(),
+        let req = crate::services::connect::Request::builder()
+        .service_name(NodeStr::from("subgraph_Query_c_0"))
+            .context(Context::default())
+            .operation_str(
+                r#"
+                query(
+                    $var1: Int, $var2: Bool, $var3: Float, $var4: ID, $var5: JSON, $var6: [String], $var7: String
+                ) {
+                    c(var1: $var1, var2: $var2, var3: $var3, var4: $var4, var5: $var5, var6: $var6, var7: $var7)
+                    c2: c(
+                        var1: 1,
+                        var2: true,
+                        var3: 0.9,
+                        var4: "123",
+                        var5: { a: 42 },
+                        var6: ["item"],
+                        var7: null
                     )
-                    .expect("request builder"),
+                }
+                "#.to_string(),
             )
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                        "var1": 1, "var2": true, "var3": 0.9,
+                        "var4": "123", "var5": { "a": 42 }, "var6": ["item"],
+                        "var7": null
+                    })
+                    .as_object()
+                    .unwrap()
+                    .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req, schema.clone()), @r###"
+        assert_debug_snapshot!(super::root_fields(&req, &schema), @r###"
         Ok(
             [
                 (
@@ -663,42 +648,44 @@ mod tests {
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
 
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query(
-                                r#"
-                              query($representations: [_Any!]!) {
-                                _entities(representations: $representations) {
-                                  __typename
-                                  ... on Entity {
-                                    field
-                                    alias: field
-                                  }
-                                }
-                              }
-                            "#,
-                            )
-                            .variables(
-                                serde_json_bytes::json!({
-                                  "representations": [
-                                      { "__typename": "Entity", "id": "1" },
-                                      { "__typename": "Entity", "id": "2" },
-                                  ]
-                                })
-                                .as_object()
-                                .unwrap()
-                                .clone(),
-                            )
-                            .build(),
-                    )
-                    .expect("request builder"),
+        let req = crate::services::connect::Request::builder()
+            .service_name(NodeStr::from("subgraph_Query_entity_0"))
+            .context(Context::default())
+            .operation_str(
+                r#"
+                query($representations: [_Any!]!) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field
+                            alias: field
+                        }
+                    }
+                }
+                "#
+                .to_string(),
             )
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ]
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
-        assert_debug_snapshot!(super::entities_from_request(&req, schema.clone()).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(&req, &schema).unwrap(), @r###"
         [
             (
                 Entity {
@@ -755,35 +742,37 @@ mod tests {
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
 
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query(
-                                r#"
-                              query($a: ID!, $b: ID!) {
-                                a: entity(id: $a) { field }
-                                b: entity(id: $b) { field }
-                              }
-                            "#,
-                            )
-                            .variables(
-                                serde_json_bytes::json!({
-                                  "a": "1",
-                                  "b": "2"
-                                })
-                                .as_object()
-                                .unwrap()
-                                .clone(),
-                            )
-                            .build(),
-                    )
-                    .expect("request builder"),
+        let req = crate::services::connect::Request::builder()
+            .service_name(NodeStr::from("subgraph_Query_entity_0"))
+            .context(Context::default())
+            .operation_str(
+                r#"
+                query($a: ID!, $b: ID!) {
+                    a: entity(id: $a) { field }
+                    b: entity(id: $b) { field }
+                }
+            "#
+                .to_string(),
             )
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "a": "1",
+                    "b": "2"
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
-        assert_debug_snapshot!(super::entities_from_request(&req, schema.clone()).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(&req, &schema).unwrap(), @r###"
         [
             (
                 RootField {
@@ -833,43 +822,45 @@ mod tests {
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
 
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query(
-                                r#"
-                              query($representations: [_Any!]!, $bye: String) {
-                                _entities(representations: $representations) {
-                                  __typename
-                                  ... on Entity {
-                                    field(foo: "hi")
-                                    alias: field(foo: $bye)
-                                  }
-                                }
-                              }
-                            "#,
-                            )
-                            .variables(
-                                serde_json_bytes::json!({
-                                  "representations": [
-                                      { "__typename": "Entity", "id": "1" },
-                                      { "__typename": "Entity", "id": "2" },
-                                  ],
-                                  "bye": "bye"
-                                })
-                                .as_object()
-                                .unwrap()
-                                .clone(),
-                            )
-                            .build(),
-                    )
-                    .expect("request builder"),
+        let req = crate::services::connect::Request::builder()
+            .service_name(NodeStr::from("subgraph_Entity_field_0"))
+            .context(Context::default())
+            .operation_str(
+                r#"
+                query($representations: [_Any!]!, $bye: String) {
+                    _entities(representations: $representations) {
+                        __typename
+                        ... on Entity {
+                            field(foo: "hi")
+                            alias: field(foo: $bye)
+                        }
+                    }
+                }
+            "#
+                .to_string(),
             )
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                    "representations": [
+                        { "__typename": "Entity", "id": "1" },
+                        { "__typename": "Entity", "id": "2" },
+                    ],
+                    "bye": "bye"
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, schema.clone()).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, &schema).unwrap(), @r###"
         [
             (
                 EntityField {
@@ -983,41 +974,43 @@ mod tests {
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
 
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_request(
-                http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query(
-                                r#"
-                              query($representations: [_Any!]!, $foo: String) {
-                                _entities(representations: $representations) {
-                                  ... on Entity {
-                                    field(foo: $foo)
-                                  }
-                                }
-                              }
-                            "#,
-                            )
-                            .variables(
-                                serde_json_bytes::json!({
-                                  "representations": [
-                                      { "__typename": "Entity", "id": "1" },
-                                      { "__typename": "Entity", "id": "2" },
-                                  ],
-                                  "foo": "bar"
-                                })
-                                .as_object()
-                                .unwrap()
-                                .clone(),
-                            )
-                            .build(),
-                    )
-                    .expect("request builder"),
+        let req = crate::services::connect::Request::builder()
+            .service_name(NodeStr::from("subgraph_Entity_field_0"))
+            .context(Context::default())
+            .operation_str(
+                r#"
+                query($representations: [_Any!]!, $foo: String) {
+                    _entities(representations: $representations) {
+                        ... on Entity {
+                            field(foo: $foo)
+                        }
+                    }
+                }
+            "#
+                .to_string(),
             )
+            .variables(Variables {
+                variables: serde_json_bytes::json!({
+                  "representations": [
+                      { "__typename": "Entity", "id": "1" },
+                      { "__typename": "Entity", "id": "2" },
+                  ],
+                  "foo": "bar"
+                })
+                .as_object()
+                .unwrap()
+                .clone(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
+                http::Request::builder()
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, schema.clone()).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&req,&schema).unwrap(), @r###"
         [
             (
                 EntityField {
@@ -1069,17 +1062,20 @@ mod tests {
 
     #[test]
     fn make_requests() {
-        let req = crate::services::SubgraphRequest::fake_builder()
-            .subgraph_name("CONNECTOR_0")
-            .subgraph_request(
+        let req = crate::services::connect::Request::builder()
+            .service_name(NodeStr::from("subgraph_Query_a_0"))
+            .context(Context::default())
+            .operation_str("query { a: hello }".to_string())
+            .variables(Variables {
+                variables: Default::default(),
+                inverted_paths: Default::default(),
+                contextual_arguments: Default::default(),
+            })
+            .supergraph_request(Arc::new(
                 http::Request::builder()
-                    .body(
-                        crate::graphql::Request::builder()
-                            .query("query { a: hello }")
-                            .build(),
-                    )
-                    .expect("request builder"),
-            )
+                    .body(graphql::Request::builder().build())
+                    .unwrap(),
+            ))
             .build();
 
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
@@ -1106,7 +1102,7 @@ mod tests {
             on_root_type: true,
         };
 
-        let requests = super::make_requests(req, &connector, Arc::new(schema)).unwrap();
+        let requests = super::make_requests(req, &connector, &schema).unwrap();
 
         assert_debug_snapshot!(requests, @r###"
         [

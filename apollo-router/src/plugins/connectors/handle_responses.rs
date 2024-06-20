@@ -5,11 +5,10 @@ use apollo_federation::sources::connect::Connector;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 
-use crate::json_ext::Object;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
-use crate::services::SubgraphResponse;
-use crate::Context;
+use crate::services::connect;
+use crate::services::router::body::RouterBody;
 
 const ENTITIES: &str = "_entities";
 const TYPENAME: &str = "__typename";
@@ -17,7 +16,7 @@ const TYPENAME: &str = "__typename";
 // --- ERRORS ------------------------------------------------------------------
 
 #[derive(Debug, thiserror::Error, displaydoc::Display)]
-pub(super) enum HandleResponseError {
+pub(crate) enum HandleResponseError {
     /// Missing response key
     MissingResponseKey,
 
@@ -30,13 +29,12 @@ pub(super) enum HandleResponseError {
 
 // --- RESPONSES ---------------------------------------------------------------
 
-pub(super) async fn handle_responses(
-    responses: Vec<http::Response<hyper::Body>>,
+pub(crate) async fn handle_responses(
+    responses: Vec<http::Response<RouterBody>>,
     connector: &Connector,
-    context: Context,
     _schema: &Valid<Schema>,   // TODO for future apply_with_selection
     _document: Option<String>, // TODO pass in relevant selection set, not the whole operation
-) -> Result<SubgraphResponse, HandleResponseError> {
+) -> Result<connect::Response, HandleResponseError> {
     use HandleResponseError::*;
 
     let mut data = serde_json_bytes::Map::new();
@@ -150,16 +148,12 @@ pub(super) async fn handle_responses(
         }
     }
 
-    let data = (!data.is_empty()).then(|| Value::Object(data));
-
-    let response = SubgraphResponse::builder()
-        .and_data(data)
-        .errors(errors)
-        .context(context)
-        .extensions(Object::default())
-        .build();
-
-    Ok(response)
+    let data = if data.is_empty() {
+        Value::Null
+    } else {
+        Value::Object(data)
+    };
+    Ok((data, errors))
 }
 
 fn inject_typename(data: &mut Value, typename: &str) {
@@ -194,7 +188,6 @@ mod tests {
 
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::make_requests::ResponseTypeName;
-    use crate::Context;
 
     #[tokio::test]
     async fn test_handle_responses_root_fields() {
@@ -223,7 +216,7 @@ mod tests {
                 name: "hello".to_string(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
             })
-            .body(hyper::Body::from(r#"{"data":"world"}"#))
+            .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .expect("response builder");
 
         let response2 = http::Response::builder()
@@ -231,7 +224,7 @@ mod tests {
                 name: "hello2".to_string(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
             })
-            .body(hyper::Body::from(r#"{"data":"world"}"#))
+            .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .expect("response builder");
 
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
@@ -239,34 +232,24 @@ mod tests {
         let res = super::handle_responses(
             vec![response1, response2],
             &connector,
-            Context::default(),
             &schema,
             Some("{hello hello2: hello}".to_string()),
         )
         .await
         .unwrap();
 
-        assert_debug_snapshot!(res.response.body(), @r###"
-        Response {
-            label: None,
-            data: Some(
-                Object({
-                    "hello": String(
-                        "world",
-                    ),
-                    "hello2": String(
-                        "world",
-                    ),
-                }),
-            ),
-            path: None,
-            errors: [],
-            extensions: {},
-            has_next: None,
-            subscribed: None,
-            created_at: None,
-            incremental: [],
-        }
+        assert_debug_snapshot!(res, @r###"
+        (
+            Object({
+                "hello": String(
+                    "world",
+                ),
+                "hello2": String(
+                    "world",
+                ),
+            }),
+            [],
+        )
         "###);
     }
 
@@ -297,7 +280,7 @@ mod tests {
                 index: 0,
                 typename: ResponseTypeName::Concrete("User".to_string()),
             })
-            .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#))
+            .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
             .expect("response builder");
 
         let response2 = http::Response::builder()
@@ -305,7 +288,7 @@ mod tests {
                 index: 1,
                 typename: ResponseTypeName::Concrete("User".to_string()),
             })
-            .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#))
+            .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#).into())
             .expect("response builder");
 
         let schema = Schema::parse_and_validate(
@@ -318,46 +301,36 @@ mod tests {
         let res = super::handle_responses(
             vec![response1, response2],
             &connector,
-            Context::default(),
             &schema,
             Some("query ($representations: [_Any]) {_entities(representations: $representations) { ... on User { id }}}".to_string()),
         )
         .await
         .unwrap();
 
-        assert_debug_snapshot!(res.response.body(), @r###"
-        Response {
-            label: None,
-            data: Some(
-                Object({
-                    "_entities": Array([
-                        Object({
-                            "id": String(
-                                "1",
-                            ),
-                            "__typename": String(
-                                "User",
-                            ),
-                        }),
-                        Object({
-                            "id": String(
-                                "2",
-                            ),
-                            "__typename": String(
-                                "User",
-                            ),
-                        }),
-                    ]),
-                }),
-            ),
-            path: None,
-            errors: [],
-            extensions: {},
-            has_next: None,
-            subscribed: None,
-            created_at: None,
-            incremental: [],
-        }
+        assert_debug_snapshot!(res, @r###"
+        (
+            Object({
+                "_entities": Array([
+                    Object({
+                        "id": String(
+                            "1",
+                        ),
+                        "__typename": String(
+                            "User",
+                        ),
+                    }),
+                    Object({
+                        "id": String(
+                            "2",
+                        ),
+                        "__typename": String(
+                            "User",
+                        ),
+                    }),
+                ]),
+            }),
+            [],
+        )
         "###);
     }
 
@@ -389,7 +362,7 @@ mod tests {
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
             })
-            .body(hyper::Body::from(r#"{"data":"value1"}"#))
+            .body(hyper::Body::from(r#"{"data":"value1"}"#).into())
             .expect("response builder");
 
         let response2 = http::Response::builder()
@@ -398,7 +371,7 @@ mod tests {
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
             })
-            .body(hyper::Body::from(r#"{"data":"value2"}"#))
+            .body(hyper::Body::from(r#"{"data":"value2"}"#).into())
             .expect("response builder");
 
         let schema = Schema::parse_and_validate(
@@ -411,46 +384,36 @@ mod tests {
         let res = super::handle_responses(
             vec![response1, response2],
             &connector,
-            Context::default(),
             &schema,
             Some("query ($representations: [_Any]) {_entities(representations: $representations) { ... on User { field }}}".to_string()),
         )
         .await
         .unwrap();
 
-        assert_debug_snapshot!(res.response.body(), @r###"
-        Response {
-            label: None,
-            data: Some(
-                Object({
-                    "_entities": Array([
-                        Object({
-                            "__typename": String(
-                                "User",
-                            ),
-                            "field": String(
-                                "value1",
-                            ),
-                        }),
-                        Object({
-                            "__typename": String(
-                                "User",
-                            ),
-                            "field": String(
-                                "value2",
-                            ),
-                        }),
-                    ]),
-                }),
-            ),
-            path: None,
-            errors: [],
-            extensions: {},
-            has_next: None,
-            subscribed: None,
-            created_at: None,
-            incremental: [],
-        }
+        assert_debug_snapshot!(res, @r###"
+        (
+            Object({
+                "_entities": Array([
+                    Object({
+                        "__typename": String(
+                            "User",
+                        ),
+                        "field": String(
+                            "value1",
+                        ),
+                    }),
+                    Object({
+                        "__typename": String(
+                            "User",
+                        ),
+                        "field": String(
+                            "value2",
+                        ),
+                    }),
+                ]),
+            }),
+            [],
+        )
         "###);
     }
 
@@ -483,7 +446,7 @@ mod tests {
                 typename: ResponseTypeName::Concrete("User".to_string()),
             })
             .status(404)
-            .body(hyper::Body::from(r#"{"error":"not found"}"#))
+            .body(hyper::Body::from(r#"{"error":"not found"}"#).into())
             .expect("response builder");
 
         let response2 = http::Response::builder()
@@ -492,7 +455,7 @@ mod tests {
 
                 typename: ResponseTypeName::Concrete("User".to_string()),
             })
-            .body(hyper::Body::from(r#"{"data":{"id":"2"}}"#))
+            .body(hyper::Body::from(r#"{"data":{"id":"2"}}"#).into())
             .expect("response builder");
 
         let response3 = http::Response::builder()
@@ -501,7 +464,7 @@ mod tests {
                 typename: ResponseTypeName::Concrete("User".to_string()),
             })
             .status(500)
-            .body(hyper::Body::from(r#"{"error":"whoops"}"#))
+            .body(hyper::Body::from(r#"{"error":"whoops"}"#).into())
             .expect("response builder");
 
         let schema = Schema::parse_and_validate(
@@ -514,34 +477,29 @@ mod tests {
         let res = super::handle_responses(
             vec![response1, response2, response3],
             &connector,
-            Context::default(),
             &schema,
             Some("query ($representations: [_Any]) {_entities(representations: $representations) { ... on User { id }}}".to_string()),
         )
         .await
         .unwrap();
 
-        assert_debug_snapshot!(res.response.body(), @r###"
-        Response {
-            label: None,
-            data: Some(
-                Object({
-                    "_entities": Array([
-                        Null,
-                        Object({
-                            "id": String(
-                                "2",
-                            ),
-                            "__typename": String(
-                                "User",
-                            ),
-                        }),
-                        Null,
-                    ]),
-                }),
-            ),
-            path: None,
-            errors: [
+        assert_debug_snapshot!(res, @r###"
+        (
+            Object({
+                "_entities": Array([
+                    Null,
+                    Object({
+                        "id": String(
+                            "2",
+                        ),
+                        "__typename": String(
+                            "User",
+                        ),
+                    }),
+                    Null,
+                ]),
+            }),
+            [
                 Error {
                     message: "http error: 404 Not Found",
                     locations: [],
@@ -569,12 +527,7 @@ mod tests {
                     },
                 },
             ],
-            extensions: {},
-            has_next: None,
-            subscribed: None,
-            created_at: None,
-            incremental: [],
-        }
+        )
         "###);
     }
 }
