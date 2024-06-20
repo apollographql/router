@@ -13,9 +13,6 @@ pub(crate) struct DurationHistogram<T = u64> {
     /// `Vec` indices represents a duration bucket.
     /// `Vec` items are the sums of values in each bucket.
     pub(crate) buckets: Vec<T>,
-
-    /// The sum of values in all buckets
-    pub(crate) total: T,
 }
 
 impl<T: Copy + Default + AddAssign> Default for DurationHistogram<T> {
@@ -26,7 +23,6 @@ impl<T: Copy + Default + AddAssign> Default for DurationHistogram<T> {
 
 impl<T: Copy + Default + AddAssign> AddAssign for DurationHistogram<T> {
     fn add_assign(&mut self, other: DurationHistogram<T>) {
-        self.total += other.total;
         if self.buckets.len() < other.buckets.len() {
             self.buckets.resize(other.buckets.len(), T::default())
         }
@@ -67,7 +63,6 @@ impl<T: Copy + Default + AddAssign> DurationHistogram<T> {
     pub(crate) fn new(init_size: Option<usize>) -> Self {
         Self {
             buckets: vec![T::default(); init_size.unwrap_or(DEFAULT_SIZE)],
-            total: T::default(),
         }
     }
 
@@ -81,7 +76,6 @@ impl<T: Copy + Default + AddAssign> DurationHistogram<T> {
         if bucket > MAXIMUM_SIZE {
             panic!("bucket is out of bounds of the bucket array");
         }
-        self.total += value;
         if bucket >= self.buckets.len() {
             self.buckets.resize(bucket + 1, T::default());
         }
@@ -95,6 +89,14 @@ impl<T: Copy + Default + AddAssign> DurationHistogram<T> {
         let zero = T::default();
         let last_non_zero = self.buckets.iter().rposition(|b| *b != zero).unwrap_or(0);
         self.buckets.truncate(last_non_zero + 1);
+    }
+
+    #[inline]
+    pub(crate) fn total(&self) -> T {
+        self.buckets.iter().fold(T::default(), |mut sum, &x| {
+            sum += x;
+            sum
+        })
     }
 }
 
@@ -207,17 +209,17 @@ mod test {
         h1.increment_duration(Some(Duration::from_nanos(2010)), 1);
         h1.increment_duration(Some(Duration::from_nanos(4000)), 1);
         assert_eq!(h1.buckets, [0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0, 1]);
-        assert_eq!(h1.total, 3);
+        assert_eq!(h1.total(), 3);
 
         let mut h2 = DurationHistogram::new(Some(0));
         h2.increment_duration(Some(Duration::from_nanos(1500)), 1);
         h2.increment_duration(Some(Duration::from_nanos(2020)), 1);
         assert_eq!(h2.buckets, [0, 0, 0, 0, 0, 1, 0, 0, 1]);
-        assert_eq!(h2.total, 2);
+        assert_eq!(h2.total(), 2);
 
         h1 += h2;
         assert_eq!(h1.buckets, [0, 0, 0, 0, 0, 1, 0, 0, 3, 0, 0, 0, 0, 0, 0, 1]);
-        assert_eq!(h1.total, 5);
+        assert_eq!(h1.total(), 5);
     }
 
     #[test]
@@ -230,6 +232,6 @@ mod test {
         assert_eq!(h.buckets.len(), DEFAULT_SIZE);
         h.trim_trailing_zeroes();
         assert_eq!(h.buckets, [0, 0, 0, 0, 0, 2, 0, 0, 1]);
-        assert_eq!(h.total, 3);
+        assert_eq!(h.total(), 3);
     }
 }
