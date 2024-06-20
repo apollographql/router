@@ -12,6 +12,7 @@ use serde_json_bytes::Value;
 
 use super::http_json_transport::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 
 const REPRESENTATIONS_VAR: &str = "representations";
@@ -62,7 +63,7 @@ pub(crate) fn make_requests(
     request: SubgraphRequest,
     connector: &Connector,
     schema: Arc<Valid<Schema>>,
-) -> Result<Vec<(http::Request<hyper::Body>, ResponseKey)>, MakeRequestError> {
+) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let request_params = if connector.entity {
         entities_from_request(&request, schema)
     } else if connector.on_root_type {
@@ -78,7 +79,7 @@ fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<(ResponseKey, RequestInputs)>,
     _original_request: &SubgraphRequest, // TODO headers
-) -> Result<Vec<(http::Request<hyper::Body>, ResponseKey)>, MakeRequestError> {
+) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     request_params
         .into_iter()
         .map(|(response_key, inputs)| {

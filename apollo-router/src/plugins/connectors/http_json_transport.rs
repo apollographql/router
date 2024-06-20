@@ -71,11 +71,12 @@ pub(crate) mod http_json_transport {
     use super::HttpJsonTransportError;
     use super::Value;
     use crate::error::ConnectorDirectiveError;
+    use crate::services::router::body::RouterBody;
 
     pub(crate) fn make_request(
         transport: &HttpJsonTransport,
         inputs: Value,
-    ) -> Result<http::Request<hyper::Body>, HttpJsonTransportError> {
+    ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
         let body = hyper::Body::empty();
 
         // TODO: why is apollo_federation HTTPMethod Ucfirst?
@@ -88,7 +89,7 @@ pub(crate) mod http_json_transport {
                     .as_str(),
             )
             .header("content-type", "application/json")
-            .body(body)
+            .body(body.into())
             .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
         Ok(request)
