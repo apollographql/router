@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/relative_connect_url_without_source.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/relative_connect_url_without_source.graphql
 ---
 [Message { code: RelativeConnectUrlWithoutSource, message: "`GET` in `@connect(http:)` on `Query.resources` specifies the relative URL \"/resources\", but no `source` is defined. Either use an absolute URL, or add a `@connect__source`.", locations: [Location { line: 8, column: 20 }..Location { line: 8, column: 37 }] }]

@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/duplicate_source_name.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/duplicate_source_name.graphql
 ---
 [Message { code: DuplicateSourceName, message: "Every `@source(name:)` must be unique. Found duplicate name \"v1\".", locations: [Location { line: 5, column: 0 }..Location { line: 5, column: 56 }, Location { line: 6, column: 0 }..Location { line: 6, column: 56 }] }]

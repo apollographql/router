@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/connect_source_name_mismatch.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/connect_source_name_mismatch.graphql
 ---
 [Message { code: SourceNameMismatch, message: "`@connect(source: \"v1\")` on `Query.resources` does not match any defined sources. Did you mean `@source(name: \"v2\")`?", locations: [Location { line: 9, column: 13 }..Location { line: 9, column: 25 }] }]

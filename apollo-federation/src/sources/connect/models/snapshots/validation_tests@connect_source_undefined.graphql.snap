@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/connect_source_undefined.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/connect_source_undefined.graphql
 ---
 [Message { code: NoSourcesDefined, message: "`@connect(source: \"v1\")` on `Query.resources` specifies a source, but none are defined. Try adding `@source(name: \"v1\")` to the schema.", locations: [Location { line: 8, column: 13 }..Location { line: 8, column: 25 }] }]

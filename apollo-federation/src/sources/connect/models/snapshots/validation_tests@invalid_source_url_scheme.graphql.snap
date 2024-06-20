@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/invalid_source_url_scheme.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/invalid_source_url_scheme.graphql
 ---
 [Message { code: SourceScheme, message: "The value \"file://data.json\" for `@source(baseURL:)` must be http or https, got file.", locations: [Location { line: 5, column: 27 }..Location { line: 5, column: 54 }] }]

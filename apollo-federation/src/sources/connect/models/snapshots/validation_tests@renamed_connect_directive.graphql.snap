@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/models/validation.rs
 expression: "format!(\"{:?}\", errors)"
-input_file: apollo-federation/src/sources/connect/models/test_data/renamed_connect_directive.graphql
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/renamed_connect_directive.graphql
 ---
 [Message { code: QueryFieldMissingConnect, message: "The field `Query.resources` has no `@data` directive.", locations: [Location { line: 8, column: 4 }..Location { line: 8, column: 25 }] }]
