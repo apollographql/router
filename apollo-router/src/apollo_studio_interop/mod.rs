@@ -130,8 +130,14 @@ impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
             }
         }
 
-        // Merge enum references
-        for (enum_name, enum_values) in other_stats.referenced_enums.iter() {
+        *self += other_stats.referenced_enums;
+    }
+}
+
+impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
+    fn add_assign(&mut self, other_enum_stats: ReferencedEnums) {
+        // Not using entry API here due to performance impact
+        for (enum_name, enum_values) in other_enum_stats.iter() {
             let enum_name_stats = match self.referenced_enums.get_mut(enum_name) {
                 Some(existing_stats) => existing_stats,
                 None => {

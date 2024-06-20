@@ -409,6 +409,7 @@ impl Report {
                 .traces_per_query
                 .insert(key.clone(), traces_and_stats.clone().into());
         }
+
         report
     }
 }

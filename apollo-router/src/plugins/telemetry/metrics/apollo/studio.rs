@@ -8,6 +8,7 @@ use uuid::Uuid;
 use super::duration_histogram::DurationHistogram;
 use crate::apollo_studio_interop::AggregatedExtendedReferenceStats;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::ReferencedEnums;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::EnumStats;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::InputFieldStats;
@@ -40,6 +41,7 @@ pub(crate) struct SingleContextualizedStats {
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
     pub(crate) extended_references: ExtendedReferenceStats,
+    pub(crate) enum_response_references: ReferencedEnums,
 }
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
@@ -98,6 +100,7 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
             *self.per_type_stat.entry(k).or_default() += v;
         }
         self.extended_references += stats.extended_references;
+        self.extended_references += stats.enum_response_references;
     }
 }
 
@@ -440,7 +443,10 @@ mod test {
                                 },
                             ),
                         ]),
-                        extended_references: ExtendedReferenceStats::new(),
+                        extended_references: ExtendedReferenceStats {
+                            referenced_input_fields: HashMap::new(),
+                            referenced_enums: HashMap::new(),
+                        },
                     },
                     referenced_fields_by_type: HashMap::from([(
                         "type1".into(),

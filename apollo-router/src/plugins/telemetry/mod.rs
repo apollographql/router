@@ -1402,11 +1402,10 @@ impl Telemetry {
                     .extensions()
                     .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
                     .unwrap_or_default();
-                let enum_responses = context
+                let enum_response_references = context
                     .extensions()
                     .with_lock(|lock| lock.get::<ReferencedEnums>().cloned())
                     .unwrap_or_default();
-                println!("enums: {:?}", enum_responses);
 
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
@@ -1454,6 +1453,7 @@ impl Telemetry {
                                 },
                                 per_type_stat,
                                 extended_references,
+                                enum_response_references,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
