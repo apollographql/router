@@ -31,6 +31,8 @@ use petgraph::visit::IntoNodeReferences;
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
+use crate::operation::integrity::debug_check;
+use crate::operation::integrity::IsWellFormedOption;
 use crate::operation::ContainmentOptions;
 use crate::operation::Field;
 use crate::operation::FieldData;
@@ -2334,10 +2336,18 @@ impl FetchDependencyGraphNode {
                 &operation_name,
             )?
         };
+        debug_check!(operation.is_well_formed(
+            subgraph_schema,
+            IsWellFormedOption::CheckFragmentSpreadSelectionSet
+        ));
         if let Some(fragments) = fragments
             .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
         {
             operation.optimize(fragments)?;
+            debug_check!(operation.is_well_formed(
+                subgraph_schema,
+                IsWellFormedOption::SkipFragmentSpreadSelectionSet
+            ));
         }
         let operation_document = operation.try_into()?;
 

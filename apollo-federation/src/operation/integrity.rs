@@ -21,12 +21,25 @@ pub(crate) use debug_check;
 // Well-formedness checks
 // - structural invariant checks for operations.
 
+// FragmentSpreadSelection holds a copy of fragment definition's selection set.
+// This option controls whether or not to check that copy or skip it.
+// Note that `Operation::optimize()` returns a selection set that may have outdated fragment
+// selection sets. Since that does not affect the correctness of the query plan, we don't bother to
+// update it. So, that part of check should be skipped, assuming the operation was well-formed
+// before optimizing it.
+#[derive(Clone, Copy)]
+pub enum IsWellFormedOption {
+    CheckFragmentSpreadSelectionSet,
+    SkipFragmentSpreadSelectionSet,
+}
+
 impl Selection {
     pub fn is_well_formed(
         &self,
         schema: &ValidFederationSchema,
         named_fragments: &NamedFragments,
         parent_type: &CompositeTypeDefinitionPosition,
+        option: IsWellFormedOption,
     ) -> Result<(), FederationError> {
         match self {
             Selection::Field(field) => {
@@ -51,7 +64,7 @@ impl Selection {
                             sub_selection_set_type, selection_set.type_position
                         )));
                     }
-                    selection_set.is_well_formed(schema, named_fragments)?;
+                    selection_set.is_well_formed(schema, named_fragments, option)?;
                 }
                 Ok(())
             }
@@ -75,9 +88,6 @@ impl Selection {
                         fragment_spread.selection_set.type_position
                     )));
                 }
-                fragment_spread
-                    .selection_set
-                    .is_well_formed(schema, named_fragments)?;
 
                 let Some(fragment_def) = named_fragments.get(&fragment_data.fragment_name) else {
                     return Err(FederationError::internal(format!(
@@ -99,6 +109,13 @@ impl Selection {
                     )));
                 }
 
+                if matches!(option, IsWellFormedOption::CheckFragmentSpreadSelectionSet) {
+                    fragment_spread.selection_set.is_well_formed(
+                        schema,
+                        named_fragments,
+                        option,
+                    )?;
+                }
                 Ok(())
                 // Note: fragment_data.type_condition_position and the parent type do not have to have
                 // non-empty intersection to be well-formed. It would be an extra check.
@@ -126,7 +143,7 @@ impl Selection {
                 }
                 inline_fragment
                     .selection_set
-                    .is_well_formed(schema, named_fragments)?;
+                    .is_well_formed(schema, named_fragments, option)?;
                 Ok(())
                 // Note: fragment_data.type_condition_position and the parent type do not have to have
                 // non-empty intersection to be well-formed. It would be an extra check.
@@ -140,6 +157,7 @@ impl SelectionSet {
         &self,
         schema: &ValidFederationSchema,
         named_fragments: &NamedFragments,
+        option: IsWellFormedOption,
     ) -> Result<(), FederationError> {
         if self.schema != *schema {
             return Err(FederationError::internal(format!(
@@ -148,14 +166,18 @@ impl SelectionSet {
             )));
         }
         for selection in self.iter() {
-            selection.is_well_formed(schema, named_fragments, &self.type_position)?;
+            selection.is_well_formed(schema, named_fragments, &self.type_position, option)?;
         }
         Ok(())
     }
 }
 
 impl Operation {
-    pub fn is_well_formed(&self, schema: &ValidFederationSchema) -> Result<(), FederationError> {
+    pub fn is_well_formed(
+        &self,
+        schema: &ValidFederationSchema,
+        option: IsWellFormedOption,
+    ) -> Result<(), FederationError> {
         if self.schema != *schema {
             return Err(FederationError::internal(format!(
                 "Schema mismatch: expected {:?}, got {:?}",
@@ -163,7 +185,7 @@ impl Operation {
             )));
         }
         self.selection_set
-            .is_well_formed(schema, &self.named_fragments)?;
+            .is_well_formed(schema, &self.named_fragments, option)?;
         Ok(())
     }
 }
