@@ -6,8 +6,18 @@ telemetry:
     events:
       router:
         # Standard events
-        request: info
-        response: info
+        request:
+          level: info
+          condition:
+            eq:
+            - request_header: x-log-request
+            - "log"
+        response:
+          level: info
+          condition:
+            eq:
+            - on_graphql_error: true
+            - true
         error: info
 
         # Custom events
@@ -46,8 +56,18 @@ telemetry:
               - response_header: "x-log-request"
       supergraph:
         # Standard events
-        request: info
-        response: info
+        request:
+          level: info
+          condition:
+            eq:
+            - request_header: x-log-request
+            - "log"
+        response:
+          level: info
+          condition:
+            eq:
+            - on_graphql_error: true
+            - true
         error: info
 
         # Custom events
@@ -79,8 +99,18 @@ telemetry:
               - response_header: "x-log-request"
       subgraph:
         # Standard events
-        request: info
-        response: warn
+        request:
+          level: info
+          condition:
+            eq:
+            - subgraph_request_header: x-log-request
+            - "log"
+        response:
+          level: warn
+          condition:
+            eq:
+            - subgraph_request_header: x-log-request
+            - "log" 
         error: error
 
         # Custom events

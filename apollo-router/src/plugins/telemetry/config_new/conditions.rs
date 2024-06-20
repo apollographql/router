@@ -178,38 +178,6 @@ where
         }
     }
 
-    /// Only used when we just care about request selectors, no other ones. Useful for events for example
-    pub(crate) fn evaluate_request_oneshot(&self, request: &T::Request) -> bool {
-        match self {
-            Condition::Eq(eq) => match (eq[0].on_request(request), eq[1].on_request(request)) {
-                (Some(left), Some(right)) => left == right,
-                _ => false,
-            },
-            Condition::Gt(gt) => {
-                let left_att = gt[0].on_request(request).map(AttributeValue::from);
-                let right_att = gt[1].on_request(request).map(AttributeValue::from);
-                match (left_att, right_att) {
-                    (Some(l), Some(r)) => l > r,
-                    _ => false,
-                }
-            }
-            Condition::Lt(lt) => {
-                let left_att = lt[0].on_request(request).map(AttributeValue::from);
-                let right_att = lt[1].on_request(request).map(AttributeValue::from);
-                match (left_att, right_att) {
-                    (Some(l), Some(r)) => l < r,
-                    _ => false,
-                }
-            }
-            Condition::Exists(exist) => exist.on_request(request).is_some(),
-            Condition::All(all) => all.iter().all(|c| c.evaluate_request_oneshot(request)),
-            Condition::Any(any) => any.iter().any(|c| c.evaluate_request_oneshot(request)),
-            Condition::Not(not) => !not.evaluate_request_oneshot(request),
-            Condition::True => true,
-            Condition::False => false,
-        }
-    }
-
     pub(crate) fn evaluate_event_response(
         &self,
         response: &T::EventResponse,

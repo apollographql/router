@@ -4886,16 +4886,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_RouterSelector",
+          "description": "#/definitions/StandardEvent_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_RouterSelector",
+          "description": "#/definitions/StandardEvent_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_RouterSelector",
+          "description": "#/definitions/StandardEvent_for_RouterSelector"
         }
       },
       "type": "object"
@@ -5442,6 +5442,81 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "StandardEvent_for_RouterSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_RouterSelector",
+              "description": "#/definitions/Condition_for_RouterSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEvent_for_SubgraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SubgraphSelector",
+              "description": "#/definitions/Condition_for_SubgraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEvent_for_SupergraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SupergraphSelector",
+              "description": "#/definitions/Condition_for_SupergraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StdOut": {
       "additionalProperties": false,
       "properties": {
@@ -5693,16 +5768,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SubgraphSelector",
+          "description": "#/definitions/StandardEvent_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SubgraphSelector",
+          "description": "#/definitions/StandardEvent_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SubgraphSelector",
+          "description": "#/definitions/StandardEvent_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -6406,16 +6481,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SupergraphSelector",
+          "description": "#/definitions/StandardEvent_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SupergraphSelector",
+          "description": "#/definitions/StandardEvent_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SupergraphSelector",
+          "description": "#/definitions/StandardEvent_for_SupergraphSelector"
         }
       },
       "type": "object"
@@ -7636,16 +7711,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_RouterSelector",
+          "description": "#/definitions/StandardEvent_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_RouterSelector",
+          "description": "#/definitions/StandardEvent_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_RouterSelector",
+          "description": "#/definitions/StandardEvent_for_RouterSelector"
         }
       },
       "type": "object"
@@ -7657,16 +7732,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SubgraphSelector",
+          "description": "#/definitions/StandardEvent_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SubgraphSelector",
+          "description": "#/definitions/StandardEvent_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SubgraphSelector",
+          "description": "#/definitions/StandardEvent_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -7678,16 +7753,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SupergraphSelector",
+          "description": "#/definitions/StandardEvent_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SupergraphSelector",
+          "description": "#/definitions/StandardEvent_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEvent_for_SupergraphSelector",
+          "description": "#/definitions/StandardEvent_for_SupergraphSelector"
         }
       },
       "type": "object"

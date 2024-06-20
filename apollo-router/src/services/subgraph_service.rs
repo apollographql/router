@@ -60,8 +60,8 @@ use crate::plugins::subscription::SubscriptionMode;
 use crate::plugins::subscription::WebSocketConfiguration;
 use crate::plugins::subscription::SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::events::SubgraphEventRequestLevel;
-use crate::plugins::telemetry::config_new::events::SubgraphEventResponseLevel;
+use crate::plugins::telemetry::config_new::events::SubgraphEventRequest;
+use crate::plugins::telemetry::config_new::events::SubgraphEventResponse;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::protocols::websocket::convert_websocket_stream;
@@ -471,6 +471,20 @@ async fn call_websocket(
         .clone()
         .unwrap_or_default();
 
+    let subgraph_request_event = context
+        .extensions()
+        .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
+    let log_request_level = subgraph_request_event.and_then(|s| match s.0.condition() {
+        Some(condition) => {
+            if condition.lock().evaluate_request(&request) == Some(true) {
+                Some(s.0.level())
+            } else {
+                None
+            }
+        }
+        None => Some(s.0.level()),
+    });
+
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
@@ -539,10 +553,7 @@ async fn call_websocket(
         request
     };
 
-    let subgraph_request_event = context
-        .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
-    if let Some(level) = subgraph_request_event {
+    if let Some(level) = log_request_level {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
             "http.request.headers".to_string(),
@@ -562,7 +573,7 @@ async fn call_websocket(
         );
         attrs.insert("subgraph.name".to_string(), service_name.to_string());
         log_event(
-            level.0,
+            level,
             "subgraph.request",
             attrs,
             &format!("Websocket request body to subgraph {service_name:?}"),
@@ -836,7 +847,7 @@ pub(crate) async fn process_batch(
 
     let subgraph_response_event = batch_context
         .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
+        .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
     if let Some(level) = subgraph_response_event {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
@@ -859,7 +870,7 @@ pub(crate) async fn process_batch(
         }
         attrs.insert("subgraph.name".to_string(), service.clone());
         log_event(
-            level.0,
+            level.0.level(),
             "subgraph.response",
             attrs,
             &format!("Raw response from subgraph {service:?} received"),
@@ -1134,6 +1145,20 @@ pub(crate) async fn call_single_http(
     client: crate::services::http::BoxService,
     service_name: &str,
 ) -> Result<SubgraphResponse, BoxError> {
+    let subgraph_request_event = context
+        .extensions()
+        .with_lock(|lock| lock.get::<SubgraphEventRequest>().cloned());
+    let log_request_level = subgraph_request_event.and_then(|s| match s.0.condition() {
+        Some(condition) => {
+            if condition.lock().evaluate_request(&request) == Some(true) {
+                Some(s.0.level())
+            } else {
+                None
+            }
+        }
+        None => Some(s.0.level()),
+    });
+
     let SubgraphRequest {
         subgraph_request, ..
     } = request;
@@ -1189,10 +1214,7 @@ pub(crate) async fn call_single_http(
     // TODO: Temporary solution to plug FileUploads plugin until 'http_client' will be fixed https://github.com/apollographql/router/pull/4666
     let request = file_uploads::http_request_wrapper(request).await;
 
-    let subgraph_request_event = context
-        .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventRequestLevel>().cloned());
-    if let Some(level) = subgraph_request_event {
+    if let Some(level) = log_request_level {
         let mut attrs = HashMap::with_capacity(5);
         attrs.insert(
             "http.request.headers".to_string(),
@@ -1213,7 +1235,7 @@ pub(crate) async fn call_single_http(
         attrs.insert("subgraph.name".to_string(), service_name.to_string());
 
         log_event(
-            level.0,
+            level,
             "subgraph.request",
             attrs,
             &format!("Request to subgraph {service_name:?}"),
@@ -1228,40 +1250,60 @@ pub(crate) async fn call_single_http(
 
     let subgraph_response_event = context
         .extensions()
-        .with_lock(|lock| lock.get::<SubgraphEventResponseLevel>().cloned());
-    if let Some(level) = subgraph_response_event {
-        let mut attrs = HashMap::with_capacity(5);
-        attrs.insert(
-            "http.response.headers".to_string(),
-            format!("{:?}", parts.headers),
-        );
-        attrs.insert(
-            "http.response.status".to_string(),
-            format!("{}", parts.status),
-        );
-        attrs.insert(
-            "http.response.version".to_string(),
-            format!("{:?}", parts.version),
-        );
-        if let Some(Ok(b)) = &body {
-            attrs.insert(
-                "http.response.body".to_string(),
-                String::from_utf8_lossy(b).to_string(),
-            );
-        }
-        attrs.insert("subgraph.name".to_string(), service_name.to_string());
-        log_event(
-            level.0,
-            "subgraph.response",
-            attrs,
-            &format!("Raw response from subgraph {service_name:?} received"),
-        );
-    }
+        .with_lock(|lock| lock.get::<SubgraphEventResponse>().cloned());
 
     if display_body {
         if let Some(Ok(b)) = &body {
             tracing::info!(
                 response.body = %String::from_utf8_lossy(b), apollo.subgraph.name = %service_name, "Raw response body from subgraph {service_name:?} received"
+            );
+        }
+    }
+
+    if let Some(subgraph_response_event) = subgraph_response_event {
+        let mut should_log = true;
+        if let Some(condition) = subgraph_response_event.0.condition() {
+            // We have to do this in order to use selectors
+            let mut resp_builder = http::Response::builder()
+                .status(parts.status)
+                .version(parts.version);
+            if let Some(headers) = resp_builder.headers_mut() {
+                *headers = parts.headers.clone();
+            }
+            let subgraph_response = SubgraphResponse::new_from_response(
+                resp_builder
+                    .body(graphql::Response::default())
+                    .expect("it won't fail everything is coming from an existing response"),
+                context.clone(),
+            );
+            should_log = condition.lock().evaluate_response(&subgraph_response);
+        }
+        if should_log {
+            let mut attrs = HashMap::with_capacity(5);
+            attrs.insert(
+                "http.response.headers".to_string(),
+                format!("{:?}", parts.headers),
+            );
+            attrs.insert(
+                "http.response.status".to_string(),
+                format!("{}", parts.status),
+            );
+            attrs.insert(
+                "http.response.version".to_string(),
+                format!("{:?}", parts.version),
+            );
+            if let Some(Ok(b)) = &body {
+                attrs.insert(
+                    "http.response.body".to_string(),
+                    String::from_utf8_lossy(b).to_string(),
+                );
+            }
+            attrs.insert("subgraph.name".to_string(), service_name.to_string());
+            log_event(
+                subgraph_response_event.0.level(),
+                "subgraph.response",
+                attrs,
+                &format!("Raw response from subgraph {service_name:?} received"),
             );
         }
     }

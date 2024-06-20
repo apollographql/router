@@ -63,9 +63,9 @@ impl Events {
             .collect();
 
         RouterEvents {
-            request: self.router.attributes.request.clone(),
-            response: self.router.attributes.response.clone(),
-            error: self.router.attributes.error.clone(),
+            request: self.router.attributes.request.clone().into(),
+            response: self.router.attributes.response.clone().into(),
+            error: self.router.attributes.error.clone().into(),
             custom: custom_events,
         }
     }
@@ -92,9 +92,9 @@ impl Events {
             .collect();
 
         SupergraphEvents {
-            request: self.supergraph.attributes.request.clone(),
-            response: self.supergraph.attributes.response.clone(),
-            error: self.supergraph.attributes.error.clone(),
+            request: self.supergraph.attributes.request.clone().into(),
+            response: self.supergraph.attributes.response.clone().into(),
+            error: self.supergraph.attributes.error.clone().into(),
             custom: custom_events,
         }
     }
@@ -121,9 +121,9 @@ impl Events {
             .collect();
 
         SubgraphEvents {
-            request: self.subgraph.attributes.request.clone(),
-            response: self.subgraph.attributes.response.clone(),
-            error: self.subgraph.attributes.error.clone(),
+            request: self.subgraph.attributes.request.clone().into(),
+            response: self.subgraph.attributes.response.clone().into(),
+            error: self.subgraph.attributes.error.clone().into(),
             custom: custom_events,
         }
     }
@@ -163,7 +163,7 @@ impl Instrumented
     fn on_request(&self, request: &Self::Request) {
         if self.request.level() != EventLevel::Off {
             if let Some(condition) = self.request.condition() {
-                if !condition.evaluate_request_oneshot(request) {
+                if condition.lock().evaluate_request(request) != Some(true) {
                     return;
                 }
             }
@@ -208,7 +208,7 @@ impl Instrumented
     fn on_response(&self, response: &Self::Response) {
         if self.response.level() != EventLevel::Off {
             if let Some(condition) = self.response.condition() {
-                if !condition.evaluate_response(response) {
+                if !condition.lock().evaluate_response(response) {
                     return;
                 }
             }
@@ -252,7 +252,7 @@ impl Instrumented
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         if self.error.level() != EventLevel::Off {
             if let Some(condition) = self.error.condition() {
-                if !condition.evaluate_error(error, ctx) {
+                if !condition.lock().evaluate_error(error, ctx) {
                     return;
                 }
             }
@@ -280,6 +280,11 @@ impl Instrumented
 
     fn on_request(&self, request: &Self::Request) {
         if self.request.level() != EventLevel::Off {
+            if let Some(condition) = self.request.condition() {
+                if condition.lock().evaluate_request(request) != Some(true) {
+                    return;
+                }
+            }
             let mut attrs = HashMap::with_capacity(5);
             #[cfg(test)]
             let mut headers: indexmap::IndexMap<String, HeaderValue> = request
@@ -313,9 +318,10 @@ impl Instrumented
             log_event(self.request.level(), "supergraph.request", attrs, "");
         }
         if self.response.level() != EventLevel::Off {
-            request.context.extensions().with_lock(|mut lock| {
-                lock.insert(SupergraphEventResponseLevel(self.response.level()))
-            });
+            request
+                .context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(SupergraphEventResponse(self.response.clone())));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -336,6 +342,11 @@ impl Instrumented
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         if self.error.level() != EventLevel::Off {
+            if let Some(condition) = self.error.condition() {
+                if !condition.lock().evaluate_error(error, ctx) {
+                    return;
+                }
+            }
             let mut attrs = HashMap::with_capacity(1);
             attrs.insert("error".to_string(), error.to_string());
             log_event(self.error.level(), "supergraph.error", attrs, "");
@@ -354,16 +365,22 @@ impl Instrumented
     type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
+        if let Some(condition) = self.request.condition() {
+            if condition.lock().evaluate_request(request) != Some(true) {
+                return;
+            }
+        }
         if self.request.level() != EventLevel::Off {
             request
                 .context
                 .extensions()
-                .with_lock(|mut lock| lock.insert(SubgraphEventRequestLevel(self.request.level())));
+                .with_lock(|mut lock| lock.insert(SubgraphEventRequest(self.request.clone())));
         }
         if self.response.level() != EventLevel::Off {
-            request.context.extensions().with_lock(|mut lock| {
-                lock.insert(SubgraphEventResponseLevel(self.response.level()))
-            });
+            request
+                .context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(SubgraphEventResponse(self.response.clone())));
         }
         for custom_event in &self.custom {
             custom_event.on_request(request);
@@ -378,6 +395,11 @@ impl Instrumented
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
         if self.error.level() != EventLevel::Off {
+            if let Some(condition) = self.error.condition() {
+                if !condition.lock().evaluate_error(error, ctx) {
+                    return;
+                }
+            }
             let mut attrs = HashMap::with_capacity(1);
 
             attrs.insert("error".to_string(), error.to_string());
@@ -393,45 +415,45 @@ impl Instrumented
 #[serde(deny_unknown_fields, default)]
 struct RouterEventsConfig {
     /// Log the router request
-    request: StandardEvent<RouterSelector>,
+    request: StandardEventConfig<RouterSelector>,
     /// Log the router response
-    response: StandardEvent<RouterSelector>,
+    response: StandardEventConfig<RouterSelector>,
     /// Log the router error
-    error: StandardEvent<RouterSelector>,
+    error: StandardEventConfig<RouterSelector>,
 }
 
 #[derive(Clone)]
-pub(crate) struct SupergraphEventResponseLevel(pub(crate) EventLevel);
+pub(crate) struct SupergraphEventResponse(pub(crate) StandardEvent<SupergraphSelector>);
 #[derive(Clone)]
-pub(crate) struct SubgraphEventResponseLevel(pub(crate) EventLevel);
+pub(crate) struct SubgraphEventResponse(pub(crate) StandardEvent<SubgraphSelector>);
 #[derive(Clone)]
-pub(crate) struct SubgraphEventRequestLevel(pub(crate) EventLevel);
+pub(crate) struct SubgraphEventRequest(pub(crate) StandardEvent<SubgraphSelector>);
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 struct SupergraphEventsConfig {
     /// Log the supergraph request
-    request: StandardEvent<SupergraphSelector>,
+    request: StandardEventConfig<SupergraphSelector>,
     /// Log the supergraph response
-    response: StandardEvent<SupergraphSelector>,
+    response: StandardEventConfig<SupergraphSelector>,
     /// Log the supergraph error
-    error: StandardEvent<SupergraphSelector>,
+    error: StandardEventConfig<SupergraphSelector>,
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug, Default)]
 #[serde(deny_unknown_fields, default)]
 struct SubgraphEventsConfig {
     /// Log the subgraph request
-    request: StandardEvent<SubgraphSelector>,
+    request: StandardEventConfig<SubgraphSelector>,
     /// Log the subgraph response
-    response: StandardEvent<SubgraphSelector>,
+    response: StandardEventConfig<SubgraphSelector>,
     /// Log the subgraph error
-    error: StandardEvent<SubgraphSelector>,
+    error: StandardEventConfig<SubgraphSelector>,
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(untagged)]
-pub(crate) enum StandardEvent<T> {
+pub(crate) enum StandardEventConfig<T> {
     Level(EventLevel),
     Conditional {
         level: EventLevel,
@@ -439,7 +461,28 @@ pub(crate) enum StandardEvent<T> {
     },
 }
 
-impl<T> Default for StandardEvent<T> {
+#[derive(Debug, Clone)]
+pub(crate) enum StandardEvent<T> {
+    Level(EventLevel),
+    Conditional {
+        level: EventLevel,
+        condition: Arc<Mutex<Condition<T>>>,
+    },
+}
+
+impl<T> From<StandardEventConfig<T>> for StandardEvent<T> {
+    fn from(value: StandardEventConfig<T>) -> Self {
+        match value {
+            StandardEventConfig::Level(level) => StandardEvent::Level(level),
+            StandardEventConfig::Conditional { level, condition } => StandardEvent::Conditional {
+                level,
+                condition: Arc::new(Mutex::new(condition)),
+            },
+        }
+    }
+}
+
+impl<T> Default for StandardEventConfig<T> {
     fn default() -> Self {
         Self::Level(EventLevel::default())
     }
@@ -453,7 +496,7 @@ impl<T> StandardEvent<T> {
         }
     }
 
-    pub(crate) fn condition(&self) -> Option<&Condition<T>> {
+    pub(crate) fn condition(&self) -> Option<&Arc<Mutex<Condition<T>>>> {
         match self {
             Self::Level(_) => None,
             Self::Conditional { condition, .. } => Some(condition),
@@ -669,6 +712,7 @@ mod tests {
 
     use super::*;
     use crate::assert_snapshot_subscriber;
+    use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::graphql;
     use crate::plugins::telemetry::Telemetry;
     use crate::plugins::test::PluginTestHarness;
@@ -709,9 +753,14 @@ mod tests {
                         .build()
                         .unwrap(),
                     |_r| {
+                        let context_with_error = Context::new();
+                        let _ = context_with_error
+                            .insert(CONTAINS_GRAPHQL_ERROR, true)
+                            .unwrap();
                         router::Response::fake_builder()
                             .header("custom-header", "val1")
-                            .data(serde_json_bytes::json!({"data": "res"}))
+                            .context(context_with_error)
+                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                             .build()
                             .expect("expecting valid response")
                     },
@@ -745,6 +794,28 @@ mod tests {
                             .header("custom-header", "val1")
                             .header("x-log-request", HeaderValue::from_static("log"))
                             .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+            test_harness
+                .call_supergraph(
+                    supergraph::Request::fake_builder()
+                        .query("query { foo }")
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        let context_with_error = Context::new();
+                        let _ = context_with_error
+                            .insert(CONTAINS_GRAPHQL_ERROR, true)
+                            .unwrap();
+                        supergraph::Response::fake_builder()
+                            .header("custom-header", "val1")
+                            .header("x-log-request", HeaderValue::from_static("log"))
+                            .context(context_with_error)
+                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                             .build()
                             .expect("expecting valid response")
                     },
