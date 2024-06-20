@@ -50,12 +50,14 @@ use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::ValidFederationSchema;
 
 mod contains;
+pub(crate) mod integrity;
 mod optimize;
 mod rebase;
 #[cfg(test)]
 mod tests;
 
 pub use contains::*;
+use integrity::debug_check;
 pub use rebase::*;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
@@ -4865,6 +4867,7 @@ pub(crate) fn normalize_operation(
         selection_set: normalized_selection_set,
         named_fragments,
     };
+    debug_check!(normalized_operation.is_well_formed(schema));
     Ok(normalized_operation)
 }
 
