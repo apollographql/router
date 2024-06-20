@@ -22,11 +22,11 @@ telemetry:
             request_header: "x-my-header" #highlight-line
 ```
 
-### Selector configuration reference
+## Selector configuration reference
 
 Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its own available selectors.
 
-#### Router
+### Router
 
 The router service is the initial entrypoint for all requests. It is HTTP centric and deals with opaque bytes.
 
@@ -45,7 +45,7 @@ The router service is the initial entrypoint for all requests. It is HTTP centri
 | `static`              | No          |                             | A static string value                                                |
 | `error`               | No          | `reason`                    | a string value containing error reason when it's a critical error    |
 
-#### Supergraph
+### Supergraph
 
 The supergraph service is executed after query parsing but before query execution. It is GraphQL centric and deals with GraphQL queries and responses.
 
@@ -68,7 +68,7 @@ The supergraph service is executed after query parsing but before query executio
 | `error`            | No          | `reason`         | a string value containing error reason when it's a critical error                |
 
 
-#### Subgraph
+### Subgraph
 
 The subgraph service executes multiple times during query execution, with each execution representing a call to a single subgraph. It is GraphQL centric and deals with GraphQL queries and responses.
 
@@ -94,7 +94,7 @@ The subgraph service executes multiple times during query execution, with each e
 | `static`                    | No          |                  | A static string value                                                          |
 | `error`                     | No          | `reason`         | a string value containing error reason when it's a critical error              |
 
-#### GraphQL
+### GraphQL
 
 GraphQL metrics are extracted from the response data the router returns to client requests.
 
