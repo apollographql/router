@@ -447,6 +447,7 @@ mod test {
                             referenced_input_fields: HashMap::new(),
                             referenced_enums: HashMap::new(),
                         },
+                        enum_response_references: HashMap::new(),
                     },
                     referenced_fields_by_type: HashMap::from([(
                         "type1".into(),

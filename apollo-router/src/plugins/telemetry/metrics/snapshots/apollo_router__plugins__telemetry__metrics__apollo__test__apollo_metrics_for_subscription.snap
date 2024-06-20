@@ -39,7 +39,8 @@ expression: results
           "extended_references": {
             "referenced_input_fields": {},
             "referenced_enums": {}
-          }
+          },
+          "enum_response_references": {}
         },
         "referenced_fields_by_type": {
           "Subscription": {
