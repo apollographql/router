@@ -223,7 +223,74 @@ telemetry:
 
 #### `value`
 
-An instrument's `value` is dependent on lifecycle stage that the instrument is defined at. `value` can be one of the following:
+The [service](#router-request-lifecycle-services) you define an instrument on determines its possible values.
+
+<table class="field-table api-ref">
+<thead>
+<tr>
+<th style="min-width: 200px;">Value</th>
+<th>Description</th>
+<th>Available services</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>
+
+##### `duration`
+
+</td>
+<td>The duration of the pipeline service</td>
+<td>router, supergraph, subgraph</td>
+</tr>
+<tr>
+<td>
+
+##### `unit`
+
+</td>
+<td>The number of times the pipeline service has been executed</td>
+<td>router, supergraph, subgraph, GraphQL</td>
+</tr>
+<tr>
+<td>
+
+##### `custom`
+
+</td>
+<td>A custom value extracted from the pipeline service. See <a href="./selectors">selectors</a> for more information.</td>
+<td>router, supergraph, subgraph, GraphQL</td>
+</tr>
+<tr>
+<td>
+
+##### `event_duration`
+
+</td>
+<td>The duration of an event in the pipeline service.</td>
+<td>supergraph</td>
+</tr>
+<tr>
+<td>
+
+##### `event_unit`
+
+</td>
+<td>The number of times an event in the pipeline service has been executed.</td>
+<td>supergraph</td>
+</tr>
+<tr>
+<td>
+
+##### `event_custom`
+
+</td>
+<td>A custom value extracted from the event in the pipeline service. See <a href="./selectors">selectors</a> for more information.</td>
+<td>supergraph</td>
+</tr>
+</tbody>
+</table>
+
 
 * `duration` - the duration of the pipeline service (router/supergraph/subgraph).
 * `unit` - the number of times the pipeline service has been executed (router/supergraph/subgraph/graphql).
