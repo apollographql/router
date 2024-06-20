@@ -1875,7 +1875,7 @@ async fn http_compressed_service() -> impl Service<
         .map_err(Into::into);
 
     let service = http_client::response_decompression(service)
-        .map_request(|mut req: http::Request<hyper::Body>| {
+        .map_request(|mut req: http::Request<crate::services::router::Body>| {
             req.headers_mut().append(
                 ACCEPT,
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),

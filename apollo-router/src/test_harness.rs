@@ -380,7 +380,7 @@ impl<'a> TestHarness<'a> {
 /// An HTTP-level service, as would be given to Hyper’s server
 #[cfg(test)]
 pub(crate) type HttpService = tower::util::BoxService<
-    http::Request<hyper::Body>,
+    http::Request<crate::services::router::Body>,
     http::Response<axum::body::BoxBody>,
     std::convert::Infallible,
 >;
