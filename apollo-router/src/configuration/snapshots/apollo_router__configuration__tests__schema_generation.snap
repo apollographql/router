@@ -4190,6 +4190,15 @@ expression: "&schema"
           "description": "Activates Persisted Queries (disabled by default)",
           "type": "boolean"
         },
+        "experimental_local_manifests": {
+          "default": null,
+          "description": "Enables using a local copy of the persisted query manifest to safelist operations",
+          "items": {
+            "type": "string"
+          },
+          "nullable": true,
+          "type": "array"
+        },
         "experimental_prewarm_query_plan_cache": {
           "default": false,
           "description": "Experimental feature to prewarm the query plan cache with persisted queries",
@@ -5113,6 +5122,25 @@ expression: "&schema"
           },
           "required": [
             "response_context"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "The operation name from the query.",
+          "properties": {
+            "default": {
+              "description": "Optional default value.",
+              "nullable": true,
+              "type": "string"
+            },
+            "operation_name": {
+              "$ref": "#/definitions/OperationName",
+              "description": "#/definitions/OperationName"
+            }
+          },
+          "required": [
+            "operation_name"
           ],
           "type": "object"
         },

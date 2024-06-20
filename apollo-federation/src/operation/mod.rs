@@ -188,12 +188,20 @@ impl Operation {
 /// - For the type, stores the schema and the position in that schema instead of just the
 ///   `NamedType`.
 /// - Stores selections in a map so they can be normalized efficiently.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub(crate) struct SelectionSet {
     pub(crate) schema: ValidFederationSchema,
     pub(crate) type_position: CompositeTypeDefinitionPosition,
     pub(crate) selections: Arc<SelectionMap>,
 }
+
+impl PartialEq for SelectionSet {
+    fn eq(&self, other: &Self) -> bool {
+        self.selections == other.selections
+    }
+}
+
+impl Eq for SelectionSet {}
 
 mod selection_map {
     use std::borrow::Cow;
@@ -3032,6 +3040,7 @@ impl SelectionSet {
         self.selections.values().any(|s| s.has_defer())
     }
 
+    // - `self` must be fragment-spread-free.
     pub(crate) fn add_aliases_for_non_merging_fields(
         &self,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
@@ -3145,6 +3154,7 @@ impl SelectionSet {
         })
     }
 
+    // - `self.selections` must be fragment-spread-free.
     pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
         let mut fields = Vec::new();
 
@@ -3336,6 +3346,7 @@ struct FieldInPath {
     field: Arc<FieldSelection>,
 }
 
+// - `selections` must be fragment-spread-free.
 fn compute_aliases_for_non_merging_fields(
     selections: Vec<SelectionSetAtPath>,
     alias_collector: &mut Vec<FieldToAlias>,
@@ -3343,6 +3354,7 @@ fn compute_aliases_for_non_merging_fields(
 ) -> Result<(), FederationError> {
     let mut seen_response_names: HashMap<Name, SeenResponseName> = HashMap::new();
 
+    // - `s.selections` must be fragment-spread-free.
     fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
         s.selections.iter().flat_map(|s2| {
             s2.fields_in_set()
@@ -4454,114 +4466,6 @@ impl NamedFragments {
             };
         }
         true
-    }
-
-    /// - Expands all nested fragments
-    /// - Applies the provided `mapper` to each selection set of the expanded fragments.
-    /// - Finally, re-fragments the nested fragments.
-    fn map_to_expanded_selection_sets(
-        &self,
-        mut mapper: impl FnMut(&SelectionSet) -> Result<SelectionSet, FederationError>,
-    ) -> Result<NamedFragments, FederationError> {
-        let mut result = NamedFragments::default();
-        // Note: `self.fragments` has insertion order topologically sorted.
-        for fragment in self.fragments.values() {
-            let expanded_selection_set = fragment.selection_set.expand_all_fragments()?.normalize(
-                &fragment.type_condition_position,
-                &Default::default(),
-                &fragment.schema,
-                NormalizeSelectionOption::NormalizeRecursively,
-            )?;
-            let mut mapped_selection_set = mapper(&expanded_selection_set)?;
-            mapped_selection_set.optimize_at_root(&result)?;
-            let updated = Fragment {
-                selection_set: mapped_selection_set,
-                schema: fragment.schema.clone(),
-                name: fragment.name.clone(),
-                type_condition_position: fragment.type_condition_position.clone(),
-                directives: fragment.directives.clone(),
-            };
-            result.insert(updated);
-        }
-        Ok(result)
-    }
-
-    pub(crate) fn add_typename_field_for_abstract_types_in_named_fragments(
-        &self,
-    ) -> Result<Self, FederationError> {
-        // This method is a bit tricky due to potentially nested fragments. More precisely, suppose that
-        // we have:
-        //   fragment MyFragment on T {
-        //     a {
-        //       b {
-        //         ...InnerB
-        //       }
-        //     }
-        //   }
-        //
-        //   fragment InnerB on B {
-        //     __typename
-        //     x
-        //     y
-        //   }
-        // then if we were to "naively" add `__typename`, the first fragment would end up being:
-        //   fragment MyFragment on T {
-        //     a {
-        //       __typename
-        //       b {
-        //         __typename
-        //         ...InnerX
-        //       }
-        //     }
-        //   }
-        // but that's not ideal because the inner-most `__typename` is already within `InnerX`. And that
-        // gets in the way to re-adding fragments (the `SelectionSet.optimize` method) because if we start
-        // with:
-        //   {
-        //     a {
-        //       __typename
-        //       b {
-        //         __typename
-        //         x
-        //         y
-        //       }
-        //     }
-        //   }
-        // and add `InnerB` first, we get:
-        //   {
-        //     a {
-        //       __typename
-        //       b {
-        //         ...InnerB
-        //       }
-        //     }
-        //   }
-        // and it becomes tricky to recognize the "updated-with-typename" version of `MyFragment` now (we "seem"
-        // to miss a `__typename`).
-        //
-        // Anyway, to avoid this issue, what we do is that for every fragment, we:
-        //  1. expand any nested fragments in its selection.
-        //  2. add `__typename` where we should in that expanded selection.
-        //  3. re-optimize all fragments (using the "updated-with-typename" versions).
-        // which is what `mapToExpandedSelectionSets` gives us.
-
-        if self.is_empty() {
-            // PORT_NOTE: This was an assertion failure in JS version. But, it's actually ok to
-            // return unchanged if empty.
-            return Ok(self.clone());
-        }
-        let updated = self.map_to_expanded_selection_sets(|ss| {
-            ss.add_typename_field_for_abstract_types(/*parent_type_if_abstract*/ None)
-        })?;
-        // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
-        // check the `updated` has the same set of fragments. To avoid performance hit, only the
-        // size is checked here.
-        if updated.size() != self.size() {
-            return Err(FederationError::internal(
-                "Unexpected change in the number of fragments",
-            ));
-        }
-        Ok(updated)
     }
 }
 
