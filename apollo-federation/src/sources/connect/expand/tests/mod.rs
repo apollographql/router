@@ -226,12 +226,12 @@ fn it_expands_a_supergraph() {
       GRAPHQL @join__graph(name: "graphql", url: "https://graphql")
     }
 
-    type User @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_1) @join__type(graph: GRAPHQL) {
-      id: ID!
-      a: String
-      b: String
-      d: String
-      c: String
+    type User @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_1) @join__type(graph: GRAPHQL, key: "id") {
+      id: ID! @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERS_0) @join__field(graph: GRAPHQL)
+      a: String @join__field(graph: CONNECTORS_QUERY_USER_0) @join__field(graph: CONNECTORS_QUERY_USERS_0)
+      b: String @join__field(graph: CONNECTORS_QUERY_USER_0)
+      d: String @join__field(graph: CONNECTORS_USER_D_1)
+      c: String @join__field(graph: GRAPHQL)
     }
 
     type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_1) @join__type(graph: GRAPHQL) {
