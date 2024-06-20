@@ -72,20 +72,14 @@ To learn about standard metric instruments for the router's request lifecycle, s
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
 
 You can define custom instruments on the router, supergraph, and subgraph services in the router pipeline.
+You can also define a custom instrument for each JSON element returned to the client.
 
-<Note>
+The example configuration below defines four custom instruments:
 
-When defining a custom instrument, make sure to reference [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/).
-
-</Note>
-
-In the example configuration below, three custom instruments are defined (`acme.request.duration`, `acme.graphql.requests`, `acme.graphql.subgraph.errors`).
-
-Instruments are defined within one of the following groups which defined when the instrument will be mutated:
-* `router` - The router service
-* `supergraph` - The supergraph service
-* `subgraph` - The subgraph service
-* `graphql` - For each json element returned to the client
+- `acme.request.duration` on the `router` service
+- `acme.graphql.requests` on the `supergraph` service
+- `acme.graphql.subgraph.errors` on the `subgraph` service
+- `acme.graphql.list.lengths` on each JSON element returned to the client (defined on `graphql`)
 
 ```yaml title="router.yaml"
 telemetry:
@@ -138,7 +132,7 @@ telemetry:
 
 #### Instrument naming conventions
 
-Make sure to follow naming conventions for instruments. For reference, the [OpenTelemetry semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/) can help guide you to:
+When defining a custom instrument, make sure to reference [OpenTelemetry (OTel) semantic conventions](https://opentelemetry.io/docs/specs/semconv/general/metrics/). The OTel semantic conventions help guide you to:
 
 * Choose a good name for your instrument.
 * See which standard attributes can be attached to your instrument. 
@@ -205,7 +199,7 @@ The attributes that the OpenTelemetry spec defines as `opt-in` must be configure
 
 <RouterServices />
 
-The `router`, `supergraph` and `subgraph` sections are used to define custom instruments for each service.
+Additionally, you can define instruments on `graphql` for each JSON element returned to the client.
 
 To define a custom instrument, add a new key to `router.yaml` as `telemetry.instruments.<service>.<custom-instrument>`. For example, add a custom instrument `acme.request.duration`:
 
@@ -229,7 +223,7 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 <thead>
 <tr>
 <th style="min-width: 200px;">Value</th>
-<th>Description</th>
+<th>Definition</th>
 <th>Available services</th>
 </tr>
 </thead>
@@ -241,7 +235,11 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 <td>The duration of the pipeline service</td>
-<td>router, supergraph, subgraph</td>
+<td>
+
+`router`, `supergraph`, `subgraph`
+
+</td>
 </tr>
 <tr>
 <td>
@@ -250,7 +248,11 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 <td>The number of times the pipeline service has been executed</td>
-<td>router, supergraph, subgraph, GraphQL</td>
+<td>
+
+`router`, `supergraph`, `subgraph`, `graphql`
+
+</td>
 </tr>
 <tr>
 <td>
@@ -259,7 +261,11 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 <td>A custom value extracted from the pipeline service. See <a href="./selectors">selectors</a> for more information.</td>
-<td>router, supergraph, subgraph, GraphQL</td>
+<td>
+
+`router`, `supergraph`, `subgraph`, `graphql`
+
+</td>
 </tr>
 <tr>
 <td>
@@ -268,7 +274,11 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 <td>The duration of an event in the pipeline service.</td>
-<td>supergraph</td>
+<td>
+
+`supergraph`
+
+</td>
 </tr>
 <tr>
 <td>
@@ -277,7 +287,11 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 <td>The number of times an event in the pipeline service has been executed.</td>
-<td>supergraph</td>
+<td>
+
+`supergraph`
+
+</td>
 </tr>
 <tr>
 <td>
@@ -286,30 +300,20 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 
 </td>
 <td>A custom value extracted from the event in the pipeline service. See <a href="./selectors">selectors</a> for more information.</td>
-<td>supergraph</td>
+<td>
+
+`supergraph`
+
+</td>
 </tr>
 </tbody>
 </table>
 
+<Note>
 
-* `duration` - the duration of the pipeline service (router/supergraph/subgraph).
-* `unit` - the number of times the pipeline service has been executed (router/supergraph/subgraph/graphql).
-* `custom` - a custom value extracted from the pipeline service. See [selectors](./selectors) for more information. (router/supergraph/subgraph/graphql)
-* `event_duration` - the duration of an event in the pipeline service (supergraph).
-* `event_unit` - the number of times an event in the pipeline service has been executed (supergraph).
-* `event_custom` - a custom value extracted from the event in the pipeline service. See [selectors](./selectors) for more information (supergraph).
+`event_*` are mandantory when you want to use a [selector](./selectors) on the supergraph response body (`response_data` and `response_errors`).
 
-```yaml title="future.router.yaml"
-telemetry:
-  instrumentation:
-    instruments:
-      router:
-        acme.metric:
-          # ...
-          value: duration
-```
-
-> `event_*` are mandantory when you want to use a [selector](./selectors) on the supergraph response body (`response_data` and `response_errors`).
+</Note>
 
 Values of custom metrics can be extracted from the pipeline using custom attributes. For example, to sum the contents of a request header, create a counter with value set as the request header:
 
@@ -327,7 +331,7 @@ telemetry:
 
 <Note>
 
-The value must be of the expected type for the instrument. For example, a counter must have a numeric value.
+The value must be of the expected [type](#type) for the instrument. For example, a counter must have a numeric value.
 
 </Note>
 
