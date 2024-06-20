@@ -71,13 +71,40 @@ where
             let busy: f64 = timings.busy as f64 / 1_000_000_000_f64;
             let name = span.metadata().name();
             if let Some(subgraph_name) = timings.subgraph.take() {
-                ::tracing::info!(histogram.apollo_router_span = duration, kind = "duration", span = name, subgraph = subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = idle, kind = "idle", span = name, subgraph = subgraph_name);
-                ::tracing::info!(histogram.apollo_router_span = busy, kind = "busy", span = name, subgraph = subgraph_name);
+                ::tracing::info!(
+                    histogram.apollo_router_span = duration,
+                    kind = "duration",
+                    span = name,
+                    subgraph = subgraph_name
+                );
+                ::tracing::info!(
+                    histogram.apollo_router_span = idle,
+                    kind = "idle",
+                    span = name,
+                    subgraph = subgraph_name
+                );
+                ::tracing::info!(
+                    histogram.apollo_router_span = busy,
+                    kind = "busy",
+                    span = name,
+                    subgraph = subgraph_name
+                );
             } else {
-                ::tracing::info!(histogram.apollo_router_span = duration, kind = "duration", span = name);
-                ::tracing::info!(histogram.apollo_router_span = idle, kind = "idle", span = name);
-                ::tracing::info!(histogram.apollo_router_span = busy, kind = "busy", span = name);
+                ::tracing::info!(
+                    histogram.apollo_router_span = duration,
+                    kind = "duration",
+                    span = name
+                );
+                ::tracing::info!(
+                    histogram.apollo_router_span = idle,
+                    kind = "idle",
+                    span = name
+                );
+                ::tracing::info!(
+                    histogram.apollo_router_span = busy,
+                    kind = "busy",
+                    span = name
+                );
             }
         }
     }
