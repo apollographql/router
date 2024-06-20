@@ -7,8 +7,6 @@ import RouterServices from '../../../../shared/router-lifecycle-services.mdx';
 
 A _selector_ is used to extract data from the Apollo Router's request lifecycle (pipeline) services and attach them to telemetry, specifically [spans](./spans), [instruments](./instruments), [conditions](./conditions) and [events](./events).
 
-Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its own available selectors.
-
 An example of a selector, `request_header`, of the router service on a custom span attribute:
 
 ```yaml title="router.yaml"
@@ -25,6 +23,7 @@ telemetry:
 ## Selector configuration reference
 
 Each service of the router pipeline (`router`, `supergraph`, `subgraph`) has its own available selectors.
+You can also extract GraphQL metrics from the response data the router returns to clients.
 
 ### Router
 

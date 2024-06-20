@@ -72,7 +72,7 @@ To learn about standard metric instruments for the router's request lifecycle, s
 <PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
 
 You can define custom instruments on the router, supergraph, and subgraph services in the router pipeline.
-You can also define a custom instrument for each JSON element returned to the client.
+You can also define custom instruments for each JSON element in the response data the router returns to clients.
 
 The example configuration below defines four custom instruments:
 
@@ -234,7 +234,7 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 ##### `duration`
 
 </td>
-<td>The duration of the pipeline service</td>
+<td>The duration of the pipeline service.</td>
 <td>
 
 `router`, `supergraph`, `subgraph`
@@ -247,7 +247,7 @@ The [service](#router-request-lifecycle-services) you define an instrument on de
 ##### `unit`
 
 </td>
-<td>The number of times the pipeline service has been executed</td>
+<td>The number of times the pipeline service has been executed.</td>
 <td>
 
 `router`, `supergraph`, `subgraph`, `graphql`
