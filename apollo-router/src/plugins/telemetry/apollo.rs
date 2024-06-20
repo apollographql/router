@@ -385,7 +385,7 @@ impl Report {
     pub(crate) fn build_proto_report(
         &self,
         header: ReportHeader,
-        metrics_reference_mode: ApolloMetricsReferenceMode,
+        extended_references_enabled: bool,
     ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
         let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
             header: Some(header),
@@ -397,10 +397,7 @@ impl Report {
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
-            extended_references_enabled: matches!(
-                metrics_reference_mode,
-                ApolloMetricsReferenceMode::Extended
-            ),
+            extended_references_enabled,
             ..Default::default()
         };
 

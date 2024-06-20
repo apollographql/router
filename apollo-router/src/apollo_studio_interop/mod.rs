@@ -240,22 +240,24 @@ pub(crate) fn generate_usage_reporting(
     schema: &Valid<Schema>,
     normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
 ) -> ComparableUsageReporting {
-    let mut generator = UsageGenerator {
-        signature_doc,
-        references_doc,
-        operation_name,
-        schema,
-        normalization_algorithm,
-        variables: &Object::new(),
-        fragments_map: HashMap::new(),
-        fields_by_type: HashMap::new(),
-        fields_by_interface: HashMap::new(),
-        enums_by_name: HashMap::new(),
-        input_field_references: HashMap::new(),
-        fragment_spread_set: HashSet::new(),
-    };
+    tracing::debug_span!("generate_usage_reporting").in_scope(|| {
+        let mut generator = UsageGenerator {
+            signature_doc,
+            references_doc,
+            operation_name,
+            schema,
+            normalization_algorithm,
+            variables: &Object::new(),
+            fragments_map: HashMap::new(),
+            fields_by_type: HashMap::new(),
+            fields_by_interface: HashMap::new(),
+            enums_by_name: HashMap::new(),
+            input_field_references: HashMap::new(),
+            fragment_spread_set: HashSet::new(),
+        };
 
-    generator.generate_usage_reporting()
+        generator.generate_usage_reporting()
+    })
 }
 
 pub(crate) fn generate_extended_references(
@@ -264,22 +266,24 @@ pub(crate) fn generate_extended_references(
     schema: &Valid<Schema>,
     variables: &Object,
 ) -> ExtendedReferenceStats {
-    let mut generator = UsageGenerator {
-        signature_doc: &doc,
-        references_doc: &doc,
-        operation_name: &operation_name,
-        schema,
-        normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
-        variables,
-        fragments_map: HashMap::new(),
-        fields_by_type: HashMap::new(),
-        fields_by_interface: HashMap::new(),
-        enums_by_name: HashMap::new(),
-        input_field_references: HashMap::new(),
-        fragment_spread_set: HashSet::new(),
-    };
+    tracing::debug_span!("generate_extended_references").in_scope(|| {
+        let mut generator = UsageGenerator {
+            signature_doc: &doc,
+            references_doc: &doc,
+            operation_name: &operation_name,
+            schema,
+            normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
+            variables,
+            fragments_map: HashMap::new(),
+            fields_by_type: HashMap::new(),
+            fields_by_interface: HashMap::new(),
+            enums_by_name: HashMap::new(),
+            input_field_references: HashMap::new(),
+            fragment_spread_set: HashSet::new(),
+        };
 
-    generator.generate_extended_references()
+        generator.generate_extended_references()
+    })
 }
 
 pub(crate) fn extract_enums_from_response(
@@ -291,13 +295,15 @@ pub(crate) fn extract_enums_from_response(
 ) {
     if let Some(operation) = query.operation(operation_name) {
         if let Some(JsonValue::Object(json_object)) = &response.data {
-            extract_enums_from_selection_set(
-                &operation.selection_set,
-                &query.fragments,
-                schema,
-                json_object,
-                result_set,
-            );
+            tracing::debug_span!("extract_enums_from_response").in_scope(|| {
+                extract_enums_from_selection_set(
+                    &operation.selection_set,
+                    &query.fragments,
+                    schema,
+                    json_object,
+                    result_set,
+                );
+            })
         }
     }
 }
