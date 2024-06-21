@@ -481,7 +481,7 @@ impl Plugin for Telemetry {
                                     // the query is invalid, we did not parse the operation kind
                                     OperationKind::Query,
                                     None,
-                                    &Default::default(),
+                                    Default::default(),
                                 );
                             }
 
@@ -1257,7 +1257,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         operation_subtype,
-                        &Default::default(),
+                        Default::default(),
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1297,17 +1297,19 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
-                        &Default::default(),
+                        Default::default(),
                     );
                 }
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
-                    let mut local_stat_recorder = LocalTypeStatRecorder::new();
 
                     response_stream
                         .enumerate()
                         .map(move |(idx, response)| {
+                            // The stats are per chunk, so we need to create a new recorder for each.
+                            // Otherwise we will end up with the same stats being contributed multiple times to the total.
+                            let mut local_stat_recorder = LocalTypeStatRecorder::new();
                             let has_errors = !response.errors.is_empty();
 
                             if !matches!(sender, Sender::Noop) {
@@ -1329,7 +1331,7 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
-                                                &local_stat_recorder,
+                                                local_stat_recorder,
                                             );
                                         }
                                     } else {
@@ -1345,12 +1347,9 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
-                                            &local_stat_recorder,
+                                            local_stat_recorder,
                                         );
                                     }
-
-                                    // we need a new recorder on each event
-                                    local_stat_recorder = LocalTypeStatRecorder::new();
                                 } else {
                                     // If it's the last response
                                     if !response.has_next.unwrap_or(false) {
@@ -1362,7 +1361,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
-                                            &local_stat_recorder,
+                                            local_stat_recorder,
                                         );
                                     }
                                 }
@@ -1385,7 +1384,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
-        local_type_stat_recorder: &LocalTypeStatRecorder,
+        local_type_stat_recorder: LocalTypeStatRecorder,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .extensions()
@@ -1478,9 +1477,7 @@ impl Telemetry {
                                     ..Default::default()
                                 },
                                 per_type_stat,
-                                local_per_type_stat: local_type_stat_recorder
-                                    .local_type_stats
-                                    .clone(),
+                                local_per_type_stat: local_type_stat_recorder.local_type_stats,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
