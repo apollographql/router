@@ -742,6 +742,33 @@ query AliasedQuery {
 }
 ```
 
+<MinVersion version="1.50.0">
+
+### Extended reference reporting
+
+</MinVersion>
+
+<ExperimentalFeature />
+
+Apollo's legacy reporting didn't include input and enum references.
+Beginning in v1.50.0, you can configure the router to report input and enum usage.
+
+Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.experimental_apollo_metrics_reference_mode` option like so:
+
+```yaml title="router.yaml"
+telemetry: 
+  apollo:
+    experimental_apollo_metrics_reference_mode: extended # Default is legacy
+```
+
+Once you enable this configuration, you can view enum and input usage along with other types of [field usage in GraphOS Studio](/graphos/metrics/field-usage).
+
+<Note>
+
+Once you enable `extended` reference reporting, there will be a lag in changes to metrics in Studio.
+This is because historical operations still use the `legacy` reference reporting.
+
+</Note>
 
 ### Safelisting with persisted queries
 
