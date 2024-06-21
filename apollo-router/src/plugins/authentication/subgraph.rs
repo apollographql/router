@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::time::Duration;
 use std::time::SystemTime;
 
@@ -18,7 +19,6 @@ use http::HeaderMap;
 use http::Request;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::sync::RwLock;
 use tokio::sync::mpsc::Sender;
 use tokio::task::JoinHandle;
 use tower::BoxError;
@@ -208,6 +208,7 @@ pub(crate) struct SigningParamsConfig {
 struct CredentialsProvider {
     credentials: Arc<RwLock<Credentials>>,
     _credentials_updater_handle: Arc<JoinHandle<()>>,
+    #[allow(dead_code)]
     refresh_credentials: Sender<()>,
 }
 
@@ -221,7 +222,7 @@ impl CredentialsProvider {
         let credentials_provider = SharedCredentialsProvider::new(provide_credentials);
         let (sender, mut refresh_credentials_receiver) = tokio::sync::mpsc::channel(1);
         let credentials = credentials_provider.provide_credentials().await?;
-        let mut refresh_timer = next_refresh_duration(credentials);
+        let mut refresh_timer = next_refresh_timer(&credentials);
         let credentials = Arc::new(RwLock::new(
             credentials_provider.provide_credentials().await?,
         ));
@@ -232,7 +233,7 @@ impl CredentialsProvider {
                     _ = tokio::time::sleep(refresh_timer) => {
                         // Refresh credentials
                         if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
-                            refresh_timer = next_refresh_duration(new_credentials);
+                            refresh_timer = next_refresh_timer(&new_credentials);
                             let mut credentials = c2.write().unwrap(); // todo: unwrap
                             *credentials = new_credentials;
                         }
@@ -257,6 +258,7 @@ impl CredentialsProvider {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn refresh_credentials(&self) {
         let _ = self.refresh_credentials.send(()).await;
     }
@@ -439,7 +441,7 @@ pub(super) async fn make_signing_params(
                     credentials_provider,
                 )
                 .await
-                .map_err(|e| BoxError::from(e))?,
+                .map_err(BoxError::from)?,
                 subgraph_name: subgraph_name.to_string(),
             })
         }
