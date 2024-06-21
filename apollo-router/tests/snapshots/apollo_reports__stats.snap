@@ -43,22 +43,22 @@ traces_per_query:
               name:
                 return_type: String
                 errors_count: 0
-                observed_execution_count: 3
-                estimated_execution_count: 3
+                observed_execution_count: 4
+                estimated_execution_count: 4
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
               reviews:
                 return_type: "[Review]"
                 errors_count: 0
-                observed_execution_count: 3
-                estimated_execution_count: 3
+                observed_execution_count: 4
+                estimated_execution_count: 4
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
               upc:
                 return_type: String!
                 errors_count: 0
-                observed_execution_count: 3
-                estimated_execution_count: 3
+                observed_execution_count: 4
+                estimated_execution_count: 4
                 requests_with_errors_count: 0
                 latency_count: "[latency_count]"
           Query:

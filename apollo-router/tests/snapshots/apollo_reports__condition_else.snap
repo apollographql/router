@@ -168,6 +168,36 @@ traces_per_query:
                                               ResponseName: name
                                         id:
                                           Index: 2
+                                      - original_field_name: ""
+                                        type: ""
+                                        parent_type: ""
+                                        cache_policy: ~
+                                        start_time: "[start_time]"
+                                        end_time: "[end_time]"
+                                        error: []
+                                        child:
+                                          - original_field_name: ""
+                                            type: String!
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: "[start_time]"
+                                            end_time: "[end_time]"
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: upc
+                                          - original_field_name: ""
+                                            type: String
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: "[start_time]"
+                                            end_time: "[end_time]"
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: name
+                                        id:
+                                          Index: 3
                                     id:
                                       ResponseName: topProducts
                                 id: ~
@@ -412,6 +442,26 @@ traces_per_query:
                                                     ResponseName: reviews
                                               id:
                                                 Index: 2
+                                            - original_field_name: ""
+                                              type: ""
+                                              parent_type: ""
+                                              cache_policy: ~
+                                              start_time: "[start_time]"
+                                              end_time: "[end_time]"
+                                              error: []
+                                              child:
+                                                - original_field_name: ""
+                                                  type: "[Review]"
+                                                  parent_type: Product
+                                                  cache_policy: ~
+                                                  start_time: "[start_time]"
+                                                  end_time: "[end_time]"
+                                                  error: []
+                                                  child: []
+                                                  id:
+                                                    ResponseName: reviews
+                                              id:
+                                                Index: 3
                                           id:
                                             ResponseName: _entities
                                       id: ~
