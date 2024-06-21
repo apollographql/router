@@ -191,13 +191,13 @@ pub(crate) struct Config {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Default, Debug)]
+#[derive(Clone, Default)]
 pub(crate) struct SigningParams {
     pub(crate) all: Option<Arc<SigningParamsConfig>>,
     pub(crate) subgraphs: HashMap<String, Arc<SigningParamsConfig>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct SigningParamsConfig {
     credentials_provider: CredentialsProvider,
     region: Region,
