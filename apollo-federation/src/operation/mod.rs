@@ -1202,6 +1202,8 @@ mod field_selection {
             Self::new(FieldData::from_position(schema, field_position))
         }
 
+        // Note: The `schema` argument must be a subgraph schema, so the __typename field won't
+        // need to be rebased, which would fail (since __typename fields are undefined).
         pub(crate) fn new_introspection_typename(
             schema: &ValidFederationSchema,
             parent_type: &CompositeTypeDefinitionPosition,

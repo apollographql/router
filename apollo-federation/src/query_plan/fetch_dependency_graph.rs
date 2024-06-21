@@ -3200,6 +3200,10 @@ fn compute_nodes_for_root_type_resolution<'a>(
     let source = stack_item.tree.graph.node_weight(source_id)?;
     let dest = stack_item.tree.graph.node_weight(dest_id)?;
     let source_type: ObjectTypeDefinitionPosition = source.type_.clone().try_into()?;
+    let source_schema: ValidFederationSchema = dependency_graph
+        .federated_query_graph
+        .schema_by_source(&source.source)?
+        .clone();
     let dest_type: ObjectTypeDefinitionPosition = dest.type_.clone().try_into()?;
     let root_operation_type = dependency_graph
         .federated_query_graph
@@ -3229,7 +3233,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
         FetchDependencyGraph::node_weight_mut(&mut dependency_graph.graph, stack_item.node_id)?;
     if !stack_item.node_path.path_in_node.is_empty() {
         let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
-            &dependency_graph.supergraph_schema,
+            &source_schema,
             &source_type.into(),
             None,
         )));
@@ -3334,7 +3338,7 @@ fn compute_nodes_for_op_path_element<'a>(
             Some(name.clone())
         };
         let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
-            &dependency_graph.supergraph_schema,
+            operation.schema(),
             &operation.parent_type_position(),
             alias,
         )));
