@@ -28,7 +28,6 @@ use tower::ServiceExt;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
-use crate::services::SubgraphResponse;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
@@ -208,14 +207,12 @@ pub(crate) struct SigningParamsConfig {
 #[derive(Clone, Debug)]
 struct CredentialsProvider {
     credentials: Arc<RwLock<Credentials>>,
-    credentials_updater_handle: Arc<JoinHandle<()>>,
+    _credentials_updater_handle: Arc<JoinHandle<()>>,
     refresh_credentials: Sender<()>,
 }
 
 // Refresh token if it will expire within the next 5 minutes
 const MIN_REMAINING_DURATION: Duration = std::time::Duration::from_secs(60 * 5);
-// Check for token duration every 1 minute
-const TOKEN_CHECK_INTERVAL: Duration = std::time::Duration::from_secs(60);
 
 impl CredentialsProvider {
     async fn from_provide_credentials(
@@ -223,6 +220,8 @@ impl CredentialsProvider {
     ) -> Result<Self, CredentialsError> {
         let credentials_provider = SharedCredentialsProvider::new(provide_credentials);
         let (sender, mut refresh_credentials_receiver) = tokio::sync::mpsc::channel(1);
+        let credentials = credentials_provider.provide_credentials().await?;
+        let mut refresh_timer = next_refresh_duration(credentials);
         let credentials = Arc::new(RwLock::new(
             credentials_provider.provide_credentials().await?,
         ));
@@ -230,19 +229,10 @@ impl CredentialsProvider {
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(TOKEN_CHECK_INTERVAL) => {
-                        let now = SystemTime::now();
-                        // check expires_at, refresh if needed
-                        let expires_at = {
-                            c2.read().unwrap().expiry().unwrap_or_else(|| now.clone())
-                        };
-                        if let Ok(d) = expires_at.duration_since(now) {
-                            if d > MIN_REMAINING_DURATION {
-                                continue;
-                            }
-                        }
+                    _ = tokio::time::sleep(refresh_timer) => {
                         // Refresh credentials
                         if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
+                            refresh_timer = next_refresh_duration(new_credentials);
                             let mut credentials = c2.write().unwrap(); // todo: unwrap
                             *credentials = new_credentials;
                         }
@@ -261,7 +251,7 @@ impl CredentialsProvider {
             }
         });
         Ok(Self {
-            credentials_updater_handle: Arc::new(handle),
+            _credentials_updater_handle: Arc::new(handle),
             refresh_credentials: sender,
             credentials,
         })
@@ -270,6 +260,18 @@ impl CredentialsProvider {
     pub(crate) async fn refresh_credentials(&self) {
         let _ = self.refresh_credentials.send(()).await;
     }
+}
+
+fn next_refresh_timer(credentials: &Credentials) -> Duration {
+    credentials
+        .expiry()
+        .and_then(|expiry| {
+            expiry
+                .duration_since(SystemTime::now())
+                .ok()
+                .and_then(|d| d.checked_sub(MIN_REMAINING_DURATION))
+        })
+        .unwrap_or_else(|| Duration::from_secs(0))
 }
 
 impl ProvideCredentials for CredentialsProvider {
