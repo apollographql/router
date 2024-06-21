@@ -1,9 +1,13 @@
+use std::backtrace::Backtrace;
+use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Deref;
 
 use apollo_compiler::ast;
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -23,6 +27,7 @@ use apollo_compiler::schema::SchemaDefinition;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
+use indexmap::IndexMap;
 use indexmap::IndexSet;
 use lazy_static::lazy_static;
 use strum::IntoEnumIterator;
@@ -4555,6 +4560,15 @@ impl UnionTypeDefinitionPosition {
             }
             .into());
         }
+        let members = type_
+            .members
+            .iter()
+            .map(|member| ObjectTypeDefinitionPosition { type_name: member.name.clone() });
+        schema
+            .union_members
+            .entry(self.type_name.clone())
+            .or_default()
+            .extend(members);
         schema
             .schema
             .types
@@ -4682,6 +4696,10 @@ impl UnionTypeDefinitionPosition {
     ) -> Result<(), FederationError> {
         let type_ = self.make_mut(&mut schema.schema)?;
         type_.make_mut().members.insert(name.clone());
+        schema.union_members
+            .entry(self.type_name.clone())
+            .or_default()
+            .insert(ObjectTypeDefinitionPosition { type_name: Name::new_unchecked(name.to_string().into()) });
         self.insert_member_references(&mut schema.referencers, &name)
     }
 
@@ -6891,6 +6909,7 @@ impl FederationSchema {
     pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {
         let metadata = links_metadata(&schema)?;
         let mut referencers: Referencers = Default::default();
+        let mut union_members: HashMap<NamedType, IndexSet<ObjectTypeDefinitionPosition>> = Default::default();
 
         // Shallow pass to populate referencers for types/directives.
         for (type_name, type_) in schema.types.iter() {
@@ -6960,6 +6979,14 @@ impl FederationSchema {
                     .insert_references(type_, &schema, &mut referencers)?;
                 }
                 ExtendedType::Union(type_) => {
+                    let members = type_
+                        .members
+                        .iter()
+                        .map(|member| ObjectTypeDefinitionPosition { type_name: member.name.clone() });
+                    union_members
+                        .entry(type_name.clone())
+                        .or_default().
+                        extend(members);
                     UnionTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
@@ -6991,6 +7018,7 @@ impl FederationSchema {
             referencers,
             links_metadata: metadata.map(Box::new),
             subgraph_metadata: None,
+            union_members
         })
     }
 }

@@ -47,6 +47,7 @@ use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
+use crate::schema::PossibleRuntimeTypes;
 use crate::schema::ValidFederationSchema;
 
 mod contains;
@@ -4878,10 +4879,22 @@ fn runtime_types_intersect(
     }
 
     if let (Ok(runtimes_1), Ok(runtimes_2)) = (
-        schema.possible_runtime_types(type1.clone()),
-        schema.possible_runtime_types(type2.clone()),
+        schema.possible_runtime_types_ref(type1.clone()),
+        schema.possible_runtime_types_ref(type2.clone()),
     ) {
-        return runtimes_1.intersection(&runtimes_2).next().is_some();
+        // println!("type1 {:#?}", type1);
+        // println!("type1 {:#?}", type2);
+        // println!("runtimes_1 {:#?}", runtimes_1);
+        // println!("runtimes_2 {:#?}", runtimes_2);
+        // let works = schema.possible_runtime_types(type1.clone());
+        // println!("runtimes_1 works {:#?}", works);
+
+        return match (runtimes_1, runtimes_2) {
+            (PossibleRuntimeTypes::Owned(a), PossibleRuntimeTypes::Owned(b)) => a.intersection(&b).next().is_some(),
+            (PossibleRuntimeTypes::Owned(a), PossibleRuntimeTypes::Ref(b)) => a.intersection(b).next().is_some(),
+            (PossibleRuntimeTypes::Ref(a), PossibleRuntimeTypes::Owned(b)) => a.intersection(&b).next().is_some(),
+            (PossibleRuntimeTypes::Ref(a), PossibleRuntimeTypes::Ref(b)) => a.intersection(b).next().is_some(),
+        }
     }
 
     false
