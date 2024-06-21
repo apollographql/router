@@ -16,6 +16,9 @@ use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
+use crate::plugins::telemetry::config_new::instruments::Event;
+use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
@@ -81,6 +84,22 @@ pub(crate) enum ResponseStatus {
 pub(crate) enum OperationKind {
     /// The raw operation kind.
     String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum RouterValue {
+    Standard(Standard),
+    Custom(RouterSelector),
+}
+
+impl From<&RouterValue> for InstrumentValue<RouterSelector> {
+    fn from(value: &RouterValue) -> Self {
+        match value {
+            RouterValue::Standard(standard) => InstrumentValue::Standard(standard.clone()),
+            RouterValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -188,6 +207,30 @@ pub(crate) enum RouterSelector {
         /// Critical error if it happens
         error: ErrorRepr,
     },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SupergraphValue {
+    Standard(Standard),
+    Event(Event<SupergraphSelector>),
+    Custom(SupergraphSelector),
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum EventHolder {
+    EventCustom(SupergraphSelector),
+}
+
+impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
+    fn from(value: &SupergraphValue) -> Self {
+        match value {
+            SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -344,6 +387,22 @@ pub(crate) enum SupergraphSelector {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,
     },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SubgraphValue {
+    Standard(Standard),
+    Custom(SubgraphSelector),
+}
+
+impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
+    fn from(value: &SubgraphValue) -> Self {
+        match value {
+            SubgraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SubgraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]

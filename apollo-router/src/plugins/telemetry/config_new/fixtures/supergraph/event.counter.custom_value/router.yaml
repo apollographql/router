@@ -1,11 +1,12 @@
 telemetry:
   instrumentation:
     instruments:
-      graphql:
+      default_requirement_level: none
+      supergraph:
         "custom_counter":
           description: "count of requests"
-          type: histogram
+          type: counter
           unit: "unit"
           value:
-            list_length: value
-
+            event_custom:
+              response_data: "$.price"
