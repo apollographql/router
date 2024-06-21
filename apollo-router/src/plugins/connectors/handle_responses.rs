@@ -58,6 +58,7 @@ pub(crate) async fn handle_responses(
                 .map_err(|_| InvalidResponseBody("couldn't deserialize response body".into()))?;
 
             let mut res_data = {
+                // TODO use response_key.selection_set() to use the operation selection set for alias/typename/field selection
                 let (res, _apply_to_errors) = connector.selection.apply_to(&json_data);
                 // TODO log apply_to_errors as diagnostics
                 res.unwrap_or_else(|| Value::Null)
@@ -68,6 +69,7 @@ pub(crate) async fn handle_responses(
                 ResponseKey::RootField {
                     ref name,
                     ref typename,
+                    ..
                 } => {
                     if let ResponseTypeName::Concrete(typename) = typename {
                         inject_typename(&mut res_data, typename);
@@ -80,6 +82,7 @@ pub(crate) async fn handle_responses(
                 ResponseKey::Entity {
                     index,
                     ref typename,
+                    ..
                 } => {
                     if let ResponseTypeName::Concrete(typename) = typename {
                         inject_typename(&mut res_data, typename);
@@ -100,6 +103,7 @@ pub(crate) async fn handle_responses(
                     index,
                     ref field_name,
                     ref typename,
+                    ..
                 } => {
                     let entities = data
                         .entry(ENTITIES)
@@ -215,6 +219,7 @@ mod tests {
             .extension(ResponseKey::RootField {
                 name: "hello".to_string(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .expect("response builder");
@@ -223,6 +228,7 @@ mod tests {
             .extension(ResponseKey::RootField {
                 name: "hello2".to_string(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .expect("response builder");
@@ -279,6 +285,7 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 0,
                 typename: ResponseTypeName::Concrete("User".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
             .expect("response builder");
@@ -287,6 +294,7 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 1,
                 typename: ResponseTypeName::Concrete("User".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#).into())
             .expect("response builder");
@@ -361,6 +369,7 @@ mod tests {
                 index: 0,
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .body(hyper::Body::from(r#"{"data":"value1"}"#).into())
             .expect("response builder");
@@ -370,6 +379,7 @@ mod tests {
                 index: 1,
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .body(hyper::Body::from(r#"{"data":"value2"}"#).into())
             .expect("response builder");
@@ -442,8 +452,8 @@ mod tests {
         let response1 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 0,
-
                 typename: ResponseTypeName::Concrete("User".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .status(404)
             .body(hyper::Body::from(r#"{"error":"not found"}"#).into())
@@ -452,8 +462,8 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 1,
-
                 typename: ResponseTypeName::Concrete("User".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .body(hyper::Body::from(r#"{"data":{"id":"2"}}"#).into())
             .expect("response builder");
@@ -462,6 +472,7 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 2,
                 typename: ResponseTypeName::Concrete("User".to_string()),
+                selection_set: Default::default(), // TODO
             })
             .status(500)
             .body(hyper::Body::from(r#"{"error":"whoops"}"#).into())
