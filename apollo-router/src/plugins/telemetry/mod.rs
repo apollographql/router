@@ -1309,14 +1309,19 @@ impl Telemetry {
                         .map(move |(idx, response)| {
                             // The stats are per chunk, so we need to create a new recorder for each.
                             // Otherwise we will end up with the same stats being contributed multiple times to the total.
-                            let mut local_stat_recorder = LocalTypeStatRecorder::new();
-                            let has_errors = !response.errors.is_empty();
 
+                            let has_errors = !response.errors.is_empty();
                             if !matches!(sender, Sender::Noop) {
-                                if let Some(query) = &ctx.unsupported_executable_document() {
-                                    // Aggregate the per-type/per-field stats on each response. They'll be submitted after the last response in the stream
+                                let local_stat_recorder = if let (Some(query), true) = (
+                                    &ctx.unsupported_executable_document(),
+                                    config.apollo.experimental_local_field_metrics,
+                                ) {
+                                    let mut local_stat_recorder = LocalTypeStatRecorder::new();
                                     local_stat_recorder.visit(query, &response);
-                                }
+                                    Some(local_stat_recorder)
+                                } else {
+                                    None
+                                };
 
                                 if operation_kind == OperationKind::Subscription {
                                     // The first empty response is always a heartbeat except if it's an error
@@ -1384,7 +1389,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
-        local_type_stat_recorder: LocalTypeStatRecorder,
+        local_type_stat_recorder: Option<LocalTypeStatRecorder>,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .extensions()
@@ -1477,7 +1482,9 @@ impl Telemetry {
                                     ..Default::default()
                                 },
                                 per_type_stat,
-                                local_per_type_stat: local_type_stat_recorder.local_type_stats,
+                                local_per_type_stat: local_type_stat_recorder
+                                    .map(|r| r.local_type_stats)
+                                    .unwrap_or_default(),
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type

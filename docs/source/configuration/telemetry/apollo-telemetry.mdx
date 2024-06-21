@@ -72,6 +72,17 @@ telemetry:
     field_level_instrumentation_sampler: always_off
 ```
 
+### Experimental local field metrics
+
+Apollo Router can send field-level metrics to GraphOS without using FTV1 tracing. This feature is experimental and is not yet displayable in GraphOS Studio.
+To enable this feature, set the `experimental_local_field_metrics` option to `true` in your router configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    experimental_local_field_metrics: true
+```
+
 ## Advanced configuration
 
 ### `send_headers`

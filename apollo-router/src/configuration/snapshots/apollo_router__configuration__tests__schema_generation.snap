@@ -1597,6 +1597,11 @@ expression: "&schema"
           "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
           "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
         },
+        "experimental_local_field_metrics": {
+          "default": false,
+          "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
+          "type": "boolean"
+        },
         "experimental_otlp_endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/",
           "description": "The Apollo Studio endpoint for exporting traces and metrics.",
