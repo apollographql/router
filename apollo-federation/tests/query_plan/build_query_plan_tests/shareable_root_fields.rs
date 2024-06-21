@@ -56,9 +56,6 @@ fn can_use_same_root_operation_from_multiple_subgraphs_in_parallel() {
 }
 
 #[test]
-#[should_panic(
-    expected = "Root nodes should have no remaining nodes unhandled, but got: [1 (missing: [2])]"
-)]
 fn handles_root_operation_shareable_in_many_subgraphs() {
     let planner = planner!(
         Subgraph1: r#"
