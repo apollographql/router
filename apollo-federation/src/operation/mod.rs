@@ -4882,18 +4882,11 @@ fn runtime_types_intersect(
         schema.possible_runtime_types_ref(type1.clone()),
         schema.possible_runtime_types_ref(type2.clone()),
     ) {
-        // println!("type1 {:#?}", type1);
-        // println!("type1 {:#?}", type2);
-        // println!("runtimes_1 {:#?}", runtimes_1);
-        // println!("runtimes_2 {:#?}", runtimes_2);
-        // let works = schema.possible_runtime_types(type1.clone());
-        // println!("runtimes_1 works {:#?}", works);
-
         return match (runtimes_1, runtimes_2) {
-            (PossibleRuntimeTypes::Owned(a), PossibleRuntimeTypes::Owned(b)) => a.intersection(&b).next().is_some(),
-            (PossibleRuntimeTypes::Owned(a), PossibleRuntimeTypes::Ref(b)) => a.intersection(b).next().is_some(),
-            (PossibleRuntimeTypes::Ref(a), PossibleRuntimeTypes::Owned(b)) => a.intersection(&b).next().is_some(),
-            (PossibleRuntimeTypes::Ref(a), PossibleRuntimeTypes::Ref(b)) => a.intersection(b).next().is_some(),
+            (PossibleRuntimeTypes::Single(_), PossibleRuntimeTypes::Single(_)) => false,
+            (PossibleRuntimeTypes::Single(a), PossibleRuntimeTypes::Many(b)) => b.contains(&a),
+            (PossibleRuntimeTypes::Many(a), PossibleRuntimeTypes::Single(b)) => a.contains(&b),
+            (PossibleRuntimeTypes::Many(a), PossibleRuntimeTypes::Many(b)) => a.intersection(b).next().is_some(),
         }
     }
 
