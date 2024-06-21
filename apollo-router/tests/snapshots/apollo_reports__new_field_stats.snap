@@ -1,0 +1,254 @@
+---
+source: apollo-router/tests/apollo_reports.rs
+expression: report
+---
+header:
+  graph_ref: test
+  hostname: "[hostname]"
+  agent_version: "[agent_version]"
+  service_version: ""
+  runtime_version: rust
+  uname: "[uname]"
+  executable_schema_id: "[executable_schema_id]"
+traces_per_query:
+  "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}":
+    trace: []
+    stats_with_context:
+      - context:
+          client_name: ""
+          client_version: ""
+          operation_type: query
+          operation_subtype: ""
+          result: ""
+        query_latency_stats:
+          latency_count: "[latency_count]"
+          request_count: 1
+          cache_hits: 0
+          persisted_query_hits: 0
+          persisted_query_misses: 0
+          cache_latency_count: "[cache_latency_count]"
+          root_error_stats:
+            children: {}
+            errors_count: 0
+            requests_with_errors_count: 0
+          requests_with_errors_count: 0
+          public_cache_ttl_count: "[public_cache_ttl_count]"
+          private_cache_ttl_count: "[private_cache_ttl_count]"
+          registered_operation_count: 0
+          forbidden_operation_count: 0
+          requests_without_field_instrumentation: 0
+        per_type_stat:
+          Product:
+            per_field_stat:
+              name:
+                return_type: String
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              reviews:
+                return_type: "[Review]"
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              upc:
+                return_type: String!
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+          Query:
+            per_field_stat:
+              _entities:
+                return_type: "[_Entity]!"
+                errors_count: 0
+                observed_execution_count: 2
+                estimated_execution_count: 2
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              topProducts:
+                return_type: "[Product]"
+                errors_count: 0
+                observed_execution_count: 1
+                estimated_execution_count: 1
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+          Review:
+            per_field_stat:
+              author:
+                return_type: User
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+          User:
+            per_field_stat:
+              id:
+                return_type: ID!
+                errors_count: 0
+                observed_execution_count: 4
+                estimated_execution_count: 4
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+              name:
+                return_type: String
+                errors_count: 0
+                observed_execution_count: 2
+                estimated_execution_count: 2
+                requests_with_errors_count: 0
+                latency_count: "[latency_count]"
+        extended_references: ~
+        local_per_type_stat:
+          Product:
+            local_per_field_stat:
+              reviews:
+                return_type: Review
+                array_size:
+                  - 2
+                  - 4
+                  - 2
+          Query:
+            local_per_field_stat:
+              topProducts:
+                return_type: Product
+                array_size:
+                  - 0
+                  - 0
+                  - 0
+                  - 0
+                  - 1
+        limits_stats:
+          strategy: "\"measure\""
+          cost_estimated:
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 1
+          max_cost_estimated: 230
+          cost_actual:
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 0
+            - 1
+          max_cost_actual: 20
+          depth: 0
+          height: 0
+          alias_count: 0
+          root_field_count: 0
+        operation_count: 0
+    referenced_fields_by_type:
+      Product:
+        field_names:
+          - name
+          - reviews
+        is_interface: false
+      Query:
+        field_names:
+          - topProducts
+        is_interface: false
+      Review:
+        field_names:
+          - author
+        is_interface: false
+      User:
+        field_names:
+          - name
+        is_interface: false
+    query_metadata: ~
+end_time: "[end_time]"
+operation_count: 0
+operation_count_by_type:
+  - type: query
+    subtype: ""
+    operation_count: 1
+traces_pre_aggregated: true
+extended_references_enabled: false
