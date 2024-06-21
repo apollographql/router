@@ -385,15 +385,15 @@ fn validate_field(
                 errors.push(Message {
                     code: Code::EntityNotOnRootQuery,
                     message: format!(
-                        "{coordinate} is invalid. Entities can only be declared on root `Query` fields.", 
+                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.", 
                         coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object_name, &field.name)
                     ),
                     locations: Location::from_node(entity_arg.location(), source_map)
                         .into_iter()
                         .collect(),
                 })
+                // TODO: Allow interfaces
             } else if field.ty.is_list() || schema.get_object(field.ty.inner_named_type()).is_none()
-            /* taylor */
             {
                 errors.push(Message {
                     code: Code::EntityTypeInvalid,
