@@ -119,13 +119,6 @@ impl BridgeQueryPlannerPool {
 
                     let res = svc.call(request).await;
 
-                    f64_histogram!(
-                        "apollo.router.query_planning.pooled_planner.duration",
-                        "Duration of the query planning.",
-                        start.elapsed().as_secs_f64(),
-                        "workerId" = worker_id.to_string()
-                    );
-
                     let _ = res_sender.send(res);
                 }
             });
