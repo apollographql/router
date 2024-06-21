@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: result
+---
+statsReportKey: "# TestCommaLowerBound\nquery TestCommaLowerBound($arg:String,$slightlyTooLongName1234:String){manyArgsQuery(arg1:$arg arg2:$arg arg3:$arg arg4:$slightlyTooLongName1234){enumResponse}}"
+referencedFieldsByType:
+  EverythingResponse:
+    fieldNames:
+      - enumResponse
+    isInterface: false
+  Query:
+    fieldNames:
+      - manyArgsQuery
+    isInterface: false

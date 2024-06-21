@@ -544,7 +544,7 @@ impl SimultaneousPaths {
         match self.0.as_slice() {
             [] => f.write("<no path>"),
 
-            [first] => f.write_fmt(format_args!("{{ {first} }}")),
+            [first] => f.write_fmt(format_args!("{first}")),
 
             _ => {
                 f.write("{")?;
@@ -2511,7 +2511,7 @@ impl OpGraphPath {
                                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
                             );
                             if is_operation_field_type_leaf
-                                && self.has_an_entity_implementation_with_shareable_field(
+                                || !self.has_an_entity_implementation_with_shareable_field(
                                     &tail_weight.source,
                                     tail_type_pos.field(
                                         operation_field.data().field_position.field_name().clone(),
@@ -2642,7 +2642,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
-                        );
+                        )?;
                         if let Some(interface_path) = interface_path {
                             let (interface_path, all_options) =
                                 if direct_path_overrides_type_explosion {
@@ -2799,7 +2799,7 @@ impl OpGraphPath {
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
-                        );
+                        )?;
                         Ok((Some(all_options), None))
                     }
                     OutputTypeDefinitionPosition::Object(tail_type_pos) => {
@@ -3015,10 +3015,11 @@ impl Display for OpGraphPath {
         // If the path is length is 0 return "[]"
         // Traverse the path, getting the of the edge.
         let head = &self.graph.graph()[self.head];
-        if head.root_kind.is_some() && self.edges.is_empty() {
+        let head_is_root_node = head.is_root_node();
+        if head_is_root_node && self.edges.is_empty() {
             return write!(f, "_");
         }
-        if head.root_kind.is_some() {
+        if !head_is_root_node {
             write!(f, "{head}")?;
         }
         self.edges
@@ -3029,9 +3030,23 @@ impl Display for OpGraphPath {
                 Some(e) => {
                     let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
                     let node = &self.graph.graph()[tail];
-                    let edge = &self.graph.graph()[e];
-                    let label = edge.transition.to_string();
-                    write!(f, " --[{label}]--> {node}")
+                    if i == 0 && head_is_root_node {
+                        write!(f, "{node}")
+                    } else {
+                        let edge = &self.graph.graph()[e];
+                        let label = edge.transition.to_string();
+
+                        if let Some(conditions) = &edge.conditions {
+                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
+                        } else if !matches!(
+                            edge.transition,
+                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                        ) {
+                            write!(f, " --[{label}]--> {node}")
+                        } else {
+                            core::fmt::Result::Ok(())
+                        }
+                    }
                 }
                 None => write!(f, " ({}) ", self.edge_triggers[i].as_ref()),
             })?;
@@ -3054,13 +3069,13 @@ impl SimultaneousPaths {
     /// the options for the `SimultaneousPaths` as a whole.
     fn flat_cartesian_product(
         options_for_each_path: Vec<Vec<SimultaneousPaths>>,
-    ) -> Vec<SimultaneousPaths> {
+    ) -> Result<Vec<SimultaneousPaths>, FederationError> {
         // This can be written more tersely with a bunch of `reduce()`/`flat_map()`s and friends,
         // but when interfaces type-explode into many implementations, this can end up with fairly
         // large `Vec`s and be a bottleneck, and a more iterative version that pre-allocates `Vec`s
         // is quite a bit faster.
         if options_for_each_path.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
         // Track, for each path, which option index we're at.
@@ -3069,8 +3084,14 @@ impl SimultaneousPaths {
         // Pre-allocate `Vec` for the result.
         let num_options = options_for_each_path
             .iter()
-            .map(|options| options.len())
-            .product();
+            .fold(1_usize, |product, options| {
+                product.saturating_mul(options.len())
+            });
+        if num_options > 1_000_000 {
+            return Err(FederationError::internal(
+                "flat_cartesian_product: excessive number of combinations: {num_options}",
+            ));
+        }
         let mut product = Vec::with_capacity(num_options);
 
         // Compute the cartesian product.
@@ -3097,7 +3118,7 @@ impl SimultaneousPaths {
             }
         }
 
-        product
+        Ok(product)
     }
 
     /// Given 2 `SimultaneousPaths` that represent 2 different options to reach the same query leaf
@@ -3399,7 +3420,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             }
         }
 
-        let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path);
+        let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path)?;
         Ok(Some(self.create_lazy_options(all_options, updated_context)))
     }
 }
@@ -3556,12 +3577,18 @@ impl OpPath {
             match element.as_ref() {
                 OpPathElement::InlineFragment(fragment) => {
                     if let Some(type_condition) = &fragment.data().type_condition_position {
-                        if schema.get_type(type_condition.type_name().clone()).is_ok() {
-                            let updated_fragment = fragment.with_updated_type_condition(None);
-                            filtered
-                                .push(Arc::new(OpPathElement::InlineFragment(updated_fragment)));
+                        if schema.get_type(type_condition.type_name().clone()).is_err() {
+                            if element.directives().is_empty() {
+                                continue; // skip this element
+                            } else {
+                                // Replace this element with an unconditioned inline fragment
+                                let updated_fragment = fragment.with_updated_type_condition(None);
+                                filtered.push(Arc::new(OpPathElement::InlineFragment(
+                                    updated_fragment,
+                                )));
+                            }
                         } else {
-                            continue;
+                            filtered.push(element.clone());
                         }
                     } else {
                         filtered.push(element.clone());
@@ -3724,7 +3751,10 @@ mod tests {
         let name = NodeStr::new("S1");
         let graph = build_query_graph(name, schema.clone()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
-        assert_eq!(path.to_string(), "_");
+        // NOTE: in general GraphPath would be used against a federated supergraph which would have
+        // a root node [query](_)* followed by a Query(S1) node
+        // This test is run against subgraph schema meaning it will start from Query(S1) node instead
+        assert_eq!(path.to_string(), "Query(S1) (types: [Query])");
         let pos = ObjectFieldDefinitionPosition {
             type_name: Name::new("T").unwrap(),
             field_name: Name::new("t").unwrap(),
@@ -3749,7 +3779,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(path.to_string(), "Query(S1)* --[t]--> T(S1) (types: [T])");
+        assert_eq!(path.to_string(), "Query(S1) --[t]--> T(S1) (types: [T])");
         let pos = ObjectFieldDefinitionPosition {
             type_name: Name::new("ID").unwrap(),
             field_name: Name::new("id").unwrap(),
@@ -3776,7 +3806,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             path.to_string(),
-            "Query(S1)* --[t]--> T(S1) --[id]--> ID(S1)"
+            "Query(S1) --[t]--> T(S1) --[id]--> ID(S1)"
         );
     }
 }

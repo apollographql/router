@@ -146,7 +146,7 @@ pub fn to_api_schema(
 
     remove_core_feature_elements(&mut api_schema)?;
 
-    let schema = api_schema.schema_mut();
+    let mut schema = api_schema.into_inner();
 
     if options.include_defer {
         schema
@@ -160,9 +160,9 @@ pub fn to_api_schema(
             .insert(name!("stream"), stream_definition());
     }
 
-    crate::compat::make_print_schema_compatible(schema);
+    crate::compat::make_print_schema_compatible(&mut schema);
 
-    api_schema.validate()
+    ValidFederationSchema::new(schema.validate()?)
 }
 
 fn defer_definition() -> Node<DirectiveDefinition> {

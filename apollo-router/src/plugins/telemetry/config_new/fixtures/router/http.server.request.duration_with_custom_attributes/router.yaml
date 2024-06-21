@@ -7,3 +7,5 @@ telemetry:
           attributes:
             my_attribute:
               request_method: true
+            graphql.operation.name:
+              operation_name: string

@@ -737,10 +737,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         // We sort branches by those that have the most options first.
         self.closed_branches
             .sort_by(|b1, b2| b1.0.len().cmp(&b2.0.len()).reverse());
-        let mut plan_count = self
-            .closed_branches
-            .iter()
-            .try_fold(1, |product, branch| {
+
+        /// Returns usize::MAX for integer overflow
+        fn product_of_closed_branches_len(closed_branches: &[ClosedBranch]) -> usize {
+            let mut product: usize = 1;
+            for branch in closed_branches {
                 if branch.0.is_empty() {
                     // This would correspond to not being to find *any* path
                     // for a particular queried field,
@@ -751,12 +752,18 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                     // is exactly to ensure we can never run into this path.
                     // In any case, we will throw later if that happens,
                     // but let's just return the proper result here, which is no plan at all.
-                    None
+                    return 0;
                 } else {
-                    Some(product * branch.0.len())
+                    let Some(new_product) = product.checked_mul(branch.0.len()) else {
+                        return usize::MAX;
+                    };
+                    product = new_product
                 }
-            })
-            .unwrap_or(0);
+            }
+            product
+        }
+
+        let mut plan_count = product_of_closed_branches_len(&self.closed_branches);
         // debug!("Query has {plan_count} possible plans");
 
         let max_evaluated_plans =
@@ -769,7 +776,19 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 break;
             }
             Self::prune_and_reorder_first_branch(&mut self.closed_branches);
-            plan_count -= plan_count / first_branch_len;
+            if plan_count != usize::MAX {
+                // We had `old_plan_count == first_branch_len * rest` and
+                // reduced `first_branch_len` by 1, so the new count is:
+                //
+                // (first_branch_len - 1) * rest
+                // = first_branch_len * rest - rest
+                // = (first_branch_len * rest) - (first_branch_len * rest) / first_branch_len
+                // = old_plan_count - old_plan_count / first_branch_len
+                plan_count -= plan_count / first_branch_len;
+            } else {
+                // Previous count had overflowed, so recompute the reduced one from scratch
+                plan_count = product_of_closed_branches_len(&self.closed_branches)
+            }
 
             // debug!("Reduced plans to consider to {plan_count} plans");
         }

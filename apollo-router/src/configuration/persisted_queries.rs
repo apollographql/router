@@ -14,6 +14,12 @@ pub struct PersistedQueries {
 
     /// Restricts execution of operations that are not found in the Persisted Query List
     pub safelist: PersistedQueriesSafelist,
+
+    /// Experimental feature to prewarm the query plan cache with persisted queries
+    pub experimental_prewarm_query_plan_cache: bool,
+
+    /// Enables using a local copy of the persisted query manifest to safelist operations
+    pub experimental_local_manifests: Option<Vec<String>>,
 }
 
 #[cfg(test)]
@@ -24,11 +30,16 @@ impl PersistedQueries {
         enabled: Option<bool>,
         log_unknown: Option<bool>,
         safelist: Option<PersistedQueriesSafelist>,
+        experimental_prewarm_query_plan_cache: Option<bool>,
+        experimental_local_manifests: Option<Vec<String>>,
     ) -> Self {
         Self {
             enabled: enabled.unwrap_or_else(default_pq),
             safelist: safelist.unwrap_or_default(),
             log_unknown: log_unknown.unwrap_or_else(default_log_unknown),
+            experimental_prewarm_query_plan_cache: experimental_prewarm_query_plan_cache
+                .unwrap_or_else(default_prewarm_query_plan_cache),
+            experimental_local_manifests,
         }
     }
 }
@@ -62,6 +73,8 @@ impl Default for PersistedQueries {
             enabled: default_pq(),
             safelist: PersistedQueriesSafelist::default(),
             log_unknown: default_log_unknown(),
+            experimental_prewarm_query_plan_cache: default_prewarm_query_plan_cache(),
+            experimental_local_manifests: None,
         }
     }
 }
@@ -88,5 +101,9 @@ const fn default_require_id() -> bool {
 }
 
 const fn default_log_unknown() -> bool {
+    false
+}
+
+const fn default_prewarm_query_plan_cache() -> bool {
     false
 }

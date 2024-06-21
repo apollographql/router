@@ -14,7 +14,6 @@ use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
 use http::Request;
 use hyper::client::HttpConnector;
-use hyper::Body;
 use hyper_rustls::HttpsConnector;
 #[cfg(unix)]
 use hyperlocal::UnixConnector;
@@ -43,15 +42,16 @@ use crate::plugins::telemetry::reload::prepare_context;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
 use crate::plugins::telemetry::LOGGING_DISPLAY_HEADERS;
 use crate::plugins::traffic_shaping::Http2Config;
+use crate::services::router::body::RouterBody;
 use crate::services::trust_dns_connector::new_async_http_connector;
 use crate::services::trust_dns_connector::AsyncHyperResolver;
 use crate::Configuration;
 use crate::Context;
 
 type HTTPClient =
-    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, Body>>;
+    Decompression<hyper::Client<HttpsConnector<HttpConnector<AsyncHyperResolver>>, RouterBody>>;
 #[cfg(unix)]
-type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, Body>>;
+type UnixHTTPClient = Decompression<hyper::Client<UnixConnector, RouterBody>>;
 #[cfg(unix)]
 type MixedClient = Either<HTTPClient, UnixHTTPClient>;
 #[cfg(not(unix))]
@@ -286,7 +286,7 @@ impl tower::Service<HttpRequest> for HttpClientService {
 
         let body = match opt_compressor {
             None => body,
-            Some(compressor) => Body::wrap_stream(compressor.process(body)),
+            Some(compressor) => RouterBody::wrap_stream(compressor.process(body)),
         };
         let mut http_request = http::Request::from_parts(parts, body);
 
@@ -337,8 +337,8 @@ async fn do_fetch(
     mut client: MixedClient,
     context: &Context,
     service_name: &str,
-    request: Request<Body>,
-) -> Result<http::Response<Body>, FetchError> {
+    request: Request<RouterBody>,
+) -> Result<http::Response<RouterBody>, FetchError> {
     let _active_request_guard = context.enter_active_request();
     let (parts, body) = client
         .call(request)
@@ -354,7 +354,7 @@ async fn do_fetch(
         .into_parts();
     Ok(http::Response::from_parts(
         parts,
-        Body::wrap_stream(BodyStream { inner: body }),
+        RouterBody::wrap_stream(BodyStream { inner: body }),
     ))
 }
 

@@ -25,6 +25,7 @@ pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
+pub mod sources;
 pub mod subgraph;
 
 use apollo_compiler::validation::Valid;
@@ -110,8 +111,7 @@ impl Supergraph {
     pub fn compose(subgraphs: Vec<&ValidSubgraph>) -> Result<Self, MergeFailure> {
         let schema = merge_subgraphs(subgraphs)?.schema;
         Ok(Self {
-            schema: ValidFederationSchema::new(schema)
-                .map_err(|err| todo!("missing error handling: {err}"))?,
+            schema: ValidFederationSchema::new(schema).map_err(Into::<MergeFailure>::into)?,
         })
     }
 

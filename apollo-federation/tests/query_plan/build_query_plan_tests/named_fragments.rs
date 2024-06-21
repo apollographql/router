@@ -70,8 +70,6 @@ fn handles_mix_of_fragments_indirection_and_unions() {
 }
 
 #[test]
-// #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn another_mix_of_fragments_indirection_and_unions() {
     // This tests that the issue reported on https://github.com/apollographql/router/issues/3172 is resolved.
 
@@ -252,7 +250,6 @@ fn another_mix_of_fragments_indirection_and_unions() {
 }
 
 #[test]
-// TODO: investigate this failure
 fn handles_fragments_with_interface_field_subtyping() {
     let planner = planner!(
         Subgraph1: r#"

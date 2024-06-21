@@ -1,8 +1,10 @@
 //! Generation of usage reporting fields
+use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
+use std::fmt::Write;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
@@ -23,6 +25,8 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
+
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
@@ -98,12 +102,14 @@ pub(crate) fn generate_usage_reporting(
     references_doc: &ExecutableDocument,
     operation_name: &Option<String>,
     schema: &Valid<Schema>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
 ) -> ComparableUsageReporting {
     let mut generator = UsageReportingGenerator {
         signature_doc,
         references_doc,
         operation_name,
         schema,
+        normalization_algorithm,
         fragments_map: HashMap::new(),
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
@@ -118,6 +124,7 @@ struct UsageReportingGenerator<'a> {
     references_doc: &'a ExecutableDocument,
     operation_name: &'a Option<String>,
     schema: &'a Valid<Schema>,
+    normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,
@@ -189,11 +196,19 @@ impl UsageReportingGenerator<'_> {
         sorted_fragments.sort_by_key(|&(k, _)| k);
 
         sorted_fragments.into_iter().for_each(|(_, f)| {
-            result.push_str(&ApolloReportingSignatureFormatter::Fragment(f).to_string())
+            let formatter = SignatureFormatterWithAlgorithm {
+                formatter: &ApolloReportingSignatureFormatter::Fragment(f),
+                normalization_algorithm: self.normalization_algorithm,
+            };
+            write!(&mut result, "{formatter}").expect("infallible");
         });
 
         // Followed by the operation
-        result.push_str(&ApolloReportingSignatureFormatter::Operation(operation).to_string());
+        let formatter = SignatureFormatterWithAlgorithm {
+            formatter: &ApolloReportingSignatureFormatter::Operation(operation),
+            normalization_algorithm: self.normalization_algorithm,
+        };
+        write!(&mut result, "{formatter}").expect("infallible");
 
         result
     }
@@ -295,20 +310,42 @@ enum ApolloReportingSignatureFormatter<'a> {
     Field(&'a Node<Field>),
 }
 
-impl<'a> fmt::Display for ApolloReportingSignatureFormatter<'a> {
+struct SignatureFormatterWithAlgorithm<'a> {
+    formatter: &'a ApolloReportingSignatureFormatter<'a>,
+    normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
+}
+
+impl<'a> fmt::Display for SignatureFormatterWithAlgorithm<'a> {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        match self {
+        match *self.formatter {
             ApolloReportingSignatureFormatter::Operation(operation) => {
-                format_operation(operation, f)
+                format_operation(operation, self.normalization_algorithm, f)
             }
-            ApolloReportingSignatureFormatter::Fragment(fragment) => format_fragment(fragment, f),
-            ApolloReportingSignatureFormatter::Argument(argument) => format_argument(argument, f),
-            ApolloReportingSignatureFormatter::Field(field) => format_field(field, f),
+            ApolloReportingSignatureFormatter::Fragment(fragment) => {
+                format_fragment(fragment, self.normalization_algorithm, f)
+            }
+            ApolloReportingSignatureFormatter::Argument(argument) => {
+                format_argument(argument, self.normalization_algorithm, f)
+            }
+            ApolloReportingSignatureFormatter::Field(field) => {
+                format_field(field, self.normalization_algorithm, f)
+            }
         }
     }
 }
 
-fn format_operation(operation: &Node<Operation>, f: &mut fmt::Formatter) -> fmt::Result {
+fn is_enhanced(normalization_algorithm: &ApolloSignatureNormalizationAlgorithm) -> bool {
+    matches!(
+        normalization_algorithm,
+        ApolloSignatureNormalizationAlgorithm::Enhanced
+    )
+}
+
+fn format_operation(
+    operation: &Node<Operation>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     let shorthand = operation.operation_type == OperationType::Query
         && operation.name.is_none()
         && operation.variables.is_empty()
@@ -329,19 +366,23 @@ fn format_operation(operation: &Node<Operation>, f: &mut fmt::Formatter) -> fmt:
                 if index != 0 {
                     f.write_str(",")?;
                 }
-                format_variable(variable, f)?;
+                format_variable(variable, normalization_algorithm, f)?;
             }
             f.write_str(")")?;
         }
 
-        // In the JS implementation, only the fragment directives are sorted
-        format_directives(&operation.directives, false, f)?;
+        // In the JS implementation, only the fragment directives are sorted (this is overridden in enhanced mode)
+        format_directives(&operation.directives, false, normalization_algorithm, f)?;
     }
 
-    format_selection_set(&operation.selection_set, f)
+    format_selection_set(&operation.selection_set, normalization_algorithm, f)
 }
 
-fn format_selection_set(selection_set: &SelectionSet, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_selection_set(
+    selection_set: &SelectionSet,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     // print selection set sorted by name with fields followed by named fragments followed by inline fragments
     let mut fields: Vec<&Node<Field>> = Vec::new();
     let mut named_fragments: Vec<&Node<FragmentSpread>> = Vec::new();
@@ -361,33 +402,60 @@ fn format_selection_set(selection_set: &SelectionSet, f: &mut fmt::Formatter) ->
     }
 
     if !fields.is_empty() || !named_fragments.is_empty() || !inline_fragments.is_empty() {
-        fields.sort_by(|&a, &b| a.name.cmp(&b.name));
+        if is_enhanced(normalization_algorithm) {
+            // in enhanced mode we display aliases so we show non-aliased field sorted by name first, then aliased fields sorted by alias
+            fields.sort_by(|&a, &b| {
+                match (a.alias.as_ref(), b.alias.as_ref()) {
+                    (None, None) => a.name.cmp(&b.name), // when both are non-aliased, sort by field name
+                    (Some(alias_a), Some(alias_b)) => alias_a.cmp(alias_b), // when both are aliased, sort by alias
+                    // when one is aliased and on isn't, the non-aliased field comes first
+                    (Some(_), None) => Ordering::Greater,
+                    (None, Some(_)) => Ordering::Less,
+                }
+            });
+        } else {
+            // otherwise we just sort by field name (and remove aliases in the field)
+            fields.sort_by(|&a, &b| a.name.cmp(&b.name));
+        }
+
+        // named fragments are always sorted
         named_fragments.sort_by(|&a, &b| a.fragment_name.cmp(&b.fragment_name));
-        // Note that inline fragments are not sorted in the JS implementation
+
+        // in enhanced mode we sort inline fragments
+        if is_enhanced(normalization_algorithm) {
+            inline_fragments.sort_by(|&a, &b| {
+                let a_name = a.type_condition.as_ref().map(|t| t.as_str()).unwrap_or("");
+                let b_name = b.type_condition.as_ref().map(|t| t.as_str()).unwrap_or("");
+                a_name.cmp(b_name)
+            });
+        }
 
         f.write_str("{")?;
 
         for (i, &field) in fields.iter().enumerate() {
-            let field_str = ApolloReportingSignatureFormatter::Field(field).to_string();
+            let formatter = SignatureFormatterWithAlgorithm {
+                formatter: &ApolloReportingSignatureFormatter::Field(field),
+                normalization_algorithm,
+            };
+            let field_str = format!("{}", formatter);
             f.write_str(&field_str)?;
 
-            // We need to insert a space if this is not the last field and it ends in an alphanumeric character
-            if i < fields.len() - 1
-                && field_str
-                    .chars()
-                    .last()
-                    .map_or(false, |c| c.is_alphanumeric() || c == '_')
-            {
+            // We need to insert a space if this is not the last field and it ends in an alphanumeric character.
+            let use_separator = field_str
+                .chars()
+                .last()
+                .map_or(false, |c| c.is_alphanumeric() || c == '_');
+            if i < fields.len() - 1 && use_separator {
                 f.write_str(" ")?;
             }
         }
 
         for &frag in named_fragments.iter() {
-            format_fragment_spread(frag, f)?;
+            format_fragment_spread(frag, normalization_algorithm, f)?;
         }
 
         for &frag in inline_fragments.iter() {
-            format_inline_fragment(frag, f)?;
+            format_inline_fragment(frag, normalization_algorithm, f)?;
         }
 
         f.write_str("}")?;
@@ -396,21 +464,41 @@ fn format_selection_set(selection_set: &SelectionSet, f: &mut fmt::Formatter) ->
     Ok(())
 }
 
-fn format_variable(arg: &Node<VariableDefinition>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_variable(
+    arg: &Node<VariableDefinition>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     write!(f, "${}:{}", arg.name, arg.ty)?;
     if let Some(value) = &arg.default_value {
         f.write_str("=")?;
-        format_value(value, f)?;
+        format_value(value, normalization_algorithm, f)?;
     }
-    format_directives(&arg.directives, false, f)
+
+    // The JS implementation doesn't sort directives (this is overridden in enhanced mode)
+    format_directives(&arg.directives, false, normalization_algorithm, f)
 }
 
-fn format_argument(arg: &Node<Argument>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_argument(
+    arg: &Node<Argument>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     write!(f, "{}:", arg.name)?;
-    format_value(&arg.value, f)
+    format_value(&arg.value, normalization_algorithm, f)
 }
 
-fn format_field(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_field(
+    field: &Node<Field>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
+    if is_enhanced(normalization_algorithm) {
+        if let Some(alias) = &field.alias {
+            write!(f, "{alias}:")?;
+        }
+    }
+
     f.write_str(&field.name)?;
 
     let mut sorted_args = field.arguments.clone();
@@ -419,28 +507,18 @@ fn format_field(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
 
         f.write_str("(")?;
 
-        // The graphql-js implementation will use newlines and indentation instead of commas if the length of the "arg line" is
-        // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never
-        // the case for any signatures that the JS implementation formatted), followed by the field name, followed by all argument
-        // names and values separated by ": ", surrounded with brackets. Our usage reporting plugin replaces all newlines +
-        // indentation with a single space, so we have to replace commas with spaces if the line length is too long.
         let arg_strings: Vec<String> = sorted_args
             .iter()
-            .map(|a| ApolloReportingSignatureFormatter::Argument(a).to_string())
+            .map(|a| {
+                let formatter = SignatureFormatterWithAlgorithm {
+                    formatter: &ApolloReportingSignatureFormatter::Argument(a),
+                    normalization_algorithm,
+                };
+                format!("{}", formatter)
+            })
             .collect();
-        // Adjust for incorrect spacing generated by the argument formatter. We end summing up:
-        // * the length of field name
-        // * 2 extra characters for the surrounding brackets
-        // * the length of all formatted arguments
-        // * one extra character per argument since the JS implementation inserts a space between the argument name and value
-        // * two extra character per argument except the last one since the JS implementation inserts a separating comma and space
-        //   between arguments (but not the last one)
-        let original_line_length = field.name.len()
-            + 2
-            + arg_strings.iter().map(|s| s.len()).sum::<usize>()
-            + arg_strings.len()
-            + ((arg_strings.len() - 1) * 2);
-        let separator = if original_line_length > 80 { " " } else { "," };
+
+        let separator = get_arg_separator(&field.name, &arg_strings, normalization_algorithm);
 
         for (index, arg_string) in arg_strings.iter().enumerate() {
             f.write_str(arg_string)?;
@@ -448,33 +526,26 @@ fn format_field(field: &Node<Field>, f: &mut fmt::Formatter) -> fmt::Result {
             // We only need to insert a separating space it's not the last arg and if the string ends in an alphanumeric character.
             // If it's a comma, we always need to insert it if it's not the last arg.
             if index < arg_strings.len() - 1
-                && (separator == ","
+                && (separator == ','
                     || arg_string
                         .chars()
                         .last()
                         .map_or(true, |c| c.is_alphanumeric() || c == '_'))
             {
-                f.write_str(separator)?;
+                write!(f, "{}", separator)?;
             }
         }
         f.write_str(")")?;
     }
 
-    // In the JS implementation, only the fragment directives are sorted
-    format_directives(&field.directives, false, f)?;
-    format_selection_set(&field.selection_set, f)
-}
-
-fn format_fragment_spread(
-    fragment_spread: &Node<FragmentSpread>,
-    f: &mut fmt::Formatter,
-) -> fmt::Result {
-    write!(f, "...{}", fragment_spread.fragment_name)?;
-    format_directives(&fragment_spread.directives, true, f)
+    // In the JS implementation, only the fragment directives are sorted (this is overridden in enhanced mode)
+    format_directives(&field.directives, false, normalization_algorithm, f)?;
+    format_selection_set(&field.selection_set, normalization_algorithm, f)
 }
 
 fn format_inline_fragment(
     inline_fragment: &Node<InlineFragment>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     if let Some(type_name) = &inline_fragment.type_condition {
@@ -483,28 +554,40 @@ fn format_inline_fragment(
         f.write_str("...")?;
     }
 
-    format_directives(&inline_fragment.directives, true, f)?;
-    format_selection_set(&inline_fragment.selection_set, f)
+    format_directives(
+        &inline_fragment.directives,
+        true,
+        normalization_algorithm,
+        f,
+    )?;
+    format_selection_set(&inline_fragment.selection_set, normalization_algorithm, f)
 }
 
-fn format_fragment(fragment: &Node<Fragment>, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_fragment(
+    fragment: &Node<Fragment>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     write!(
         f,
         "fragment {} on {}",
         &fragment.name.to_string(),
         &fragment.selection_set.ty.to_string()
     )?;
-    format_directives(&fragment.directives, true, f)?;
-    format_selection_set(&fragment.selection_set, f)
+    format_directives(&fragment.directives, true, normalization_algorithm, f)?;
+    format_selection_set(&fragment.selection_set, normalization_algorithm, f)
 }
 
 fn format_directives(
     directives: &DirectiveList,
     sorted: bool,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
     f: &mut fmt::Formatter,
 ) -> fmt::Result {
     let mut sorted_directives = directives.clone();
-    if sorted {
+
+    // In enhanced mode, we always want to sort
+    if sorted || is_enhanced(normalization_algorithm) {
         sorted_directives.sort_by(|a, b| a.name.cmp(&b.name));
     }
 
@@ -521,7 +604,11 @@ fn format_directives(
                 if index != 0 {
                     f.write_str(",")?;
                 }
-                f.write_str(&ApolloReportingSignatureFormatter::Argument(argument).to_string())?;
+                let formatter = SignatureFormatterWithAlgorithm {
+                    formatter: &ApolloReportingSignatureFormatter::Argument(argument),
+                    normalization_algorithm,
+                };
+                write!(f, "{}", formatter)?;
             }
 
             f.write_str(")")?;
@@ -531,14 +618,81 @@ fn format_directives(
     Ok(())
 }
 
-fn format_value(value: &Value, f: &mut fmt::Formatter) -> fmt::Result {
+fn format_value(
+    value: &Value,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
     match value {
         Value::String(_) => f.write_str("\"\""),
         Value::Float(_) | Value::Int(_) => f.write_str("0"),
-        Value::Object(_) => f.write_str("{}"),
+        Value::Object(o) => {
+            if is_enhanced(normalization_algorithm) {
+                f.write_str("{")?;
+                for (index, (name, val)) in o.iter().enumerate() {
+                    if index != 0 {
+                        f.write_str(",")?;
+                    }
+                    write!(f, "{}:", name)?;
+                    format_value(val, normalization_algorithm, f)?;
+                }
+                f.write_str("}")
+            } else {
+                f.write_str("{}")
+            }
+        }
         Value::List(_) => f.write_str("[]"),
         rest => f.write_str(&rest.to_string()),
     }
+}
+
+// Figure out which separator to use between arguments
+fn get_arg_separator(
+    field_name: &Name,
+    arg_strings: &[String],
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+) -> char {
+    // In enhanced mode, we just always use a comma
+    if is_enhanced(normalization_algorithm) {
+        return ',';
+    }
+
+    // The graphql-js implementation will use newlines and indentation instead of commas if the length of the "arg line" is
+    // over 80 characters. This "arg line" includes the alias followed by ": " if the field has an alias (which is never
+    // the case for any signatures that the JS implementation formatted), followed by the field name, followed by all argument
+    // names and values separated by ": ", surrounded with brackets. Our usage reporting plugin replaces all newlines +
+    // indentation with a single space, so we have to replace commas with spaces if the line length is too long.
+    // We adjust for incorrect spacing generated by the argument formatter here. We end summing up:
+    // * the length of field name
+    // * 2 extra characters for the surrounding brackets
+    // * the length of all formatted arguments
+    // * one extra character per argument since the JS implementation inserts a space between the argument name and value
+    // * two extra character per argument except the last one since the JS implementation inserts a separating comma and space
+    //   between arguments (but not the last one)
+    let original_line_length = field_name.len()
+        + 2
+        + arg_strings.iter().map(|s| s.len()).sum::<usize>()
+        + arg_strings.len()
+        + ((arg_strings.len() - 1) * 2);
+    if original_line_length > 80 {
+        ' '
+    } else {
+        ','
+    }
+}
+
+fn format_fragment_spread(
+    fragment_spread: &Node<FragmentSpread>,
+    normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
+    f: &mut fmt::Formatter,
+) -> fmt::Result {
+    write!(f, "...{}", fragment_spread.fragment_name)?;
+    format_directives(
+        &fragment_spread.directives,
+        true,
+        normalization_algorithm,
+        f,
+    )
 }
 
 #[cfg(test)]
