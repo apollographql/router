@@ -5805,8 +5805,9 @@ dependencies = [
 [[package]]
 name = "serde_json_bytes"
 version = "0.2.3"
-source = "git+https://github.com/BrynCooke/serde_json_bytes.git?branch=bryn/gxhash#307177de366870cd2c49caf0da6263871b6ea517"
+source = "git+https://github.com/BrynCooke/serde_json_bytes.git?branch=bryn/gxhash#efc54fcd49c9b10c255ab1056accc36bd79f5471"
 dependencies = [
+ "ahash",
  "bytes",
  "indexmap 2.2.3",
  "jsonpath-rust",
