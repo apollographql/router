@@ -1,6 +1,4 @@
-use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Schema;
 use apollo_federation::sources::connect::Connector;
 use serde_json_bytes::json;
@@ -37,16 +35,33 @@ pub(crate) enum ResponseKey {
     RootField {
         name: String,
         typename: ResponseTypeName,
+        #[allow(dead_code)]
+        selection_set: Vec<apollo_compiler::ast::Selection>,
     },
     Entity {
         index: usize,
         typename: ResponseTypeName,
+        #[allow(dead_code)]
+        selection_set: Vec<apollo_compiler::ast::Selection>,
     },
     EntityField {
         index: usize,
         field_name: String,
         typename: ResponseTypeName,
+        #[allow(dead_code)]
+        selection_set: Vec<apollo_compiler::ast::Selection>,
     },
+}
+
+impl ResponseKey {
+    #[allow(dead_code)]
+    pub(crate) fn selection_set(&self) -> &Vec<apollo_compiler::ast::Selection> {
+        match self {
+            ResponseKey::RootField { selection_set, .. } => selection_set,
+            ResponseKey::Entity { selection_set, .. } => selection_set,
+            ResponseKey::EntityField { selection_set, .. } => selection_set,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -137,31 +152,62 @@ fn root_fields(
     request: &connect::Request,
     schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
-    let doc =
-        ExecutableDocument::parse(schema, &request.operation_str, "op.graphql").map_err(|_| {
-            MakeRequestError::InvalidOperation("cannot parse operation document".into())
-        })?;
+    use apollo_compiler::ast::Selection;
+    use MakeRequestError::*;
 
+    let doc = apollo_compiler::ast::Document::parse(&request.operation_str, "op.graphql")
+        .map_err(|_| InvalidOperation("cannot parse operation document".into()))?;
+
+    // Assume a single operation (because this is from a query plan)
     let op = doc
-        .get_operation(None)
-        .map_err(|_| MakeRequestError::InvalidOperation("no operation found".into()))?;
+        .definitions
+        .into_iter()
+        .find_map(|d| match d {
+            apollo_compiler::ast::Definition::OperationDefinition(op) => Some(op),
+            _ => None,
+        })
+        .ok_or_else(|| InvalidOperation("missing operation".into()))?;
+
+    let parent_type_name = schema.root_operation(op.operation_type).ok_or_else(|| {
+        InvalidOperation(format!(
+            "missing root operation of type {:?}",
+            op.operation_type
+        ))
+    })?;
 
     op.selection_set
-        .selections
         .iter()
         .map(|s| match s {
             Selection::Field(field) => {
+                let response_name = field
+                    .alias
+                    .as_ref()
+                    .unwrap_or_else(|| &field.name)
+                    .to_string();
+                let field_def = schema
+                    .type_field(parent_type_name, &field.name)
+                    .map_err(|_| {
+                        InvalidOperation(format!(
+                            "field {}.{} not found in schema",
+                            parent_type_name, field.name
+                        ))
+                    })?;
+
                 let response_key = ResponseKey::RootField {
-                    name: field.response_key().to_string(),
-                    typename: ResponseTypeName::Concrete(field.ty().inner_named_type().to_string()),
+                    name: response_name,
+                    typename: ResponseTypeName::Concrete(
+                        field_def.ty.inner_named_type().to_string(),
+                    ),
+                    selection_set: field.selection_set.clone(),
                 };
 
-                let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
-                    .map_err(|_| {
-                        MakeRequestError::InvalidArguments(
-                            "cannot get inputs from field arguments".into(),
-                        )
-                    })?;
+                let args =
+                    graphql_utils::ast_field_arguments_map(field, &request.variables.variables)
+                        .map_err(|_| {
+                            MakeRequestError::InvalidArguments(
+                                "cannot get inputs from field arguments".into(),
+                            )
+                        })?;
 
                 let request_inputs = RequestInputs {
                     args,
@@ -211,7 +257,8 @@ fn entities_from_request(
         return root_fields(request, schema);
     };
 
-    let (_, typename_requested) = graphql_utils::get_entity_fields(&request.operation_str)?;
+    let (entities_field, typename_requested) =
+        graphql_utils::get_entity_fields(&request.operation_str)?;
 
     representations
         .as_array()
@@ -241,7 +288,11 @@ fn entities_from_request(
             };
 
             Ok((
-                ResponseKey::Entity { index: i, typename },
+                ResponseKey::Entity {
+                    index: i,
+                    typename,
+                    selection_set: entities_field.selection_set.clone(),
+                },
                 RequestInputs {
                     args: rep
                         .as_object()
@@ -359,6 +410,7 @@ fn entities_with_fields_from_request(
                         index: *i,
                         field_name: field.response_name().to_string(),
                         typename,
+                        selection_set: field.selection_set.clone(),
                     },
                     RequestInputs {
                         args,
@@ -396,13 +448,14 @@ mod tests {
 
     #[test]
     fn test_root_fields_simple() {
-        let schema =
-            Arc::new(Schema::parse_and_validate("type Query { a: String }", "./").unwrap());
+        let schema = Arc::new(
+            Schema::parse_and_validate("type Query { a: A } type A { f: String }", "./").unwrap(),
+        );
 
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Query_a_0"))
             .context(Context::default())
-            .operation_str("query { a a2: a }".to_string())
+            .operation_str("query { a { f } a2: a { f2: f } }".to_string())
             .variables(Variables {
                 variables: Default::default(),
                 inverted_paths: Default::default(),
@@ -422,8 +475,19 @@ mod tests {
                     RootField {
                         name: "a",
                         typename: Concrete(
-                            "String",
+                            "A",
                         ),
+                        selection_set: [
+                            Field(
+                                12..13 @9 Field {
+                                    alias: None,
+                                    name: "f",
+                                    arguments: [],
+                                    directives: [],
+                                    selection_set: [],
+                                },
+                            ),
+                        ],
                     },
                     RequestInputs {
                         args: {},
@@ -434,8 +498,21 @@ mod tests {
                     RootField {
                         name: "a2",
                         typename: Concrete(
-                            "String",
+                            "A",
                         ),
+                        selection_set: [
+                            Field(
+                                24..29 @9 Field {
+                                    alias: Some(
+                                        "f2",
+                                    ),
+                                    name: "f",
+                                    arguments: [],
+                                    directives: [],
+                                    selection_set: [],
+                                },
+                            ),
+                        ],
                     },
                     RequestInputs {
                         args: {},
@@ -483,6 +560,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
+                        selection_set: [],
                     },
                     RequestInputs {
                         args: {
@@ -499,6 +577,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
+                        selection_set: [],
                     },
                     RequestInputs {
                         args: {
@@ -520,7 +599,6 @@ mod tests {
             r#"
             scalar JSON
             type Query {
-
               c(var1: Int, var2: Boolean, var3: Float, var4: ID, var5: JSON, var6: [String], var7: String): String
             }
           "#,
@@ -576,6 +654,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
+                        selection_set: [],
                     },
                     RequestInputs {
                         args: {
@@ -606,6 +685,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
+                        selection_set: [],
                     },
                     RequestInputs {
                         args: {
@@ -693,6 +773,47 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            144..154 @11 Field {
+                                alias: None,
+                                name: "__typename",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                        InlineFragment(
+                            179..295 @11 InlineFragment {
+                                type_condition: Some(
+                                    "Entity",
+                                ),
+                                directives: [],
+                                selection_set: [
+                                    Field(
+                                        223..228 @11 Field {
+                                            alias: None,
+                                            name: "field",
+                                            arguments: [],
+                                            directives: [],
+                                            selection_set: [],
+                                        },
+                                    ),
+                                    Field(
+                                        257..269 @11 Field {
+                                            alias: Some(
+                                                "alias",
+                                            ),
+                                            name: "field",
+                                            arguments: [],
+                                            directives: [],
+                                            selection_set: [],
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -712,6 +833,47 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            144..154 @11 Field {
+                                alias: None,
+                                name: "__typename",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                        InlineFragment(
+                            179..295 @11 InlineFragment {
+                                type_condition: Some(
+                                    "Entity",
+                                ),
+                                directives: [],
+                                selection_set: [
+                                    Field(
+                                        223..228 @11 Field {
+                                            alias: None,
+                                            name: "field",
+                                            arguments: [],
+                                            directives: [],
+                                            selection_set: [],
+                                        },
+                                    ),
+                                    Field(
+                                        257..269 @11 Field {
+                                            alias: Some(
+                                                "alias",
+                                            ),
+                                            name: "field",
+                                            arguments: [],
+                                            directives: [],
+                                            selection_set: [],
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -737,6 +899,10 @@ mod tests {
         }
 
         type Entity {
+          field: T
+        }
+
+        type T {
           field: String
         }
         "#;
@@ -748,8 +914,8 @@ mod tests {
             .operation_str(
                 r#"
                 query($a: ID!, $b: ID!) {
-                    a: entity(id: $a) { field }
-                    b: entity(id: $b) { field }
+                    a: entity(id: $a) { field { field } }
+                    b: entity(id: $b) { field { alias: field } }
                 }
             "#
                 .to_string(),
@@ -780,6 +946,27 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            83..98 @15 Field {
+                                alias: None,
+                                name: "field",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [
+                                    Field(
+                                        91..96 @15 Field {
+                                            alias: None,
+                                            name: "field",
+                                            arguments: [],
+                                            directives: [],
+                                            selection_set: [],
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -796,6 +983,29 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            141..163 @15 Field {
+                                alias: None,
+                                name: "field",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [
+                                    Field(
+                                        149..161 @15 Field {
+                                            alias: Some(
+                                                "alias",
+                                            ),
+                                            name: "field",
+                                            arguments: [],
+                                            directives: [],
+                                            selection_set: [],
+                                        },
+                                    ),
+                                ],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -817,7 +1027,11 @@ mod tests {
 
         type Entity { # @key(fields: "id")
           id: ID!
-          field(foo: String): String
+          field(foo: String): T
+        }
+
+        type T {
+          selected: String
         }
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
@@ -831,8 +1045,8 @@ mod tests {
                     _entities(representations: $representations) {
                         __typename
                         ... on Entity {
-                            field(foo: "hi")
-                            alias: field(foo: $bye)
+                            field(foo: "hi") { selected }
+                            alias: field(foo: $bye) { selected }
                         }
                     }
                 }
@@ -869,6 +1083,17 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            256..264 @2 Field {
+                                alias: None,
+                                name: "selected",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -893,6 +1118,17 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            256..264 @2 Field {
+                                alias: None,
+                                name: "selected",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -917,6 +1153,17 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            321..329 @2 Field {
+                                alias: None,
+                                name: "selected",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -941,6 +1188,17 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
+                    selection_set: [
+                        Field(
+                            321..329 @2 Field {
+                                alias: None,
+                                name: "selected",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -969,7 +1227,11 @@ mod tests {
 
         type Entity { # @interfaceObject @key(fields: "id")
           id: ID!
-          field(foo: String): String
+          field(foo: String): T
+        }
+
+        type T {
+          selected: String
         }
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
@@ -982,7 +1244,7 @@ mod tests {
                 query($representations: [_Any!]!, $foo: String) {
                     _entities(representations: $representations) {
                         ... on Entity {
-                            field(foo: $foo)
+                            field(foo: $foo) { selected }
                         }
                     }
                 }
@@ -1017,6 +1279,17 @@ mod tests {
                     index: 0,
                     field_name: "field",
                     typename: Omitted,
+                    selection_set: [
+                        Field(
+                            221..229 @2 Field {
+                                alias: None,
+                                name: "selected",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -1039,6 +1312,17 @@ mod tests {
                     index: 1,
                     field_name: "field",
                     typename: Omitted,
+                    selection_set: [
+                        Field(
+                            221..229 @2 Field {
+                                alias: None,
+                                name: "selected",
+                                arguments: [],
+                                directives: [],
+                                selection_set: [],
+                            },
+                        ),
+                    ],
                 },
                 RequestInputs {
                     args: {
@@ -1123,6 +1407,7 @@ mod tests {
                     typename: Concrete(
                         "String",
                     ),
+                    selection_set: [],
                 },
             ),
         ]
@@ -1133,7 +1418,6 @@ mod tests {
 mod graphql_utils {
     use apollo_compiler::ast;
     use apollo_compiler::ast::Definition;
-    use apollo_compiler::executable::Field;
     use apollo_compiler::schema::Value;
     use apollo_compiler::Node;
     use serde_json::Number;
@@ -1144,29 +1428,6 @@ mod graphql_utils {
 
     use super::MakeRequestError;
     use super::ENTITIES;
-
-    pub(super) fn field_arguments_map(
-        field: &Node<Field>,
-        variables: &Map<ByteString, JSONValue>,
-    ) -> Result<Map<ByteString, JSONValue>, BoxError> {
-        let mut arguments = Map::new();
-        for argument in field.arguments.iter() {
-            match &*argument.value {
-                apollo_compiler::schema::Value::Variable(name) => {
-                    if let Some(value) = variables.get(name.as_str()) {
-                        arguments.insert(argument.name.as_str(), value.clone());
-                    }
-                }
-                _ => {
-                    arguments.insert(
-                        argument.name.as_str(),
-                        argument_value_to_json(&argument.value)?,
-                    );
-                }
-            }
-        }
-        Ok(arguments)
-    }
 
     pub(super) fn ast_field_arguments_map(
         field: &apollo_compiler::Node<apollo_compiler::ast::Field>,
