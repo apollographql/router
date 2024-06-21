@@ -24,6 +24,7 @@ use tracing_subscriber::registry::SpanRef;
 
 use super::config_new::logging::RateLimit;
 use super::dynamic_attribute::LogAttributes;
+use super::reload::SampledSpan;
 use crate::metrics::layer::METRIC_PREFIX_COUNTER;
 use crate::metrics::layer::METRIC_PREFIX_HISTOGRAM;
 use crate::metrics::layer::METRIC_PREFIX_MONOTONIC_COUNTER;
@@ -314,5 +315,13 @@ where
             return Some((span_context.trace_id(), span_context.span_id()));
         }
     }
+    if let Some(sampled_span) = ext.get::<SampledSpan>() {
+        let (trace_id, span_id) = sampled_span.trace_and_span_id();
+        return Some((
+            opentelemetry_api::trace::TraceId::from(trace_id.to_u128()),
+            span_id,
+        ));
+    }
+
     None
 }
