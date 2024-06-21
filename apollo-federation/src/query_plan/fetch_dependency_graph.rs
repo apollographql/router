@@ -2368,6 +2368,7 @@ impl FetchDependencyGraphNode {
         }))
     }
 
+    // - `self.selection_set` must be fragment-spread-free.
     fn finalize_selection(
         &self,
         variable_definitions: &[Node<VariableDefinition>],

@@ -1,4 +1,7 @@
+use std::sync::Arc;
+
 use apollo_compiler::name;
+use apollo_compiler::schema::Schema;
 use apollo_compiler::ExecutableDocument;
 use indexmap::IndexSet;
 
@@ -29,6 +32,46 @@ pub(super) fn parse_subgraph(name: &str, schema: &str) -> ValidFederationSchema 
     let parsed_schema =
         Subgraph::parse_and_expand(name, &format!("https://{name}"), schema).unwrap();
     ValidFederationSchema::new(parsed_schema.schema).unwrap()
+}
+
+pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
+    let schema = Schema::parse_and_validate(schema_doc, "schema.graphql").unwrap();
+    ValidFederationSchema::new(schema).unwrap()
+}
+
+pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
+    let executable_document = apollo_compiler::ExecutableDocument::parse_and_validate(
+        schema.schema(),
+        query,
+        "query.graphql",
+    )
+    .unwrap();
+    let operation = executable_document.get_operation(None).unwrap();
+    let named_fragments = NamedFragments::new(&executable_document.fragments, schema);
+    let selection_set =
+        SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
+            .unwrap();
+
+    Operation {
+        schema: schema.clone(),
+        root_kind: operation.operation_type.into(),
+        name: operation.name.clone(),
+        variables: Arc::new(operation.variables.clone()),
+        directives: Arc::new(operation.directives.clone()),
+        selection_set,
+        named_fragments,
+    }
+}
+
+/// Parse and validate the query similarly to `parse_operation`, but does not construct the
+/// `Operation` struct.
+pub(super) fn validate_operation(schema: &ValidFederationSchema, query: &str) {
+    apollo_compiler::ExecutableDocument::parse_and_validate(
+        schema.schema(),
+        query,
+        "query.graphql",
+    )
+    .unwrap();
 }
 
 #[test]
