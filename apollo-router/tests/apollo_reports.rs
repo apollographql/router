@@ -344,6 +344,7 @@ async fn get_metrics_report_mocked(
     .await
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>(
     service_fn: impl FnOnce(Arc<Mutex<Vec<Report>>>, bool, bool, bool, bool) -> Fut,
     reports: Arc<Mutex<Vec<Report>>>,
