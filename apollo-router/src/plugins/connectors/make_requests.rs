@@ -1,6 +1,7 @@
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use apollo_federation::sources::connect::Connector;
+use itertools::Itertools;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
@@ -30,7 +31,7 @@ impl RequestInputs {
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) enum ResponseKey {
     RootField {
         name: String,
@@ -60,6 +61,45 @@ impl ResponseKey {
             ResponseKey::RootField { selection_set, .. } => selection_set,
             ResponseKey::Entity { selection_set, .. } => selection_set,
             ResponseKey::EntityField { selection_set, .. } => selection_set,
+        }
+    }
+}
+
+// Vec<Selection> debug isn't deterministic when run in parallel tests
+impl std::fmt::Debug for ResponseKey {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
+        let selection_set = self
+            .selection_set()
+            .iter()
+            .map(|s| format!("{}", s))
+            .join(" ");
+        match self {
+            ResponseKey::RootField { name, typename, .. } => f
+                .debug_struct("RootField")
+                .field("name", name)
+                .field("typename", typename)
+                .field("selection_set", &selection_set)
+                .finish(),
+            ResponseKey::Entity {
+                index, typename, ..
+            } => f
+                .debug_struct("Entity")
+                .field("index", index)
+                .field("typename", typename)
+                .field("selection_set", &selection_set)
+                .finish(),
+            ResponseKey::EntityField {
+                index,
+                field_name,
+                typename,
+                ..
+            } => f
+                .debug_struct("EntityField")
+                .field("index", index)
+                .field("field_name", field_name)
+                .field("typename", typename)
+                .field("selection_set", &selection_set)
+                .finish(),
         }
     }
 }
@@ -477,17 +517,7 @@ mod tests {
                         typename: Concrete(
                             "A",
                         ),
-                        selection_set: [
-                            Field(
-                                12..13 @9 Field {
-                                    alias: None,
-                                    name: "f",
-                                    arguments: [],
-                                    directives: [],
-                                    selection_set: [],
-                                },
-                            ),
-                        ],
+                        selection_set: "f",
                     },
                     RequestInputs {
                         args: {},
@@ -500,19 +530,7 @@ mod tests {
                         typename: Concrete(
                             "A",
                         ),
-                        selection_set: [
-                            Field(
-                                24..29 @9 Field {
-                                    alias: Some(
-                                        "f2",
-                                    ),
-                                    name: "f",
-                                    arguments: [],
-                                    directives: [],
-                                    selection_set: [],
-                                },
-                            ),
-                        ],
+                        selection_set: "f2: f",
                     },
                     RequestInputs {
                         args: {},
@@ -560,7 +578,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
-                        selection_set: [],
+                        selection_set: "",
                     },
                     RequestInputs {
                         args: {
@@ -577,7 +595,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
-                        selection_set: [],
+                        selection_set: "",
                     },
                     RequestInputs {
                         args: {
@@ -654,7 +672,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
-                        selection_set: [],
+                        selection_set: "",
                     },
                     RequestInputs {
                         args: {
@@ -685,7 +703,7 @@ mod tests {
                         typename: Concrete(
                             "String",
                         ),
-                        selection_set: [],
+                        selection_set: "",
                     },
                     RequestInputs {
                         args: {
@@ -773,47 +791,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            144..154 @11 Field {
-                                alias: None,
-                                name: "__typename",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                        InlineFragment(
-                            179..295 @11 InlineFragment {
-                                type_condition: Some(
-                                    "Entity",
-                                ),
-                                directives: [],
-                                selection_set: [
-                                    Field(
-                                        223..228 @11 Field {
-                                            alias: None,
-                                            name: "field",
-                                            arguments: [],
-                                            directives: [],
-                                            selection_set: [],
-                                        },
-                                    ),
-                                    Field(
-                                        257..269 @11 Field {
-                                            alias: Some(
-                                                "alias",
-                                            ),
-                                            name: "field",
-                                            arguments: [],
-                                            directives: [],
-                                            selection_set: [],
-                                        },
-                                    ),
-                                ],
-                            },
-                        ),
-                    ],
+                    selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
                 },
                 RequestInputs {
                     args: {
@@ -833,47 +811,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            144..154 @11 Field {
-                                alias: None,
-                                name: "__typename",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                        InlineFragment(
-                            179..295 @11 InlineFragment {
-                                type_condition: Some(
-                                    "Entity",
-                                ),
-                                directives: [],
-                                selection_set: [
-                                    Field(
-                                        223..228 @11 Field {
-                                            alias: None,
-                                            name: "field",
-                                            arguments: [],
-                                            directives: [],
-                                            selection_set: [],
-                                        },
-                                    ),
-                                    Field(
-                                        257..269 @11 Field {
-                                            alias: Some(
-                                                "alias",
-                                            ),
-                                            name: "field",
-                                            arguments: [],
-                                            directives: [],
-                                            selection_set: [],
-                                        },
-                                    ),
-                                ],
-                            },
-                        ),
-                    ],
+                    selection_set: "__typename ... on Entity {\n  field\n  alias: field\n}",
                 },
                 RequestInputs {
                     args: {
@@ -946,27 +884,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            83..98 @15 Field {
-                                alias: None,
-                                name: "field",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [
-                                    Field(
-                                        91..96 @15 Field {
-                                            alias: None,
-                                            name: "field",
-                                            arguments: [],
-                                            directives: [],
-                                            selection_set: [],
-                                        },
-                                    ),
-                                ],
-                            },
-                        ),
-                    ],
+                    selection_set: "field {\n  field\n}",
                 },
                 RequestInputs {
                     args: {
@@ -983,29 +901,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            141..163 @15 Field {
-                                alias: None,
-                                name: "field",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [
-                                    Field(
-                                        149..161 @15 Field {
-                                            alias: Some(
-                                                "alias",
-                                            ),
-                                            name: "field",
-                                            arguments: [],
-                                            directives: [],
-                                            selection_set: [],
-                                        },
-                                    ),
-                                ],
-                            },
-                        ),
-                    ],
+                    selection_set: "field {\n  alias: field\n}",
                 },
                 RequestInputs {
                     args: {
@@ -1083,17 +979,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            256..264 @2 Field {
-                                alias: None,
-                                name: "selected",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                    ],
+                    selection_set: "selected",
                 },
                 RequestInputs {
                     args: {
@@ -1118,17 +1004,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            256..264 @2 Field {
-                                alias: None,
-                                name: "selected",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                    ],
+                    selection_set: "selected",
                 },
                 RequestInputs {
                     args: {
@@ -1153,17 +1029,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            321..329 @2 Field {
-                                alias: None,
-                                name: "selected",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                    ],
+                    selection_set: "selected",
                 },
                 RequestInputs {
                     args: {
@@ -1188,17 +1054,7 @@ mod tests {
                     typename: Concrete(
                         "Entity",
                     ),
-                    selection_set: [
-                        Field(
-                            321..329 @2 Field {
-                                alias: None,
-                                name: "selected",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                    ],
+                    selection_set: "selected",
                 },
                 RequestInputs {
                     args: {
@@ -1272,24 +1128,14 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req,&schema).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, &schema).unwrap(), @r###"
         [
             (
                 EntityField {
                     index: 0,
                     field_name: "field",
                     typename: Omitted,
-                    selection_set: [
-                        Field(
-                            221..229 @2 Field {
-                                alias: None,
-                                name: "selected",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                    ],
+                    selection_set: "selected",
                 },
                 RequestInputs {
                     args: {
@@ -1312,17 +1158,7 @@ mod tests {
                     index: 1,
                     field_name: "field",
                     typename: Omitted,
-                    selection_set: [
-                        Field(
-                            221..229 @2 Field {
-                                alias: None,
-                                name: "selected",
-                                arguments: [],
-                                directives: [],
-                                selection_set: [],
-                            },
-                        ),
-                    ],
+                    selection_set: "selected",
                 },
                 RequestInputs {
                     args: {
@@ -1407,7 +1243,7 @@ mod tests {
                     typename: Concrete(
                         "String",
                     ),
-                    selection_set: [],
+                    selection_set: "",
                 },
             ),
         ]
