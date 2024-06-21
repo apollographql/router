@@ -34,7 +34,7 @@ fuzz_target!(|data: &[u8]| {
         .unwrap()
         .json::<Value>();
 
-    debug!("======= DOCUMENT =======");
+    debug!("======= OPERATION ======");
     debug!("{}", generated_operation);
     debug!("========================");
     debug!("======= RESPONSE =======");
