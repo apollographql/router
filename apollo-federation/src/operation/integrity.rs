@@ -11,7 +11,9 @@ use crate::schema::ValidFederationSchema;
 // result is an Err.
 macro_rules! debug_check {
     ($result:expr) => {
-        debug_assert_eq!((), $result?)
+        if cfg!(debug_assertions) {
+            $result?;
+        }
     };
 }
 
@@ -19,7 +21,9 @@ macro_rules! debug_check {
 // - Calls the closure and then unwraps it.
 macro_rules! debug_check_unwrap {
     ($result:expr) => {
-        debug_assert_eq!((), $result.unwrap())
+        if cfg!(debug_assertions) {
+            $result.unwrap();
+        }
     };
 }
 
@@ -152,8 +156,7 @@ impl Selection {
                 }
                 inline_fragment
                     .selection_set
-                    .is_well_formed(schema, named_fragments, option)?;
-                Ok(())
+                    .is_well_formed(schema, named_fragments, option)
                 // Note: fragment_data.type_condition_position and the parent type do not have to have
                 // non-empty intersection to be well-formed. It would be an extra check.
             }
@@ -194,7 +197,6 @@ impl Operation {
             )));
         }
         self.selection_set
-            .is_well_formed(schema, &self.named_fragments, option)?;
-        Ok(())
+            .is_well_formed(schema, &self.named_fragments, option)
     }
 }

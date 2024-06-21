@@ -2786,6 +2786,9 @@ impl FetchInputs {
         true
     }
 
+    // Note: The return value of `to_selection_set_nodes` won't be well-formed (according to
+    // `operation::integrity::SelectionSet::is_well_formed`), but it's ok since it's used only for
+    // query plan display purposes.
     fn to_selection_set_nodes(
         &self,
         variable_definitions: &[Node<VariableDefinition>],
