@@ -109,7 +109,7 @@ traces_per_query:
               reviews:
                 return_type: Review
                 array_size:
-                  - 0
+                  - 2
                   - 4
                   - 2
           Query:
@@ -117,6 +117,7 @@ traces_per_query:
               topProducts:
                 return_type: Product
                 array_size:
+                  - 0
                   - 0
                   - 0
                   - 0
