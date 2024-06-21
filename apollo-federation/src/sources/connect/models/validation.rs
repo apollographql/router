@@ -258,9 +258,9 @@ fn validate_object_fields(
                 object_category,
                 source_names,
                 &object.name,
-                source_map,
                 connect_directive_name,
                 source_directive_name,
+                schema,
             )
         })
         .collect()
@@ -271,11 +271,11 @@ fn validate_field(
     category: ObjectCategory,
     source_names: &[SourceName],
     object_name: &Name,
-    source_map: &SourceMap,
     connect_directive_name: &Name,
     source_directive_name: &Name,
+    schema: &Schema,
 ) -> Vec<Message> {
-    let _connect_directive_name = connect_directive_name.as_str();
+    let source_map = &schema.sources;
     let mut errors = Vec::new();
     let Some(connect_directive) = field
         .directives
@@ -376,19 +376,41 @@ fn validate_field(
         .iter()
         .find(|arg| arg.name == CONNECT_ENTITY_ARGUMENT_NAME)
     {
-        if entity_arg
-            .value
+        let entity_arg_value = &entity_arg.value;
+        if entity_arg_value
             .to_bool()
             .is_some_and(|entity_arg_value| entity_arg_value)
-            && category != ObjectCategory::Query
         {
-            errors.push(Message {
-                code: Code::EntityNotOnRootQuery,
-                message: format!("{coordinate} is invalid. Entities can only be declared on root `Query` fields.", coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, object_name, &field.name)),
-                locations: Location::from_node(entity_arg.location(), source_map)
-                    .into_iter()
-                    .collect(),
-            })
+            if category != ObjectCategory::Query {
+                errors.push(Message {
+                    code: Code::EntityNotOnRootQuery,
+                    message: format!(
+                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.", 
+                        coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object_name, &field.name)
+                    ),
+                    locations: Location::from_node(entity_arg.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                })
+                // TODO: Allow interfaces
+            } else if field.ty.is_list() || schema.get_object(field.ty.inner_named_type()).is_none()
+            {
+                errors.push(Message {
+                    code: Code::EntityTypeInvalid,
+                    message: format!(
+                        "{coordinate} is invalid. Entities can only be non-list, object types.",
+                        coordinate = connect_directive_entity_argument_coordinate(
+                            connect_directive_name,
+                            entity_arg_value.as_ref(),
+                            object_name,
+                            &field.name
+                        )
+                    ),
+                    locations: Location::from_node(entity_arg.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                })
+            }
         }
     }
 
@@ -525,10 +547,11 @@ fn connect_directive_name_coordinate(
 
 fn connect_directive_entity_argument_coordinate(
     connect_directive_entity_argument: &Name,
+    value: &Value,
     object: &Name,
     field: &Name,
 ) -> String {
-    format!("`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}:)` on `{object}.{field}`")
+    format!("`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{object}.{field}`")
 }
 
 fn connect_directive_http_coordinate(
@@ -763,6 +786,8 @@ pub enum Code {
     MissingHttpMethod,
     /// The `entity` argument should only be used on the root `Query` field
     EntityNotOnRootQuery,
+    /// The `entity` argument should only be used with non-list, object types
+    EntityTypeInvalid,
 }
 
 impl Code {
