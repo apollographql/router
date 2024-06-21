@@ -32,6 +32,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
 use crate::operation::integrity::debug_check;
+use crate::operation::integrity::debug_check_unwrap;
 use crate::operation::integrity::IsWellFormedOption;
 use crate::operation::ContainmentOptions;
 use crate::operation::Field;
@@ -39,6 +40,7 @@ use crate::operation::FieldData;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
 use crate::operation::InlineFragmentSelection;
+use crate::operation::NamedFragments;
 use crate::operation::Operation;
 use crate::operation::RebasedFragments;
 use crate::operation::Selection;
@@ -2274,7 +2276,7 @@ impl FetchDependencyGraphNode {
     //            assuming `self.inputs` won't be changed from None to Some in the middle of its
     //            lifetime.
     fn on_inputs_updated(&mut self) {
-        if self.inputs.is_some() {
+        if let Some(inputs) = &self.inputs {
             // (Original comment from the JS codebase with a minor adjustment for Rust version):
             // We're trying to avoid the full recomputation of `is_useless` when we're already
             // shown that the node is known useful (if it is shown useless, the node is removed,
@@ -2284,6 +2286,23 @@ impl FetchDependencyGraphNode {
             // never remove from selections), then this won't change. Only changing inputs may
             // require some recomputation.
             self.is_known_useful = false;
+
+            debug_check_unwrap!(|| -> Result<(), FederationError> {
+                for (parent_type, selection_set) in inputs.selection_sets_per_parent_type.iter() {
+                    if selection_set.type_position != *parent_type {
+                        return Err(FederationError::internal(format!(
+                            "Parent type mismatch: {} != {}",
+                            selection_set.type_position, parent_type
+                        )));
+                    }
+                    selection_set.is_well_formed(
+                        &inputs.supergraph_schema,
+                        &NamedFragments::default(),
+                        IsWellFormedOption::CheckFragmentSpreadSelectionSet,
+                    )?;
+                }
+                Ok(())
+            }())
         }
     }
 

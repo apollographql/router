@@ -10,12 +10,21 @@ use crate::schema::ValidFederationSchema;
 // - Executes an expression `$result` that returns a `Result<(), E>` and returns the error if the
 // result is an Err.
 macro_rules! debug_check {
-    ($result: expr) => {
-        debug_assert_eq!((), $result?);
+    ($result:expr) => {
+        debug_assert_eq!((), $result?)
+    };
+}
+
+// `debug_check_unwrap`: a debug-only sanity check taking a closure that returns a `Result<(), E>`.
+// - Calls the closure and then unwraps it.
+macro_rules! debug_check_unwrap {
+    ($result:expr) => {
+        debug_assert_eq!((), $result.unwrap())
     };
 }
 
 pub(crate) use debug_check;
+pub(crate) use debug_check_unwrap;
 
 //================================================================================================
 // Well-formedness checks
