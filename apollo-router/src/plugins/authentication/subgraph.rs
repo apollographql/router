@@ -1,7 +1,9 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 
+use aws_credential_types::provider::error::CredentialsError;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::Credentials;
 use aws_sigv4::http_request::sign;
@@ -11,10 +13,14 @@ use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
 use aws_smithy_runtime_api::client::identity::Identity;
 use aws_types::region::Region;
+use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
 use http::Request;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::sync::RwLock;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -22,6 +28,7 @@ use tower::ServiceExt;
 use crate::services::router::body::get_body_bytes;
 use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
+use crate::services::SubgraphResponse;
 
 /// Hardcoded Config using access_key and secret.
 /// Prefer using DefaultChain instead.
@@ -184,18 +191,101 @@ pub(crate) struct Config {
 }
 
 #[allow(dead_code)]
-#[derive(Clone, Default)]
+#[derive(Clone, Default, Debug)]
 pub(crate) struct SigningParams {
     pub(crate) all: Option<Arc<SigningParamsConfig>>,
     pub(crate) subgraphs: HashMap<String, Arc<SigningParamsConfig>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) struct SigningParamsConfig {
-    credentials_provider: Arc<dyn ProvideCredentials>,
+    credentials_provider: CredentialsProvider,
     region: Region,
     service_name: String,
     subgraph_name: String,
+}
+
+#[derive(Clone, Debug)]
+struct CredentialsProvider {
+    credentials: Arc<RwLock<Credentials>>,
+    credentials_updater_handle: Arc<JoinHandle<()>>,
+    refresh_credentials: Sender<()>,
+}
+
+// Refresh token if it will expire within the next 5 minutes
+const MIN_REMAINING_DURATION: Duration = std::time::Duration::from_secs(60 * 5);
+// Check for token duration every 1 minute
+const TOKEN_CHECK_INTERVAL: Duration = std::time::Duration::from_secs(60);
+
+impl CredentialsProvider {
+    async fn from_provide_credentials(
+        provide_credentials: impl ProvideCredentials + 'static,
+    ) -> Result<Self, CredentialsError> {
+        let credentials_provider = SharedCredentialsProvider::new(provide_credentials);
+        let (sender, mut refresh_credentials_receiver) = tokio::sync::mpsc::channel(1);
+        let credentials = Arc::new(RwLock::new(
+            credentials_provider.provide_credentials().await?,
+        ));
+        let c2 = credentials.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(TOKEN_CHECK_INTERVAL) => {
+                        let now = SystemTime::now();
+                        // check expires_at, refresh if needed
+                        let expires_at = {
+                            c2.read().unwrap().expiry().unwrap_or_else(|| now.clone())
+                        };
+                        if let Ok(d) = expires_at.duration_since(now) {
+                            if d > MIN_REMAINING_DURATION {
+                                continue;
+                            }
+                        }
+                        // Refresh credentials
+                        if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
+                            let mut credentials = c2.write().unwrap(); // todo: unwrap
+                            *credentials = new_credentials;
+                        }
+                    },
+                    rcr = refresh_credentials_receiver.recv() => {
+                        if rcr.is_some() {
+                            if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
+                                let mut credentials = c2.write().unwrap(); // todo: unwrap
+                                *credentials = new_credentials;
+                            }
+                        } else {
+                            return;
+                        }
+                    },
+                }
+            }
+        });
+        Ok(Self {
+            credentials_updater_handle: Arc::new(handle),
+            refresh_credentials: sender,
+            credentials,
+        })
+    }
+
+    pub(crate) async fn refresh_credentials(&self) {
+        let _ = self.refresh_credentials.send(()).await;
+    }
+}
+
+impl ProvideCredentials for CredentialsProvider {
+    fn provide_credentials<'a>(
+        &'a self,
+    ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+    where
+        Self: 'a,
+    {
+        // todo: unwrap
+        aws_credential_types::provider::future::ProvideCredentials::ready(Ok(self
+            .credentials
+            .read()
+            .unwrap()
+            .clone()))
+    }
 }
 
 impl SigningParamsConfig {
@@ -343,7 +433,11 @@ pub(super) async fn make_signing_params(
             Ok(SigningParamsConfig {
                 region: config.region(),
                 service_name: config.service_name(),
-                credentials_provider,
+                credentials_provider: CredentialsProvider::from_provide_credentials(
+                    credentials_provider,
+                )
+                .await
+                .map_err(|e| BoxError::from(e))?,
                 subgraph_name: subgraph_name.to_string(),
             })
         }
