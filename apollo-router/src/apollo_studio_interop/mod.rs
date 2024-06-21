@@ -32,7 +32,9 @@ use serde::Serialize;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::spec::Fragments;
+use crate::spec::Query;
 use crate::spec::Selection as SpecSelection;
 
 /// The stats for a single execution of an input object field.
@@ -159,9 +161,6 @@ impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
         }
     }
 }
-
-use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
-use crate::spec::Query;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.

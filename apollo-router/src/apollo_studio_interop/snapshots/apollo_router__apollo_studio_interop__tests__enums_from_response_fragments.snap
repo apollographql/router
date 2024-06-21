@@ -3,12 +3,12 @@ source: apollo-router/src/apollo_studio_interop/tests.rs
 expression: "&generated"
 ---
 SomeEnum:
-  - SOME_VALUE_5
-  - SOME_VALUE_6
   - SOME_VALUE_1
-  - SOME_VALUE_11
   - SOME_VALUE_10
+  - SOME_VALUE_11
+  - SOME_VALUE_13
   - SOME_VALUE_14
   - SOME_VALUE_4
+  - SOME_VALUE_5
+  - SOME_VALUE_6
   - SOME_VALUE_8
-  - SOME_VALUE_13

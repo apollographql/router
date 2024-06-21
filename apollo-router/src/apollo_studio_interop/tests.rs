@@ -67,7 +67,7 @@ macro_rules! assert_enums_from_response {
         insta::with_settings!({sort_maps => true}, {
             insta::assert_yaml_snapshot!($actual, {
                 // sort referenced enum value sets
-                ".response_enums.*" => insta::sorted_redaction()
+                ".*" => insta::sorted_redaction()
             });
         });
     };
