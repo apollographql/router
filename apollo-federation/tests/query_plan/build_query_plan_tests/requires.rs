@@ -179,8 +179,6 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged (reverse order of parallel fetches)
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
         Subgraph1: r#"
@@ -248,6 +246,22 @@ fn handles_multiple_requires_involving_different_nestedness() {
               }
             },
             Parallel {
+              Flatten(path: "list.@.user") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                      value
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      computed
+                    }
+                  }
+                },
+              },
               Flatten(path: "list.@") {
                 Fetch(service: "Subgraph2") {
                   {
@@ -264,22 +278,6 @@ fn handles_multiple_requires_involving_different_nestedness() {
                     ... on Item {
                       computed
                       computed2
-                    }
-                  }
-                },
-              },
-              Flatten(path: "list.@.user") {
-                Fetch(service: "Subgraph2") {
-                  {
-                    ... on User {
-                      __typename
-                      id
-                      value
-                    }
-                  } =>
-                  {
-                    ... on User {
-                      computed
                     }
                   }
                 },
