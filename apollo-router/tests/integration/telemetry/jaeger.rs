@@ -122,7 +122,7 @@ async fn test_local_root_no_sample() -> Result<(), BoxError> {
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
     let (_, response) = router.execute_untraced_query(&query).await;
-    assert!(response.headers().get("apollo-custom-trace-id").is_none());
+    assert!(response.headers().get("apollo-custom-trace-id").is_some());
 
     router.graceful_shutdown().await;
     Ok(())
