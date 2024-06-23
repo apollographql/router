@@ -2,7 +2,7 @@
 
 Allow customers to have more control over the communication with their coprocessor, specifically enabling use of h2c (http2 cleartext) communication for scenarios where the networking architecture/mesh connections do not support or require tls for outbound communications from router.
 
-Introduces a new config `traffic_shaping` under coprocessor, where the first and only supported option is `experimental_http2`, having the same options available as `experimental_http2` option under subgraphs:
+Introduces a new config section `client` under coprocessor, where the first and only supported option is `experimental_http2`, having the same options currently available as `experimental_http2` option under subgraphs/traffic_shaping:
 
 - disable - disable http2, use http/1.1 only
 - enable - http urls results in http/1.1, https urls results in tls with either http1.1 or http2 based on the tls handshake 
