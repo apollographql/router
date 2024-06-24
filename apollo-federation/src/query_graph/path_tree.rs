@@ -513,7 +513,7 @@ mod tests {
             build_graph_path(&query_graph, SchemaRootDefinitionKind::Query, &["t", "id"]).unwrap();
         assert_eq!(
             path1.to_string(),
-            "Query(Test)* --[t]--> T(Test) --[id]--> ID(Test)"
+            "Query(Test) --[t]--> T(Test) --[id]--> ID(Test)"
         );
 
         let path2 = build_graph_path(
@@ -524,7 +524,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             path2.to_string(),
-            "Query(Test)* --[t]--> T(Test) --[otherId]--> ID(Test)"
+            "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
         let normalized_operation =
@@ -539,7 +539,7 @@ mod tests {
         let path_tree =
             OpPathTree::from_op_paths(query_graph.to_owned(), NodeIndex::new(0), &paths).unwrap();
         let computed = path_tree.to_string();
-        let expected = r#"Query(Test)*:
+        let expected = r#"Query(Test):
  -> [3] t = T(Test):
    -> [1] id = ID(Test)
    -> [0] otherId = ID(Test)"#;

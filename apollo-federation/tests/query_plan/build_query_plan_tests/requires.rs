@@ -179,8 +179,6 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged (reverse order of parallel fetches)
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
         Subgraph1: r#"
@@ -248,6 +246,22 @@ fn handles_multiple_requires_involving_different_nestedness() {
               }
             },
             Parallel {
+              Flatten(path: "list.@.user") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                      value
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      computed
+                    }
+                  }
+                },
+              },
               Flatten(path: "list.@") {
                 Fetch(service: "Subgraph2") {
                   {
@@ -264,22 +278,6 @@ fn handles_multiple_requires_involving_different_nestedness() {
                     ... on Item {
                       computed
                       computed2
-                    }
-                  }
-                },
-              },
-              Flatten(path: "list.@.user") {
-                Fetch(service: "Subgraph2") {
-                  {
-                    ... on User {
-                      __typename
-                      id
-                      value
-                    }
-                  } =>
-                  {
-                    ... on User {
-                      computed
                     }
                   }
                 },
@@ -1163,8 +1161,6 @@ fn it_handles_complex_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
 fn it_handes_diamond_shape_depedencies() {
     // The idea of this test is that to be able to fulfill the @require in subgraph D, we need
     // both values from C for the @require and values from B for the key itself, but both
@@ -1237,6 +1233,21 @@ fn it_handes_diamond_shape_depedencies() {
             },
             Parallel {
               Flatten(path: "t") {
+                Fetch(service: "C") {
+                  {
+                    ... on T {
+                      __typename
+                      id1
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v3
+                    }
+                  }
+                },
+              },
+              Flatten(path: "t") {
                 Fetch(service: "B") {
                   {
                     ... on T {
@@ -1251,21 +1262,6 @@ fn it_handes_diamond_shape_depedencies() {
                       v1
                       v2
                       id1
-                    }
-                  }
-                },
-              },
-              Flatten(path: "t") {
-                Fetch(service: "C") {
-                  {
-                    ... on T {
-                      __typename
-                      id1
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      v3
                     }
                   }
                 },
