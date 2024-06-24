@@ -427,14 +427,14 @@ pub(crate) mod test_utils {
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::to_value(v)))
+                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
                     .collect(),
             }
         }
     }
 
     impl SerdeMetricDataPoint {
-        pub(crate) fn to_value(v: &Value) -> serde_json::Value {
+        pub(crate) fn convert(v: &Value) -> serde_json::Value {
             match v.clone() {
                 Value::Bool(v) => v.into(),
                 Value::I64(v) => v.into(),
@@ -461,7 +461,7 @@ pub(crate) mod test_utils {
                 attributes: value
                     .attributes
                     .iter()
-                    .map(|(k, v)| (k.as_str().to_string(), Self::to_value(v)))
+                    .map(|(k, v)| (k.as_str().to_string(), Self::convert(v)))
                     .collect(),
             }
         }
@@ -855,7 +855,7 @@ macro_rules! assert_metric {
                             .map(|kv: &opentelemetry::KeyValue| {
                                 (
                                     kv.key.to_string(),
-                                    crate::metrics::test_utils::SerdeMetricDataPoint::to_value(
+                                    crate::metrics::test_utils::SerdeMetricDataPoint::convert(
                                         &kv.value,
                                     ),
                                 )
