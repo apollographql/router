@@ -1,12 +1,15 @@
-use crate::plugins::telemetry::metrics::apollo::histogram::{
-    Histogram, HistogramConfig, MAXIMUM_SIZE,
-};
-use num_traits::{AsPrimitive, FromPrimitive};
-use serde::ser::SerializeMap;
-use serde::Serialize;
 use std::fmt::Debug;
 use std::ops::AddAssign;
 use std::time::Duration;
+
+use num_traits::AsPrimitive;
+use num_traits::FromPrimitive;
+use serde::ser::SerializeMap;
+use serde::Serialize;
+
+use crate::plugins::telemetry::metrics::apollo::histogram::Histogram;
+use crate::plugins::telemetry::metrics::apollo::histogram::HistogramConfig;
+use crate::plugins::telemetry::metrics::apollo::histogram::MAXIMUM_SIZE;
 
 pub(crate) type DurationHistogram<Type = u64> = Histogram<DurationConfig<Type>>;
 #[derive(Debug, Clone)]
@@ -76,8 +79,9 @@ impl Serialize for Histogram<DurationConfig<f64>> {
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use num_traits::AsPrimitive;
+
+    use super::*;
 
     // DurationHistogram Tests
     impl<Config: HistogramConfig> Histogram<Config>

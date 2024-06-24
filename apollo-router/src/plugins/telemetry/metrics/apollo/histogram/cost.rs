@@ -1,9 +1,10 @@
-use crate::plugins::telemetry::metrics::apollo::histogram::{
-    Histogram, HistogramConfig, MAXIMUM_SIZE,
-};
 use num_traits::AsPrimitive;
 use serde::ser::SerializeMap;
 use serde::Serialize;
+
+use crate::plugins::telemetry::metrics::apollo::histogram::Histogram;
+use crate::plugins::telemetry::metrics::apollo::histogram::HistogramConfig;
+use crate::plugins::telemetry::metrics::apollo::histogram::MAXIMUM_SIZE;
 
 pub(crate) type CostHistogram = Histogram<CostConfig>;
 #[derive(Debug, Clone)]
@@ -43,8 +44,9 @@ impl Serialize for Histogram<CostConfig> {
 
 #[cfg(test)]
 mod test {
-    use crate::plugins::telemetry::metrics::apollo::histogram::CostHistogram;
     use insta::assert_yaml_snapshot;
+
+    use crate::plugins::telemetry::metrics::apollo::histogram::CostHistogram;
 
     #[test]
     fn cost_bucketing() {

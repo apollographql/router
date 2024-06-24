@@ -1,8 +1,9 @@
-use crate::plugins::telemetry::metrics::apollo::histogram::{
-    Histogram, HistogramConfig, MAXIMUM_SIZE,
-};
 use serde::ser::SerializeMap;
 use serde::Serialize;
+
+use crate::plugins::telemetry::metrics::apollo::histogram::Histogram;
+use crate::plugins::telemetry::metrics::apollo::histogram::HistogramConfig;
+use crate::plugins::telemetry::metrics::apollo::histogram::MAXIMUM_SIZE;
 
 pub(crate) type ListLengthHistogram = Histogram<ListLengthConfig>;
 #[derive(Debug, Clone, Serialize)]
@@ -42,9 +43,8 @@ impl Serialize for Histogram<ListLengthConfig> {
 
 #[cfg(test)]
 mod test {
-    use crate::plugins::telemetry::metrics::apollo::histogram::{
-        ListLengthHistogram, MAXIMUM_SIZE,
-    };
+    use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
+    use crate::plugins::telemetry::metrics::apollo::histogram::MAXIMUM_SIZE;
 
     #[test]
     fn list_length_bucketing() {

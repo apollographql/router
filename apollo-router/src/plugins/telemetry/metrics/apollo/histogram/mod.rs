@@ -2,14 +2,13 @@ mod cost;
 mod duration;
 mod list_length;
 
-use num_traits::AsPrimitive;
 use std::fmt::Debug;
 use std::ops::AddAssign;
 
 pub(crate) use cost::CostHistogram;
 pub(crate) use duration::DurationHistogram;
 pub(crate) use list_length::ListLengthHistogram;
-
+use num_traits::AsPrimitive;
 use serde::Serialize;
 const MAXIMUM_SIZE: usize = 384;
 
