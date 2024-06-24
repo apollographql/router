@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/plugins/telemetry/metrics/apollo/histogram.rs
+source: apollo-router/src/plugins/telemetry/metrics/apollo/histogram/cost.rs
 expression: hist.buckets_to_i64()
 ---
 - 2
