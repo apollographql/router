@@ -704,7 +704,7 @@ impl Process {
         // step 11: mark the PR as automerge
         //  APOLLO_RECONCILE_PR_URL=$(gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr list --state open --base dev --head main --json url --jq '.[-1] | .url')
         // test -n "${APOLLO_RECONCILE_PR_URL}" && \
-        // gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge "${APOLLO_RECONCILE_PR_URL}"
+        // gh --repo "${APOLLO_ROUTER_RELEASE_GITHUB_REPO}" pr merge --merge --auto "${APOLLO_RECONCILE_PR_URL}"
         let output = std::process::Command::new(&gh)
             .args([
                 "--repo",
@@ -735,6 +735,8 @@ impl Process {
                 self.github_repository.as_str(),
                 "pr",
                 "merge",
+                "--merge",
+                "--auto",
                 url.trim(),
             ])
             .status()?;
