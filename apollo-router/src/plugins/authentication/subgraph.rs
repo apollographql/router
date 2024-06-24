@@ -231,26 +231,17 @@ impl CredentialsProvider {
             credentials_provider.provide_credentials().await?,
         ));
         let c2 = credentials.clone();
+        let crp2 = credentials_provider.clone();
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
                     _ = tokio::time::sleep(refresh_timer) => {
-                        // Refresh credentials
-                        if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
-                            refresh_timer = next_refresh_timer(&new_credentials);
-                            let mut credentials = c2.write().expect("authentication: credentials RwLock poisoned");
-                            *credentials = new_credentials;
-                        } else {
-                            // We couldn't refresh the credentials, try again in a minute
-                            refresh_timer = RETRY_DURATION;
-                        }
+                       refresh_timer = refresh_credentials(&crp2, &c2).await;
+
                     },
                     rcr = refresh_credentials_receiver.recv() => {
                         if rcr.is_some() {
-                            if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
-                                let mut credentials = c2.write().expect("authentication: credentials RwLock poisoned");
-                                *credentials = new_credentials;
-                            }
+                            refresh_timer = refresh_credentials(&crp2, &c2).await;
                         } else {
                             return;
                         }
@@ -268,6 +259,25 @@ impl CredentialsProvider {
     #[allow(dead_code)]
     pub(crate) async fn refresh_credentials(&self) {
         let _ = self.refresh_credentials.send(()).await;
+    }
+}
+
+async fn refresh_credentials(
+    credentials_provider: &(impl ProvideCredentials + 'static),
+    credentials: &RwLock<Credentials>,
+) -> Duration {
+    match credentials_provider.provide_credentials().await {
+        Ok(new_credentials) => {
+            let mut credentials = credentials
+                .write()
+                .expect("authentication: credentials RwLock poisoned");
+            *credentials = new_credentials;
+            next_refresh_timer(&credentials)
+        }
+        Err(e) => {
+            tracing::warn!("authentication: couldn't refresh credentials {e}");
+            RETRY_DURATION
+        }
     }
 }
 
