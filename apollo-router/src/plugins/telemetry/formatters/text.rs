@@ -6,6 +6,7 @@ use std::fmt;
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
 use opentelemetry::sdk::Resource;
+use opentelemetry::OrderMap;
 use serde_json::Value;
 use tracing_core::Event;
 use tracing_core::Field;
@@ -26,6 +27,7 @@ use super::get_trace_and_span_id;
 use super::EventFormatter;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config_new::logging::TextFormat;
+use crate::plugins::telemetry::dynamic_attribute::EventAttributes;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
 use crate::plugins::telemetry::otel::OtelData;
@@ -364,9 +366,24 @@ where
         if let Some(span) = ctx.event_span(event) {
             let mut extensions = span.extensions_mut();
             let otel_data = extensions.get_mut::<OtelData>();
-            if let Some(event_attributes) = otel_data.and_then(|od| od.event_attributes.take()) {
+            let attrs = otel_data.and_then(|od| od.event_attributes.take());
+            let event_attributes = match attrs {
+                Some(attrs) => Some(attrs),
+                None => {
+                    let event_attributes = extensions.get_mut::<EventAttributes>();
+                    event_attributes.map(|event_attributes| {
+                        OrderMap::from_iter(
+                            event_attributes
+                                .take()
+                                .into_iter()
+                                .map(|kv| (kv.key, kv.value)),
+                        )
+                    })
+                }
+            };
+            if let Some(event_attributes) = event_attributes {
                 for (key, value) in event_attributes {
-                    default_visitor.log_debug_attrs(key.as_str(), &value.as_str());
+                    default_visitor.log_debug_attrs(key.as_str(), &value);
                 }
             }
         }
@@ -482,7 +499,7 @@ impl<'a> DefaultVisitor<'a> {
         Style::new()
     }
 
-    fn log_debug_attrs(&mut self, field_name: &str, value: &dyn fmt::Debug) {
+    fn log_debug_attrs(&mut self, field_name: &str, value: &opentelemetry::Value) {
         let style = self.dimmed();
 
         self.result = write!(self.writer, "{}", style.prefix());
@@ -494,14 +511,14 @@ impl<'a> DefaultVisitor<'a> {
         self.result = match field_name {
             name if name.starts_with("r#") => write!(
                 self.writer,
-                "{}{}{:?}",
+                "{}{}{}",
                 self.italic().paint(&name[2..]),
                 self.dimmed().paint("="),
                 value
             ),
             name => write!(
                 self.writer,
-                "{}{}{:?}",
+                "{}{}{}",
                 self.italic().paint(name),
                 self.dimmed().paint("="),
                 value
