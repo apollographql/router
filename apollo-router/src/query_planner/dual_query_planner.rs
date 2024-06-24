@@ -172,7 +172,7 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> bool {
         requires,
         variable_usages,
         operation,
-        operation_name,
+        operation_name: _, // ignored (reordered parallel fetches may have different names)
         operation_kind,
         id,
         input_rewrites,
@@ -184,7 +184,6 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> bool {
     *service_name == other.service_name
         && *requires == other.requires
         && vec_matches_sorted(variable_usages, &other.variable_usages)
-        && *operation_name == other.operation_name
         && *operation_kind == other.operation_kind
         && *id == other.id
         && *input_rewrites == other.input_rewrites
@@ -285,11 +284,25 @@ fn vec_matches_sorted_by_key<T: Eq + Hash + Clone>(this: &Vec<T>, other: &Vec<T>
     vec_matches(&this_sorted, &other_sorted, T::eq)
 }
 
+// performs a set comparison, ignoring order
+fn vec_matches_as_set<T>(this: &Vec<T>, other: &Vec<T>, item_matches: impl Fn(&T, &T) -> bool) -> bool {
+    // Set-inclusion test in both directions
+    this.len() == other.len()
+        && this.iter().all(|this_node| {
+            other.iter().any(|other_node| item_matches(this_node, other_node))
+        })
+        && other.iter().all(|other_node| {
+            this.iter().any(|this_node| item_matches(this_node, other_node))
+        })
+}
+
 fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> bool {
     match (this, other) {
-        (PlanNode::Sequence { nodes: this }, PlanNode::Sequence { nodes: other })
-        | (PlanNode::Parallel { nodes: this }, PlanNode::Parallel { nodes: other }) => {
+        (PlanNode::Sequence { nodes: this }, PlanNode::Sequence { nodes: other }) => {
             vec_matches(this, other, plan_node_matches)
+        }
+        (PlanNode::Parallel { nodes: this }, PlanNode::Parallel { nodes: other }) => {
+            vec_matches_as_set(this, other, plan_node_matches)
         }
         (PlanNode::Fetch(this), PlanNode::Fetch(other)) => fetch_node_matches(this, other),
         (PlanNode::Flatten(this), PlanNode::Flatten(other)) => flatten_node_matches(this, other),
@@ -389,8 +402,8 @@ fn hash_value<T: Hash>(x: &T) -> u64 {
 }
 
 fn same_ast_operation_definition(x: &ast::OperationDefinition, y: &ast::OperationDefinition) -> bool {
+    // Note: Operation names are ignored, since parallel fetches may have different names.
     x.operation_type == y.operation_type
-    && x.name == y.name
     && vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x.name.cmp(&y.name))
     && x.directives == y.directives
     && same_ast_top_level_selection_set(&x.selection_set, &y.selection_set)
