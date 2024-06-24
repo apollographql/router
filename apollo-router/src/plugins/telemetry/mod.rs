@@ -73,7 +73,6 @@ use self::config_new::spans::Spans;
 use self::metrics::apollo::studio::SingleTypeStat;
 use self::metrics::AttributesForwardConf;
 use self::reload::reload_fmt;
-use self::reload::SamplingFilter;
 pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
@@ -554,7 +553,7 @@ impl Plugin for Telemetry {
                 };
                 if let (Some(header_name), Some(trace_id)) = (
                     expose_trace_id_header,
-                    TraceId::maybe_new().and_then(format_id),
+                    TraceId::current().and_then(format_id),
                 ) {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }
@@ -792,7 +791,7 @@ impl Telemetry {
         // Only apply things if we were executing in the context of a vanilla the Apollo executable.
         // Users that are rolling their own routers will need to set up telemetry themselves.
         if let Some(hot_tracer) = OPENTELEMETRY_TRACER_HANDLE.get() {
-            SamplingFilter::configure(&self.sampling_filter_ratio);
+            otel::layer::configure(&self.sampling_filter_ratio);
 
             // The reason that this has to happen here is that we are interacting with global state.
             // If we do this logic during plugin init then if a subsequent plugin fails to init then we

@@ -7,6 +7,5 @@ telemetry:
           type: histogram
           unit: "unit"
           value:
-            field_custom:
-              list_length: value
+            list_length: value
 
