@@ -4,6 +4,176 @@ All notable changes to Router will be documented in this file.
 
 This project adheres to [Semantic Versioning v2.0.0](https://semver.org/spec/v2.0.0.html).
 
+# [1.123.456] - 2024-06-24
+
+## 🚀 Features
+
+### Add selector for router service in custom telemetry ([PR #5392](https://github.com/apollographql/router/pull/5392))
+
+Instead of having to access to the operation_name using the response_context at the router service, we now provide a selector for operation name at the router service in instrumentations.
+
+example:
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.request.duration:
+          attributes:
+            graphql.operation.name:
+              operation_name: string
+```
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5392
+
+### Rhai: `status_code` is available at the `router_service` ([Issue #5357](https://github.com/apollographql/router/issues/5357))
+
+Following up on the introduction of [`status_code`](https://www.apollographql.com/docs/router/customizations/rhai-api/#responsestatus_codeto_string)  as an available property in Rhai's `subgraph_service` response, we've now introduced the availability of the property on the `router_service` response as well:
+
+```rust
+fn router_service(service) {
+    let f = |response| {
+        if response.is_primary() {
+            print(response.status_code);
+        }
+    };
+
+    service.map_response(f);
+}
+```
+
+By [@IvanGoncharov](https://github.com/IvanGoncharov) in https://github.com/apollographql/router/pull/5358
+
+### Allow use of a local persisted query manifest for use with offline licenses ([Issue #4587](https://github.com/apollographql/router/issues/4587))
+
+This adds support to be able to pass [Persisted Query](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) manifests to be used in place of the hosted Uplink version. 
+
+An example configuration would look like:
+
+```yml
+persisted_queries:
+  enabled: true
+  log_unknown: true
+  experimental_local_manifests: 
+    - ./persisted-query-manifest.json
+  safelist:
+    enabled: true
+    require_id: false
+```
+
+By [@lleadbet](https://github.com/lleadbet) in https://github.com/apollographql/router/pull/5310
+
+## 🐛 Fixes
+
+### Fix events when trace is not sampled, and keep event attribute types ([PR #5464](https://github.com/apollographql/router/pull/5464))
+
+Several fixes about events:
+
++ Keep original attribute type and not convert it to string (also perf improvement)
++ Use `http.response.body.size`  and `http.request.body.size` as a number and not a string
++ Display custom event attributes even if the trace is not sampled 
+
+
+
+> :warning: If you had some monitoring enabled on your logs please be cautious because with these changes, now instead of having for example an attribute like `http.response.status_code = "200"` it will be `http.response.status_code = 200` the 200 code will be a number and not a string anymore. That's an example. Same for `http.request|response.body.size` attribute
+
+
+By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5464
+
+### Security fix: timing variability in curve25519-dalek ([Issue #5484](https://github.com/apollographql/router/issues/5484))
+
+This removes deno_crypto due to the vulnerability reported in curve25519-dalek: https://rustsec.org/advisories/RUSTSEC-2024-0344 
+The router is not affected by that vulnerability, as deno_crypto was only used to provide a random number generator to create UUIDs
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5483
+
+### Update the query planner to Federation 2.8.1 ([PR #5483](https://github.com/apollographql/router/pull/5483))
+
+This updates the query planner to 2.8.1 to fix a performance issue when looking up contexts: https://github.com/apollographql/federation/pull/3031
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5483
+
+## 📃 Configuration
+
+### Make `value` for custom instruments easier to use ([PR #5472](https://github.com/apollographql/router/pull/5472))
+
+Previously every custom instrument at every stage had the ability to specify values that were not related to that stage. e.g. event_unit for a router instrument.
+
+With this change only the relevant values for the stage are allowed. In addition, graphql instruments no longer need to specify field_event:
+There is no automatic migration for this as graphql instruments are still experimental.
+
+```yaml
+telemetry:
+  instrumentation:
+    instruments:
+      graphql:
+        # OLD definition of a custom instrument that measures the number of fields
+        my.unit.instrument:
+          value: field_unit # Changes to unit
+        
+        # NEW definition
+        my.unit.instrument:
+          value: unit 
+
+        # OLD  
+        my.custom.instrument:
+          value: # Changes to not require `field_custom`
+            field_custom:
+              list_length: value
+        # NEW
+        my.custom.instrument:
+          value: 
+            list_length: value
+```
+
+The following misconfiguration is now not possible:
+```yaml
+router_instrument:
+  value:
+    event_custom:
+      request_header: foo
+```
+
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5472
+
+## 🛠 Maintenance
+
+### isolate uses of hyper 0.14 types ([PR #5175](https://github.com/apollographql/router/pull/5175))
+
+[Hyper](https://hyper.rs/), the HTTP client and server used in the Router, recently reached version 1.0, with various improvements that we need in the Router, but also some API breaking changes.
+To reduce the future impact of these breaking changes we have isolated uses of hyper's types. This will make future upgrades simpler.
+
+This will have no impact on the current public API of the Router, it mainly affects internal code and will not affect the Router's normal execution.
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5175
+
+### Add cost information to protobuf traces ([PR #5430](https://github.com/apollographql/router/pull/5430))
+
+If `experimental_demand_control` is enabled, cost information for queries is now exported on Apollo protobuf traces for display in studio.
+
+By [@BrynCooke](https://github.com/BrynCooke) in https://github.com/apollographql/router/pull/5430
+
+### fuzz test the router VS a monolithic subgraph ([PR #5302](https://github.com/apollographql/router/pull/5302))
+
+To get better assurance in how the Router is running and battle test new features, we are improving our testing process by including a fuzzer that can run with any Router configuration.
+
+This adds a Router fuzzing target, to compare the result of a query sent to a router VS a monolithic subgraph, with a supergraph schema that points all subgraphs to that same monolith.
+
+The subgraph here merges the code from the usual accounts, products, reviews and inventory subgraphs (taken from the [starstuff repository](https://github.com/apollographql/starstuff/)).
+This means that it can answer any query that would be handled by those subgraphs, but since it also has all the types and data available, it can be queried directly too.
+The invariant we check here is that we should get the same result by sending the query to the subgraph directly, or through a router that will artificially cut up the query in multiple subgraph requests, according to the supergraph schema.
+
+To execute it:
+- start a router using the schema `fuzz/subgraph/supergraph.graphql`
+- start the subgraph with `cargo run --release` in `fuzz/subgraph`. It will start a subgraph on port 4005
+- start the fuzzer from the repo root with `cargo +nightly fuzz run router`
+
+By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5302
+
+
+
 # [1.49.1] - 2024-06-19
 
 > [!IMPORTANT]
