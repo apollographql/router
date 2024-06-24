@@ -6502,10 +6502,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json_bytes"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9eb67259abd83636e3b2f4700ddc3ecfdbfe7b1b89e824da42bfea6530caf03b"
+checksum = "0ecd92a088fb2500b2f146c9ddc5da9950bb7264d3f00932cd2a6fb369c26c46"
 dependencies = [
+ "ahash",
  "bytes",
  "indexmap 2.2.3",
  "jsonpath-rust",
