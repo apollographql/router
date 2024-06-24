@@ -101,6 +101,7 @@ use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
+use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -1303,24 +1304,25 @@ impl Telemetry {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
 
+                    // Local field stats are recorded when enabled by the experimental configuration flag.
+                    // For subscriptions, metrics are sent to Studio after each event, otherwise the metrics
+                    // are sent to Studio after the last response. In the case of deferred responses, the last
+                    // response needs to submit an aggregation of metrics across the primary and incremental
+                    // responses. To avoid submitting duplicates, the recorder's contents are drained each time
+                    // metrics are submitted.
+                    let mut local_stat_recorder = LocalTypeStatRecorder::new();
+
                     response_stream
                         .enumerate()
                         .map(move |(idx, response)| {
-                            // The stats are per chunk, so we need to create a new recorder for each.
-                            // Otherwise we will end up with the same stats being contributed multiple times to the total.
-
                             let has_errors = !response.errors.is_empty();
                             if !matches!(sender, Sender::Noop) {
-                                let local_stat_recorder = if let (Some(query), true) = (
-                                    &ctx.unsupported_executable_document(),
+                                if let (true, Some(query)) = (
                                     config.apollo.experimental_local_field_metrics,
+                                    ctx.unsupported_executable_document(),
                                 ) {
-                                    let mut local_stat_recorder = LocalTypeStatRecorder::new();
-                                    local_stat_recorder.visit(query, &response);
-                                    Some(local_stat_recorder)
-                                } else {
-                                    None
-                                };
+                                    local_stat_recorder.visit(&query, &response);
+                                }
 
                                 if operation_kind == OperationKind::Subscription {
                                     // The first empty response is always a heartbeat except if it's an error
@@ -1335,7 +1337,10 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
-                                                local_stat_recorder,
+                                                local_stat_recorder
+                                                    .local_type_stats
+                                                    .drain()
+                                                    .collect(),
                                             );
                                         }
                                     } else {
@@ -1351,7 +1356,7 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
-                                            local_stat_recorder,
+                                            local_stat_recorder.local_type_stats.drain().collect(),
                                         );
                                     }
                                 } else {
@@ -1365,7 +1370,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
-                                            local_stat_recorder,
+                                            local_stat_recorder.local_type_stats.drain().collect(),
                                         );
                                     }
                                 }
@@ -1388,7 +1393,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
-        local_type_stat_recorder: Option<LocalTypeStatRecorder>,
+        local_per_type_stat: HashMap<String, LocalTypeStat>,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .extensions()
@@ -1481,9 +1486,7 @@ impl Telemetry {
                                     ..Default::default()
                                 },
                                 per_type_stat,
-                                local_per_type_stat: local_type_stat_recorder
-                                    .map(|r| r.local_type_stats)
-                                    .unwrap_or_default(),
+                                local_per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
