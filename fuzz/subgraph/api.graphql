@@ -1,0 +1,42 @@
+
+schema {
+  query: Query
+  mutation: Mutation
+}
+
+directive @apollo_studio_metadata(launchId: String, buildId: String, checkId: String) on SCHEMA
+
+type Mutation {
+  createReview(upc: ID!, id: ID!, body: String): Review
+  createProduct(upc: ID!, name: String): Product
+}
+
+type Product {
+  upc: String!
+  name: String
+  price: Int
+  weight: Int
+  reviews: [Review]
+  reviewsForAuthor(authorID: ID!): [Review]
+  inStock: Boolean
+  shippingEstimate: Int
+}
+
+type Query {
+  topProducts(first: Int = 5): [Product]
+  me: User
+}
+
+type Review {
+  id: ID!
+  body: String
+  author: User
+  product: Product
+}
+
+type User {
+  id: ID!
+  name: String
+  username: String
+  reviews: [Review]
+}
