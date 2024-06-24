@@ -738,6 +738,7 @@ mod test {
         assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
 
         cp.refresh_credentials().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         let _ = cp.provide_credentials().await.unwrap();
         let _ = cp.provide_credentials().await.unwrap();
@@ -747,7 +748,7 @@ mod test {
         Ok(())
     }
 
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_credentials_provider_refresh_on_stale() -> Result<(), BoxError> {
         #[derive(Debug, Default, Clone)]
         struct TestCredentialsProvider {
@@ -788,7 +789,7 @@ mod test {
         assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
 
         cp.refresh_credentials().await;
-        tokio::time::sleep(Duration::from_millis(200)).await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         let _ = cp.provide_credentials().await.unwrap();
         let _ = cp.provide_credentials().await.unwrap();
