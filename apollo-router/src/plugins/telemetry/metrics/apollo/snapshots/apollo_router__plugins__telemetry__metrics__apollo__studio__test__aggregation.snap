@@ -1397,7 +1397,77 @@ expression: aggregated_metrics
               "alias_count": 0,
               "root_field_count": 1
             },
-            "local_per_type_stat": {}
+            "local_per_type_stat": {
+              "type1": {
+                "local_per_field_stat": {
+                  "field1": {
+                    "return_type": "String",
+                    "list_lengths": {
+                      "buckets": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        2.0
+                      ],
+                      "max": 20.0,
+                      "total": 2.0
+                    }
+                  }
+                }
+              },
+              "type2": {
+                "local_per_field_stat": {
+                  "field1": {
+                    "return_type": "String",
+                    "list_lengths": {
+                      "buckets": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        2.0
+                      ],
+                      "max": 21.0,
+                      "total": 2.0
+                    }
+                  }
+                }
+              }
+            }
           }
         ]
       ],

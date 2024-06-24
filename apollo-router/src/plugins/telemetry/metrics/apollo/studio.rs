@@ -553,7 +553,10 @@ mod test {
                                 },
                             ),
                         ]),
-                        local_per_type_stat: HashMap::new(), // TODO: Put some data in here
+                        local_per_type_stat: HashMap::from([
+                            ("type1".into(), local_type_stat(&mut count)),
+                            ("type2".into(), local_type_stat(&mut count)),
+                        ]),
                     },
                     referenced_fields_by_type: HashMap::from([(
                         "type1".into(),
@@ -581,6 +584,22 @@ mod test {
             requests_with_errors_count: count.inc_u64(),
             latency,
             length,
+        }
+    }
+
+    fn local_type_stat(count: &mut Count) -> LocalTypeStat {
+        LocalTypeStat {
+            local_per_field_stat: HashMap::from([("field1".into(), local_field_stat(count))]),
+        }
+    }
+
+    fn local_field_stat(count: &mut Count) -> LocalFieldStat {
+        let mut length = ListLengthHistogram::default();
+        length.record(Some(count.inc_u64()), 1);
+
+        LocalFieldStat {
+            return_type: "String".into(),
+            list_lengths: length,
         }
     }
 
