@@ -750,7 +750,9 @@ query AliasedQuery {
 
 <ExperimentalFeature />
 
-Apollo's legacy reporting didn't include input and enum references.
+<EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
+
+Apollo's legacy reporting didn't include input and enum references, meaning you couldn't see input and enum field usage in GraphOS insights and some operation checks may have flagged non-issues.
 Beginning in v1.50.0, you can configure the router to report input and enum usage.
 
 Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.experimental_apollo_metrics_reference_mode` option like so:
@@ -761,12 +763,11 @@ telemetry:
     experimental_apollo_metrics_reference_mode: extended # Default is legacy
 ```
 
-Once you enable this configuration, you can view enum and input usage along with other types of [field usage in GraphOS Studio](/graphos/metrics/field-usage).
+Once you enable this configuration, you can view enum and input usage along with other types of [field usage in GraphOS Studio](/graphos/metrics/field-usage). To-do: Information about enhanced checks + link to relevant GraphOS docs.
 
 <Note>
 
-Once you enable `extended` reference reporting, there will be a lag in changes to metrics in Studio.
-This is because historical operations still use the `legacy` reference reporting.
+Once you enable `extended` reference reporting, you won't see an immediate change in your operations check behavior. This is because operation checks use historical client operation data and need some historical operations with the `extended` reporting for comparison.
 
 </Note>
 
