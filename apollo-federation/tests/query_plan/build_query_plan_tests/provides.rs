@@ -246,8 +246,6 @@ fn it_works_on_interfaces() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (missing parallel fetches)
 fn it_works_on_unions() {
     let planner = planner!(
         Subgraph1: r#"
@@ -319,36 +317,26 @@ fn it_works_on_unions() {
             }
           }
         },
-        Parallel {
-          Flatten(path: "noProvides") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on T2 {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on T2 {
-                  b
-                }
+        Flatten(path: "noProvides") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T1 {
+                __typename
+                id
               }
-            },
-          },
-          Flatten(path: "noProvides") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on T1 {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on T1 {
-                  a
-                }
+              ... on T2 {
+                __typename
+                id
               }
-            },
+            } =>
+            {
+              ... on T1 {
+                a
+              }
+              ... on T2 {
+                b
+              }
+            }
           },
         },
       },
@@ -412,6 +400,7 @@ fn it_works_on_unions() {
         Fetch(service: "Subgraph1") {
           {
             withProvidesForT1 {
+              __typename
               ... on T1 {
                 a
               }
