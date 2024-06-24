@@ -237,7 +237,6 @@ impl CredentialsProvider {
                 tokio::select! {
                     _ = tokio::time::sleep(refresh_timer) => {
                        refresh_timer = refresh_credentials(&crp2, &c2).await;
-
                     },
                     rcr = refresh_credentials_receiver.recv() => {
                         if rcr.is_some() {
@@ -433,19 +432,6 @@ pub(super) async fn make_signing_params(
     match config {
         AuthConfig::AWSSigV4(config) => {
             let credentials_provider = config.get_credentials_provider().await;
-            if let Err(e) = credentials_provider.provide_credentials().await {
-                let error_subgraph_name = if subgraph_name == "all" {
-                    "all subgraphs".to_string()
-                } else {
-                    format!("{} subgraph", subgraph_name)
-                };
-                return Err(format!(
-                    "auth: {}: couldn't get credentials from provider: {}",
-                    error_subgraph_name, e,
-                )
-                .into());
-            }
-
             Ok(SigningParamsConfig {
                 region: config.region(),
                 service_name: config.service_name(),
@@ -510,6 +496,8 @@ impl SubgraphAuth {
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use http::header::CONTENT_LENGTH;
@@ -714,6 +702,39 @@ mod test {
         .subgraph_service("test_subgraph", mock.boxed());
 
         service.ready().await?.call(subgraph_request).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_credentials_provider_keeps_credentials_in_cache() -> Result<(), BoxError> {
+        #[derive(Debug, Default, Clone)]
+        struct TestCredentialsProvider {
+            times_called: Arc<AtomicUsize>
+        }
+
+        impl ProvideCredentials for TestCredentialsProvider {
+            fn provide_credentials<'a>(
+                &'a self,
+            ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                self.times_called.fetch_add(1, Ordering::SeqCst);
+                aws_credential_types::provider::future::ProvideCredentials::ready(Ok(
+                    Credentials::new("test_key", "test_secret", None, None, "test_provider"),
+                ))
+            }
+        }
+
+        let tcp = TestCredentialsProvider::default();
+
+        let cp = CredentialsProvider::from_provide_credentials(tcp.clone()).await.unwrap();
+        
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
+
         Ok(())
     }
 
