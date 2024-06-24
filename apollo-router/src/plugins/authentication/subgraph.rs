@@ -214,6 +214,10 @@ struct CredentialsProvider {
 
 // Refresh token if it will expire within the next 5 minutes
 const MIN_REMAINING_DURATION: Duration = std::time::Duration::from_secs(60 * 5);
+// If the token doesn't have a validity duration, default to 15 minutes
+const FALLBACK_TOKEN_DURATION: Duration = std::time::Duration::from_secs(60 * 15);
+// If the token couldn't be refreshed, try again in 1 minute
+const RETRY_DURATION: Duration = std::time::Duration::from_secs(60);
 
 impl CredentialsProvider {
     async fn from_provide_credentials(
@@ -234,14 +238,17 @@ impl CredentialsProvider {
                         // Refresh credentials
                         if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
                             refresh_timer = next_refresh_timer(&new_credentials);
-                            let mut credentials = c2.write().unwrap(); // todo: unwrap
+                            let mut credentials = c2.write().expect("authentication: credentials RwLock poisoned");
                             *credentials = new_credentials;
+                        } else {
+                            // We couldn't refresh the credentials, try again in a minute
+                            refresh_timer = RETRY_DURATION;
                         }
                     },
                     rcr = refresh_credentials_receiver.recv() => {
                         if rcr.is_some() {
                             if let Ok(new_credentials) = credentials_provider.provide_credentials().await {
-                                let mut credentials = c2.write().unwrap(); // todo: unwrap
+                                let mut credentials = c2.write().expect("authentication: credentials RwLock poisoned");
                                 *credentials = new_credentials;
                             }
                         } else {
@@ -267,13 +274,9 @@ impl CredentialsProvider {
 fn next_refresh_timer(credentials: &Credentials) -> Duration {
     credentials
         .expiry()
-        .and_then(|expiry| {
-            expiry
-                .duration_since(SystemTime::now())
-                .ok()
-                .and_then(|d| d.checked_sub(MIN_REMAINING_DURATION))
-        })
-        .unwrap_or_else(|| Duration::from_secs(0))
+        .and_then(|expiry| expiry.duration_since(SystemTime::now()).ok())
+        .and_then(|d| d.checked_sub(MIN_REMAINING_DURATION))
+        .unwrap_or(FALLBACK_TOKEN_DURATION)
 }
 
 impl ProvideCredentials for CredentialsProvider {
@@ -283,11 +286,10 @@ impl ProvideCredentials for CredentialsProvider {
     where
         Self: 'a,
     {
-        // todo: unwrap
         aws_credential_types::provider::future::ProvideCredentials::ready(Ok(self
             .credentials
             .read()
-            .unwrap()
+            .expect("authentication: credentials RwLock poisoned")
             .clone()))
     }
 }
