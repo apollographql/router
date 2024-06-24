@@ -1,0 +1,52 @@
+---
+source: apollo-federation/src/merge.rs
+expression: result.schema.serialize()
+input_file: apollo-federation/tests/test_data/merge/roundtrip/directives.graphql
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+enum join__Graph {
+  ONE @join__graph(name: "one", url: "none")
+  TWO @join__graph(name: "two", url: "none")
+}
+
+type Query @join__type(graph: ONE) @join__type(graph: TWO) {
+  tagged: String @join__field(graph: ONE)
+  hidden: String @join__field(graph: ONE)
+  custom: String @join__field(graph: ONE)
+  authenticated: String @join__field(graph: ONE) @authenticated
+  requiresScopes: String @join__field(graph: ONE)
+  policy: String @join__field(graph: ONE)
+  overridden: String @join__field(graph: ONE) @join__field(graph: TWO)
+}

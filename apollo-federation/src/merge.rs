@@ -1,3 +1,5 @@
+mod spec;
+
 use std::collections::HashSet;
 use std::fmt::Debug;
 use std::fmt::Formatter;
@@ -7,7 +9,6 @@ use std::sync::Arc;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::DirectiveDefinition;
-use apollo_compiler::ast::DirectiveList;
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::EnumValueDefinition;
 use apollo_compiler::ast::FieldDefinition;
@@ -22,9 +23,7 @@ use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::InterfaceType;
 use apollo_compiler::schema::Name;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
-use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
@@ -35,6 +34,9 @@ use indexmap::map::Iter;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use spec::add_core_feature_join;
+use spec::add_core_feature_link;
+use spec::join_field_applied_directive;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
@@ -118,6 +120,7 @@ impl Merger {
             errors: Vec::new(),
         }
     }
+
     fn merge(&mut self, subgraphs: ValidFederationSubgraphs) -> Result<MergeSuccess, MergeFailure> {
         let mut subgraphs = subgraphs
             .into_iter()
@@ -204,7 +207,7 @@ impl Merger {
                         value,
                     ),
                     ExtendedType::Scalar(_value) => {
-                        // DO NOTHING
+                        supergraph.types.insert(type_name.clone(), ty.clone());
                     }
                 }
             }
@@ -433,6 +436,10 @@ impl Merger {
             })
             .unwrap_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC);
 
+        let authenticated_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&name!("authenticated")))
+            .unwrap_or(name!("authenticated"));
+
         let is_interface_object = object.directives.has(&interface_object_directive_name);
         let existing_type = types
             .entry(object_name.clone())
@@ -441,6 +448,7 @@ impl Merger {
                 object,
                 is_interface_object,
             ));
+
         if let ExtendedType::Object(obj) = existing_type {
             let key_directives = object.directives.get_all(&key_directive_name);
             let join_type_directives =
@@ -480,6 +488,7 @@ impl Merger {
                         ty: field.ty.clone(),
                     })),
                 };
+
                 self.merge_descriptions(
                     &mut supergraph_field.make_mut().description,
                     &field.description,
@@ -527,6 +536,19 @@ impl Merger {
                     .make_mut()
                     .directives
                     .push(Node::new(join_field_directive));
+
+                dbg!(&field.directives);
+                if let Some(authenticated_directive) = field
+                    .directives
+                    .get_all(&authenticated_directive_name)
+                    .next()
+                {
+                    dbg!(&authenticated_directive);
+                    supergraph_field
+                        .make_mut()
+                        .directives
+                        .push(authenticated_directive.clone());
+                }
 
                 // TODO: implement needsJoinField to avoid adding join__field when unnecessary
                 // https://github.com/apollographql/federation/blob/0d8a88585d901dff6844fdce1146a4539dec48df/composition-js/src/merging/merge.ts#L1648
@@ -817,505 +839,6 @@ fn directive_bool_arg_value<'a>(directive: &'a Directive, arg_name: &Name) -> Op
     }
 }
 
-// TODO link spec
-fn add_core_feature_link(supergraph: &mut Schema) {
-    // @link(url: "https://specs.apollo.dev/link/v1.0")
-    supergraph
-        .schema_definition
-        .make_mut()
-        .directives
-        .push(Component::new(Directive {
-            name: name!("link"),
-            arguments: vec![Node::new(Argument {
-                name: name!("url"),
-                value: Node::new(Value::String(NodeStr::new(
-                    "https://specs.apollo.dev/link/v1.0",
-                ))),
-            })],
-        }));
-
-    let (name, link_purpose_enum) = link_purpose_enum_type();
-    supergraph.types.insert(name, link_purpose_enum.into());
-
-    // scalar Import
-    let link_import_name = name!("link__Import");
-    let link_import_scalar = ExtendedType::Scalar(Node::new(ScalarType {
-        directives: Default::default(),
-        name: link_import_name.clone(),
-        description: None,
-    }));
-    supergraph
-        .types
-        .insert(link_import_name, link_import_scalar);
-
-    let link_directive_definition = link_directive_definition();
-    supergraph
-        .directive_definitions
-        .insert(name!("link"), Node::new(link_directive_definition));
-}
-
-/// directive @link(url: String, as: String, import: [Import], for: link__Purpose) repeatable on SCHEMA
-fn link_directive_definition() -> DirectiveDefinition {
-    DirectiveDefinition {
-        name: name!("link"),
-        description: None,
-        arguments: vec![
-            Node::new(InputValueDefinition {
-                name: name!("url"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("as"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("for"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(link__Purpose).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("import"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!([link__Import]).into(),
-                default_value: None,
-            }),
-        ],
-        locations: vec![DirectiveLocation::Schema],
-        repeatable: true,
-    }
-}
-
-/// enum link__Purpose {
-///   """
-///   \`SECURITY\` features provide metadata necessary to securely resolve fields.
-///   """
-///   SECURITY
-///
-///   """
-///   \`EXECUTION\` features provide metadata necessary for operation execution.
-///   """
-///   EXECUTION
-/// }
-fn link_purpose_enum_type() -> (Name, EnumType) {
-    let link_purpose_name = name!("link__Purpose");
-    let mut link_purpose_enum = EnumType {
-        description: None,
-        name: link_purpose_name.clone(),
-        directives: Default::default(),
-        values: IndexMap::new(),
-    };
-    let link_purpose_security_value = EnumValueDefinition {
-        description: Some(NodeStr::new(
-            r"SECURITY features provide metadata necessary to securely resolve fields.",
-        )),
-        directives: Default::default(),
-        value: name!("SECURITY"),
-    };
-    let link_purpose_execution_value = EnumValueDefinition {
-        description: Some(NodeStr::new(
-            r"EXECUTION features provide metadata necessary for operation execution.",
-        )),
-        directives: Default::default(),
-        value: name!("EXECUTION"),
-    };
-    link_purpose_enum.values.insert(
-        link_purpose_security_value.value.clone(),
-        Component::new(link_purpose_security_value),
-    );
-    link_purpose_enum.values.insert(
-        link_purpose_execution_value.value.clone(),
-        Component::new(link_purpose_execution_value),
-    );
-    (link_purpose_name, link_purpose_enum)
-}
-
-// TODO join spec
-fn add_core_feature_join(
-    supergraph: &mut Schema,
-    subgraphs_and_enum_values: &Vec<(&ValidFederationSubgraph, Name)>,
-) {
-    // @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
-    supergraph
-        .schema_definition
-        .make_mut()
-        .directives
-        .push(Component::new(Directive {
-            name: name!("link"),
-            arguments: vec![
-                Node::new(Argument {
-                    name: name!("url"),
-                    value: Node::new(Value::String(NodeStr::new(
-                        "https://specs.apollo.dev/join/v0.3",
-                    ))),
-                }),
-                Node::new(Argument {
-                    name: name!("for"),
-                    value: Node::new(Value::Enum(name!("EXECUTION"))),
-                }),
-            ],
-        }));
-
-    // scalar FieldSet
-    let join_field_set_name = name!("join__FieldSet");
-    let join_field_set_scalar = ExtendedType::Scalar(Node::new(ScalarType {
-        directives: Default::default(),
-        name: join_field_set_name.clone(),
-        description: None,
-    }));
-    supergraph
-        .types
-        .insert(join_field_set_name, join_field_set_scalar);
-
-    let join_graph_directive_definition = join_graph_directive_definition();
-    supergraph.directive_definitions.insert(
-        join_graph_directive_definition.name.clone(),
-        Node::new(join_graph_directive_definition),
-    );
-
-    let join_type_directive_definition = join_type_directive_definition();
-    supergraph.directive_definitions.insert(
-        join_type_directive_definition.name.clone(),
-        Node::new(join_type_directive_definition),
-    );
-
-    let join_field_directive_definition = join_field_directive_definition();
-    supergraph.directive_definitions.insert(
-        join_field_directive_definition.name.clone(),
-        Node::new(join_field_directive_definition),
-    );
-
-    let join_implements_directive_definition = join_implements_directive_definition();
-    supergraph.directive_definitions.insert(
-        join_implements_directive_definition.name.clone(),
-        Node::new(join_implements_directive_definition),
-    );
-
-    let join_union_member_directive_definition = join_union_member_directive_definition();
-    supergraph.directive_definitions.insert(
-        join_union_member_directive_definition.name.clone(),
-        Node::new(join_union_member_directive_definition),
-    );
-
-    let join_enum_value_directive_definition = join_enum_value_directive_definition();
-    supergraph.directive_definitions.insert(
-        join_enum_value_directive_definition.name.clone(),
-        Node::new(join_enum_value_directive_definition),
-    );
-
-    let (name, join_graph_enum_type) = join_graph_enum_type(subgraphs_and_enum_values);
-    supergraph.types.insert(name, join_graph_enum_type.into());
-}
-
-/// directive @enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-fn join_enum_value_directive_definition() -> DirectiveDefinition {
-    DirectiveDefinition {
-        name: name!("join__enumValue"),
-        description: None,
-        arguments: vec![Node::new(InputValueDefinition {
-            name: name!("graph"),
-            description: None,
-            directives: Default::default(),
-            ty: ty!(join__Graph!).into(),
-            default_value: None,
-        })],
-        locations: vec![DirectiveLocation::EnumValue],
-        repeatable: true,
-    }
-}
-
-/// directive @field(
-///   graph: Graph,
-///   requires: FieldSet,
-///   provides: FieldSet,
-///   type: String,
-///   external: Boolean,
-///   override: String,
-///   usedOverridden: Boolean
-/// ) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-fn join_field_directive_definition() -> DirectiveDefinition {
-    DirectiveDefinition {
-        name: name!("join__field"),
-        description: None,
-        arguments: vec![
-            Node::new(InputValueDefinition {
-                name: name!("graph"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(join__Graph).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("requires"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(join__FieldSet).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("provides"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(join__FieldSet).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("type"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("external"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(Boolean).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("override"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("usedOverridden"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(Boolean).into(),
-                default_value: None,
-            }),
-        ],
-        locations: vec![
-            DirectiveLocation::FieldDefinition,
-            DirectiveLocation::InputFieldDefinition,
-        ],
-        repeatable: true,
-    }
-}
-
-fn join_field_applied_directive(
-    subgraph_name: Name,
-    requires: Option<&str>,
-    provides: Option<&str>,
-    external: bool,
-) -> Directive {
-    let mut join_field_directive = Directive {
-        name: name!("join__field"),
-        arguments: vec![Node::new(Argument {
-            name: name!("graph"),
-            value: Node::new(Value::Enum(subgraph_name)),
-        })],
-    };
-    if let Some(required_fields) = requires {
-        join_field_directive.arguments.push(Node::new(Argument {
-            name: name!("requires"),
-            value: Node::new(Value::String(NodeStr::new(required_fields))),
-        }));
-    }
-    if let Some(provided_fields) = provides {
-        join_field_directive.arguments.push(Node::new(Argument {
-            name: name!("provides"),
-            value: Node::new(Value::String(NodeStr::new(provided_fields))),
-        }));
-    }
-    if external {
-        join_field_directive.arguments.push(Node::new(Argument {
-            name: name!("external"),
-            value: Node::new(Value::Boolean(external)),
-        }));
-    }
-    join_field_directive
-}
-
-/// directive @graph(name: String!, url: String!) on ENUM_VALUE
-fn join_graph_directive_definition() -> DirectiveDefinition {
-    DirectiveDefinition {
-        name: name!("join__graph"),
-        description: None,
-        arguments: vec![
-            Node::new(InputValueDefinition {
-                name: name!("name"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String!).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("url"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String!).into(),
-                default_value: None,
-            }),
-        ],
-        locations: vec![DirectiveLocation::EnumValue],
-        repeatable: false,
-    }
-}
-
-/// directive @implements(
-///   graph: Graph!,
-///   interface: String!
-/// ) on OBJECT | INTERFACE
-fn join_implements_directive_definition() -> DirectiveDefinition {
-    DirectiveDefinition {
-        name: name!("join__implements"),
-        description: None,
-        arguments: vec![
-            Node::new(InputValueDefinition {
-                name: name!("graph"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(join__Graph!).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("interface"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String!).into(),
-                default_value: None,
-            }),
-        ],
-        locations: vec![DirectiveLocation::Interface, DirectiveLocation::Object],
-        repeatable: true,
-    }
-}
-
-/// directive @type(
-///   graph: Graph!,
-///   key: FieldSet,
-///   extension: Boolean! = false,
-///   resolvable: Boolean = true,
-///   isInterfaceObject: Boolean = false
-/// ) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-fn join_type_directive_definition() -> DirectiveDefinition {
-    DirectiveDefinition {
-        name: name!("join__type"),
-        description: None,
-        arguments: vec![
-            Node::new(InputValueDefinition {
-                name: name!("graph"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(join__Graph!).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("key"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(join__FieldSet).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("extension"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(Boolean!).into(),
-                default_value: Some(Node::new(Value::Boolean(false))),
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("resolvable"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(Boolean!).into(),
-                default_value: Some(Node::new(Value::Boolean(true))),
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("isInterfaceObject"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(Boolean!).into(),
-                default_value: Some(Node::new(Value::Boolean(false))),
-            }),
-        ],
-        locations: vec![
-            DirectiveLocation::Enum,
-            DirectiveLocation::InputObject,
-            DirectiveLocation::Interface,
-            DirectiveLocation::Object,
-            DirectiveLocation::Scalar,
-            DirectiveLocation::Union,
-        ],
-        repeatable: true,
-    }
-}
-
-/// directive @unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-fn join_union_member_directive_definition() -> DirectiveDefinition {
-    DirectiveDefinition {
-        name: name!("join__unionMember"),
-        description: None,
-        arguments: vec![
-            Node::new(InputValueDefinition {
-                name: name!("graph"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(join__Graph!).into(),
-                default_value: None,
-            }),
-            Node::new(InputValueDefinition {
-                name: name!("member"),
-                description: None,
-                directives: Default::default(),
-                ty: ty!(String!).into(),
-                default_value: None,
-            }),
-        ],
-        locations: vec![DirectiveLocation::Union],
-        repeatable: true,
-    }
-}
-
-/// enum Graph
-fn join_graph_enum_type(
-    subgraphs_and_enum_values: &Vec<(&ValidFederationSubgraph, Name)>,
-) -> (Name, EnumType) {
-    let join_graph_enum_name = name!("join__Graph");
-    let mut join_graph_enum_type = EnumType {
-        description: None,
-        name: join_graph_enum_name.clone(),
-        directives: Default::default(),
-        values: IndexMap::new(),
-    };
-    for (s, subgraph_name) in subgraphs_and_enum_values {
-        let join_graph_applied_directive = Directive {
-            name: name!("join__graph"),
-            arguments: vec![
-                (Node::new(Argument {
-                    name: name!("name"),
-                    value: Node::new(Value::String(NodeStr::new(s.name.as_str()))),
-                })),
-                (Node::new(Argument {
-                    name: name!("url"),
-                    value: Node::new(Value::String(NodeStr::new(s.url.as_str()))),
-                })),
-            ],
-        };
-        let graph = EnumValueDefinition {
-            description: None,
-            directives: DirectiveList(vec![Node::new(join_graph_applied_directive)]),
-            value: subgraph_name.clone(),
-        };
-        join_graph_enum_type
-            .values
-            .insert(graph.value.clone(), Component::new(graph));
-    }
-    (join_graph_enum_name, join_graph_enum_type)
-}
-
 // TODO use apollo_compiler::executable::FieldSet
 fn parse_keys<'a>(
     directives: impl Iterator<Item = &'a Component<Directive>> + Sized,
@@ -1341,10 +864,15 @@ fn merge_directive(
 
 #[cfg(test)]
 mod tests {
+    use std::fs::read_to_string;
+
     use apollo_compiler::Schema;
     use insta::assert_snapshot;
+    use insta::glob;
 
     use crate::merge::merge_federation_subgraphs;
+    use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
+    use crate::schema::FederationSchema;
     use crate::schema::ValidFederationSchema;
     use crate::ValidFederationSubgraph;
     use crate::ValidFederationSubgraphs;
@@ -1408,5 +936,40 @@ mod tests {
         assert!(validation.is_ok(), "{:?}", validation);
 
         assert_snapshot!(schema.serialize());
+    }
+
+    #[test]
+    fn test_round_trips() {
+        insta::with_settings!({prepend_module_to_snapshot => false}, {
+            glob!("../tests/test_data", "merge/roundtrip/*.graphql", |path| {
+                let schema = read_to_string(path).unwrap();
+                let parsed = Schema::parse(&schema, path).unwrap();
+                let _sorted_string = sort_schema(&parsed).serialize().to_string();
+
+                let federated = FederationSchema::new(parsed).unwrap();
+                let subgraphs = extract_subgraphs_from_supergraph(&federated, None).unwrap();
+                for (_, subgraph) in subgraphs.clone().into_iter() {
+                    println!("{}", &subgraph.schema.schema().serialize().to_string())
+                }
+                let result = merge_federation_subgraphs(subgraphs).unwrap();
+
+                // TODO: switch from snapshot tests to comparison tests when we
+                // fix things like join__field optimizations
+
+                // let sorted_result = sort_schema(&result.schema);
+                // pretty_assertions::assert_eq!(_sorted_string, sorted_result.serialize().to_string());
+                assert_snapshot!(result.schema.serialize());
+            });
+        });
+    }
+
+    fn sort_schema(schema: &Schema) -> Schema {
+        let mut sorted = Schema::new();
+        sorted.schema_definition = schema.schema_definition.clone();
+        sorted.types = schema.types.clone();
+        sorted.types.sort_keys();
+        sorted.directive_definitions = schema.directive_definitions.clone();
+        sorted.directive_definitions.sort_keys();
+        sorted
     }
 }

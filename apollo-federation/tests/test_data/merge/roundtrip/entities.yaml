@@ -1,0 +1,48 @@
+# rover supergraph compose --config apollo-federation/tests/test_data/merge/roundtrip/entities.yaml > apollo-federation/tests/test_data/merge/roundtrip/entities.graphql
+federation_version: =2.8.1
+subgraphs:
+  one:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import:
+            ["@key", "@requires", "@external", "@provides", "@shareable"]
+          )
+
+        type Query {
+          one: One
+          two_two: Two @provides(fields: "two")
+        }
+
+        type One @key(fields: "id") {
+          id: ID!
+          one: String
+          required: String @external
+          computed: String @requires(fields: "required")
+        }
+
+        type Two @key(fields: "id", resolvable: false) {
+          id: ID!
+          two: String @external
+        }
+  two:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: ["@key", "@shareable"])
+
+        type Query {
+          two: Two
+        }
+
+        type Two @key(fields: "id") {
+          id: ID!
+          two: String @shareable
+        }
+
+        type One @key(fields: "id") {
+          id: ID!
+          required: String
+        }
