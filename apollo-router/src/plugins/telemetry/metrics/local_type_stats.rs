@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use crate::graphql::ResponseVisitor;
-use crate::plugins::telemetry::metrics::apollo::list_length_histogram::ListLengthHistogram;
+use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalFieldStat;
 use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 
@@ -47,7 +47,7 @@ impl ResponseVisitor for LocalTypeStatRecorder {
                             field.name.to_string(),
                             LocalFieldStat {
                                 return_type: field.ty().inner_named_type().to_string(),
-                                list_lengths: ListLengthHistogram::new(),
+                                list_lengths: ListLengthHistogram::new(None),
                             },
                         );
                         stat.local_per_field_stat
@@ -56,7 +56,9 @@ impl ResponseVisitor for LocalTypeStatRecorder {
                     }
                 };
 
-                local_field_stat.list_lengths.record(items.len());
+                local_field_stat
+                    .list_lengths
+                    .record(Some(items.len() as u64), 1);
 
                 for item in items {
                     self.visit_list_item(request, field.ty().inner_named_type(), field, item);

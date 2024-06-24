@@ -173,6 +173,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "persisted_query_hits": 2,
@@ -326,6 +327,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "root_error_stats": {
@@ -495,6 +497,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "private_cache_ttl_count": {
@@ -646,6 +649,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "registered_operation_count": 2,
@@ -809,12 +813,17 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     },
-                    "length": [
-                      0,
-                      2
-                    ]
+                    "length": {
+                      "buckets": [
+                        0.0,
+                        2.0
+                      ],
+                      "max": 1.0,
+                      "total": 2.0
+                    }
                   },
                   "field2": {
                     "return_type": "String",
@@ -970,12 +979,17 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     },
-                    "length": [
-                      0,
-                      2
-                    ]
+                    "length": {
+                      "buckets": [
+                        0.0,
+                        2.0
+                      ],
+                      "max": 1.0,
+                      "total": 2.0
+                    }
                   }
                 }
               },
@@ -1135,12 +1149,17 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     },
-                    "length": [
-                      0,
-                      2
-                    ]
+                    "length": {
+                      "buckets": [
+                        0.0,
+                        2.0
+                      ],
+                      "max": 1.0,
+                      "total": 2.0
+                    }
                   },
                   "field2": {
                     "return_type": "String",
@@ -1296,72 +1315,83 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     },
-                    "length": [
-                      0,
-                      2
-                    ]
+                    "length": {
+                      "buckets": [
+                        0.0,
+                        2.0
+                      ],
+                      "max": 1.0,
+                      "total": 2.0
+                    }
                   }
                 }
               }
             },
             "limits_stats": {
               "strategy": "test",
-              "cost_estimated": [
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                2
-              ],
-              "cost_actual": [
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                0,
-                2
-              ],
+              "cost_estimated": {
+                "buckets": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  2.0
+                ],
+                "max": 10.0,
+                "total": 2.0
+              },
+              "cost_actual": {
+                "buckets": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  2.0
+                ],
+                "max": 7.0,
+                "total": 2.0
+              },
               "depth": 2,
               "height": 4,
               "alias_count": 0,

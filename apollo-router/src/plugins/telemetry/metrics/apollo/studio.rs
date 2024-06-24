@@ -5,14 +5,12 @@ use std::time::Duration;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::duration_histogram::DurationHistogram;
+use super::histogram::CostHistogram;
+use super::histogram::DurationHistogram;
+use super::histogram::ListLengthHistogram;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
-use crate::plugins::telemetry::metrics::apollo::cost_histogram::CostHistogram;
-use crate::plugins::telemetry::metrics::apollo::list_length_histogram::ListLengthHistogram;
-
-pub(crate) const MAX_HISTOGRAM_BUCKETS: usize = 384;
 
 #[derive(Default, Debug, Serialize)]
 pub(crate) struct SingleStatsReport {
@@ -127,20 +125,19 @@ pub(crate) struct QueryLatencyStats {
 
 impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
     fn add_assign(&mut self, stats: SingleQueryLatencyStats) {
-        self.request_latencies
-            .increment_duration(Some(stats.latency), 1);
+        self.request_latencies.record(Some(stats.latency), 1);
         match stats.persisted_query_hit {
             Some(true) => self.persisted_query_hits += 1,
             Some(false) => self.persisted_query_misses += 1,
             None => {}
         }
-        self.cache_hits.increment_duration(stats.cache_latency, 1);
+        self.cache_hits.record(stats.cache_latency, 1);
         self.root_error_stats += stats.root_error_stats;
         self.requests_with_errors_count += stats.has_errors as u64;
         self.public_cache_ttl_count
-            .increment_duration(stats.public_cache_ttl_latency, 1);
+            .record(stats.public_cache_ttl_latency, 1);
         self.private_cache_ttl_count
-            .increment_duration(stats.private_cache_ttl_latency, 1);
+            .record(stats.private_cache_ttl_latency, 1);
         self.registered_operation_count += stats.registered_operation as u64;
         self.forbidden_operation_count += stats.forbidden_operation as u64;
         self.requests_without_field_instrumentation += stats.without_field_instrumentation as u64;
@@ -230,9 +227,9 @@ impl From<QueryLatencyStats>
 {
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
-            request_count: stats.request_latencies.total,
+            request_count: stats.request_latencies.total_u64(),
             latency_count: stats.request_latencies.buckets_to_i64(),
-            cache_hits: stats.cache_hits.total,
+            cache_hits: stats.cache_hits.total_u64(),
             cache_latency_count: stats.cache_hits.buckets_to_i64(),
             persisted_query_hits: stats.persisted_query_hits,
             persisted_query_misses: stats.persisted_query_misses,
@@ -284,7 +281,7 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
 
             observed_execution_count: stat.observed_execution_count,
             // Round sampling-rate-compensated floating-point estimates to nearest integers:
-            estimated_execution_count: stat.latency.total as u64,
+            estimated_execution_count: stat.latency.total_u64(),
             latency_count: stat.latency.buckets_to_i64(),
         }
     }
@@ -306,10 +303,10 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
     fn from(value: LimitsStats) -> Self {
         Self {
             strategy: value.strategy,
-            cost_estimated: value.cost_estimated.to_vec(),
-            max_cost_estimated: value.cost_estimated.max(),
-            cost_actual: value.cost_actual.to_vec(),
-            max_cost_actual: value.cost_actual.max(),
+            max_cost_estimated: value.cost_estimated.max_u64(),
+            cost_estimated: value.cost_estimated.buckets_to_i64(),
+            max_cost_actual: value.cost_actual.max_u64(),
+            cost_actual: value.cost_actual.buckets_to_i64(),
             depth: value.depth,
             height: value.height,
             alias_count: value.alias_count,
@@ -321,15 +318,11 @@ impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::re
 impl AddAssign<SingleLimitsStats> for LimitsStats {
     fn add_assign(&mut self, rhs: SingleLimitsStats) {
         if let Some(cost) = rhs.cost_estimated {
-            if self.cost_estimated.record(cost).is_err() {
-                tracing::warn!("could not record estimated cost in LimitsStats");
-            }
+            self.cost_estimated.record(Some(cost), 1.0)
         }
 
         if let Some(cost) = rhs.cost_actual {
-            if self.cost_actual.record(cost).is_err() {
-                tracing::warn!("could not record actual cost in LimitsStats");
-            }
+            self.cost_actual.record(Some(cost), 1.0)
         }
 
         // These are derived from the query and thus shouldn't change when we collect metrics
@@ -344,24 +337,14 @@ impl AddAssign<SingleLimitsStats> for LimitsStats {
 
 impl From<SingleLimitsStats> for LimitsStats {
     fn from(value: SingleLimitsStats) -> Self {
-        let mut cost_estimated = CostHistogram::new();
+        let mut cost_estimated = CostHistogram::default();
         if let Some(cost) = value.cost_estimated {
-            let res = cost_estimated.record(cost);
-            if res.is_err() {
-                tracing::warn!(
-                    "could not record estimated cost when converting SingleLimitsStats to LimitsStats"
-                );
-            }
+            cost_estimated.record(Some(cost), 1.0)
         }
 
-        let mut cost_actual = CostHistogram::new();
+        let mut cost_actual = CostHistogram::default();
         if let Some(cost) = value.cost_actual {
-            let res = cost_actual.record(cost);
-            if res.is_err() {
-                tracing::warn!(
-                    "could not record actual cost when converting SingleLimitsStats to LimitsStats"
-                );
-            }
+            cost_actual.record(Some(cost), 1.0)
         }
 
         Self {
@@ -426,7 +409,7 @@ impl From<LocalFieldStat>
     fn from(value: LocalFieldStat) -> Self {
         Self {
             return_type: value.return_type,
-            array_size: value.list_lengths.to_vec(),
+            array_size: value.list_lengths.buckets_to_i64(),
         }
     }
 }
@@ -586,10 +569,10 @@ mod test {
 
     fn field_stat(count: &mut Count) -> SingleFieldStat {
         let mut latency = DurationHistogram::default();
-        latency.increment_duration(Some(Duration::from_secs(1)), 1.0);
+        latency.record(Some(Duration::from_secs(1)), 1.0);
 
-        let mut length = ListLengthHistogram::new();
-        length.record(1);
+        let mut length = ListLengthHistogram::default();
+        length.record(Some(1), 1);
 
         SingleFieldStat {
             return_type: "String".into(),
