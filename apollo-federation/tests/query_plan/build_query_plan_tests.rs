@@ -287,8 +287,6 @@ fn handles_non_intersecting_fragment_conditions() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure (parallel fetch ordering difference)
 fn avoids_unnecessary_fetches() {
     // This test is a reduced example demonstrating a previous issue with the computation of query plans cost.
     // The general idea is that "Subgraph 3" has a declaration that is kind of useless (it declares entity A
@@ -373,6 +371,21 @@ fn avoids_unnecessary_fetches() {
               }
             },
             Parallel {
+              Flatten(path: "t.a") {
+                Fetch(service: "Subgraph4") {
+                  {
+                    ... on A {
+                      __typename
+                      idA2
+                    }
+                  } =>
+                  {
+                    ... on A {
+                      idA1
+                    }
+                  }
+                },
+              },
               Sequence {
                 Flatten(path: "t") {
                   Fetch(service: "Subgraph2") {
@@ -408,21 +421,6 @@ fn avoids_unnecessary_fetches() {
                   },
                 },
               },
-              Flatten(path: "t.a") {
-                Fetch(service: "Subgraph4") {
-                  {
-                    ... on A {
-                      __typename
-                      idA2
-                    }
-                  } =>
-                  {
-                    ... on A {
-                      idA1
-                    }
-                  }
-                },
-              },
             },
           },
         }
@@ -431,15 +429,13 @@ fn avoids_unnecessary_fetches() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure: fetch nodes are queries instead of mutations?
 fn it_executes_mutation_operations_in_sequence() {
     let planner = planner!(
         Subgraph1: r#"
           type Query {
             q1: Int
           }
-  
+
           type Mutation {
             m1: Int
           }
@@ -479,9 +475,7 @@ fn it_executes_mutation_operations_in_sequence() {
 
 /// @requires references external field indirectly {
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "U.k2" to selection set of parent type "U""#
-)]
+#[should_panic(expected = "snapshot assertion")]
 // TODO: investigate this failure (appears to be visiting wrong subgraph)
 fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
     // Field issue where we were seeing a FetchGroup created where the fields used by the key to jump subgraphs
@@ -492,11 +486,11 @@ fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
           type Query {
             u: U!
           }
-  
+
           type U @key(fields: "k1 { id }") {
             k1: K
           }
-  
+
           type K @key(fields: "id") {
             id: ID!
           }
@@ -509,11 +503,11 @@ fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
             f: ID! @requires(fields: "v { v }")
             f2: Int!
           }
-  
+
           type K @key(fields: "id") {
             id: ID!
           }
-  
+
           type V @key(fields: "id") {
             id: ID!
             v: String! @external
@@ -525,11 +519,11 @@ fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
             k2: ID!
             v: V!
           }
-  
+
           type K @key(fields: "id") {
             id: ID!
           }
-  
+
           type V @key(fields: "id") {
             id: ID!
             v: String!
@@ -617,4 +611,111 @@ fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
         }
       "###
     );
+}
+
+// TODO(@TylerBloom): As part of the private preview, we strip out all uses of the @defer
+// directive. Once handling that feature is implemented, this test will start failing and should be
+// updated to use a config for the planner to strip out the defer directive.
+#[test]
+fn defer_gets_stripped_out() {
+    let planner = planner!(
+        Subgraph1: r#"
+          type Query {
+            t: T
+          }
+
+          type T @key(fields: "id") {
+            id: ID!
+          }
+          "#,
+        Subgraph2: r#"
+          type T @key(fields: "id") {
+            id: ID!
+            data: String
+          }
+          "#,
+    );
+    let plan_one = assert_plan!(
+        &planner,
+        r#"
+          {
+              t {
+                  id
+                  data
+              }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "Subgraph1") {
+                {
+                  t {
+                    __typename
+                    id
+                  }
+                }
+              },
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      data
+                    }
+                  }
+                },
+              },
+            },
+          }
+        "###
+    );
+    let plan_two = assert_plan!(
+        &planner,
+        r#"
+          {
+              t {
+                  id
+                  ... @defer {
+                    data
+                  }
+              }
+          }
+        "#,
+        @r###"
+          QueryPlan {
+            Sequence {
+              Fetch(service: "Subgraph1") {
+                {
+                  t {
+                    __typename
+                    id
+                  }
+                }
+              },
+              Flatten(path: "t") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on T {
+                      __typename
+                      id
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      data
+                    }
+                  }
+                },
+              },
+            },
+          }
+        "###
+    );
+    assert_eq!(plan_one, plan_two)
 }

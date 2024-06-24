@@ -1,14 +1,4 @@
 #[test]
-#[should_panic(
-    expected = r#"Cannot add selection of field "S.y" to selection set of parent type "S""#
-)]
-// TODO: investigate this failure (appears to be visiting wrong subgraph)
-// Note that Rover composition warns:
-// ```text
-// HINT: [INCONSISTENT_OBJECT_VALUE_TYPE_FIELD]: Field "S.y" of non-entity object type "S"
-// is defined in some but not all subgraphs that define "S":
-// "S.y" is defined in subgraph "Subgraph2" but not in subgraph "Subgraph1".
-// ```
 fn handles_non_matching_value_types_under_interface_field() {
     let planner = planner!(
         Subgraph1: r#"
@@ -94,8 +84,6 @@ fn handles_non_matching_value_types_under_interface_field() {
 }
 
 #[test]
-#[should_panic(expected = "assertion `left == right` failed")]
-// TODO: investigate this failure (`evaluated_plan_count` is 0, when it's expected to be 1.)
 fn skip_type_explosion_early_if_unnecessary() {
     let planner = planner!(
         Subgraph1: r#"
@@ -163,5 +151,5 @@ fn skip_type_explosion_early_if_unnecessary() {
         }
       "###
     );
-    assert_eq!(plan.statistics.evaluated_plan_count, 1);
+    assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
 }

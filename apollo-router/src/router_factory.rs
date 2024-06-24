@@ -54,7 +54,7 @@ use crate::ListenAddr;
 pub(crate) const STARTING_SPAN_NAME: &str = "starting";
 pub(crate) const OVERRIDE_LABEL_ARG_NAME: &str = "overrideLabel";
 pub(crate) const CONTEXT_DIRECTIVE: &str = "context";
-pub(crate) const JOIN_DIRECTIVE: &str = "join__directive";
+pub(crate) const JOIN_FIELD: &str = "join__field";
 
 #[derive(Clone)]
 /// A path and a handler to be exposed as a web_endpoint for plugins
@@ -97,7 +97,7 @@ impl Endpoint {
         }
     }
     pub(crate) fn into_router(self) -> axum::Router {
-        let handler = move |req: http::Request<hyper::Body>| {
+        let handler = move |req: http::Request<crate::services::router::Body>| {
             let endpoint = self.handler.clone();
             async move {
                 Ok(endpoint
@@ -262,12 +262,31 @@ impl YamlRouterFactory {
                 .warm_up_query_planner(
                     &query_analysis_layer,
                     &persisted_query_layer,
-                    previous_cache,
+                    Some(previous_cache),
                     configuration.supergraph.query_planning.warmed_up_queries,
                     configuration
                         .supergraph
                         .query_planning
                         .experimental_reuse_query_plans,
+                    configuration
+                        .persisted_queries
+                        .experimental_prewarm_query_plan_cache,
+                )
+                .await;
+        } else {
+            supergraph_creator
+                .warm_up_query_planner(
+                    &query_analysis_layer,
+                    &persisted_query_layer,
+                    None,
+                    configuration.supergraph.query_planning.warmed_up_queries,
+                    configuration
+                        .supergraph
+                        .query_planning
+                        .experimental_reuse_query_plans,
+                    configuration
+                        .persisted_queries
+                        .experimental_prewarm_query_plan_cache,
                 )
                 .await;
         };
@@ -772,7 +791,7 @@ fn can_use_with_experimental_query_planner(
                     let join_field_directives = field
                         .directives
                         .iter()
-                        .filter(|d| d.name.as_str() == JOIN_DIRECTIVE)
+                        .filter(|d| d.name.as_str() == JOIN_FIELD)
                         .collect::<Vec<_>>();
                     if !join_field_directives.is_empty() {
                         Some(join_field_directives)
@@ -785,6 +804,8 @@ fn can_use_with_experimental_query_planner(
                     if let Some(override_label_arg) =
                         join_directive.argument_by_name(OVERRIDE_LABEL_ARG_NAME)
                     {
+                        // Any argument value for `overrideLabel` that's not
+                        // null can be considered as progressive override usage
                         if !override_label_arg.is_null() {
                             return true;
                         }
@@ -847,12 +868,15 @@ mod test {
     use tower_http::BoxError;
 
     use crate::configuration::Configuration;
+    use crate::configuration::QueryPlannerMode;
     use crate::plugin::Plugin;
     use crate::plugin::PluginInit;
     use crate::register_plugin;
+    use crate::router_factory::can_use_with_experimental_query_planner;
     use crate::router_factory::inject_schema_id;
     use crate::router_factory::RouterSuperServiceFactory;
     use crate::router_factory::YamlRouterFactory;
+    use crate::spec::Schema;
 
     #[derive(Debug)]
     struct PluginError;
@@ -989,6 +1013,127 @@ mod test {
         assert_eq!(
             &config.apollo.schema_id,
             "8e2021d131b23684671c3b85f82dfca836908c6a541bbd5c3772c66e7f8429d8"
+        );
+    }
+
+    #[test]
+    fn test_cannot_use_context_with_experimental_query_planner() {
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Both,
+            ..Default::default()
+        };
+        let schema = include_str!("testdata/supergraph_with_context.graphql");
+        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
+            "experimental_query_planner_mode: both cannot be used with @context"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::New,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
+            "experimental_query_planner_mode: new cannot be used with @context"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Legacy,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
+            "experimental_query_planner_mode: legacy should be able to be used with @context"
+        );
+    }
+
+    #[test]
+    fn test_cannot_use_progressive_overrides_with_experimental_query_planner() {
+        // PROGRESSIVE OVERRIDES
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Both,
+            ..Default::default()
+        };
+        let schema = include_str!("testdata/supergraph_with_override_label.graphql");
+        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
+            "experimental_query_planner_mode: both cannot be used with progressive overrides"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::New,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
+            "experimental_query_planner_mode: new cannot be used with progressive overrides"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Legacy,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
+            "experimental_query_planner_mode: legacy should be able to be used with progressive overrides"
+        );
+    }
+
+    #[test]
+    fn test_cannot_use_fed1_supergraphs_with_experimental_query_planner() {
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Both,
+            ..Default::default()
+        };
+        let schema = include_str!("testdata/supergraph.graphql");
+        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
+            "experimental_query_planner_mode: both cannot be used with fed1 supergraph"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::New,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
+            "experimental_query_planner_mode: new cannot be used with fed1 supergraph"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Legacy,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
+            "experimental_query_planner_mode: legacy should be able to be used with fed1 supergraph"
+        );
+    }
+
+    #[test]
+    fn test_can_use_fed2_supergraphs_with_experimental_query_planner() {
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Both,
+            ..Default::default()
+        };
+        let schema = include_str!("testdata/minimal_fed2_supergraph.graphql");
+        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
+            "experimental_query_planner_mode: both can be used"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::New,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
+            "experimental_query_planner_mode: new can be used"
+        );
+        let config = Configuration {
+            experimental_query_planner_mode: QueryPlannerMode::Legacy,
+            ..Default::default()
+        };
+        assert!(
+            can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
+            "experimental_query_planner_mode: legacy can be used"
         );
     }
 }

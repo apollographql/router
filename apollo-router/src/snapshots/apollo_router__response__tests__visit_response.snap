@@ -1,7 +1,0 @@
----
-source: apollo-router/src/response.rs
-expression: visitor
----
-name: 2
-registrationFee: 2
-ships: 1

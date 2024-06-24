@@ -36,9 +36,9 @@ impl LogAttributes {
 }
 
 /// To add dynamic attributes for spans
-pub(crate) struct DynSpanAttributeLayer;
+pub(crate) struct DynAttributeLayer;
 
-impl<S> Layer<S> for DynSpanAttributeLayer
+impl<S> Layer<S> for DynAttributeLayer
 where
     S: tracing_core::Subscriber + for<'lookup> tracing_subscriber::registry::LookupSpan<'lookup>,
 {
@@ -53,10 +53,13 @@ where
         if extensions.get_mut::<LogAttributes>().is_none() {
             extensions.insert(LogAttributes::default());
         }
+        if extensions.get_mut::<EventAttributes>().is_none() {
+            extensions.insert(EventAttributes::default());
+        }
     }
 }
 
-impl DynSpanAttributeLayer {
+impl DynAttributeLayer {
     pub(crate) fn new() -> Self {
         Self {}
     }
@@ -194,7 +197,7 @@ impl SpanDynAttribute for ::tracing::Span {
 
 fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::Value) {
     match key.as_str() {
-        SPAN_NAME_FIELD => otel_data.builder.name = format!("{:?}", value).into(),
+        SPAN_NAME_FIELD => otel_data.forced_span_name = Some(value.to_string()),
         SPAN_KIND_FIELD => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
         SPAN_STATUS_CODE_FIELD => otel_data.forced_status = str_to_status(&value.as_str()).into(),
         SPAN_STATUS_MESSAGE_FIELD => {
@@ -202,6 +205,25 @@ fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::
                 opentelemetry::trace::Status::error(value.as_str().to_string())
         }
         _ => {}
+    }
+}
+
+#[derive(Debug, Default)]
+pub(crate) struct EventAttributes {
+    attributes: Vec<KeyValue>,
+}
+
+impl EventAttributes {
+    pub(crate) fn insert(&mut self, kv: KeyValue) {
+        self.attributes.push(kv);
+    }
+
+    pub(crate) fn extend(&mut self, other: impl IntoIterator<Item = KeyValue>) {
+        self.attributes.extend(other);
+    }
+
+    pub(crate) fn take(&mut self) -> Vec<KeyValue> {
+        std::mem::take(&mut self.attributes)
     }
 }
 
@@ -223,21 +245,37 @@ impl EventDynAttribute for ::tracing::Span {
                         if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
                             return;
                         }
-                        let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<OtelData>() {
-                            Some(otel_data) => match &mut otel_data.event_attributes {
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => match &mut otel_data.event_attributes {
+                                    Some(attributes) => {
+                                        attributes.insert(key, value);
+                                    }
+                                    None => {
+                                        let mut order_map = OrderMap::new();
+                                        order_map.insert(key, value);
+                                        otel_data.event_attributes = Some(order_map);
+                                    }
+                                },
+                                None => {
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no OtelData, this is a bug");
+                                }
+                            }
+                        } else {
+                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
+                                return;
+                            }
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<EventAttributes>() {
                                 Some(attributes) => {
-                                    attributes.insert(key, value);
+                                    attributes.insert(KeyValue::new(key, value));
                                 }
                                 None => {
-                                    let mut order_map = OrderMap::new();
-                                    order_map.insert(key, value);
-                                    otel_data.event_attributes = Some(order_map);
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no EventAttributes, this is a bug");
                                 }
-                            },
-                            None => {
-                                // Can't use ::tracing::error! because it could create deadlock on extensions
-                                eprintln!("no OtelData, this is a bug");
                             }
                         }
                     }
@@ -258,22 +296,41 @@ impl EventDynAttribute for ::tracing::Span {
                 match reg.span(id) {
                     None => eprintln!("no spanref, this is a bug"),
                     Some(s) => {
-                        let mut extensions = s.extensions_mut();
-                        match extensions.get_mut::<OtelData>() {
-                            Some(otel_data) => match &mut otel_data.event_attributes {
-                                Some(event_attributes) => {
-                                    event_attributes
-                                        .extend(attributes.map(|kv| (kv.key, kv.value)));
+                        if s.is_sampled() {
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<OtelData>() {
+                                Some(otel_data) => match &mut otel_data.event_attributes {
+                                    Some(event_attributes) => {
+                                        event_attributes
+                                            .extend(attributes.map(|kv| (kv.key, kv.value)));
+                                    }
+                                    None => {
+                                        otel_data.event_attributes = Some(OrderMap::from_iter(
+                                            attributes.map(|kv| (kv.key, kv.value)),
+                                        ));
+                                    }
+                                },
+                                None => {
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no OtelData, this is a bug");
+                                }
+                            }
+                        } else {
+                            let mut attributes = attributes
+                                .filter(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
+                                .peekable();
+                            if attributes.peek().is_none() {
+                                return;
+                            }
+                            let mut extensions = s.extensions_mut();
+                            match extensions.get_mut::<EventAttributes>() {
+                                Some(registered_attributes) => {
+                                    registered_attributes.extend(attributes);
                                 }
                                 None => {
-                                    otel_data.event_attributes = Some(OrderMap::from_iter(
-                                        attributes.map(|kv| (kv.key, kv.value)),
-                                    ));
+                                    // Can't use ::tracing::error! because it could create deadlock on extensions
+                                    eprintln!("no EventAttributes, this is a bug");
                                 }
-                            },
-                            None => {
-                                // Can't use ::tracing::error! because it could create deadlock on extensions
-                                eprintln!("no OtelData, this is a bug");
                             }
                         }
                     }

@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
@@ -11,6 +10,8 @@ use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
@@ -228,11 +229,10 @@ async fn service_call(
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
 
-            if let Some(batching) = {
-                let lock = context.extensions().lock();
-                let batching = lock.get::<Batching>();
-                batching.cloned()
-            } {
+            if let Some(batching) = context
+                .extensions()
+                .with_lock(|lock| lock.get::<Batching>().cloned())
+            {
                 if batching.enabled && (is_deferred || is_subscription) {
                     let message = if is_deferred {
                         "BATCHING_DEFER_UNSUPPORTED"
@@ -254,7 +254,9 @@ async fn service_call(
                     return Ok(response);
                 }
                 // Now perform query batch analysis
-                let batch_query_opt = context.extensions().lock().get::<BatchQuery>().cloned();
+                let batch_query_opt = context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<BatchQuery>().cloned());
                 if let Some(batch_query) = batch_query_opt {
                     let query_hashes =
                         plan.query_hashes(batching, operation_name.as_deref(), &variables)?;
@@ -272,9 +274,7 @@ async fn service_call(
                 ..
             } = context
                 .extensions()
-                .lock()
-                .get()
-                .cloned()
+                .with_lock(|lock| lock.get().cloned())
                 .unwrap_or_default();
             let mut subscription_tx = None;
             if (is_deferred && !accepts_multipart_defer)
@@ -342,29 +342,29 @@ async fn service_call(
 
                 let supergraph_response_event = context
                     .extensions()
-                    .lock()
-                    .get::<SupergraphEventResponseLevel>()
-                    .cloned();
+                    .with_lock(|lock| lock.get::<SupergraphEventResponseLevel>().cloned());
                 match supergraph_response_event {
                     Some(level) => {
-                        let mut attrs = HashMap::with_capacity(4);
-                        attrs.insert(
-                            "http.response.headers".to_string(),
-                            format!("{:?}", parts.headers),
-                        );
-                        attrs.insert(
-                            "http.response.status".to_string(),
-                            format!("{}", parts.status),
-                        );
-                        attrs.insert(
-                            "http.response.version".to_string(),
-                            format!("{:?}", parts.version),
-                        );
+                        let mut attrs = Vec::with_capacity(4);
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.headers"),
+                            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+                        ));
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.status"),
+                            opentelemetry::Value::String(format!("{}", parts.status).into()),
+                        ));
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.version"),
+                            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                        ));
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
-                            attrs.insert(
-                                "http.response.body".to_string(),
-                                serde_json::to_string(resp).unwrap_or_default(),
-                            );
+                            attrs.push(KeyValue::new(
+                                Key::from_static_str("http.response.body"),
+                                opentelemetry::Value::String(
+                                    serde_json::to_string(resp).unwrap_or_default().into(),
+                                ),
+                            ));
                             log_event(level.0, "supergraph.response", attrs.clone(), "");
                         }));
 
@@ -444,9 +444,10 @@ async fn subscription_task(
     let mut subscription_handle = subscription_handle.clone();
     let operation_signature = context
         .extensions()
-        .lock()
-        .get::<Arc<UsageReporting>>()
-        .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+        .with_lock(|lock| {
+            lock.get::<Arc<UsageReporting>>()
+                .map(|usage_reporting| usage_reporting.stats_report_key.clone())
+        })
         .unwrap_or_default();
 
     let operation_name = context
@@ -649,10 +650,9 @@ async fn plan_query(
     // tests will pass.
     // During a regular request, `ParsedDocument` is already populated during query analysis.
     // Some tests do populate the document, so we only do it if it's not already there.
-    if !{
-        let lock = context.extensions().lock();
+    if !context.extensions().with_lock(|lock| {
         lock.contains_key::<crate::services::layers::query_analysis::ParsedDocument>()
-    } {
+    }) {
         let doc = crate::spec::Query::parse_document(
             &query_str,
             operation_name.as_deref(),
@@ -660,10 +660,9 @@ async fn plan_query(
             &Configuration::default(),
         )
         .map_err(crate::error::QueryPlannerError::from)?;
-        context
-            .extensions()
-            .lock()
-            .insert::<crate::services::layers::query_analysis::ParsedDocument>(doc);
+        context.extensions().with_lock(|mut lock| {
+            lock.insert::<crate::services::layers::query_analysis::ParsedDocument>(doc)
+        });
     }
 
     let qpr = planning
@@ -909,9 +908,10 @@ impl SupergraphCreator {
         &mut self,
         query_parser: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: InMemoryCachePlanner,
+        previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
+        experimental_pql_prewarm: bool,
     ) {
         self.query_planner_service
             .warm_up(
@@ -920,6 +920,7 @@ impl SupergraphCreator {
                 previous_cache,
                 count,
                 experimental_reuse_query_plans,
+                experimental_pql_prewarm,
             )
             .await
     }

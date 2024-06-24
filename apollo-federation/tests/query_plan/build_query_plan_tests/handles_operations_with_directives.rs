@@ -40,7 +40,7 @@ const SUBGRAPH_B: &str = r#"
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (missing directives on fetch operation)
 fn test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries() {
     let planner = planner!(
         subgraphA: SUBGRAPH_A,
@@ -154,7 +154,7 @@ fn test_if_directives_at_the_operation_level_are_passed_down_to_subgraph_queries
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (missing `mutation` keyword and operation name)
 fn test_if_directives_on_mutations_are_passed_down_to_subgraph_queries() {
     let planner = planner!(
         subgraphA: SUBGRAPH_A,
@@ -199,7 +199,7 @@ fn test_if_directives_on_mutations_are_passed_down_to_subgraph_queries() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (missing directives on fetch query)
 fn test_if_directives_with_arguments_applied_on_queries_are_ok() {
     let planner = planner!(
       Subgraph1: r#"

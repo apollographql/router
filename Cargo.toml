@@ -28,6 +28,7 @@ members = [
     "examples/coprocessor-subgraph/rust",
     "examples/throw-error/rhai",
     "fuzz",
+    "fuzz/subgraph"
     # Note that xtask is not in the workspace member because it relies on dependencies that are incompatible with the router. Notably hyperx but there are others.
 ]
 
@@ -70,7 +71,7 @@ serde_json = { version = "1.0.114", features = [
     "preserve_order",
     "float_roundtrip",
 ] }
-serde_json_bytes = { version = "0.2.2", features = ["preserve_order"] }
+serde_json_bytes = { version = "0.2.3", features = ["preserve_order"] }
 sha1 = "0.10.6"
 tempfile = "3.10.0"
 tokio = { version = "1.36.0", features = ["full"] }

@@ -80,7 +80,7 @@ impl Display for QueryGraphNode {
         if let Some(provide_id) = self.provide_id {
             write!(f, "-{}", provide_id)?;
         }
-        if self.root_kind.is_some() {
+        if self.is_root_node() {
             write!(f, "*")?;
         }
         Ok(())
@@ -283,7 +283,11 @@ pub struct QueryGraph {
     /// The sources on which the query graph was built, which is a set (potentially of size 1) of
     /// GraphQL schema keyed by the name identifying them. Note that the `source` strings in the
     /// nodes/edges of a query graph are guaranteed to be valid key in this map.
-    pub(crate) sources: IndexMap<NodeStr, ValidFederationSchema>,
+    sources: IndexMap<NodeStr, ValidFederationSchema>,
+    /// For federated query graphs, this is a map from subgraph names to their schemas. This is the
+    /// same as `sources`, but is missing the dummy source FEDERATED_GRAPH_ROOT_SOURCE which isn't
+    /// really a subgraph.
+    subgraphs_by_name: IndexMap<NodeStr, ValidFederationSchema>,
     /// A map (keyed by source) that associates type names of the underlying schema on which this
     /// query graph was built to each of the nodes that points to a type of that name. Note that for
     /// a "federated" query graph source, each type name will only map to a single node.
@@ -380,7 +384,7 @@ impl QueryGraph {
         })
     }
 
-    pub(crate) fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
+    fn schema(&self) -> Result<&ValidFederationSchema, FederationError> {
         self.schema_by_source(&self.current_source)
     }
 
@@ -396,19 +400,22 @@ impl QueryGraph {
         })
     }
 
-    pub(crate) fn sources(&self) -> impl Iterator<Item = (&NodeStr, &ValidFederationSchema)> {
-        self.sources.iter()
+    pub(crate) fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
+        &self.subgraphs_by_name
     }
 
-    /// Returns an iterator over of node indices whose name matches the given type name.
-    pub(crate) fn nodes_for_type<'c, 'b: 'c, 'a: 'c>(
-        &'a self,
-        name: &'b Name,
-    ) -> impl 'c + Iterator<Item = NodeIndex> {
-        self.types_to_nodes_by_source
-            .values()
-            .filter_map(|tys| tys.get(name))
-            .flat_map(|vs| vs.iter().cloned())
+    pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&NodeStr, &ValidFederationSchema)> {
+        self.subgraphs_by_name.iter()
+    }
+
+    /// Returns the node indices whose name matches the given type name.
+    pub(crate) fn nodes_for_type(
+        &self,
+        name: &Name,
+    ) -> Result<&IndexSet<NodeIndex>, FederationError> {
+        self.types_to_nodes()?
+            .get(name)
+            .ok_or_else(|| FederationError::internal("No nodes unexpectedly found for type"))
     }
 
     pub(crate) fn types_to_nodes(

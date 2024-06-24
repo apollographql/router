@@ -255,8 +255,8 @@ const TEST_PLUGIN_ORDERING_CONTEXT_KEY: &str = "ordering-trace";
 #[tokio::test(flavor = "multi_thread")]
 async fn test_plugin_ordering() {
     async fn coprocessor(
-        request: hyper::Request<hyper::Body>,
-    ) -> Result<hyper::Response<hyper::Body>, BoxError> {
+        request: http::Request<hyper::Body>,
+    ) -> Result<http::Response<hyper::Body>, BoxError> {
         let body = hyper::body::to_bytes(request.into_body()).await?;
         let mut json: serde_json::Value = serde_json::from_slice(&body)?;
         let stage = json["stage"].as_str().unwrap().to_owned();
@@ -268,7 +268,7 @@ async fn test_plugin_ordering() {
             .as_array_mut()
             .unwrap()
             .push(format!("coprocessor {stage}").into());
-        Ok(hyper::Response::new(hyper::Body::from(
+        Ok(http::Response::new(hyper::Body::from(
             serde_json::to_string(&json)?,
         )))
     }
