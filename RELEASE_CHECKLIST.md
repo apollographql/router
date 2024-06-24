@@ -12,6 +12,7 @@ Release Checklist
   - Verifying the release (TODO)
   - [Troubleshooting a release](#troubleshooting-a-release) - Something went wrong?
 - [Nightly releases](#nightly-releases)
+- [Using the new release automation](#using-the-new-release-automation)
 
 ## Building a Release
 
@@ -520,3 +521,8 @@ Make sure you also delete the local tag:
 ```console
 git tag --delete vX.X.X
 ```
+
+# Using the new release automation
+
+The release process precedently described can be executed through `cargo xtask` commands that store the required environment variables, along with the current state of the process, in a file called `.release-state.json`.
+This can be executed by running cargo xtask release start, then calling cargo xtask release continue at each step.
