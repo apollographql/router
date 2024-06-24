@@ -227,9 +227,7 @@ impl CredentialsProvider {
         let (sender, mut refresh_credentials_receiver) = tokio::sync::mpsc::channel(1);
         let credentials = credentials_provider.provide_credentials().await?;
         let mut refresh_timer = next_refresh_timer(&credentials);
-        let credentials = Arc::new(RwLock::new(
-            credentials_provider.provide_credentials().await?,
-        ));
+        let credentials = Arc::new(RwLock::new(credentials));
         let c2 = credentials.clone();
         let crp2 = credentials_provider.clone();
         let handle = tokio::spawn(async move {
@@ -283,9 +281,11 @@ async fn refresh_credentials(
 fn next_refresh_timer(credentials: &Credentials) -> Duration {
     credentials
         .expiry()
-        .and_then(|expiry| expiry.duration_since(SystemTime::now()).ok())
-        .and_then(|d| d.checked_sub(MIN_REMAINING_DURATION))
+        .and_then(|e| e.duration_since(SystemTime::now()).ok())
         .unwrap_or(FALLBACK_TOKEN_DURATION)
+        .checked_sub(MIN_REMAINING_DURATION)
+        // Credentials will expire in less than 5 minutes
+        .unwrap_or(Duration::from_secs(0))
 }
 
 impl ProvideCredentials for CredentialsProvider {
@@ -709,7 +709,7 @@ mod test {
     async fn test_credentials_provider_keeps_credentials_in_cache() -> Result<(), BoxError> {
         #[derive(Debug, Default, Clone)]
         struct TestCredentialsProvider {
-            times_called: Arc<AtomicUsize>
+            times_called: Arc<AtomicUsize>,
         }
 
         impl ProvideCredentials for TestCredentialsProvider {
@@ -728,12 +728,76 @@ mod test {
 
         let tcp = TestCredentialsProvider::default();
 
-        let cp = CredentialsProvider::from_provide_credentials(tcp.clone()).await.unwrap();
-        
+        let cp = CredentialsProvider::from_provide_credentials(tcp.clone())
+            .await
+            .unwrap();
+
         let _ = cp.provide_credentials().await.unwrap();
         let _ = cp.provide_credentials().await.unwrap();
 
         assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
+
+        cp.refresh_credentials().await;
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(2, tcp.times_called.load(Ordering::SeqCst));
+
+        Ok(())
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_credentials_provider_refresh_on_stale() -> Result<(), BoxError> {
+        #[derive(Debug, Default, Clone)]
+        struct TestCredentialsProvider {
+            times_called: Arc<AtomicUsize>,
+        }
+
+        impl ProvideCredentials for TestCredentialsProvider {
+            fn provide_credentials<'a>(
+                &'a self,
+            ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                self.times_called.fetch_add(1, Ordering::SeqCst);
+                aws_credential_types::provider::future::ProvideCredentials::ready(Ok(
+                    // The token will expire immediately, it should be refreshed fairly fast
+                    Credentials::new(
+                        "test_key",
+                        "test_secret",
+                        None,
+                        // 5 minutes + 1 second
+                        SystemTime::now().checked_add(Duration::from_secs(60 * 5 + 1)),
+                        "test_provider",
+                    ),
+                ))
+            }
+        }
+
+        let tcp = TestCredentialsProvider::default();
+
+        let cp = CredentialsProvider::from_provide_credentials(tcp.clone())
+            .await
+            .unwrap();
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
+
+        cp.refresh_credentials().await;
+        tokio::time::sleep(Duration::from_millis(200)).await;
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(2, tcp.times_called.load(Ordering::SeqCst));
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert_eq!(3, tcp.times_called.load(Ordering::SeqCst));
 
         Ok(())
     }
