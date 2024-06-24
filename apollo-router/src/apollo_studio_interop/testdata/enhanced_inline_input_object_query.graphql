@@ -1,0 +1,13 @@
+query InputObjectTypeQuery {
+    inputTypeQuery(input: {
+        inputString: "foo",
+        inputInt: 42,
+        inputBoolean: null,
+        nestedType: { someFloat: 4.2 },
+        enumInput: SOME_VALUE_1,
+        nestedTypeList: [ { someFloat: 4.2, someNullableFloat: null } ],
+        listInput: [1, 2, 3]
+    }) {
+        enumResponse
+    }
+}

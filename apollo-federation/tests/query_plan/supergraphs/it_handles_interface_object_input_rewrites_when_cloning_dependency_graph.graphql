@@ -1,0 +1,84 @@
+# Composed from subgraphs with hash: ebabfd0be0356580cd148a45b86e2db82b29d3c3
+schema
+  @link(url: "https://specs.apollo.dev/link/v1.0")
+  @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
+{
+  query: Query
+}
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+interface I
+  @join__type(graph: S1, key: "i1")
+  @join__type(graph: S2, key: "i1", isInterfaceObject: true)
+{
+  i1: String!
+  i2: T
+  i3: Int @join__field(graph: S2)
+}
+
+scalar join__FieldSet
+
+enum join__Graph {
+  S1 @join__graph(name: "S1", url: "none")
+  S2 @join__graph(name: "S2", url: "none")
+  S3 @join__graph(name: "S3", url: "none")
+  S4 @join__graph(name: "S4", url: "none")
+}
+
+scalar link__Import
+
+enum link__Purpose {
+  """
+  `SECURITY` features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+
+  """
+  `EXECUTION` features provide metadata necessary for operation execution.
+  """
+  EXECUTION
+}
+
+type Query
+  @join__type(graph: S1)
+  @join__type(graph: S2)
+  @join__type(graph: S3)
+  @join__type(graph: S4)
+{
+  i: I! @join__field(graph: S1)
+}
+
+type T
+  @join__type(graph: S1, key: "t1", resolvable: false)
+  @join__type(graph: S2, key: "t1", resolvable: false)
+  @join__type(graph: S3, key: "t1")
+  @join__type(graph: S4, key: "t1")
+{
+  t1: String!
+  t2: String! @join__field(graph: S3) @join__field(graph: S4)
+  t3: Int @join__field(graph: S3)
+  t4: Int @join__field(graph: S4)
+}
+
+type U implements I
+  @join__implements(graph: S1, interface: "I")
+  @join__type(graph: S1, key: "i1")
+{
+  id: ID!
+  i1: String!
+  i2: T
+  i3: Int @join__field
+}
