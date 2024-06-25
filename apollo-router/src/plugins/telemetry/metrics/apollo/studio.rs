@@ -8,7 +8,12 @@ use uuid::Uuid;
 use super::histogram::CostHistogram;
 use super::histogram::DurationHistogram;
 use super::histogram::ListLengthHistogram;
+use crate::apollo_studio_interop::AggregatedExtendedReferenceStats;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::EnumStats;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::InputFieldStats;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::InputTypeStats;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::ReferencedFieldsForType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
 
@@ -37,6 +42,7 @@ pub(crate) struct SingleContextualizedStats {
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
     pub(crate) limits_stats: SingleLimitsStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
+    pub(crate) extended_references: ExtendedReferenceStats,
     pub(crate) local_per_type_stat: HashMap<String, LocalTypeStat>,
 }
 // TODO Make some of these fields bool
@@ -86,6 +92,7 @@ pub(crate) struct ContextualizedStats {
     context: StatsContext,
     query_latency_stats: QueryLatencyStats,
     per_type_stat: HashMap<String, TypeStat>,
+    extended_references: AggregatedExtendedReferenceStats,
     limits_stats: Option<LimitsStats>,
     local_per_type_stat: HashMap<String, LocalTypeStat>,
 }
@@ -102,6 +109,7 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
         for (k, v) in stats.per_type_stat {
             *self.per_type_stat.entry(k).or_default() += v;
         }
+        self.extended_references += stats.extended_references;
         for (k, v) in stats.local_per_type_stat {
             *self.local_per_type_stat.entry(k).or_default() += v;
         }
@@ -208,13 +216,17 @@ impl From<ContextualizedStats>
                 .collect(),
             query_latency_stats: Some(stats.query_latency_stats.into()),
             context: Some(stats.context),
-            extended_references: None,
             limits_stats: stats.limits_stats.map(|ls| ls.into()),
             local_per_type_stat: stats
                 .local_per_type_stat
                 .into_iter()
                 .map(|(k, v)| (k, v.into()))
                 .collect(),
+            extended_references: if stats.extended_references.is_empty() {
+                None
+            } else {
+                Some(stats.extended_references.into())
+            },
             operation_count: 0,
         }
     }
@@ -419,6 +431,44 @@ impl AddAssign<LocalFieldStat> for LocalFieldStat {
     }
 }
 
+impl From<AggregatedExtendedReferenceStats>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::ExtendedReferences
+{
+    fn from(references: AggregatedExtendedReferenceStats) -> Self {
+        Self {
+            input_types: references
+                .referenced_input_fields
+                .into_iter()
+                .map(|(type_name, type_stats)| {
+                    (
+                        type_name,
+                        InputTypeStats {
+                            field_names: type_stats
+                                .into_iter()
+                                .map(|(field_name, field_stats)| {
+                                    (
+                                        field_name,
+                                        InputFieldStats {
+                                            refs: field_stats.referenced,
+                                            null_refs: field_stats.null_reference,
+                                            missing: field_stats.undefined_reference,
+                                        },
+                                    )
+                                })
+                                .collect(),
+                        },
+                    )
+                })
+                .collect(),
+            enum_values: references
+                .referenced_enums
+                .into_iter()
+                .map(|(k, v)| (k, EnumStats { enum_values: v }))
+                .collect(),
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     use std::collections::HashMap;
@@ -555,6 +605,7 @@ mod test {
                             ("type1".into(), local_type_stat(&mut count)),
                             ("type2".into(), local_type_stat(&mut count)),
                         ]),
+                        extended_references: ExtendedReferenceStats::new(),
                     },
                     referenced_fields_by_type: HashMap::from([(
                         "type1".into(),

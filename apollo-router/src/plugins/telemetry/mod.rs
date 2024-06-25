@@ -76,6 +76,7 @@ pub(crate) use self::span_factory::SpanMode;
 use self::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
@@ -1440,6 +1441,16 @@ impl Telemetry {
                         root_field_count: 0,
                     }
                 });
+
+                // If extended references are populated, we want to add them to the SingleStatsReport
+                let extended_references = match context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<ExtendedReferenceStats>().cloned())
+                {
+                    Some(extended_refs) => extended_refs,
+                    None => ExtendedReferenceStats::new(),
+                };
+
                 SingleStatsReport {
                     request_id: uuid::Uuid::from_bytes(
                         Span::current()
@@ -1486,6 +1497,7 @@ impl Telemetry {
                                     ..Default::default()
                                 },
                                 per_type_stat,
+                                extended_references,
                                 local_per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
