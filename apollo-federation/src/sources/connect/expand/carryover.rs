@@ -1,5 +1,3 @@
-use std::error::Error;
-
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Name;
@@ -8,15 +6,28 @@ use apollo_compiler::name;
 use apollo_compiler::Node;
 use apollo_compiler::NodeStr;
 
+use crate::error::FederationError;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::spec::Identity;
 use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::Link;
+use crate::schema::position::DirectiveArgumentDefinitionPosition;
 use crate::schema::position::DirectiveDefinitionPosition;
+use crate::schema::position::EnumTypeDefinitionPosition;
+use crate::schema::position::EnumValueDefinitionPosition;
+use crate::schema::position::InputObjectFieldDefinitionPosition;
+use crate::schema::position::InputObjectTypeDefinitionPosition;
+use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
+use crate::schema::position::InterfaceFieldDefinitionPosition;
+use crate::schema::position::InterfaceTypeDefinitionPosition;
+use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
+use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
+use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::FederationSchema;
+use crate::schema::ObjectFieldDefinitionPosition;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");
@@ -26,7 +37,7 @@ const POLICY_DIRECTIVE_NAME_IN_SPEC: Name = name!("policy");
 pub(super) fn carryover_directives(
     from: &FederationSchema,
     to: &mut FederationSchema,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<(), FederationError> {
     let Some(metadata) = from.metadata() else {
         return Ok(());
     };
@@ -35,17 +46,16 @@ pub(super) fn carryover_directives(
 
     if let Some(link) = metadata.for_identity(&Identity::inaccessible_identity()) {
         let directive_name = link.directive_name_in_schema(&INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC);
-        let _ = from
-            .referencers()
+        from.referencers()
             .get_directive(&directive_name)
-            .map(|references| {
-                if references.len() > 0 {
-                    let _ = SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into());
-                    copy_directive_definition(from, to, directive_name.clone());
+            .map(|referencers| {
+                if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
+                    copy_directive_definition(from, to, directive_name.clone())?;
                 }
-                references.copy_directives(from, to, directive_name);
-            });
+                referencers.copy_directives(from, to, &directive_name)
+            })??;
     }
 
     // @tag
@@ -55,17 +65,16 @@ pub(super) fn carryover_directives(
         name: TAG_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&TAG_DIRECTIVE_NAME_IN_SPEC);
-        let _ = from
-            .referencers()
+        from.referencers()
             .get_directive(&directive_name)
-            .map(|references| {
-                if references.len() > 0 {
-                    let _ = SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into());
-                    copy_directive_definition(from, to, directive_name.clone());
+            .map(|referencers| {
+                if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
+                    copy_directive_definition(from, to, directive_name.clone())?;
                 }
-                references.copy_directives(from, to, directive_name);
-            });
+                referencers.copy_directives(from, to, &directive_name)
+            })??;
     }
 
     // @authenticated
@@ -75,17 +84,16 @@ pub(super) fn carryover_directives(
         name: AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC);
-        let _ = from
-            .referencers()
+        from.referencers()
             .get_directive(&directive_name)
-            .map(|references| {
-                if references.len() > 0 {
-                    let _ = SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into());
-                    copy_directive_definition(from, to, directive_name.clone());
+            .map(|referencers| {
+                if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
+                    copy_directive_definition(from, to, directive_name.clone())?;
                 }
-                references.copy_directives(from, to, directive_name);
-            });
+                referencers.copy_directives(from, to, &directive_name)
+            })??;
     }
 
     // @requiresScopes
@@ -95,26 +103,25 @@ pub(super) fn carryover_directives(
         name: REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC);
-        let _ = from
-            .referencers()
+        from.referencers()
             .get_directive(&directive_name)
-            .map(|references| {
-                if references.len() > 0 {
-                    let _ = SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into());
+            .map(|referencers| {
+                if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
 
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Scope)),
                     };
-                    let _ = scalar_type_pos.get(from.schema()).map(|def| {
-                        let _ = scalar_type_pos.pre_insert(to);
-                        let _ = scalar_type_pos.insert(to, def.clone());
-                    });
+                    scalar_type_pos.get(from.schema()).and_then(|def| {
+                        scalar_type_pos.pre_insert(to)?;
+                        scalar_type_pos.insert(to, def.clone())
+                    })?;
 
-                    copy_directive_definition(from, to, directive_name.clone());
+                    copy_directive_definition(from, to, directive_name.clone())?;
                 }
-                references.copy_directives(from, to, directive_name);
-            });
+                referencers.copy_directives(from, to, &directive_name)
+            })??;
     }
 
     // @policy
@@ -124,26 +131,25 @@ pub(super) fn carryover_directives(
         name: POLICY_DIRECTIVE_NAME_IN_SPEC,
     }) {
         let directive_name = link.directive_name_in_schema(&POLICY_DIRECTIVE_NAME_IN_SPEC);
-        let _ = from
-            .referencers()
+        from.referencers()
             .get_directive(&directive_name)
-            .map(|references| {
-                if references.len() > 0 {
-                    let _ = SchemaDefinitionPosition
-                        .insert_directive(to, link.to_directive_application().into());
+            .map(|referencers| {
+                if referencers.len() > 0 {
+                    SchemaDefinitionPosition
+                        .insert_directive(to, link.to_directive_application().into())?;
 
                     let scalar_type_pos = ScalarTypeDefinitionPosition {
                         type_name: link.type_name_in_schema(&name!(Policy)),
                     };
-                    let _ = scalar_type_pos.get(from.schema()).map(|def| {
-                        let _ = scalar_type_pos.pre_insert(to);
-                        let _ = scalar_type_pos.insert(to, def.clone());
-                    });
+                    scalar_type_pos.get(from.schema()).and_then(|def| {
+                        scalar_type_pos.pre_insert(to)?;
+                        scalar_type_pos.insert(to, def.clone())
+                    })?;
 
-                    copy_directive_definition(from, to, directive_name.clone());
+                    copy_directive_definition(from, to, directive_name.clone())?;
                 }
-                references.copy_directives(from, to, directive_name);
-            });
+                referencers.copy_directives(from, to, &directive_name)
+            })??;
     }
 
     // compose directive
@@ -152,20 +158,20 @@ pub(super) fn carryover_directives(
         .directives_by_imported_name
         .iter()
         .filter(|(_name, (link, _import))| !is_known_link(link))
-        .for_each(|(name, (link, _import))| {
+        .try_for_each(|(name, (link, _import))| {
             let directive_name = link.directive_name_in_schema(name);
-            let _ = from
-                .referencers()
+            from.referencers()
                 .get_directive(&directive_name)
-                .map(|references| {
-                    if references.len() > 0 {
-                        let _ = SchemaDefinitionPosition
-                            .insert_directive(to, link.to_directive_application().into());
-                        copy_directive_definition(from, to, directive_name.clone());
+                .map(|referencers| {
+                    if referencers.len() > 0 {
+                        SchemaDefinitionPosition
+                            .insert_directive(to, link.to_directive_application().into())?;
+                        copy_directive_definition(from, to, directive_name.clone())?;
                     }
-                    references.copy_directives(from, to, directive_name);
-                });
-        });
+                    referencers.copy_directives(from, to, &directive_name)
+                })??;
+            Ok::<_, FederationError>(())
+        })?;
 
     Ok(())
 }
@@ -188,13 +194,13 @@ fn copy_directive_definition(
     from: &FederationSchema,
     to: &mut FederationSchema,
     directive_name: Name,
-) {
+) -> Result<(), FederationError> {
     let def_pos = DirectiveDefinitionPosition { directive_name };
 
-    let _ = def_pos.get(from.schema()).map(|def| {
-        let _ = def_pos.pre_insert(to);
-        let _ = def_pos.insert(to, def.clone());
-    });
+    def_pos.get(from.schema()).and_then(|def| {
+        def_pos.pre_insert(to)?;
+        def_pos.insert(to, def.clone())
+    })
 }
 
 impl Link {
@@ -273,6 +279,70 @@ impl Link {
     }
 }
 
+trait CopyDirective {
+    fn copy_directive(
+        &self,
+        from: &FederationSchema,
+        to: &mut FederationSchema,
+        directive_name: &Name,
+    ) -> Result<(), FederationError>;
+}
+
+impl CopyDirective for SchemaDefinitionPosition {
+    fn copy_directive(
+        &self,
+        from: &FederationSchema,
+        to: &mut FederationSchema,
+        directive_name: &Name,
+    ) -> Result<(), FederationError> {
+        self.get(from.schema())
+            .directives
+            .iter()
+            .filter(|d| &d.name == directive_name)
+            .try_for_each(|directive| self.insert_directive(to, directive.clone()))
+    }
+}
+
+macro_rules! impl_copy_directive {
+    ($( $Ty: ty )+) => {
+        $(
+            impl CopyDirective for $Ty {
+                fn copy_directive(
+                    &self,
+                    from: &FederationSchema,
+                    to: &mut FederationSchema,
+                    directive_name: &Name,
+                ) -> Result<(), FederationError> {
+                    self.get(from.schema())
+                        .map(|def| {
+                            def.directives
+                                .iter()
+                                .filter(|d| &d.name == directive_name)
+                                .try_for_each(|directive| self.insert_directive(to, directive.clone()))
+                        })
+                        .unwrap_or(Ok(()))
+                }
+            }
+        )+
+    };
+}
+
+impl_copy_directive! {
+    ScalarTypeDefinitionPosition
+    ObjectTypeDefinitionPosition
+    ObjectFieldDefinitionPosition
+    ObjectFieldArgumentDefinitionPosition
+    InterfaceTypeDefinitionPosition
+    InterfaceFieldDefinitionPosition
+    InterfaceFieldArgumentDefinitionPosition
+    UnionTypeDefinitionPosition
+    EnumTypeDefinitionPosition
+    EnumValueDefinitionPosition
+    InputObjectTypeDefinitionPosition
+    InputObjectFieldDefinitionPosition
+    DirectiveArgumentDefinitionPosition
+}
+
 impl DirectiveReferencers {
     fn len(&self) -> usize {
         self.schema.as_ref().map(|_| 1).unwrap_or_default()
@@ -295,148 +365,51 @@ impl DirectiveReferencers {
         &self,
         from: &FederationSchema,
         to: &mut FederationSchema,
-        directive_name: Name,
-    ) {
+        directive_name: &Name,
+    ) -> Result<(), FederationError> {
         if let Some(position) = &self.schema {
-            position
-                .get(from.schema())
-                .directives
-                .iter()
-                .filter(|d| d.name == directive_name)
-                .for_each(|directive| {
-                    let _ = position.insert_directive(to, directive.clone());
-                });
+            position.copy_directive(from, to, directive_name)?
         }
-        self.scalar_types.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.object_types.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.object_fields.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.object_field_arguments.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.interface_types.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.interface_fields.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.interface_field_arguments.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.union_types.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.enum_types.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.enum_values.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.input_object_types.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.input_object_fields.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
-        self.directive_arguments.iter().for_each(|position| {
-            let _ = position.get(from.schema()).map(|def| {
-                def.directives
-                    .iter()
-                    .filter(|d| d.name == directive_name)
-                    .for_each(|directive| {
-                        let _ = position.insert_directive(to, directive.clone());
-                    })
-            });
-        });
+        self.scalar_types
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.object_types
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.object_fields
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.object_field_arguments
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.interface_types
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.interface_fields
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.interface_field_arguments
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.union_types
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.enum_types
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.enum_values
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.input_object_types
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.input_object_fields
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        self.directive_arguments
+            .iter()
+            .try_for_each(|position| position.copy_directive(from, to, directive_name))?;
+        Ok(())
     }
 }
 
