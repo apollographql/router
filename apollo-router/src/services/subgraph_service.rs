@@ -26,6 +26,7 @@ use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use rustls::RootCertStore;
 use serde::Serialize;
+use tokio::select;
 use tokio::sync::oneshot;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::connect_async_tls_with_config;
@@ -476,6 +477,7 @@ async fn call_websocket(
     let SubgraphRequest {
         subgraph_request,
         subscription_stream,
+        connection_closed_signal,
         ..
     } = request;
     let subscription_stream_tx =
@@ -647,9 +649,9 @@ async fn call_websocket(
         connection_params,
     )
     .await
-    .map_err(|_| FetchError::SubrequestWsError {
+    .map_err(|err| FetchError::SubrequestWsError {
         service: service_name.clone(),
-        reason: "cannot get the GraphQL websocket stream".to_string(),
+        reason: format!("cannot get the GraphQL websocket stream: {}", err.message),
     })?;
 
     let gql_stream = gql_socket
@@ -663,10 +665,26 @@ async fn call_websocket(
     let (handle_sink, handle_stream) = handle.split();
 
     tokio::task::spawn(async move {
-        let _ = gql_stream
-            .map(Ok::<_, graphql::Error>)
-            .forward(handle_sink)
-            .await;
+        match connection_closed_signal {
+            Some(mut connection_closed_signal) => select! {
+                // We prefer to specify the order of checks within the select
+                biased;
+                _ = gql_stream
+                    .map(Ok::<_, graphql::Error>)
+                    .forward(handle_sink) => {
+                    tracing::debug!("gql_stream empty");
+                },
+                _ = connection_closed_signal.recv() => {
+                    tracing::debug!("connection_closed_signal triggered");
+                }
+            },
+            None => {
+                let _ = gql_stream
+                    .map(Ok::<_, graphql::Error>)
+                    .forward(handle_sink)
+                    .await;
+            }
+        }
     });
 
     subscription_stream_tx.send(Box::pin(handle_stream)).await?;
