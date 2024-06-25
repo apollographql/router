@@ -216,10 +216,6 @@ fn interface_union_interaction() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add fragment of condition "A" (runtimes: [A]) to parent type "I" (runtimes: [B, C])"#
-)]
-// TODO: investigate this failure
 fn interface_union_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
@@ -501,10 +497,6 @@ fn union_union_interaction() {
 }
 
 #[test]
-#[should_panic(
-    expected = r#"Cannot add fragment of condition "A" (runtimes: [A]) to parent type "U1" (runtimes: [B, C])"#
-)]
-// TODO: investigate this failure
 fn union_union_interaction_but_no_need_to_type_explode() {
     let planner = planner!(
         Subgraph1: r#"
@@ -641,7 +633,7 @@ fn handles_spread_unions_correctly() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (reverse order of parallel fetches)
 fn handles_case_of_key_chains_in_parallel_requires() {
     let planner = planner!(
         Subgraph1: r#"
@@ -770,8 +762,6 @@ fn handles_case_of_key_chains_in_parallel_requires() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
     let planner = planner!(
         Subgraph1: r#"
@@ -882,8 +872,6 @@ fn handles_types_with_no_common_supertype_at_the_same_merge_at() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn does_not_error_out_handling_fragments_when_interface_subtyping_is_involved() {
     // This test essentially make sure the issue in https://github.com/apollographql/federation/issues/2592
     // is resolved.

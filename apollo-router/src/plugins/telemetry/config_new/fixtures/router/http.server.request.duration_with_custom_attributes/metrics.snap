@@ -12,12 +12,17 @@ info:
             attributes:
               my_attribute:
                 request_method: true
+              graphql.operation.name:
+                operation_name: string
 ---
 - name: http.server.request.duration
+  description: Duration of HTTP server requests.
+  unit: s
   data:
     datapoints:
       - sum: 0.1
         attributes:
+          graphql.operation.name: TestQuery
           http.request.method: GET
           http.response.status_code: 200
           my_attribute: GET

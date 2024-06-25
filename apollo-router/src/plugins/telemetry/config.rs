@@ -3,6 +3,7 @@ use std::collections::BTreeMap;
 use std::collections::HashSet;
 
 use axum::headers::HeaderName;
+use derivative::Derivative;
 use opentelemetry::sdk::metrics::new_view;
 use opentelemetry::sdk::metrics::Aggregation;
 use opentelemetry::sdk::metrics::Instrument;
@@ -22,6 +23,7 @@ use super::*;
 use crate::plugin::serde::deserialize_option_header_name;
 use crate::plugins::telemetry::metrics;
 use crate::plugins::telemetry::resource::ConfigResource;
+use crate::Configuration;
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum Error {
@@ -241,6 +243,30 @@ pub(crate) enum TraceIdFormat {
     ///
     /// (e.g. Trace ID 16 -> 16)
     Decimal,
+}
+
+/// Apollo usage report signature normalization algorithm
+#[derive(Clone, PartialEq, Eq, Default, Derivative, Serialize, Deserialize, JsonSchema)]
+#[derivative(Debug)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ApolloSignatureNormalizationAlgorithm {
+    /// Use the algorithm that matches the JavaScript-based implementation.
+    #[default]
+    Legacy,
+    /// Use a new algorithm that includes input object forms, normalized aliases and variable names, and removes some
+    /// edge cases from the JS implementation that affected normalization.
+    Enhanced,
+}
+
+/// Apollo usage report reference generation modes.
+#[derive(Clone, Default, Debug, Deserialize, JsonSchema, Copy)]
+#[serde(deny_unknown_fields, rename_all = "lowercase")]
+pub(crate) enum ApolloMetricsReferenceMode {
+    /// Use the extended mode to report input object fields and enum value references as well as object fields.
+    Extended,
+    /// Use the standard mode that only reports referenced object fields.
+    #[default]
+    Standard,
 }
 
 /// Configure propagation of traces. In general you won't have to do this as these are automatically configured
@@ -656,6 +682,37 @@ impl Conf {
                 (_, _) => 0.0,
             },
         )
+    }
+
+    pub(crate) fn metrics_reference_mode(
+        configuration: &Configuration,
+    ) -> ApolloMetricsReferenceMode {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => conf.apollo.experimental_apollo_metrics_reference_mode,
+                    _ => ApolloMetricsReferenceMode::default(),
+                }
+            }
+            _ => ApolloMetricsReferenceMode::default(),
+        }
+    }
+
+    pub(crate) fn signature_normalization_algorithm(
+        configuration: &Configuration,
+    ) -> ApolloSignatureNormalizationAlgorithm {
+        match configuration.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<Conf>(telemetry_config.clone()) {
+                    Ok(conf) => {
+                        conf.apollo
+                            .experimental_apollo_signature_normalization_algorithm
+                    }
+                    _ => ApolloSignatureNormalizationAlgorithm::default(),
+                }
+            }
+            _ => ApolloSignatureNormalizationAlgorithm::default(),
+        }
     }
 }
 

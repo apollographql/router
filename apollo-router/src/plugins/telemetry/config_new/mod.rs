@@ -18,7 +18,7 @@ pub(crate) mod attributes;
 pub(crate) mod conditions;
 
 mod conditional;
-mod cost;
+pub(crate) mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
 pub(crate) mod extendable;
@@ -41,12 +41,12 @@ pub(crate) trait Selectors {
     fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue>;
     fn on_response_field(
         &self,
+        _attrs: &mut Vec<KeyValue>,
         _ty: &apollo_compiler::executable::NamedType,
         _field: &apollo_compiler::executable::Field,
         _value: &serde_json_bytes::Value,
         _ctx: &Context,
-    ) -> Vec<KeyValue> {
-        Vec::with_capacity(0)
+    ) {
     }
 }
 
@@ -122,7 +122,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
     if span_context.is_valid() {
         Some(span_context.trace_id())
     } else {
-        None
+        crate::tracer::TraceId::current().map(|trace_id| TraceId::from(trace_id.to_u128()))
     }
 }
 
@@ -270,7 +270,7 @@ mod test {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
+                TraceId::from(42),
                 SpanId::from_u64(42),
                 TraceFlags::default(),
                 false,

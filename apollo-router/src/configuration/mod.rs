@@ -50,6 +50,8 @@ use crate::plugin::plugins;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
@@ -590,6 +592,44 @@ impl Configuration {
                 message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
                 error: "either change to some other query planner mode, or change to new metrics generation".into()
             });
+        }
+
+        let apollo_telemetry_config = match self.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<crate::plugins::telemetry::config::Conf>(
+                    telemetry_config.clone(),
+                ) {
+                    Ok(conf) => Some(conf.apollo),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(config) = apollo_telemetry_config {
+            if matches!(
+                config.experimental_apollo_signature_normalization_algorithm,
+                ApolloSignatureNormalizationAlgorithm::Enhanced
+            ) && self.experimental_apollo_metrics_generation_mode
+                != ApolloMetricsGenerationMode::New
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
+                    error: "either change to the legacy signature normalization mode, or change to new metrics generation".into()
+                });
+            }
+
+            if matches!(
+                config.experimental_apollo_metrics_reference_mode,
+                ApolloMetricsReferenceMode::Extended
+            ) && self.experimental_apollo_metrics_generation_mode
+                != ApolloMetricsGenerationMode::New
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`",
+                    error: "either change to the standard reference generation mode, or change to new metrics generation".into()
+                });
+            };
         }
 
         Ok(self)

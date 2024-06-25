@@ -103,7 +103,7 @@ impl BridgeQueryPlannerPool {
             .map(|p| p.planner().clone())
             .collect();
 
-        for (worker_id, mut planner) in bridge_query_planners.into_iter().enumerate() {
+        for mut planner in bridge_query_planners.into_iter() {
             let receiver = receiver.clone();
 
             tokio::spawn(async move {
@@ -116,16 +116,8 @@ impl BridgeQueryPlannerPool {
                             continue;
                         }
                     };
-                    let start = Instant::now();
 
                     let res = svc.call(request).await;
-
-                    f64_histogram!(
-                        "apollo.router.query_planning.plan.duration",
-                        "Duration of the query planning.",
-                        start.elapsed().as_secs_f64(),
-                        "workerId" = worker_id.to_string()
-                    );
 
                     let _ = res_sender.send(res);
                 }

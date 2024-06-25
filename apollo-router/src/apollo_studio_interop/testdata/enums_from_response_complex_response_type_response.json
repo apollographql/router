@@ -1,0 +1,34 @@
+{
+  "enumInputQuery": {
+    "enumResponse": "SOME_VALUE_2"
+  },
+  "enumResponseQuery": {
+    "list": [
+      "SOME_VALUE_3",
+      "SOME_VALUE_5"
+    ],
+    "listOfLists": [
+      [],
+      [
+        "SOME_VALUE_6",
+        "SOME_VALUE_8"
+      ]
+    ],
+    "nestedObject": {
+      "singleValue": "SOME_VALUE_10",
+      "listOfLists": [
+        [],
+        [
+          "SOME_VALUE_13"
+        ],
+        [
+          "SOME_VALUE_14"
+        ]
+      ],
+      "list": [
+        "SOME_VALUE_11"
+      ]
+    },
+    "singleValue": "SOME_VALUE_1"
+  }
+}

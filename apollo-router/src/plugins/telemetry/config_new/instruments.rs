@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::metrics::Unit;
@@ -33,10 +34,14 @@ use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::RouterValue;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphValue;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
+use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
@@ -53,19 +58,25 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) default_requirement_level: DefaultAttributeRequirementLevel,
 
     /// Router service instruments. For more information see documentation on Router lifecycle.
-    pub(crate) router:
-        Extendable<RouterInstrumentsConfig, Instrument<RouterAttributes, RouterSelector>>,
+    pub(crate) router: Extendable<
+        RouterInstrumentsConfig,
+        Instrument<RouterAttributes, RouterSelector, RouterValue>,
+    >,
     /// Supergraph service instruments. For more information see documentation on Router lifecycle.
     pub(crate) supergraph: Extendable<
         SupergraphInstrumentsConfig,
-        Instrument<SupergraphAttributes, SupergraphSelector>,
+        Instrument<SupergraphAttributes, SupergraphSelector, SupergraphValue>,
     >,
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
-    pub(crate) subgraph:
-        Extendable<SubgraphInstrumentsConfig, Instrument<SubgraphAttributes, SubgraphSelector>>,
+    pub(crate) subgraph: Extendable<
+        SubgraphInstrumentsConfig,
+        Instrument<SubgraphAttributes, SubgraphSelector, SubgraphValue>,
+    >,
     /// GraphQL response field instruments.
-    pub(crate) graphql:
-        Extendable<GraphQLInstrumentsConfig, Instrument<GraphQLAttributes, GraphQLSelector>>,
+    pub(crate) graphql: Extendable<
+        GraphQLInstrumentsConfig,
+        Instrument<GraphQLAttributes, GraphQLSelector, GraphQLValue>,
+    >,
 }
 
 impl InstrumentsConfig {
@@ -93,7 +104,13 @@ impl InstrumentsConfig {
                 inner: Mutex::new(CustomHistogramInner {
                     increment: Increment::Duration(Instant::now()),
                     condition: Condition::True,
-                    histogram: Some(meter.f64_histogram("http.server.request.duration").init()),
+                    histogram: Some(
+                        meter
+                            .f64_histogram("http.server.request.duration")
+                            .with_unit(Unit::new("s"))
+                            .with_description("Duration of HTTP server requests.")
+                            .init(),
+                    ),
                     attributes: Vec::new(),
                     selector: None,
                     selectors: match &self.router.attributes.http_server_request_duration {
@@ -126,7 +143,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.server.request.body.size").init(),
+                                meter
+                                    .f64_histogram("http.server.request.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP server request bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::RequestHeader {
@@ -160,7 +181,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.server.response.body.size").init(),
+                                meter
+                                    .f64_histogram("http.server.response.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP server response bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(RouterSelector::ResponseHeader {
@@ -183,6 +208,8 @@ impl InstrumentsConfig {
                     counter: Some(
                         meter
                             .i64_up_down_counter("http.server.active_requests")
+                            .with_unit(Unit::new("request"))
+                            .with_description("Number of active HTTP server requests.")
                             .init(),
                     ),
                     attrs_config: match &self.router.attributes.http_server_active_requests {
@@ -213,34 +240,39 @@ impl InstrumentsConfig {
 
     pub(crate) fn new_subgraph_instruments(&self) -> SubgraphInstruments {
         let meter = metrics::meter_provider().meter(METER_NAME);
-        let http_client_request_duration = self
-            .subgraph
-            .attributes
-            .http_client_request_duration
-            .is_enabled()
-            .then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &self.subgraph.attributes.http_client_request_duration {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
+        let http_client_request_duration =
+            self.subgraph
+                .attributes
+                .http_client_request_duration
+                .is_enabled()
+                .then(|| {
+                    let mut nb_attributes = 0;
+                    let selectors = match &self.subgraph.attributes.http_client_request_duration {
+                        DefaultedStandardInstrument::Bool(_)
+                        | DefaultedStandardInstrument::Unset => None,
+                        DefaultedStandardInstrument::Extendable { attributes } => {
+                            nb_attributes = attributes.custom.len();
+                            Some(attributes.clone())
+                        }
+                    };
+                    CustomHistogram {
+                        inner: Mutex::new(CustomHistogramInner {
+                            increment: Increment::Duration(Instant::now()),
+                            condition: Condition::True,
+                            histogram: Some(
+                                meter
+                                    .f64_histogram("http.client.request.duration")
+                                    .with_unit(Unit::new("s"))
+                                    .with_description("Duration of HTTP client requests.")
+                                    .init(),
+                            ),
+                            attributes: Vec::with_capacity(nb_attributes),
+                            selector: None,
+                            selectors,
+                            updated: false,
+                        }),
                     }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::Duration(Instant::now()),
-                        condition: Condition::True,
-                        histogram: Some(meter.f64_histogram("http.client.request.duration").init()),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: None,
-                        selectors,
-                        updated: false,
-                    }),
-                }
-            });
+                });
         let http_client_request_body_size =
             self.subgraph
                 .attributes
@@ -261,7 +293,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.client.request.body.size").init(),
+                                meter
+                                    .f64_histogram("http.client.request.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP client request bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(SubgraphSelector::SubgraphRequestHeader {
@@ -294,7 +330,11 @@ impl InstrumentsConfig {
                             increment: Increment::Custom(None),
                             condition: Condition::True,
                             histogram: Some(
-                                meter.f64_histogram("http.client.response.body.size").init(),
+                                meter
+                                    .f64_histogram("http.client.response.body.size")
+                                    .with_unit(Unit::new("By"))
+                                    .with_description("Size of HTTP client response bodies.")
+                                    .init(),
                             ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: Some(Arc::new(SubgraphSelector::SubgraphResponseHeader {
@@ -540,17 +580,18 @@ impl DefaultForLevel for SubgraphInstrumentsConfig {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Instrument<A, E>
+pub(crate) struct Instrument<A, E, V>
 where
     A: Default + Debug,
     E: Debug,
+    for<'a> &'a V: Into<InstrumentValue<E>>,
 {
     /// The type of instrument.
     #[serde(rename = "type")]
     ty: InstrumentType,
 
     /// The value of the instrument.
-    value: InstrumentValue<E>,
+    value: V,
 
     /// The description of the instrument.
     description: String,
@@ -567,12 +608,14 @@ where
     condition: Condition<E>,
 }
 
-impl<A, E, Request, Response, EventResponse> Selectors for Instrument<A, E>
+impl<A, E, Request, Response, EventResponse, SelectorValue> Selectors
+    for Instrument<A, E, SelectorValue>
 where
     A: Debug
         + Default
         + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+    for<'a> &'a SelectorValue: Into<InstrumentValue<E>>,
 {
     type Request = Request;
     type Response = Response;
@@ -620,6 +663,12 @@ pub(crate) enum InstrumentValue<T> {
     Chunked(Event<T>),
     Field(Field<T>),
     Custom(T),
+}
+
+#[derive(Clone, Deserialize, JsonSchema, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum StandardUnit {
+    Unit,
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
@@ -673,7 +722,8 @@ pub(crate) trait Instrumented {
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
-impl<A, B, E, Request, Response, EventResponse> Instrumented for Extendable<A, Instrument<B, E>>
+impl<A, B, E, Request, Response, EventResponse, SelectorValue> Instrumented
+    for Extendable<A, Instrument<B, E, SelectorValue>>
 where
     A: Default
         + Instrumented<Request = Request, Response = Response, EventResponse = EventResponse>,
@@ -681,6 +731,7 @@ where
         + Debug
         + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
+    for<'a> InstrumentValue<E>: From<&'a SelectorValue>,
 {
     type Request = Request;
     type Response = Response;
@@ -743,16 +794,18 @@ impl Selectors for SubgraphInstrumentsConfig {
     }
 }
 
-pub(crate) struct CustomInstruments<Request, Response, Attributes, Select>
+pub(crate) struct CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
 where
     Attributes: Selectors<Request = Request, Response = Response> + Default,
     Select: Selector<Request = Request, Response = Response> + Debug,
 {
+    _phantom: PhantomData<SelectorValue>,
     counters: Vec<CustomCounter<Request, Response, Attributes, Select>>,
     histograms: Vec<CustomHistogram<Request, Response, Attributes, Select>>,
 }
 
-impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
+impl<Request, Response, Attributes, Select, SelectorValue>
+    CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
 where
     Attributes: Selectors<Request = Request, Response = Response> + Default,
     Select: Selector<Request = Request, Response = Response> + Debug,
@@ -762,12 +815,16 @@ where
     }
 }
 
-impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
+impl<Request, Response, Attributes, Select, SelectorValue>
+    CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
 where
     Attributes: Selectors<Request = Request, Response = Response> + Default + Debug + Clone,
     Select: Selector<Request = Request, Response = Response> + Debug + Clone,
+    for<'a> &'a SelectorValue: Into<InstrumentValue<Select>>,
 {
-    pub(crate) fn new(config: &HashMap<String, Instrument<Attributes, Select>>) -> Self {
+    pub(crate) fn new(
+        config: &HashMap<String, Instrument<Attributes, Select, SelectorValue>>,
+    ) -> Self {
         let mut counters = Vec::new();
         let mut histograms = Vec::new();
         let meter = metrics::meter_provider().meter(METER_NAME);
@@ -775,7 +832,7 @@ where
         for (instrument_name, instrument) in config {
             match instrument.ty {
                 InstrumentType::Counter => {
-                    let (selector, increment) = match &instrument.value {
+                    let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
                                 Standard::Duration => Increment::Duration(Instant::now()),
@@ -784,22 +841,20 @@ where
                             (None, incr)
                         }
                         InstrumentValue::Custom(selector) => {
-                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                            (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
                             Event::Duration => (None, Increment::EventDuration(Instant::now())),
                             Event::Unit => (None, Increment::EventUnit),
-                            Event::Custom(selector) => (
-                                Some(Arc::new(selector.clone())),
-                                Increment::EventCustom(None),
-                            ),
+                            Event::Custom(selector) => {
+                                (Some(Arc::new(selector)), Increment::EventCustom(None))
+                            }
                         },
                         InstrumentValue::Field(incr) => match incr {
                             Field::Unit => (None, Increment::FieldUnit),
-                            Field::Custom(selector) => (
-                                Some(Arc::new(selector.clone())),
-                                Increment::FieldCustom(None),
-                            ),
+                            Field::Custom(selector) => {
+                                (Some(Arc::new(selector)), Increment::FieldCustom(None))
+                            }
                         },
                     };
                     let counter = CustomCounterInner {
@@ -823,7 +878,7 @@ where
                     })
                 }
                 InstrumentType::Histogram => {
-                    let (selector, increment) = match &instrument.value {
+                    let (selector, increment) = match (&instrument.value).into() {
                         InstrumentValue::Standard(incr) => {
                             let incr = match incr {
                                 Standard::Duration => Increment::Duration(Instant::now()),
@@ -832,22 +887,20 @@ where
                             (None, incr)
                         }
                         InstrumentValue::Custom(selector) => {
-                            (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                            (Some(Arc::new(selector)), Increment::Custom(None))
                         }
                         InstrumentValue::Chunked(incr) => match incr {
                             Event::Duration => (None, Increment::EventDuration(Instant::now())),
                             Event::Unit => (None, Increment::EventUnit),
-                            Event::Custom(selector) => (
-                                Some(Arc::new(selector.clone())),
-                                Increment::EventCustom(None),
-                            ),
+                            Event::Custom(selector) => {
+                                (Some(Arc::new(selector)), Increment::EventCustom(None))
+                            }
                         },
                         InstrumentValue::Field(incr) => match incr {
                             Field::Unit => (None, Increment::FieldUnit),
-                            Field::Custom(selector) => (
-                                Some(Arc::new(selector.clone())),
-                                Increment::FieldCustom(None),
-                            ),
+                            Field::Custom(selector) => {
+                                (Some(Arc::new(selector)), Increment::FieldCustom(None))
+                            }
                         },
                     };
                     let histogram = CustomHistogramInner {
@@ -874,14 +927,15 @@ where
         }
 
         Self {
+            _phantom: Default::default(),
             counters,
             histograms,
         }
     }
 }
 
-impl<Request, Response, EventResponse, Attributes, Select> Instrumented
-    for CustomInstruments<Request, Response, Attributes, Select>
+impl<Request, Response, EventResponse, Attributes, Select, SelectorValue> Instrumented
+    for CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
 where
     Attributes:
         Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
@@ -1115,18 +1169,29 @@ impl Instrumented for SubgraphInstruments {
     }
 }
 
-pub(crate) type RouterCustomInstruments =
-    CustomInstruments<router::Request, router::Response, RouterAttributes, RouterSelector>;
+pub(crate) type RouterCustomInstruments = CustomInstruments<
+    router::Request,
+    router::Response,
+    RouterAttributes,
+    RouterSelector,
+    RouterValue,
+>;
 
 pub(crate) type SupergraphCustomInstruments = CustomInstruments<
     supergraph::Request,
     supergraph::Response,
     SupergraphAttributes,
     SupergraphSelector,
+    SupergraphValue,
 >;
 
-pub(crate) type SubgraphCustomInstruments =
-    CustomInstruments<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
+pub(crate) type SubgraphCustomInstruments = CustomInstruments<
+    subgraph::Request,
+    subgraph::Response,
+    SubgraphAttributes,
+    SubgraphSelector,
+    SubgraphValue,
+>;
 
 // ---------------- Counter -----------------------
 #[derive(Debug)]
@@ -1139,6 +1204,16 @@ pub(crate) enum Increment {
     Custom(Option<i64>),
     EventCustom(Option<i64>),
     FieldCustom(Option<i64>),
+}
+
+fn to_i64(value: opentelemetry::Value) -> Option<i64> {
+    match value {
+        opentelemetry::Value::I64(i) => Some(i),
+        opentelemetry::Value::String(s) => s.as_str().parse::<i64>().ok(),
+        opentelemetry::Value::F64(f) => Some(f.floor() as i64),
+        opentelemetry::Value::Bool(_) => None,
+        opentelemetry::Value::Array(_) => None,
+    }
 }
 
 pub(crate) struct CustomCounter<Request, Response, A, T>
@@ -1187,12 +1262,8 @@ where
 
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1231,12 +1302,8 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::Custom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1292,12 +1359,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1378,29 +1441,14 @@ where
             return;
         }
 
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(ty, field, value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
-        }
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
@@ -1428,8 +1476,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.counter.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(counter), Some(increment)) = (&inner.counter, increment) {
-            counter.add(increment, &attrs);
+            counter.add(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }
@@ -1599,15 +1662,9 @@ where
         }
         if let Some(selected_value) = inner.selector.as_ref().and_then(|s| s.on_request(request)) {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1644,15 +1701,9 @@ where
             .and_then(|s| s.on_response(response))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::Custom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::Custom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1704,12 +1755,8 @@ where
             .and_then(|s| s.on_response_event(response, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::EventCustom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::EventCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::EventCustom(None) => Increment::EventCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::EventCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or EventCustom, please open an issue: {other:?}");
                     return;
@@ -1786,29 +1833,14 @@ where
             return;
         }
 
-        // Response field may be called multiple times so we don't extend inner.attributes
-        let mut attrs = inner.attributes.clone();
-        if let Some(selectors) = inner.selectors.as_ref() {
-            attrs.extend(
-                selectors
-                    .on_response_field(ty, field, value, ctx)
-                    .into_iter()
-                    .collect::<Vec<_>>(),
-            );
-        }
-
         if let Some(selected_value) = inner
             .selector
             .as_ref()
             .and_then(|s| s.on_response_field(ty, field, value, ctx))
         {
             let new_incr = match &inner.increment {
-                Increment::FieldCustom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
-                Increment::Custom(None) => {
-                    Increment::FieldCustom(selected_value.as_str().parse::<i64>().ok())
-                }
+                Increment::FieldCustom(None) => Increment::FieldCustom(to_i64(selected_value)),
+                Increment::Custom(None) => Increment::FieldCustom(to_i64(selected_value)),
                 other => {
                     failfast_error!("this is a bug and should not happen, the increment should only be Custom or FieldCustom, please open an issue: {other:?}");
                     return;
@@ -1836,8 +1868,23 @@ where
             }
         };
 
+        // Response field may be called multiple times
+        // But there's no need for us to create a new vec each time, we can just extend the existing one and then reset it after
+        let original_length = inner.attributes.len();
+        if inner.histogram.is_some() && increment.is_some() {
+            // Only get the attributes from the selectors if we are actually going to increment the histogram
+            // Cloning selectors should not have to happen
+            let selectors = inner.selectors.clone();
+            let attributes = &mut inner.attributes;
+            if let Some(selectors) = selectors {
+                selectors.on_response_field(attributes, ty, field, value, ctx);
+            }
+        }
+
         if let (Some(histogram), Some(increment)) = (&inner.histogram, increment) {
-            histogram.record(increment, &attrs);
+            histogram.record(increment, &inner.attributes);
+            // Reset the attributes to the original length, this will discard the new attributes added from selectors.
+            inner.attributes.truncate(original_length);
         }
     }
 }
@@ -1890,7 +1937,6 @@ mod tests {
     use apollo_compiler::ast::Name;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
-    use apollo_compiler::execution::JsonMap;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -1901,6 +1947,7 @@ mod tests {
     use schemars::gen::SchemaGenerator;
     use serde::Deserialize;
     use serde_json::json;
+    use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
 
     use super::*;
@@ -1915,10 +1962,17 @@ mod tests {
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::spec::operation_limits::OperationLimits;
     use crate::Context;
+
+    type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
     #[derive(RustEmbed)]
     #[folder = "src/plugins/telemetry/config_new/fixtures"]
@@ -1927,6 +1981,9 @@ mod tests {
     #[derive(Deserialize, JsonSchema)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     enum Event {
+        Extension {
+            map: serde_json::Map<String, serde_json::Value>,
+        },
         Context {
             map: serde_json::Map<String, serde_json::Value>,
         },
@@ -2383,6 +2440,42 @@ mod tests {
                                 Event::Context { map } => {
                                     for (key, value) in map {
                                         context.insert(key, value).expect("insert context");
+                                    }
+                                }
+                                Event::Extension { map } => {
+                                    for (key, value) in map {
+                                        if key == APOLLO_PRIVATE_QUERY_ALIASES.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.aliases = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_DEPTH.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.depth = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_HEIGHT.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.height = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_ROOT_FIELDS.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.root_fields = value_as_u32;
+                                            });
+                                        }
                                     }
                                 }
                             }

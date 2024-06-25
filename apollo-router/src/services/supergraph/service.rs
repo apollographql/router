@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
@@ -11,6 +10,8 @@ use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
@@ -69,6 +70,7 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -224,6 +226,11 @@ async fn service_call(
         }
 
         Some(QueryPlannerContent::Plan { plan }) => {
+            let query_metrics = plan.query_metrics;
+            context.extensions().with_lock(|mut lock| {
+                let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
+            });
+
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
@@ -344,24 +351,26 @@ async fn service_call(
                     .with_lock(|lock| lock.get::<SupergraphEventResponseLevel>().cloned());
                 match supergraph_response_event {
                     Some(level) => {
-                        let mut attrs = HashMap::with_capacity(4);
-                        attrs.insert(
-                            "http.response.headers".to_string(),
-                            format!("{:?}", parts.headers),
-                        );
-                        attrs.insert(
-                            "http.response.status".to_string(),
-                            format!("{}", parts.status),
-                        );
-                        attrs.insert(
-                            "http.response.version".to_string(),
-                            format!("{:?}", parts.version),
-                        );
+                        let mut attrs = Vec::with_capacity(4);
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.headers"),
+                            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+                        ));
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.status"),
+                            opentelemetry::Value::String(format!("{}", parts.status).into()),
+                        ));
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.version"),
+                            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                        ));
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
-                            attrs.insert(
-                                "http.response.body".to_string(),
-                                serde_json::to_string(resp).unwrap_or_default(),
-                            );
+                            attrs.push(KeyValue::new(
+                                Key::from_static_str("http.response.body"),
+                                opentelemetry::Value::String(
+                                    serde_json::to_string(resp).unwrap_or_default().into(),
+                                ),
+                            ));
                             log_event(level.0, "supergraph.response", attrs.clone(), "");
                         }));
 
@@ -418,6 +427,7 @@ async fn subscription_task(
                 root: Arc::new(*r),
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
+                query_metrics: query_plan.query_metrics,
             })
         }),
         _ => {
@@ -905,9 +915,10 @@ impl SupergraphCreator {
         &mut self,
         query_parser: &QueryAnalysisLayer,
         persisted_query_layer: &PersistedQueryLayer,
-        previous_cache: InMemoryCachePlanner,
+        previous_cache: Option<InMemoryCachePlanner>,
         count: Option<usize>,
         experimental_reuse_query_plans: bool,
+        experimental_pql_prewarm: bool,
     ) {
         self.query_planner_service
             .warm_up(
@@ -916,6 +927,7 @@ impl SupergraphCreator {
                 previous_cache,
                 count,
                 experimental_reuse_query_plans,
+                experimental_pql_prewarm,
             )
             .await
     }
