@@ -1439,17 +1439,17 @@ impl Telemetry {
                 let limits_stats = context.extensions().with_lock(|guard| {
                     let strategy = guard.get::<demand_control::strategy::Strategy>();
                     let cost_ctx = guard.get::<demand_control::CostContext>();
+                    let query_limits = guard.get::<OperationLimits<u32>>();
                     SingleLimitsStats {
                         strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
                         cost_estimated: cost_ctx.map(|ctx| ctx.estimated),
                         cost_actual: cost_ctx.map(|ctx| ctx.actual),
 
                         // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
-                        // TODO: Populate these with Traffic Shaping results
-                        depth: 0,
-                        height: 0,
-                        alias_count: 0,
-                        root_field_count: 0,
+                        depth: query_limits.map_or(0, |ql| ql.depth as u64),
+                        height: query_limits.map_or(0, |ql| ql.height as u64),
+                        alias_count: query_limits.map_or(0, |ql| ql.aliases as u64),
+                        root_field_count: query_limits.map_or(0, |ql| ql.root_fields as u64),
                     }
                 });
 
