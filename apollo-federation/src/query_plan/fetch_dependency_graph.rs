@@ -3325,18 +3325,12 @@ fn compute_nodes_for_op_path_element<'a>(
     // We have a operation element, field or inline fragment.
     // We first check if it's been "tagged" to remember that __typename must be queried.
     // See the comment on the `optimize_sibling_typenames()` method to see why this exists.
-    if let Some(name) = operation.sibling_typename() {
+    if let Some(sibling_typename) = operation.sibling_typename() {
         // We need to add the query __typename for the current type in the current node.
-        // Note that `name` is the alias or '' if there is no alias
-        let alias = if name.is_empty() {
-            None
-        } else {
-            Some(name.clone())
-        };
         let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
             &dependency_graph.supergraph_schema,
             &operation.parent_type_position(),
-            alias,
+            sibling_typename.alias().cloned(),
         )));
         let typename_path = stack_item
             .node_path

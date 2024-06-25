@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::schema::Name;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
@@ -36,6 +35,7 @@ use crate::operation::RebaseErrorHandlingOption;
 use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
 use crate::operation::SelectionSet;
+use crate::operation::SiblingTypename;
 use crate::query_graph::condition_resolver::ConditionResolution;
 use crate::query_graph::condition_resolver::ConditionResolver;
 use crate::query_graph::condition_resolver::UnsatisfiedConditionReason;
@@ -318,7 +318,7 @@ impl OpPathElement {
         }
     }
 
-    pub(crate) fn sibling_typename(&self) -> Option<&Name> {
+    pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
         match self {
             OpPathElement::Field(field) => field.sibling_typename(),
             OpPathElement::InlineFragment(_) => None,

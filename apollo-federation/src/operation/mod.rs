@@ -209,7 +209,6 @@ mod selection_map {
     use std::ops::Deref;
     use std::sync::Arc;
 
-    use apollo_compiler::ast::Name;
     use apollo_compiler::executable;
     use indexmap::IndexMap;
 
@@ -222,6 +221,7 @@ mod selection_map {
     use crate::operation::Selection;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
+    use crate::operation::SiblingTypename;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -457,7 +457,7 @@ mod selection_map {
             self.0
         }
 
-        pub(crate) fn get_sibling_typename_mut(&mut self) -> &mut Option<Name> {
+        pub(crate) fn get_sibling_typename_mut(&mut self) -> &mut Option<SiblingTypename> {
             Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
@@ -1272,11 +1272,11 @@ mod field_selection {
             &mut self.data.directives
         }
 
-        pub(crate) fn sibling_typename(&self) -> Option<&Name> {
+        pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
             self.data.sibling_typename.as_ref()
         }
 
-        pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<Name> {
+        pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<SiblingTypename> {
             &mut self.data.sibling_typename
         }
 
@@ -1330,6 +1330,24 @@ mod field_selection {
         }
     }
 
+    // SiblingTypename indicates how the sibling __typename field should be restored.
+    // PORT_NOTE: The JS version used the empty string to indicate unaliased sibling typenames.
+    // Here we use an enum to make the distinction explicit.
+    #[derive(Debug, Clone)]
+    pub(crate) enum SiblingTypename {
+        Unaliased,
+        Aliased(Name), // the sibling __typename has been aliased
+    }
+
+    impl SiblingTypename {
+        pub(crate) fn alias(&self) -> Option<&Name> {
+            match self {
+                SiblingTypename::Unaliased => None,
+                SiblingTypename::Aliased(alias) => Some(alias),
+            }
+        }
+    }
+
     #[derive(Debug, Clone)]
     pub(crate) struct FieldData {
         pub(crate) schema: ValidFederationSchema,
@@ -1337,7 +1355,7 @@ mod field_selection {
         pub(crate) alias: Option<Name>,
         pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
         pub(crate) directives: Arc<executable::DirectiveList>,
-        pub(crate) sibling_typename: Option<Name>,
+        pub(crate) sibling_typename: Option<SiblingTypename>,
     }
 
     impl FieldData {
@@ -1398,6 +1416,7 @@ mod field_selection {
 pub(crate) use field_selection::Field;
 pub(crate) use field_selection::FieldData;
 pub(crate) use field_selection::FieldSelection;
+pub(crate) use field_selection::SiblingTypename;
 
 mod fragment_spread_selection {
     use std::sync::Arc;
@@ -2451,8 +2470,13 @@ impl SelectionSet {
                 mutable_selection_map.remove(&typename_key),
                 mutable_selection_map.get_mut(&sibling_field_key),
             ) {
-                *sibling_field.get_sibling_typename_mut() =
-                    Some(typename_field.field.data().response_name());
+                // Note that as we tag the element, we also record the alias used if any since that
+                // needs to be preserved.
+                let sibling_typename = match &typename_field.field.data().alias {
+                    None => SiblingTypename::Unaliased,
+                    Some(alias) => SiblingTypename::Aliased(alias.clone()),
+                };
+                *sibling_field.get_sibling_typename_mut() = Some(sibling_typename);
             } else {
                 unreachable!("typename and sibling fields must both exist at this point")
             }
@@ -2683,16 +2707,10 @@ impl SelectionSet {
                 return Ok(updated.into());
             };
             // We need to add the query __typename for the current type in the current group.
-            // Note that the value of the sibling_typename is the alias or "" if there is no alias
-            let alias = if sibling_typename.is_empty() {
-                None
-            } else {
-                Some(sibling_typename.clone())
-            };
             let field_element = Field::new_introspection_typename(
                 &self.schema,
                 &selection.element()?.parent_type_position(),
-                alias,
+                sibling_typename.alias().cloned(),
             );
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
