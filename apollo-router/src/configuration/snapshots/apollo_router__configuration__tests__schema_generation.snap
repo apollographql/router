@@ -4110,6 +4110,34 @@ expression: "&schema"
             "string"
           ],
           "type": "string"
+        },
+        {
+          "description": "The query aliases.",
+          "enum": [
+            "aliases"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query depth.",
+          "enum": [
+            "depth"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query height.",
+          "enum": [
+            "height"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query root fields.",
+          "enum": [
+            "root_fields"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -5531,6 +5559,17 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphQuery": {
+      "oneOf": [
+        {
+          "description": "The raw query kind.",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "SubgraphRequestConf": {
       "additionalProperties": false,
       "description": "What information is passed to a subgraph request/response stage",
@@ -5642,8 +5681,8 @@ expression: "&schema"
               "type": "string"
             },
             "subgraph_query": {
-              "$ref": "#/definitions/Query",
-              "description": "#/definitions/Query"
+              "$ref": "#/definitions/SubgraphQuery",
+              "description": "#/definitions/SubgraphQuery"
             }
           },
           "required": [

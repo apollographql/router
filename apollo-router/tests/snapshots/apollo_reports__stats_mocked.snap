@@ -451,8 +451,8 @@ limits_stats:
   cost_actual:
     - 0
   max_cost_actual: 0
-  depth: 0
-  height: 0
+  depth: 4
+  height: 7
   alias_count: 0
-  root_field_count: 0
+  root_field_count: 1
 operation_count: 0

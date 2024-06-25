@@ -56,6 +56,7 @@ use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::operation_limits::OperationLimits;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Query;
 use crate::spec::Schema;
@@ -457,9 +458,11 @@ impl BridgeQueryPlanner {
         query: String,
         operation_name: Option<&str>,
         doc: &ParsedDocument,
+        query_metrics_in: &mut OperationLimits<u32>,
     ) -> Result<Query, QueryPlannerError> {
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
+            query_metrics_in,
             &self.configuration,
             &query,
             executable,
@@ -517,6 +520,7 @@ impl BridgeQueryPlanner {
         selections: Query,
         plan_options: PlanOptions,
         doc: &ParsedDocument,
+        query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
         let plan_success = self
             .planner
@@ -675,6 +679,7 @@ impl BridgeQueryPlanner {
                         root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
+                        query_metrics,
                     }),
                 })
             }
@@ -851,11 +856,13 @@ impl BridgeQueryPlanner {
             None
         };
 
+        let mut query_metrics = Default::default();
         let mut selections = self
             .parse_selections(
                 key.original_query.clone(),
                 key.operation_name.as_deref(),
                 &doc,
+                &mut query_metrics,
             )
             .await?;
 
@@ -923,6 +930,7 @@ impl BridgeQueryPlanner {
                     key.filtered_query.clone(),
                     key.operation_name.as_deref(),
                     &doc,
+                    &mut query_metrics,
                 )
                 .await?;
             filtered.is_original = false;
@@ -937,6 +945,7 @@ impl BridgeQueryPlanner {
             selections,
             key.plan_options,
             &doc,
+            query_metrics,
         )
         .await
     }
@@ -1222,8 +1231,9 @@ mod tests {
 
         let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
+        let mut query_metrics = Default::default();
         let selections = planner
-            .parse_selections(query.to_string(), None, &doc)
+            .parse_selections(query.to_string(), None, &doc, &mut query_metrics)
             .await
             .unwrap();
         let err =
@@ -1239,6 +1249,7 @@ mod tests {
                 selections,
                 PlanOptions::default(),
                 &doc,
+                query_metrics
             )
             .await
             .unwrap_err();

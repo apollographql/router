@@ -202,10 +202,10 @@ traces_per_query:
             - 0
             - 1
           max_cost_actual: 20
-          depth: 0
-          height: 0
+          depth: 4
+          height: 7
           alias_count: 0
-          root_field_count: 0
+          root_field_count: 1
         operation_count: 0
     referenced_fields_by_type:
       Product:

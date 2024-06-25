@@ -1,0 +1,10 @@
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        'query.aliases':
+          description: 'The aliases of the query'
+          value:
+            query: aliases
+          unit: unit
+          type: histogram
