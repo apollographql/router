@@ -76,6 +76,14 @@ telemetry:
             - "enabled"
         response: off
         error: error
+      supergraph:
+        response:
+          level: info
+          condition: # Only log the supergraph response containing graphql errors
+            eq:
+            - on_graphql_error: true
+            - true
+        error: error
         # ...
 ```
 
