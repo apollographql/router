@@ -134,7 +134,7 @@ impl BothModeComparisonJob {
                 if is_matched {
                     tracing::debug!("JS and Rust query plans match{operation_desc}! 🎉");
                 } else {
-                    tracing::warn!("JS v.s. Rust query plan mismatch{operation_desc}");
+                    tracing::debug!("JS v.s. Rust query plan mismatch{operation_desc}");
                     if let Some(formatted) = &js_plan.formatted_query_plan {
                         tracing::debug!(
                             "Diff of formatted plans:\n{}",
