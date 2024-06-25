@@ -40,6 +40,7 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -377,6 +378,11 @@ impl RouterService {
                         monotonic_counter.apollo.router.graphql_error = 1u64,
                         code = "INVALID_ACCEPT_HEADER"
                     );
+                    // Useful for selector in spans/instruments/events
+                    context.insert_json_value(
+                        CONTAINS_GRAPHQL_ERROR,
+                        serde_json_bytes::Value::Bool(true),
+                    );
 
                     // this should be unreachable due to a previous check, but just to be sure...
                     Ok(router::Response::error_builder()
@@ -414,6 +420,9 @@ impl RouterService {
                     status = err.status.as_u16() as i64,
                     error = err.error.to_string()
                 );
+                // Useful for selector in spans/instruments/events
+                context
+                    .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
 
                 return router::Response::error_builder()
                     .error(
