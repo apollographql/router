@@ -51,7 +51,6 @@ use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::dual_query_planner::BothModeComparisonJob;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::labeler::add_defer_labels;
-use crate::query_planner::plan::metric_query_planning_plan_duration;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::QueryPlannerContent;
@@ -62,6 +61,9 @@ use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
+
+pub(crate) const RUST_QP_MODE: &str = "rust";
+const JS_QP_MODE: &str = "js";
 
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
@@ -203,7 +205,7 @@ impl PlannerMode {
 
                 let result = js.plan(filtered_query, operation, plan_options).await;
 
-                metric_query_planning_plan_duration("js", start);
+                metric_query_planning_plan_duration(JS_QP_MODE, start);
 
                 let mut success = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -227,7 +229,7 @@ impl PlannerMode {
                     .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
-                metric_query_planning_plan_duration("rust", start);
+                metric_query_planning_plan_duration(RUST_QP_MODE, start);
 
                 let plan = result?;
 
@@ -260,7 +262,7 @@ impl PlannerMode {
 
                 let result = js.plan(filtered_query, operation, plan_options).await;
 
-                metric_query_planning_plan_duration("js", start);
+                metric_query_planning_plan_duration(JS_QP_MODE, start);
 
                 let mut js_result = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -1123,6 +1125,15 @@ pub(crate) fn render_diff(differences: &[diff::Result<&str>]) -> String {
     output
 }
 
+pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: Instant) {
+    f64_histogram!(
+        "apollo.router.query_planning.plan.duration",
+        "Duration of the query planning.",
+        start.elapsed().as_secs_f64(),
+        "planner" = planner
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1744,5 +1755,24 @@ mod tests {
         insta::assert_snapshot!(*subgraph_queries, @r###"
         { topProducts { name } }
         "###)
+    }
+
+    #[test]
+    fn test_metric_query_planning_plan_duration() {
+        let start = Instant::now();
+        metric_query_planning_plan_duration(RUST_QP_MODE, start);
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust"
+        );
+
+        let start = Instant::now();
+        metric_query_planning_plan_duration(JS_QP_MODE, start);
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "js"
+        );
     }
 }

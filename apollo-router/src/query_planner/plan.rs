@@ -1,5 +1,4 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
@@ -605,13 +604,4 @@ pub(crate) struct DeferredNode {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct Depends {
     pub(crate) id: NodeStr,
-}
-
-pub(crate) fn metric_query_planning_plan_duration(planner: &str, start: Instant) {
-    f64_histogram!(
-        "apollo.router.query_planning.plan.duration",
-        "Duration of the query planning.",
-        start.elapsed().as_secs_f64(),
-        "planner" = planner
-    );
 }

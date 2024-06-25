@@ -17,8 +17,9 @@ use super::subscription::SubscriptionNode;
 use super::FlattenNode;
 use crate::error::format_bridge_errors;
 use crate::executable::USING_CATCH_UNWIND;
+use crate::query_planner::bridge_query_planner::metric_query_planning_plan_duration;
+use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
 use crate::query_planner::convert::convert_root_query_plan_node;
-use crate::query_planner::plan::metric_query_planning_plan_duration;
 use crate::query_planner::render_diff;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
@@ -78,7 +79,7 @@ impl BothModeComparisonJob {
             // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);
 
-            metric_query_planning_plan_duration("rust", start);
+            metric_query_planning_plan_duration(RUST_QP_MODE, start);
 
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
