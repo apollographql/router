@@ -294,7 +294,7 @@ pub(crate) fn extract_enums_from_response(
             schema,
             response_body,
             &mut result,
-        )
+        );
     }
     result
 }
