@@ -1289,6 +1289,10 @@ expression: aggregated_metrics
                   }
                 }
               }
+            },
+            "extended_references": {
+              "referenced_input_fields": {},
+              "referenced_enums": {}
             }
           }
         ]
