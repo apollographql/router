@@ -116,7 +116,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
@@ -179,7 +179,7 @@ async fn fetch_includes_operation_name() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
@@ -239,7 +239,7 @@ async fn fetch_makes_post_requests() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
@@ -373,7 +373,7 @@ async fn defer() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
-    let schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    let schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
     let sf = Arc::new(SubgraphServiceFactory {
         services: Arc::new(HashMap::from([
             (
@@ -433,7 +433,7 @@ async fn defer_if_condition() {
           }"#;
 
     let schema = include_str!("testdata/defer_clause.graphql");
-    // we need to use the planner here instead of Schema::parse_test because that one uses the router bridge's api_schema function
+    // we need to use the planner here instead of Schema::parse because that one uses the router bridge's api_schema function
     // does not keep the defer directive definition
     let planner =
         BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()), None)
@@ -681,7 +681,7 @@ async fn dependent_mutations() {
             &Context::new(),
             &sf,
             &Default::default(),
-            &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+            &Arc::new(Schema::parse(schema, &Default::default()).unwrap()),
             &Default::default(),
             sender,
             None,
