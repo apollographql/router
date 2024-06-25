@@ -49,6 +49,7 @@ expression: results
             "referenced_input_fields": {},
             "referenced_enums": {}
           },
+          "enum_response_references": {},
           "local_per_type_stat": {}
         },
         "referenced_fields_by_type": {

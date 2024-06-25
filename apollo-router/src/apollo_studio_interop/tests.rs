@@ -5,6 +5,7 @@ use router_bridge::planner::QueryPlannerConfig;
 use test_log::test;
 
 use super::*;
+use crate::Configuration;
 
 macro_rules! assert_generated_report {
     ($actual:expr) => {
@@ -61,6 +62,17 @@ macro_rules! assert_extended_references {
     };
 }
 
+macro_rules! assert_enums_from_response {
+    ($actual:expr) => {
+        insta::with_settings!({sort_maps => true}, {
+            insta::assert_yaml_snapshot!($actual, {
+                // sort referenced enum value sets
+                ".*" => insta::sorted_redaction()
+            });
+        });
+    };
+}
+
 // Generate usage reporting with the same signature and refs doc, and with legacy normalization algorithm
 fn generate_legacy(
     doc: &ExecutableDocument,
@@ -104,6 +116,28 @@ fn generate_extended_refs(
         operation_name,
         schema,
         variables.unwrap_or(&default_vars),
+    )
+}
+
+fn enums_from_response(
+    query_str: &str,
+    operation_name: Option<&str>,
+    schema_str: &str,
+    response_body_str: &str,
+) -> ReferencedEnums {
+    let config = Configuration::default();
+    let compiler_schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
+    let spec_schema = crate::spec::Schema::parse(schema_str, &config)
+        .unwrap()
+        .with_api_schema(compiler_schema.clone());
+    let query = Query::parse(query_str, operation_name, &spec_schema, &config).unwrap();
+    let response_body: Object = serde_json::from_str(response_body_str).unwrap();
+
+    extract_enums_from_response(
+        Arc::new(query),
+        operation_name,
+        &compiler_schema,
+        &response_body,
     )
 }
 
@@ -707,6 +741,29 @@ async fn test_extended_references_var_nested_type() {
         Some(&vars),
     );
     assert_extended_references!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_enums_from_response_complex_response_type() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/enums_from_response_complex_response_type.graphql");
+    let response_str =
+        include_str!("testdata/enums_from_response_complex_response_type_response.json");
+    let op_name = Some("EnumResponseQuery");
+
+    let generated = enums_from_response(query_str, op_name, schema_str, response_str);
+    assert_enums_from_response!(&generated);
+}
+
+#[test(tokio::test)]
+async fn test_enums_from_response_fragments() {
+    let schema_str = include_str!("testdata/schema_interop.graphql");
+    let query_str = include_str!("testdata/enums_from_response_fragments.graphql");
+    let response_str = include_str!("testdata/enums_from_response_fragments_response.json");
+    let op_name = Some("EnumResponseQueryFragments");
+
+    let generated = enums_from_response(query_str, op_name, schema_str, response_str);
+    assert_enums_from_response!(&generated);
 }
 
 #[test(tokio::test)]

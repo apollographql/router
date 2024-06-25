@@ -10,6 +10,7 @@ use super::histogram::DurationHistogram;
 use super::histogram::ListLengthHistogram;
 use crate::apollo_studio_interop::AggregatedExtendedReferenceStats;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
+use crate::apollo_studio_interop::ReferencedEnums;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::EnumStats;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::InputFieldStats;
@@ -43,6 +44,7 @@ pub(crate) struct SingleContextualizedStats {
     pub(crate) limits_stats: SingleLimitsStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
     pub(crate) extended_references: ExtendedReferenceStats,
+    pub(crate) enum_response_references: ReferencedEnums,
     pub(crate) local_per_type_stat: HashMap<String, LocalTypeStat>,
 }
 // TODO Make some of these fields bool
@@ -110,6 +112,7 @@ impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
             *self.per_type_stat.entry(k).or_default() += v;
         }
         self.extended_references += stats.extended_references;
+        self.extended_references += stats.enum_response_references;
         for (k, v) in stats.local_per_type_stat {
             *self.local_per_type_stat.entry(k).or_default() += v;
         }
@@ -601,11 +604,15 @@ mod test {
                                 },
                             ),
                         ]),
+                        extended_references: ExtendedReferenceStats {
+                            referenced_input_fields: HashMap::new(),
+                            referenced_enums: HashMap::new(),
+                        },
+                        enum_response_references: HashMap::new(),
                         local_per_type_stat: HashMap::from([
                             ("type1".into(), local_type_stat(&mut count)),
                             ("type2".into(), local_type_stat(&mut count)),
                         ]),
-                        extended_references: ExtendedReferenceStats::new(),
                     },
                     referenced_fields_by_type: HashMap::from([(
                         "type1".into(),
