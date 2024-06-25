@@ -2799,7 +2799,7 @@ impl SelectionSet {
         &mut self,
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
-        self.add_selection_set_with_fragments(&selection_set, &NamedFragments::default())
+        self.add_selection_set_with_fragments(selection_set, &NamedFragments::default())
     }
 
     /// Rebase given `SelectionSet` on self with the specified fragments and then inserts it into the
