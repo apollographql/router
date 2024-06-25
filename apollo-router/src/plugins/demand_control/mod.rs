@@ -14,6 +14,7 @@ use futures::stream;
 use futures::StreamExt;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde::Serialize;
 use thiserror::Error;
 use tower::BoxError;
 use tower::ServiceBuilder;
@@ -99,9 +100,9 @@ pub(crate) enum StrategyConfig {
     },
 }
 
-#[derive(Copy, Clone, Debug, Deserialize, JsonSchema, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, JsonSchema, Eq, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
-enum Mode {
+pub(crate) enum Mode {
     Measure,
     Enforce,
 }

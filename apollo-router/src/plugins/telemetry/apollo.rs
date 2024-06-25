@@ -112,6 +112,9 @@ pub(crate) struct Config {
 
     /// Set the Apollo usage report reference reporting mode to use.
     pub(crate) experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
+
+    /// Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.
+    pub(crate) experimental_local_field_metrics: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -214,6 +217,7 @@ impl Default for Config {
             errors: ErrorsConfiguration::default(),
             experimental_apollo_signature_normalization_algorithm:
                 ApolloSignatureNormalizationAlgorithm::default(),
+            experimental_local_field_metrics: false,
             experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode::default(),
         }
     }
