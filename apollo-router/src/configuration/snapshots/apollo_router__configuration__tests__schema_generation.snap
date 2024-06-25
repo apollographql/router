@@ -3641,6 +3641,13 @@ expression: "&schema"
             "histogram"
           ],
           "type": "object"
+        },
+        {
+          "description": "Simply drop the metrics matching this view",
+          "enum": [
+            "drop"
+          ],
+          "type": "string"
         }
       ]
     },
