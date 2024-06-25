@@ -48,14 +48,14 @@ pub(super) fn carryover_directives(
         let directive_name = link.directive_name_in_schema(&INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
-            .map(|referencers| {
+            .and_then(|referencers| {
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
-            })??;
+            })?;
     }
 
     // @tag
@@ -67,14 +67,14 @@ pub(super) fn carryover_directives(
         let directive_name = link.directive_name_in_schema(&TAG_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
-            .map(|referencers| {
+            .and_then(|referencers| {
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
-            })??;
+            })?;
     }
 
     // @authenticated
@@ -86,14 +86,14 @@ pub(super) fn carryover_directives(
         let directive_name = link.directive_name_in_schema(&AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
-            .map(|referencers| {
+            .and_then(|referencers| {
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
-            })??;
+            })?;
     }
 
     // @requiresScopes
@@ -105,7 +105,7 @@ pub(super) fn carryover_directives(
         let directive_name = link.directive_name_in_schema(&REQUIRES_SCOPES_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
-            .map(|referencers| {
+            .and_then(|referencers| {
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
@@ -121,7 +121,7 @@ pub(super) fn carryover_directives(
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
-            })??;
+            })?;
     }
 
     // @policy
@@ -133,7 +133,7 @@ pub(super) fn carryover_directives(
         let directive_name = link.directive_name_in_schema(&POLICY_DIRECTIVE_NAME_IN_SPEC);
         from.referencers()
             .get_directive(&directive_name)
-            .map(|referencers| {
+            .and_then(|referencers| {
                 if referencers.len() > 0 {
                     SchemaDefinitionPosition
                         .insert_directive(to, link.to_directive_application().into())?;
@@ -149,7 +149,7 @@ pub(super) fn carryover_directives(
                     copy_directive_definition(from, to, directive_name.clone())?;
                 }
                 referencers.copy_directives(from, to, &directive_name)
-            })??;
+            })?;
     }
 
     // compose directive
@@ -162,14 +162,14 @@ pub(super) fn carryover_directives(
             let directive_name = link.directive_name_in_schema(name);
             from.referencers()
                 .get_directive(&directive_name)
-                .map(|referencers| {
+                .and_then(|referencers| {
                     if referencers.len() > 0 {
                         SchemaDefinitionPosition
                             .insert_directive(to, link.to_directive_application().into())?;
                         copy_directive_definition(from, to, directive_name.clone())?;
                     }
                     referencers.copy_directives(from, to, &directive_name)
-                })??;
+                })?;
             Ok::<_, FederationError>(())
         })?;
 
