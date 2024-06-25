@@ -18,6 +18,7 @@ use crate::plugins::telemetry::apollo::router_id;
 use crate::plugins::telemetry::apollo::Config;
 use crate::plugins::telemetry::apollo_exporter::get_uname;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::MetricsCommon;
 use crate::plugins::telemetry::metrics::CustomAggregationSelector;
 use crate::plugins::telemetry::metrics::MetricsBuilder;
@@ -25,7 +26,7 @@ use crate::plugins::telemetry::metrics::MetricsConfigurator;
 use crate::plugins::telemetry::otlp::CustomTemporalitySelector;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
-mod duration_histogram;
+pub(crate) mod histogram;
 pub(crate) mod studio;
 
 fn default_buckets() -> Vec<f64> {
@@ -54,6 +55,7 @@ impl MetricsConfigurator for Config {
                 apollo_graph_ref: Some(reference),
                 schema_id,
                 batch_processor,
+                experimental_apollo_metrics_reference_mode,
                 ..
             } => {
                 if !ENABLED.swap(true, Ordering::Relaxed) {
@@ -67,6 +69,7 @@ impl MetricsConfigurator for Config {
                     reference,
                     schema_id,
                     batch_processor,
+                    *experimental_apollo_metrics_reference_mode,
                 )?;
                 // env variable EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED will disappear without warning in future
                 if std::env::var("EXPERIMENTAL_APOLLO_OTLP_METRICS_ENABLED")
@@ -154,11 +157,18 @@ impl Config {
         reference: &str,
         schema_id: &str,
         batch_processor: &BatchProcessorConfig,
+        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<MetricsBuilder, BoxError> {
         let batch_processor_config = batch_processor;
         tracing::debug!(endpoint = %endpoint, "creating Apollo metrics exporter");
-        let exporter =
-            ApolloExporter::new(endpoint, batch_processor_config, key, reference, schema_id)?;
+        let exporter = ApolloExporter::new(
+            endpoint,
+            batch_processor_config,
+            key,
+            reference,
+            schema_id,
+            metrics_reference_mode,
+        )?;
 
         builder.apollo_metrics_sender = exporter.start();
         Ok(builder)
