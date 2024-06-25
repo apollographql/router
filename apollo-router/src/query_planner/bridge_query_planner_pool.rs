@@ -103,7 +103,7 @@ impl BridgeQueryPlannerPool {
             .map(|p| p.planner().clone())
             .collect();
 
-        for (worker_id, mut planner) in bridge_query_planners.into_iter().enumerate() {
+        for (_, mut planner) in bridge_query_planners.into_iter().enumerate() {
             let receiver = receiver.clone();
 
             tokio::spawn(async move {

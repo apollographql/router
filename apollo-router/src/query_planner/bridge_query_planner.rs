@@ -51,6 +51,7 @@ use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::dual_query_planner::BothModeComparisonJob;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::labeler::add_defer_labels;
+use crate::query_planner::plan::metric_query_planning_plan_duration;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::QueryPlannerContent;
@@ -200,16 +201,9 @@ impl PlannerMode {
             PlannerMode::Js(js) => {
                 let start = Instant::now();
 
-                let result = js
-                    .plan(filtered_query, operation, plan_options)
-                    .await;
+                let result = js.plan(filtered_query, operation, plan_options).await;
 
-                f64_histogram!(
-                    "apollo.router.query_planning.plan.duration",
-                    "Duration of the query planning.",
-                    start.elapsed().as_secs_f64(),
-                    "planner" = "js" 
-                );
+                metric_query_planning_plan_duration("js", start);
 
                 let mut success = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
@@ -233,12 +227,7 @@ impl PlannerMode {
                     .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
                     .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
 
-                f64_histogram!(
-                    "apollo.router.query_planning.plan.duration",
-                    "Duration of the query planning.",
-                    start.elapsed().as_secs_f64(),
-                    "planner" = "rust" 
-                );
+                metric_query_planning_plan_duration("rust", start);
 
                 let plan = result?;
 
@@ -269,18 +258,12 @@ impl PlannerMode {
 
                 let start = Instant::now();
 
-                let result = js
-                    .plan(filtered_query, operation, plan_options)
-                    .await;
+                let result = js.plan(filtered_query, operation, plan_options).await;
 
-                f64_histogram!(
-                    "apollo.router.query_planning.plan.duration",
-                    "Duration of the query planning.",
-                    start.elapsed().as_secs_f64(),
-                    "planner" = "js" 
-                );
+                metric_query_planning_plan_duration("js", start);
 
-                let mut js_result = result.map_err(QueryPlannerError::RouterBridgeError)?
+                let mut js_result = result
+                    .map_err(QueryPlannerError::RouterBridgeError)?
                     .into_result()
                     .map_err(PlanErrors::from);
 

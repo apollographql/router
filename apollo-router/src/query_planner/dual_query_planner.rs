@@ -18,6 +18,7 @@ use super::FlattenNode;
 use crate::error::format_bridge_errors;
 use crate::executable::USING_CATCH_UNWIND;
 use crate::query_planner::convert::convert_root_query_plan_node;
+use crate::query_planner::plan::metric_query_planning_plan_duration;
 use crate::query_planner::render_diff;
 use crate::query_planner::DeferredNode;
 use crate::query_planner::PlanNode;
@@ -77,12 +78,8 @@ impl BothModeComparisonJob {
             // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);
 
-            f64_histogram!(
-                "apollo.router.query_planning.plan.duration",
-                "Duration of the query planning.",
-                start.elapsed().as_secs_f64(),
-                "planner" = "rust" 
-            );
+            metric_query_planning_plan_duration("rust", start);
+
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
             USING_CATCH_UNWIND.set(false);
@@ -101,7 +98,6 @@ impl BothModeComparisonJob {
                 ),
             ))
         });
-
 
         let name = self.operation_name.as_deref();
         let operation_desc = if let Ok(operation) = self.document.get_operation(name) {
