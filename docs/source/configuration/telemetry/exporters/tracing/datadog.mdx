@@ -119,7 +119,7 @@ Instead, when `enable_span_mapping` is set to `true` the following trace will be
 
 ```
     | request /graphql                                                                                   |
-        | router                                                                                         |
+        | router /graphql                                                                                         |
             | supergraph MyQuery                                                                         |
                 | query_planning MyQuery  | execution                                                    |
                                               | fetch fetch                                              |

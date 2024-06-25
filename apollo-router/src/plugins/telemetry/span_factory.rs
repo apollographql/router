@@ -97,7 +97,7 @@ impl SpanMode {
             }
             SpanMode::SpecCompliant => {
                 info_span!(ROUTER_SPAN_NAME,
-                    // Needed for apollo_telemetry
+                    // Needed for apollo_telemetry and datadog span mapping
                     "http.route" = %request.uri(),
                     "http.request.method" = %request.method(),
                     "otel.name" = ::tracing::field::Empty,
