@@ -61,7 +61,7 @@ impl QueryPlan {
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
         initial_value: Option<Value>,
-        connectors: &'a Connectors,
+        connectors: &'a Connectors, // TODO: remove (source-aware)
     ) -> Response {
         let root = Path::empty();
 
@@ -135,6 +135,7 @@ impl PlanNode {
 
             match self {
                 PlanNode::Sequence {
+                    // TODO: remove (private preview+source aware)
                     nodes,
                     connector: Some(connector_node),
                 } => {
