@@ -184,7 +184,6 @@ pub(crate) struct FieldStat {
     // rounded to integers when converting to Protobuf after aggregating
     // a number of requests.
     latency: DurationHistogram<f64>,
-    length: ListLengthHistogram,
 }
 
 impl AddAssign<SingleFieldStat> for FieldStat {
@@ -194,7 +193,6 @@ impl AddAssign<SingleFieldStat> for FieldStat {
         self.observed_execution_count += stat.observed_execution_count;
         self.errors_count += stat.errors_count;
         self.return_type = stat.return_type;
-        self.length += stat.length;
     }
 }
 

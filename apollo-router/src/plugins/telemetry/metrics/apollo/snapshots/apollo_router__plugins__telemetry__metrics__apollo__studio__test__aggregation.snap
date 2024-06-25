@@ -815,14 +815,6 @@ expression: aggregated_metrics
                       ],
                       "max": 1000000.0,
                       "total": 2.0
-                    },
-                    "length": {
-                      "buckets": [
-                        0.0,
-                        2.0
-                      ],
-                      "max": 1.0,
-                      "total": 2.0
                     }
                   },
                   "field2": {
@@ -980,14 +972,6 @@ expression: aggregated_metrics
                         2.0
                       ],
                       "max": 1000000.0,
-                      "total": 2.0
-                    },
-                    "length": {
-                      "buckets": [
-                        0.0,
-                        2.0
-                      ],
-                      "max": 1.0,
                       "total": 2.0
                     }
                   }
@@ -1151,14 +1135,6 @@ expression: aggregated_metrics
                       ],
                       "max": 1000000.0,
                       "total": 2.0
-                    },
-                    "length": {
-                      "buckets": [
-                        0.0,
-                        2.0
-                      ],
-                      "max": 1.0,
-                      "total": 2.0
                     }
                   },
                   "field2": {
@@ -1316,14 +1292,6 @@ expression: aggregated_metrics
                         2.0
                       ],
                       "max": 1000000.0,
-                      "total": 2.0
-                    },
-                    "length": {
-                      "buckets": [
-                        0.0,
-                        2.0
-                      ],
-                      "max": 1.0,
                       "total": 2.0
                     }
                   }
