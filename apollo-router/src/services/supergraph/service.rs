@@ -407,7 +407,7 @@ async fn subscription_task(
     mut rx: mpsc::Receiver<SubscriptionTaskParams>,
     notify: Notify<String, graphql::Response>,
     supergraph_req: SupergraphRequest,
-    connectors: Connectors,
+    connectors: Connectors, // TODO: remove (source-aware)
 ) {
     let sub_params = match rx.recv().await {
         Some(sub_params) => sub_params,
