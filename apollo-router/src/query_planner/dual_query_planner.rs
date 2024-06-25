@@ -9,6 +9,7 @@ use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
+use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 
 use super::fetch::FetchNode;
@@ -217,6 +218,13 @@ fn operation_without_whitespace(op: &SubgraphOperation) -> String {
 
 // The rest is calling the comparison functions above instead of `PartialEq`,
 // but otherwise behave just like `PartialEq`:
+
+// Note: Reexported under `apollo_compiler::_private`
+pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> bool {
+    let js_root_node = &js_plan.query_plan.node;
+    let rust_root_node = convert_root_query_plan_node(rust_plan);
+    opt_plan_node_matches(js_root_node, &rust_root_node)
+}
 
 fn opt_plan_node_matches(
     this: &Option<impl Borrow<PlanNode>>,
