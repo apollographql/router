@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
@@ -209,11 +210,19 @@ fn subscription_primary_matches(this: &SubscriptionNode, other: &SubscriptionNod
 }
 
 fn operation_matches(this: &SubgraphOperation, other: &SubgraphOperation) -> bool {
-    operation_without_whitespace(this) == operation_without_whitespace(other)
-}
-
-fn operation_without_whitespace(op: &SubgraphOperation) -> String {
-    op.as_serialized().replace([' ', '\n'], "")
+    let this_ast = match ast::Document::parse(this.as_serialized(), "this_operation.graphql") {
+        Ok(document) => {
+            document
+        },
+        Err(e) => panic!("Parse error in operation: {:?}", e),
+    };
+    let other_ast = match ast::Document::parse(other.as_serialized(), "other_operation.graphql") {
+        Ok(document) => {
+            document
+        },
+        Err(e) => panic!("Parse error in operation: {:?}", e),
+    };
+    this_ast == other_ast
 }
 
 // The rest is calling the comparison functions above instead of `PartialEq`,
