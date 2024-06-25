@@ -2788,16 +2788,34 @@ impl SelectionSet {
         self.merge_into(std::iter::once(selection_set))
     }
 
-    /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Should any sub
-    /// selection with the same key already exist in the map, the existing selection and the given
-    /// selection are merged, replacing the existing selection while keeping the same insertion index.
+    /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Assumes that given
+    /// selection set does not reference ANY named fragments. If it does, Use `add_selection_set_with_fragments`
+    /// instead.
+    ///
+    /// Should any sub selection with the same key already exist in the map, the existing selection
+    /// and the given selection are merged, replacing the existing selection while keeping the same
+    /// insertion index.
     pub(crate) fn add_selection_set(
         &mut self,
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
+        self.add_selection_set_with_fragments(&selection_set, &NamedFragments::default())
+    }
+
+    /// Rebase given `SelectionSet` on self with the specified fragments and then inserts it into the
+    /// inner map.
+    ///
+    /// Should any sub selection with the same key already exist in the map, the existing selection
+    /// and the given selection are merged, replacing the existing selection while keeping the same
+    /// insertion index.
+    pub(crate) fn add_selection_set_with_fragments(
+        &mut self,
+        selection_set: &SelectionSet,
+        named_fragments: &NamedFragments,
+    ) -> Result<(), FederationError> {
         let rebased = selection_set.rebase_on(
             &self.type_position,
-            &NamedFragments::default(),
+            named_fragments,
             &self.schema,
             RebaseErrorHandlingOption::ThrowError,
         )?;
@@ -3016,8 +3034,9 @@ impl SelectionSet {
                     }
                     SelectionOrSet::SelectionSet(normalized_set) => {
                         // Since the `selection` has been expanded/lifted, we use
-                        // `add_selection_set` to make sure it's rebased.
-                        normalized_selections.add_selection_set(&normalized_set)?;
+                        // `add_selection_set_with_fragments` to make sure it's rebased.
+                        normalized_selections
+                            .add_selection_set_with_fragments(&normalized_set, named_fragments)?;
                     }
                 }
             }
