@@ -12,12 +12,16 @@ use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 
+use crate::apollo_studio_interop::generate_extended_references;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -38,6 +42,7 @@ pub(crate) struct QueryAnalysisLayer {
     configuration: Arc<Configuration>,
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
+    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -50,6 +55,8 @@ impl QueryAnalysisLayer {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
+        let metrics_reference_mode = TelemetryConfig::metrics_reference_mode(&configuration);
+
         Self {
             schema,
             cache: Arc::new(Mutex::new(LruCache::new(
@@ -62,6 +69,7 @@ impl QueryAnalysisLayer {
             ))),
             enable_authorization_directives,
             configuration,
+            metrics_reference_mode,
         }
     }
 
@@ -173,7 +181,7 @@ impl QueryAnalysisLayer {
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {
                                 query,
-                                operation_name: op_name,
+                                operation_name: op_name.clone(),
                             },
                             Ok((context.clone(), doc.clone())),
                         );
@@ -188,10 +196,28 @@ impl QueryAnalysisLayer {
         match res {
             Ok((context, doc)) => {
                 request.context.extend(&context);
-                request
-                    .context
-                    .extensions()
-                    .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc));
+
+                let extended_ref_stats = if matches!(
+                    self.metrics_reference_mode,
+                    ApolloMetricsReferenceMode::Extended
+                ) {
+                    Some(generate_extended_references(
+                        doc.executable.clone(),
+                        op_name,
+                        self.schema.api_schema(),
+                        &request.supergraph_request.body().variables.clone(),
+                    ))
+                } else {
+                    None
+                };
+
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert::<ParsedDocument>(doc.clone());
+                    if let Some(stats) = extended_ref_stats {
+                        lock.insert::<ExtendedReferenceStats>(stats);
+                    }
+                });
+
                 Ok(SupergraphRequest {
                     supergraph_request: request.supergraph_request,
                     context: request.context,

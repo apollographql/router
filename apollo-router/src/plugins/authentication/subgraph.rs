@@ -13,13 +13,14 @@ use aws_smithy_runtime_api::client::identity::Identity;
 use aws_types::region::Region;
 use http::HeaderMap;
 use http::Request;
-use hyper::Body;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::RouterBody;
 use crate::services::SubgraphRequest;
 
 /// Hardcoded Config using access_key and secret.
@@ -200,9 +201,9 @@ pub(crate) struct SigningParamsConfig {
 impl SigningParamsConfig {
     pub(crate) async fn sign(
         &self,
-        mut req: Request<Body>,
+        mut req: Request<RouterBody>,
         subgraph_name: &str,
-    ) -> Result<Request<Body>, BoxError> {
+    ) -> Result<Request<RouterBody>, BoxError> {
         let credentials = self.credentials().await?;
         let builder = self.signing_params_builder(&credentials).await?;
         let (parts, body) = req.into_parts();
@@ -210,7 +211,7 @@ impl SigningParamsConfig {
         // We'll go with default signed headers
         let headers = HeaderMap::<&'static str>::default();
         // UnsignedPayload only applies to lattice
-        let body_bytes = hyper::body::to_bytes(body).await?.to_vec();
+        let body_bytes = get_body_bytes(body).await?.to_vec();
         let signable_request = SignableRequest::new(
             parts.method.as_str(),
             parts.uri.to_string(),
@@ -231,7 +232,7 @@ impl SigningParamsConfig {
                 error
             })?
             .into_parts();
-        req = Request::<Body>::from_parts(parts, body_bytes.into());
+        req = Request::<RouterBody>::from_parts(parts, body_bytes.into());
         signing_instructions.apply_to_request_http0x(&mut req);
         increment_success_counter(subgraph_name);
         Ok(req)
@@ -645,7 +646,7 @@ mod test {
     fn get_signed_request(
         request: &SubgraphRequest,
         service_name: String,
-    ) -> hyper::Request<hyper::Body> {
+    ) -> http::Request<RouterBody> {
         let signing_params = request
             .context
             .extensions()
@@ -655,7 +656,7 @@ mod test {
         let http_request = request
             .clone()
             .subgraph_request
-            .map(|body| hyper::Body::from(serde_json::to_string(&body).unwrap()));
+            .map(|body| RouterBody::from(serde_json::to_string(&body).unwrap()));
 
         std::thread::spawn(move || {
             let rt = tokio::runtime::Runtime::new().unwrap();

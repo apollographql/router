@@ -117,7 +117,7 @@ async fn graphql_client(string_variable_bytes: usize) -> Duration {
         "query": "mutation Mutation($data: String) { upload(data: $data) }",
         "variables": {"data": "_".repeat(string_variable_bytes)}
     });
-    let request = hyper::Request::post(format!("http://127.0.0.1:{SUPERGRAPH_PORT}"))
+    let request = http::Request::post(format!("http://127.0.0.1:{SUPERGRAPH_PORT}"))
         .header("content-type", "application/json")
         .body(serde_json::to_string(&graphql_request).unwrap().into())
         .unwrap();
@@ -159,8 +159,8 @@ async fn spawn_subgraph() -> ShutdownOnDrop {
 }
 
 async fn subgraph(
-    request: hyper::Request<hyper::Body>,
-) -> Result<hyper::Response<hyper::Body>, hyper::Error> {
+    request: http::Request<hyper::Body>,
+) -> Result<http::Response<hyper::Body>, hyper::Error> {
     // Read the request body and prompty ignore it
     request
         .into_body()
@@ -171,7 +171,7 @@ async fn subgraph(
         .await;
     // Assume we got a GraphQL request with `mutation Mutation { upload($some_string) }`
     let graphql_response = r#"{"data":{"upload":true}}"#;
-    Ok(hyper::Response::new(hyper::Body::from(graphql_response)))
+    Ok(http::Response::new(hyper::Body::from(graphql_response)))
 }
 
 struct ShutdownOnDrop(Option<tokio::sync::oneshot::Sender<()>>);
