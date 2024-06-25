@@ -568,13 +568,17 @@ async fn subscription_task(
                                         execution_service_factory.plugins.clone(),
                                     )),
                                     subscription_plugin_conf.clone(),
-                                                // TODO: HTTP SERVICE + CONNECTORS
+                                    // TODO: HTTP SERVICE + CONNECTORS
                                     Arc::new(ConnectorServiceFactory::new(
                                         execution_service_factory.schema.clone(),
                                         execution_service_factory.subgraph_schemas.clone(),
                                         Arc::new(http_service_factory),
                                         subscription_plugin_conf,
-                                        Default::default(),
+                                        execution_service_factory.schema
+                                            .connectors_by_service_name
+                                            .as_ref()
+                                            .cloned()
+                                            .unwrap_or_default(),
                                     )),
                                  ),
 
@@ -860,7 +864,11 @@ impl PluggableSupergraphServiceBuilder {
                 subgraph_schemas,
                 Arc::new(self.http_service_factory),
                 subscription_plugin_conf,
-                Default::default(),
+                schema
+                    .connectors_by_service_name
+                    .as_ref()
+                    .cloned()
+                    .unwrap_or_default(),
             )),
         ));
 

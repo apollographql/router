@@ -41,7 +41,6 @@ pub(crate) struct Schema {
     /// supergraph schema here for use in the router factory and query planner.
     pub(crate) source: Option<Source>,
 
-    #[allow(dead_code)]
     pub(crate) connectors_by_service_name: Option<IndexMap<NodeStr, Connector>>,
 }
 
