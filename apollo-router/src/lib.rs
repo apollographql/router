@@ -110,6 +110,8 @@ pub mod _private {
 
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
+    // For fuzzing
+    pub use crate::query_planner::dual_query_planner::opt_plan_node_matches;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }

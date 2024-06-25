@@ -209,7 +209,8 @@ fn operation_without_whitespace(op: &SubgraphOperation) -> String {
 // The rest is calling the comparison functions above instead of `PartialEq`,
 // but otherwise behave just like `PartialEq`:
 
-fn opt_plan_node_matches(
+/// Reexported under `apollo_compiler::_private`
+pub fn opt_plan_node_matches(
     this: &Option<impl Borrow<PlanNode>>,
     other: &Option<impl Borrow<PlanNode>>,
 ) -> bool {
