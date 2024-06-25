@@ -214,8 +214,6 @@ struct CredentialsProvider {
 
 // Refresh token if it will expire within the next 5 minutes
 const MIN_REMAINING_DURATION: Duration = std::time::Duration::from_secs(60 * 5);
-// If the token doesn't have a validity duration, default to 15 minutes
-const FALLBACK_TOKEN_DURATION: Duration = std::time::Duration::from_secs(60 * 15);
 // If the token couldn't be refreshed, try again in 1 minute
 const RETRY_DURATION: Duration = std::time::Duration::from_secs(60);
 
@@ -233,7 +231,7 @@ impl CredentialsProvider {
         let handle = tokio::spawn(async move {
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(refresh_timer) => {
+                    _ = tokio::time::sleep(refresh_timer.unwrap_or(Duration::MAX)) => {
                        refresh_timer = refresh_credentials(&crp2, &c2).await;
                     },
                     rcr = refresh_credentials_receiver.recv() => {
@@ -262,7 +260,7 @@ impl CredentialsProvider {
 async fn refresh_credentials(
     credentials_provider: &(impl ProvideCredentials + 'static),
     credentials: &RwLock<Credentials>,
-) -> Duration {
+) -> Option<Duration> {
     match credentials_provider.provide_credentials().await {
         Ok(new_credentials) => {
             let mut credentials = credentials
@@ -273,19 +271,19 @@ async fn refresh_credentials(
         }
         Err(e) => {
             tracing::warn!("authentication: couldn't refresh credentials {e}");
-            RETRY_DURATION
+            Some(RETRY_DURATION)
         }
     }
 }
 
-fn next_refresh_timer(credentials: &Credentials) -> Duration {
+fn next_refresh_timer(credentials: &Credentials) -> Option<Duration> {
     credentials
         .expiry()
         .and_then(|e| e.duration_since(SystemTime::now()).ok())
-        .unwrap_or(FALLBACK_TOKEN_DURATION)
-        .checked_sub(MIN_REMAINING_DURATION)
-        // Credentials will expire in less than 5 minutes
-        .unwrap_or(Duration::from_secs(0))
+        .and_then(|d| {
+            d.checked_sub(MIN_REMAINING_DURATION)
+                .or(Some(Duration::from_secs(0)))
+        })
 }
 
 impl ProvideCredentials for CredentialsProvider {

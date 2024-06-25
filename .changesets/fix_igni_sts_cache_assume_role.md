@@ -6,7 +6,7 @@ This changeset introduces a custom CredentialsProvider that operates as a cachin
 
 1. When credentials are retrieved, they will be kept in cache for:
      - `credentials.expiry()` if it is set
-     - `15 minutes` if not
+     - `ever` if not
 2. 5 minutes before credentials get removed from cache, we will try to retrieve new ones.
 3. Failure to retrieve credentials will trigger a new attempt after `1 minute`
 4. `CredentialsProvider` exposes a `refresh_credentials()` function that could be used to manually trigger a refresh, say if the subgraph call yields a `401` (TODO as a followup, not part of this changeset)
