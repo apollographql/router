@@ -1,10 +1,9 @@
 use access_json::JSONQuery;
 use derivative::Derivative;
-use jsonpath_rust::JsonPathFinder;
-use jsonpath_rust::JsonPathInst;
 use opentelemetry_api::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::path::JsonPathInst;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
@@ -17,6 +16,9 @@ use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
+use crate::plugins::telemetry::config_new::instruments::Event;
+use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
@@ -85,6 +87,22 @@ pub(crate) enum OperationKind {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum RouterValue {
+    Standard(Standard),
+    Custom(RouterSelector),
+}
+
+impl From<&RouterValue> for InstrumentValue<RouterSelector> {
+    fn from(value: &RouterValue) -> Self {
+        match value {
+            RouterValue::Standard(standard) => InstrumentValue::Standard(standard.clone()),
+            RouterValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[cfg_attr(test, derive(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
@@ -141,6 +159,17 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    /// The operation name from the query.
+    OperationName {
+        /// The operation name from the query.
+        operation_name: OperationName,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
+    },
     /// A value from baggage.
     Baggage {
         /// The name of the baggage item.
@@ -178,6 +207,30 @@ pub(crate) enum RouterSelector {
         /// Critical error if it happens
         error: ErrorRepr,
     },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SupergraphValue {
+    Standard(Standard),
+    Event(Event<SupergraphSelector>),
+    Custom(SupergraphSelector),
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum EventHolder {
+    EventCustom(SupergraphSelector),
+}
+
+impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
+    fn from(value: &SupergraphValue) -> Self {
+        match value {
+            SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -334,6 +387,22 @@ pub(crate) enum SupergraphSelector {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,
     },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SubgraphValue {
+    Standard(Standard),
+    Custom(SubgraphSelector),
+}
+
+impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
+    fn from(value: &SubgraphValue) -> Self {
+        match value {
+            SubgraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SubgraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -618,6 +687,23 @@ impl Selector for RouterSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = response.context.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
@@ -658,6 +744,23 @@ impl Selector for RouterSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
             _ => None,
         }
     }
@@ -818,17 +921,7 @@ impl Selector for SupergraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.data {
-                let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(response_data.clone())).find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
-
+                let val = response_data.find(data);
                 val.maybe_to_otel_value()
             } else {
                 None
@@ -840,16 +933,8 @@ impl Selector for SupergraphSelector {
                 ..
             } => {
                 let errors = response.errors.clone();
-                let data: serde_json::Value = serde_json::to_value(errors).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(response_errors.clone())).find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
+                let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
+                let val = response_errors.find(&data);
 
                 val.maybe_to_otel_value()
             }
@@ -1088,17 +1173,7 @@ impl Selector for SubgraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.response.body().data {
-                let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_data.clone()))
-                        .find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
+                let val = subgraph_response_data.find(data);
 
                 val.maybe_to_otel_value()
             } else {
@@ -1111,17 +1186,9 @@ impl Selector for SubgraphSelector {
                 ..
             } => {
                 let errors = response.response.body().errors.clone();
-                let data: serde_json::Value = serde_json::to_value(errors).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_error.clone()))
-                        .find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
+                let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
+
+                let val = subgraph_response_error.find(&data);
 
                 val.maybe_to_otel_value()
             }
@@ -1176,7 +1243,6 @@ mod test {
     use std::sync::Arc;
 
     use http::StatusCode;
-    use jsonpath_rust::JsonPathInst;
     use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
@@ -1188,6 +1254,7 @@ mod test {
     use opentelemetry::KeyValue;
     use opentelemetry_api::StringValue;
     use serde_json::json;
+    use serde_json_bytes::path::JsonPathInst;
     use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;
@@ -1846,7 +1913,16 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             let _context_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             assert_eq!(
@@ -1884,6 +1960,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(
@@ -1895,6 +1979,7 @@ mod test {
                 "defaulted".into()
             );
             let _outer_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             let span = span!(tracing::Level::INFO, "test");
@@ -1922,6 +2007,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(&crate::services::SubgraphRequest::fake_builder().build())
@@ -1930,6 +2023,7 @@ mod test {
             );
             let _outer_guard = Context::new()
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .with_remote_span_context(span_context)
                 .attach();
 
             let span = span!(tracing::Level::INFO, "test");
@@ -1963,7 +2057,7 @@ mod test {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
                 SpanId::from_u64(42),
-                TraceFlags::default(),
+                TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),
             );
@@ -2047,6 +2141,39 @@ mod test {
                     .unwrap(),
             ),
             Some("env_value".into())
+        );
+    }
+
+    #[test]
+    fn router_operation_name_string() {
+        let selector = RouterSelector::OperationName {
+            operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("defaulted".into())
+        );
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("topProducts".into())
+        );
+        assert_eq!(
+            selector.on_error(&BoxError::from(String::from("my error")), &context),
+            Some("topProducts".into())
         );
     }
 

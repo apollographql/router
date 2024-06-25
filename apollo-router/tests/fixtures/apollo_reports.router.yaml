@@ -3,6 +3,13 @@ include_subgraph_errors:
 rhai:
   scripts: tests/fixtures
   main: test_callbacks.rhai
+preview_demand_control:
+  mode: measure
+  enabled: false
+  strategy:
+    static_estimated:
+      max: 1500
+      list_size: 10
 telemetry:
   instrumentation:
     spans:
@@ -21,6 +28,7 @@ telemetry:
     endpoint: ENDPOINT
     batch_processor:
       scheduled_delay: 10ms
+    experimental_local_field_metrics: false
     experimental_otlp_endpoint: "http://127.0.0.1"
     experimental_otlp_tracing_sampler: always_off
     experimental_otlp_tracing_protocol: http
