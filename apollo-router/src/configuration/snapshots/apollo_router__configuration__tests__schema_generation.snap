@@ -159,6 +159,25 @@ expression: "&schema"
         }
       ]
     },
+    "ApolloMetricsReferenceMode": {
+      "description": "Apollo usage report reference generation modes.",
+      "oneOf": [
+        {
+          "description": "Use the extended mode to report input object fields and enum value references as well as object fields.",
+          "enum": [
+            "extended"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the standard mode that only reports referenced object fields.",
+          "enum": [
+            "standard"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ApolloSignatureNormalizationAlgorithm": {
       "description": "Apollo usage report signature normalization algorithm",
       "oneOf": [
@@ -1608,6 +1627,10 @@ expression: "&schema"
         "errors": {
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
+        },
+        "experimental_apollo_metrics_reference_mode": {
+          "$ref": "#/definitions/ApolloMetricsReferenceMode",
+          "description": "#/definitions/ApolloMetricsReferenceMode"
         },
         "experimental_apollo_signature_normalization_algorithm": {
           "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
