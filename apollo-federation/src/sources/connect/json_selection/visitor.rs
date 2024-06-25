@@ -12,12 +12,46 @@ use crate::error::FederationError;
 
 use super::JSONSelection;
 
+/// A visitor for JSONSelection output keys.
+///
+/// This trait allows for walking a JSONSelection over just its output
+/// keys. Each key is `visit`ed in alphabetical order, with each subselection's
+/// keys visited immediately after its named group.
+///
+/// When given the following JSON Selection:
+/// ```json_selection
+/// a: something
+/// b {
+///   c
+///   d: else
+/// }
+/// ```
+///
+/// The order of traversal would look like the following:
+/// ```text
+/// visit("a")
+/// visit("b")
+/// enter_group("b")
+///   visit("c")
+///   visit("d")
+///   exit_group("b")
+/// finish()
+/// ```
 pub trait JSONSelectionVisitor {
+    /// Visit an output key
     fn visit(&mut self, name: &str) -> Result<(), FederationError>;
 
+    /// Enter a subselection group
+    /// Note: You can assume that the named selection corresponding to this
+    /// group will be visited first.
     fn enter_group(&mut self, group: &str) -> Result<(), FederationError>;
+
+    /// Exit a subselection group
+    /// Note: You can assume that the named selection corresponding to this
+    /// group will be visited and entered first.
     fn exit_group(&mut self) -> Result<(), FederationError>;
 
+    /// Finish visiting the output keys.
     fn finish(self) -> Result<(), FederationError>;
 }
 

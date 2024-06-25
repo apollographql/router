@@ -1,4 +1,3 @@
-use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Name;
 use apollo_compiler::schema::Component;
@@ -17,12 +16,25 @@ use crate::sources::connect::json_selection::JSONSelectionVisitor;
 
 use super::filter_directives;
 
+/// A JSONSelection visitor for schema building.
+///
+/// This implementation of the JSONSelection visitor walks a JSONSelection,
+/// copying over all output types (and respective fields / sub types) as it goes
+/// from a reference schema.
 pub(super) struct ToSchemaVisitor<'a> {
-    original_schema: &'a ValidFederationSchema,
-    to_schema: &'a mut FederationSchema,
-    type_stack: Vec<(TypeDefinitionPosition, ExtendedType)>,
-
+    /// List of directives to not copy over into the target schema.
     directive_deny_list: &'a IndexSet<&'a Name>,
+
+    /// The original schema used for sourcing all types / fields / directives / etc.
+    original_schema: &'a ValidFederationSchema,
+
+    /// The target schema for adding all types.
+    to_schema: &'a mut FederationSchema,
+
+    /// A stack of parent types used for fetching subtypes
+    ///
+    /// Each entry corresponds to a nested subselect in the JSONSelection.
+    type_stack: Vec<(TypeDefinitionPosition, ExtendedType)>,
 }
 
 impl<'a> ToSchemaVisitor<'a> {
@@ -51,11 +63,10 @@ impl<'a> ToSchemaVisitor<'a> {
         };
 
         ToSchemaVisitor {
+            directive_deny_list,
             original_schema,
             to_schema,
             type_stack: vec![(initial_position, initial_type)],
-
-            directive_deny_list,
         }
     }
 }
