@@ -16,6 +16,9 @@ use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
+use crate::plugins::telemetry::config_new::instruments::Event;
+use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
@@ -98,6 +101,22 @@ pub(crate) enum ResponseStatus {
 pub(crate) enum OperationKind {
     /// The raw operation kind.
     String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum RouterValue {
+    Standard(Standard),
+    Custom(RouterSelector),
+}
+
+impl From<&RouterValue> for InstrumentValue<RouterSelector> {
+    fn from(value: &RouterValue) -> Self {
+        match value {
+            RouterValue::Standard(standard) => InstrumentValue::Standard(standard.clone()),
+            RouterValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -205,6 +224,30 @@ pub(crate) enum RouterSelector {
         /// Critical error if it happens
         error: ErrorRepr,
     },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SupergraphValue {
+    Standard(Standard),
+    Event(Event<SupergraphSelector>),
+    Custom(SupergraphSelector),
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum EventHolder {
+    EventCustom(SupergraphSelector),
+}
+
+impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
+    fn from(value: &SupergraphValue) -> Self {
+        match value {
+            SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -359,6 +402,22 @@ pub(crate) enum SupergraphSelector {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,
     },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SubgraphValue {
+    Standard(Standard),
+    Custom(SubgraphSelector),
+}
+
+impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
+    fn from(value: &SubgraphValue) -> Self {
+        match value {
+            SubgraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SubgraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -1929,7 +1988,16 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             let _context_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             assert_eq!(
@@ -1967,6 +2035,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(
@@ -1978,6 +2054,7 @@ mod test {
                 "defaulted".into()
             );
             let _outer_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             let span = span!(tracing::Level::INFO, "test");
@@ -2005,6 +2082,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(&crate::services::SubgraphRequest::fake_builder().build())
@@ -2013,6 +2098,7 @@ mod test {
             );
             let _outer_guard = Context::new()
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .with_remote_span_context(span_context)
                 .attach();
 
             let span = span!(tracing::Level::INFO, "test");
@@ -2046,7 +2132,7 @@ mod test {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
                 SpanId::from_u64(42),
-                TraceFlags::default(),
+                TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),
             );

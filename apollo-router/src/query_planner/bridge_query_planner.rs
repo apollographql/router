@@ -74,6 +74,7 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
+    signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
 }
 
 #[derive(Clone)]
@@ -401,6 +402,9 @@ impl BridgeQueryPlanner {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
         let federation_instrument = federation_version_instrument(schema.federation_version());
+        let signature_normalization_algorithm =
+            TelemetryConfig::signature_normalization_algorithm(&configuration);
+
         Ok(Self {
             planner,
             schema,
@@ -409,6 +413,7 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
+            signature_normalization_algorithm,
         })
     }
 
@@ -565,28 +570,12 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let signature_normalization_mode =
-                        match self.configuration.apollo_plugins.plugins.get("telemetry") {
-                            Some(telemetry_config) => {
-                                match serde_json::from_value::<TelemetryConfig>(
-                                    telemetry_config.clone(),
-                                ) {
-                                    Ok(conf) => {
-                                        conf.apollo
-                                            .experimental_apollo_signature_normalization_algorithm
-                                    }
-                                    _ => ApolloSignatureNormalizationAlgorithm::default(),
-                                }
-                            }
-                            None => ApolloSignatureNormalizationAlgorithm::default(),
-                        };
-
                     let generated_usage_reporting = generate_usage_reporting(
                         &signature_doc.executable,
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
-                        &signature_normalization_mode,
+                        &self.signature_normalization_algorithm,
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where
