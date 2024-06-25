@@ -3,6 +3,7 @@
 use std::borrow::Borrow;
 use std::sync::Arc;
 use std::sync::OnceLock;
+use std::time::Instant;
 
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
@@ -16,6 +17,8 @@ use super::subscription::SubscriptionNode;
 use super::FlattenNode;
 use crate::error::format_bridge_errors;
 use crate::executable::USING_CATCH_UNWIND;
+use crate::query_planner::bridge_query_planner::metric_query_planning_plan_duration;
+use crate::query_planner::bridge_query_planner::RUST_QP_MODE;
 use crate::query_planner::convert::convert_root_query_plan_node;
 use crate::query_planner::render_diff;
 use crate::query_planner::DeferredNode;
@@ -69,8 +72,14 @@ impl BothModeComparisonJob {
         let rust_result = std::panic::catch_unwind(|| {
             let name = self.operation_name.clone().map(Name::new).transpose()?;
             USING_CATCH_UNWIND.set(true);
+
+            let start = Instant::now();
+
             // No question mark operator or macro from here …
             let result = self.rust_planner.build_query_plan(&self.document, name);
+
+            metric_query_planning_plan_duration(RUST_QP_MODE, start);
+
             // … to here, so the thread can only eiher reach here or panic.
             // We unset USING_CATCH_UNWIND in both cases.
             USING_CATCH_UNWIND.set(false);
