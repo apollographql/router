@@ -232,11 +232,11 @@ mod tests {
     use super::*;
     use crate::plugins::connectors::Source;
 
-    const SCHEMA: &str = include_str!("./test_supergraph.graphql");
+    const SCHEMA: &str = include_str!("./testdata/test_supergraph.graphql");
 
     #[test]
     fn test_finder_field_for_connector() {
-        let schema = Schema::parse(SCHEMA, "test_supergraph.graphql").unwrap();
+        let schema = Schema::parse(SCHEMA, "./testdata/test_supergraph.graphql").unwrap();
         let source = Source::new(&schema).unwrap().unwrap();
 
         let field_names = source
@@ -265,9 +265,10 @@ mod tests {
     #[test]
     fn test_finder_field_for_fetch_node() {
         let schema = crate::spec::Schema::parse(SCHEMA, &Default::default()).unwrap();
-        let source = Source::new(&Schema::parse(SCHEMA, "test_supergraph.graphql").unwrap())
-            .unwrap()
-            .unwrap();
+        let source =
+            Source::new(&Schema::parse(SCHEMA, "./testdata/test_supergraph.graphql").unwrap())
+                .unwrap()
+                .unwrap();
         let connectors = source.connectors();
         let connectors = connectors.values().collect::<Vec<_>>();
 

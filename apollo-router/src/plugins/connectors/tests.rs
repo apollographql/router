@@ -199,7 +199,7 @@ async fn basic_errors() {
     "###);
 }
 
-const SCHEMA: &str = include_str!("./steelthread.graphql");
+const SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 
 async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {
     let connector_uri = format!("{}/", uri);

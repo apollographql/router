@@ -325,6 +325,7 @@ test-log = { version = "0.2.14", default-features = false, features = [
 test-span = "0.7"
 basic-toml = "0.1"
 tower-test = "0.4.0"
+tracing-fluent-assertions = "0.3.0"
 
 # See note above in this file about `^tracing` packages which also applies to
 # these dev dependencies.

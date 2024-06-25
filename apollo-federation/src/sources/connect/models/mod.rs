@@ -157,8 +157,8 @@ impl HttpJsonTransport {
 
         Ok(Self {
             // TODO: We'll need to eventually support @connect directives without
-            // a corresponding @source...
-            // See: https://apollographql.atlassian.net/browse/CNN-201
+            //  a corresponding @source...
+            //  See: https://apollographql.atlassian.net/browse/CNN-201
             base_url: source
                 .map(|s| s.base_url.clone())
                 .ok_or(FederationError::internal(
@@ -174,7 +174,12 @@ impl HttpJsonTransport {
     }
 
     fn label(&self) -> String {
-        format!("http: {} {}", self.method, self.path_template)
+        let path = self.path_template.to_string();
+        if path.is_empty() {
+            format!("http: {}", self.method)
+        } else {
+            format!("http: {} {}", self.method, path)
+        }
     }
 }
 

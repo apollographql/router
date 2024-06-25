@@ -18,6 +18,7 @@ pub(crate) mod make_requests;
 mod request_inputs;
 mod request_response;
 mod response_formatting;
+pub(crate) mod tracing;
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -963,7 +963,7 @@ mod tests {
     use crate::plugins::connectors::Source;
     use crate::spec::Schema as RouterSchema;
 
-    const SCHEMA: &str = include_str!("./test_supergraph.graphql");
+    const SCHEMA: &str = include_str!("./testdata/test_supergraph.graphql");
 
     #[tokio::test]
     async fn it_works() {

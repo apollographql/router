@@ -25,6 +25,7 @@ use crate::json_ext::Object;
 use crate::json_ext::Path;
 use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
+use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::fetch::Variables;
 use crate::query_planner::FlattenNode;
@@ -105,7 +106,7 @@ impl QueryPlan {
     }
 }
 
-// holds the query plan executon arguments that do not change between calls
+// holds the query plan execution arguments that do not change between calls
 pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<FetchServiceFactory>,
@@ -277,7 +278,7 @@ impl PlanNode {
                         parameters.context.created_at.elapsed().as_nanos() as i64;
 
                     // The client closed the connection, we are still executing the request pipeline,
-                    // but we won't send unused trafic to subgraph
+                    // but we won't send unused traffic to subgraph
                     if parameters
                         .context
                         .extensions()
@@ -306,16 +307,33 @@ impl PlanNode {
                                     .current_dir(current_dir.clone())
                                     .deferred_fetches(parameters.deferred_fetches.clone())
                                     .build();
-                                let (v, e) = service
-                                    .oneshot(request)
-                                    .instrument(tracing::info_span!(
+                                let connector = parameters
+                                    .schema
+                                    .connectors_by_service_name
+                                    .as_ref()
+                                    .and_then(|connectors| {
+                                        connectors.get(fetch_node.service_name.as_str())
+                                    });
+                                let span = if let Some(connector) = connector {
+                                    tracing::info_span!(
+                                        CONNECT_SPAN_NAME,
+                                        "otel.kind" = "INTERNAL",
+                                        "apollo.connector.field" =
+                                            connector.id.directive.field.to_string(), // TODO: add field type and "!" if required
+                                        "apollo.connector.type" = "http", // TODO: fix after preview when more types are added
+                                        "apollo.connector.detail" = connector.id.label.as_str(),
+                                        "apollo_private.sent_time_offset" = fetch_time_offset
+                                    )
+                                } else {
+                                    tracing::info_span!(
                                         FETCH_SPAN_NAME,
                                         "otel.kind" = "INTERNAL",
                                         "apollo.subgraph.name" = fetch_node.service_name.as_str(),
                                         "apollo_private.sent_time_offset" = fetch_time_offset
-                                    ))
-                                    .await
-                                    .unwrap();
+                                    )
+                                };
+                                let (v, e) =
+                                    service.oneshot(request).instrument(span).await.unwrap();
                                 value = v;
                                 errors = e;
                             }

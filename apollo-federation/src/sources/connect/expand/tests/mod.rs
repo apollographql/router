@@ -36,7 +36,7 @@ fn it_expands_a_supergraph() {
     {
         "connectors_Query_users_0": Connector {
             id: ConnectId {
-                label: "connectors.example http: Get ",
+                label: "connectors.example http: Get",
                 subgraph_name: "connectors",
                 directive: ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.users),
