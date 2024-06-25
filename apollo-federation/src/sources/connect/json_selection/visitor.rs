@@ -8,9 +8,8 @@ use std::collections::VecDeque;
 
 use itertools::Itertools;
 
-use crate::error::FederationError;
-
 use super::JSONSelection;
+use crate::error::FederationError;
 
 /// A visitor for JSONSelection output keys.
 ///
@@ -108,9 +107,8 @@ impl JSONSelection {
 mod tests {
     use insta::assert_snapshot;
 
-    use crate::sources::connect::JSONSelection;
-
     use super::JSONSelectionVisitor;
+    use crate::sources::connect::JSONSelection;
 
     /// Visitor for tests.
     ///

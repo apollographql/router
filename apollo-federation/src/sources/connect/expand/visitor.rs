@@ -8,13 +8,12 @@ use apollo_compiler::Node;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 
+use super::filter_directives;
 use crate::error::FederationError;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::sources::connect::json_selection::JSONSelectionVisitor;
-
-use super::filter_directives;
 
 /// A JSONSelection visitor for schema building.
 ///
@@ -52,7 +51,7 @@ impl<'a> ToSchemaVisitor<'a> {
                 description: object.description.clone(),
                 name: object.name.clone(),
                 implements_interfaces: object.implements_interfaces.clone(),
-                directives: filter_directives(&directive_deny_list, &object.directives),
+                directives: filter_directives(directive_deny_list, &object.directives),
                 fields: IndexMap::new(), // Will be filled in by subsequent visits
             })),
             ExtendedType::Scalar(_) => todo!(),
@@ -92,7 +91,7 @@ impl JSONSelectionVisitor for ToSchemaVisitor<'_> {
                         name: field.name.clone(),
                         arguments: field.arguments.clone(),
                         ty: field.ty.clone(),
-                        directives: filter_directives(&self.directive_deny_list, &field.directives),
+                        directives: filter_directives(self.directive_deny_list, &field.directives),
                     }),
                 );
             }
