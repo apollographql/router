@@ -143,7 +143,7 @@ impl QueryAnalysisLayer {
 
         let res = match entry {
             None => {
-              let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
+                let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
                 let result = self
                     .parse_document(&query, op_name.as_deref())
                     .instrument(span)
