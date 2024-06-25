@@ -206,11 +206,16 @@ impl ApolloExporter {
             ));
         }
 
+        let extended_references_enabled = matches!(
+            self.metrics_reference_mode,
+            ApolloMetricsReferenceMode::Extended
+        );
+
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
         let mut proto_report =
-            report.build_proto_report(self.header.clone(), self.metrics_reference_mode);
+            report.build_proto_report(self.header.clone(), extended_references_enabled);
         prost::Message::encode(&proto_report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder
@@ -309,7 +314,8 @@ impl ApolloExporter {
                             "The number of reports submitted to Studio by the Router",
                             1,
                             report.type = report_type,
-                            report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO
+                            report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO,
+                            report.extended_references_enabled = extended_references_enabled
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.
