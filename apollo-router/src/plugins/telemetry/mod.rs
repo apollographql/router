@@ -19,6 +19,8 @@ use http::header;
 use http::HeaderMap;
 use http::HeaderValue;
 use http::StatusCode;
+use metrics::apollo::studio::SingleLimitsStats;
+use metrics::local_type_stats::LocalTypeStatRecorder;
 use multimap::MultiMap;
 use once_cell::sync::OnceCell;
 use opentelemetry::global::GlobalTracerProvider;
@@ -80,6 +82,7 @@ use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
+use crate::graphql::ResponseVisitor;
 use crate::layers::instrument::InstrumentLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::metrics::aggregation::MeterProviderType;
@@ -87,6 +90,7 @@ use crate::metrics::filter::FilterMeterProvider;
 use crate::metrics::meter_provider;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::demand_control;
 use crate::plugins::telemetry::apollo::ForwardHeaders;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::node::Id::ResponseName;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::StatsContext;
@@ -98,6 +102,8 @@ use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
+use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
+use crate::plugins::telemetry::metrics::apollo::studio::LocalTypeStat;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleContextualizedStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SinglePathErrorStats;
 use crate::plugins::telemetry::metrics::apollo::studio::SingleQueryLatencyStats;
@@ -477,6 +483,7 @@ impl Plugin for Telemetry {
                                     // the query is invalid, we did not parse the operation kind
                                     OperationKind::Query,
                                     None,
+                                    Default::default(),
                                 );
                             }
 
@@ -1252,6 +1259,7 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         operation_subtype,
+                        Default::default(),
                     );
                 }
                 let mut metric_attrs = Vec::new();
@@ -1291,18 +1299,33 @@ impl Telemetry {
                         start.elapsed(),
                         operation_kind,
                         Some(OperationSubType::SubscriptionRequest),
+                        Default::default(),
                     );
                 }
                 Ok(router_response.map(move |response_stream| {
                     let sender = sender.clone();
                     let ctx = ctx.clone();
 
+                    // Local field stats are recorded when enabled by the experimental configuration flag.
+                    // For subscriptions, metrics are sent to Studio after each event, otherwise the metrics
+                    // are sent to Studio after the last response. In the case of deferred responses, the last
+                    // response needs to submit an aggregation of metrics across the primary and incremental
+                    // responses. To avoid submitting duplicates, the recorder's contents are drained each time
+                    // metrics are submitted.
+                    let mut local_stat_recorder = LocalTypeStatRecorder::new();
+
                     response_stream
                         .enumerate()
                         .map(move |(idx, response)| {
                             let has_errors = !response.errors.is_empty();
-
                             if !matches!(sender, Sender::Noop) {
+                                if let (true, Some(query)) = (
+                                    config.apollo.experimental_local_field_metrics,
+                                    ctx.unsupported_executable_document(),
+                                ) {
+                                    local_stat_recorder.visit(&query, &response);
+                                }
+
                                 if operation_kind == OperationKind::Subscription {
                                     // The first empty response is always a heartbeat except if it's an error
                                     if idx == 0 {
@@ -1316,6 +1339,10 @@ impl Telemetry {
                                                 start.elapsed(),
                                                 operation_kind,
                                                 Some(OperationSubType::SubscriptionRequest),
+                                                local_stat_recorder
+                                                    .local_type_stats
+                                                    .drain()
+                                                    .collect(),
                                             );
                                         }
                                     } else {
@@ -1331,6 +1358,7 @@ impl Telemetry {
                                                 .unwrap_or_else(|| start.elapsed()),
                                             operation_kind,
                                             Some(OperationSubType::SubscriptionEvent),
+                                            local_stat_recorder.local_type_stats.drain().collect(),
                                         );
                                     }
                                 } else {
@@ -1344,6 +1372,7 @@ impl Telemetry {
                                             start.elapsed(),
                                             operation_kind,
                                             None,
+                                            local_stat_recorder.local_type_stats.drain().collect(),
                                         );
                                     }
                                 }
@@ -1357,6 +1386,7 @@ impl Telemetry {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn update_apollo_metrics(
         context: &Context,
         field_level_instrumentation_ratio: f64,
@@ -1365,6 +1395,7 @@ impl Telemetry {
         duration: Duration,
         operation_kind: OperationKind,
         operation_subtype: Option<OperationSubType>,
+        local_per_type_stat: HashMap<String, LocalTypeStat>,
     ) {
         let metrics = if let Some(usage_reporting) = context
             .extensions()
@@ -1395,6 +1426,22 @@ impl Telemetry {
                 let traces = Self::subgraph_ftv1_traces(context);
                 let per_type_stat = Self::per_type_stat(&traces, field_level_instrumentation_ratio);
                 let root_error_stats = Self::per_path_error_stats(&traces);
+                let limits_stats = context.extensions().with_lock(|guard| {
+                    let strategy = guard.get::<demand_control::strategy::Strategy>();
+                    let cost_ctx = guard.get::<demand_control::CostContext>();
+                    SingleLimitsStats {
+                        strategy: strategy.and_then(|s| serde_json::to_string(&s.mode).ok()),
+                        cost_estimated: cost_ctx.map(|ctx| ctx.estimated),
+                        cost_actual: cost_ctx.map(|ctx| ctx.actual),
+
+                        // These limits are related to the Traffic Shaping feature, unrelated to the Demand Control plugin
+                        // TODO: Populate these with Traffic Shaping results
+                        depth: 0,
+                        height: 0,
+                        alias_count: 0,
+                        root_field_count: 0,
+                    }
+                });
 
                 // If extended references or enums from responses are populated, we want to add them to the SingleStatsReport
                 let extended_references = context
@@ -1443,6 +1490,7 @@ impl Telemetry {
                                         .map(|op| op.to_string())
                                         .unwrap_or_default(),
                                 },
+                                limits_stats,
                                 query_latency_stats: SingleQueryLatencyStats {
                                     latency: duration,
                                     has_errors,
@@ -1453,6 +1501,7 @@ impl Telemetry {
                                 per_type_stat,
                                 extended_references,
                                 enum_response_references,
+                                local_per_type_stat,
                             },
                             referenced_fields_by_type: usage_reporting
                                 .referenced_fields_by_type
@@ -1538,13 +1587,15 @@ impl Telemetry {
                     latency: Default::default(),
                     observed_execution_count: 0,
                     requests_with_errors_count: 0,
+                    length: ListLengthHistogram::new(None),
                 });
             let latency = Duration::from_nanos(node.end_time.saturating_sub(node.start_time));
             field_stat
                 .latency
-                .increment_duration(Some(latency), field_execution_weight);
+                .record(Some(latency), field_execution_weight);
             field_stat.observed_execution_count += 1;
             field_stat.errors_count += node.error.len() as u64;
+
             if !node.error.is_empty() {
                 field_stat.requests_with_errors_count += 1;
             }
