@@ -15,6 +15,7 @@ use serde::Serialize;
 use url::Url;
 use uuid::Uuid;
 
+use super::config::ApolloMetricsReferenceMode;
 use super::config::ApolloSignatureNormalizationAlgorithm;
 use super::config::Sampler;
 use super::metrics::apollo::studio::ContextualizedStats;
@@ -108,6 +109,9 @@ pub(crate) struct Config {
     /// Set the signature normalization algorithm to use when sending Apollo usage reports.
     pub(crate) experimental_apollo_signature_normalization_algorithm:
         ApolloSignatureNormalizationAlgorithm,
+
+    /// Set the Apollo usage report reference reporting mode to use.
+    pub(crate) experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -210,6 +214,7 @@ impl Default for Config {
             errors: ErrorsConfiguration::default(),
             experimental_apollo_signature_normalization_algorithm:
                 ApolloSignatureNormalizationAlgorithm::default(),
+            experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode::default(),
         }
     }
 }
@@ -380,6 +385,7 @@ impl Report {
     pub(crate) fn build_proto_report(
         &self,
         header: ReportHeader,
+        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
         let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
             header: Some(header),
@@ -391,6 +397,10 @@ impl Report {
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
+            extended_references_enabled: matches!(
+                metrics_reference_mode,
+                ApolloMetricsReferenceMode::Extended
+            ),
             ..Default::default()
         };
 
