@@ -19,6 +19,7 @@ use crate::json_ext::Value;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::fetch::SubgraphSchemas;
+use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Query;
 
 /// A planner key.
@@ -37,10 +38,11 @@ pub(crate) struct QueryKey {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct QueryPlan {
     pub(crate) usage_reporting: Arc<UsageReporting>,
-    pub(crate) root: PlanNode,
+    pub(crate) root: Arc<PlanNode>,
     /// String representation of the query plan (not a json representation)
-    pub(crate) formatted_query_plan: Option<String>,
+    pub(crate) formatted_query_plan: Option<Arc<String>>,
     pub(crate) query: Arc<Query>,
+    pub(crate) query_metrics: OperationLimits<u32>,
 }
 
 /// This default impl is useful for test users
@@ -59,9 +61,10 @@ impl QueryPlan {
                     referenced_fields_by_type: Default::default(),
                 })
                 .into(),
-            root: root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() }),
+            root: Arc::new(root.unwrap_or_else(|| PlanNode::Sequence { nodes: Vec::new() })),
             formatted_query_plan: Default::default(),
             query: Arc::new(Query::empty()),
+            query_metrics: Default::default(),
         }
     }
 }

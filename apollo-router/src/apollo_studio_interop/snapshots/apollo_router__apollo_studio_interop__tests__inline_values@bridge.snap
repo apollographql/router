@@ -1,0 +1,14 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: plan.usage_reporting
+---
+statsReportKey: "# InlineInputTypeQuery\nquery InlineInputTypeQuery{inputTypeQuery(input:{}){enumResponse}}"
+referencedFieldsByType:
+  EverythingResponse:
+    fieldNames:
+      - enumResponse
+    isInterface: false
+  Query:
+    fieldNames:
+      - inputTypeQuery
+    isInterface: false

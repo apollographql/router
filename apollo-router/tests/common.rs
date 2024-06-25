@@ -1150,3 +1150,14 @@ fn merge_overrides(
 
     serde_yaml::to_string(&config).unwrap()
 }
+
+#[allow(dead_code)]
+pub fn graph_os_enabled() -> bool {
+    matches!(
+        (
+            std::env::var("TEST_APOLLO_KEY"),
+            std::env::var("TEST_APOLLO_GRAPH_REF"),
+        ),
+        (Ok(_), Ok(_))
+    )
+}

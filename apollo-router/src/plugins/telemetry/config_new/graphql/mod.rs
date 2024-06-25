@@ -1,9 +1,13 @@
 use std::sync::Arc;
 
+use apollo_compiler::ast::NamedType;
+use apollo_compiler::executable::Field;
+use apollo_compiler::ExecutableDocument;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
@@ -12,15 +16,14 @@ use super::instruments::CustomInstruments;
 use super::instruments::Increment;
 use super::instruments::InstrumentsConfig;
 use super::instruments::METER_NAME;
+use crate::graphql::ResponseVisitor;
 use crate::metrics;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::Visitor;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
+use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
 use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
@@ -72,6 +75,7 @@ pub(crate) type GraphQLCustomInstruments = CustomInstruments<
     supergraph::Response,
     GraphQLAttributes,
     GraphQLSelector,
+    GraphQLValue,
 >;
 
 pub(crate) struct GraphQLInstruments {
@@ -191,29 +195,33 @@ impl Instrumented for GraphQLInstruments {
     }
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
+        if let Some(field_length) = &self.list_length {
+            field_length.on_response_event(response, ctx);
+        }
+        if let Some(field_execution) = &self.field_execution {
+            field_execution.on_response_event(response, ctx);
+        }
+        self.custom.on_response_event(response, ctx);
+
         if !self.custom.is_empty() || self.list_length.is_some() || self.field_execution.is_some() {
             if let Some(executable_document) = ctx.unsupported_executable_document() {
-                if let Ok(schema) =
-                    schema_aware_response::SchemaAwareResponse::new(&executable_document, response)
-                {
-                    GraphQLInstrumentsVisitor {
-                        ctx,
-                        instruments: self,
-                    }
-                    .visit(&schema.value)
+                GraphQLInstrumentsVisitor {
+                    ctx,
+                    instruments: self,
                 }
+                .visit(&executable_document, response);
             }
         }
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) {
+    fn on_response_field(&self, ty: &NamedType, field: &Field, value: &Value, ctx: &Context) {
         if let Some(field_length) = &self.list_length {
-            field_length.on_response_field(typed_value, ctx);
+            field_length.on_response_field(ty, field, value, ctx);
         }
         if let Some(field_execution) = &self.field_execution {
-            field_execution.on_response_field(typed_value, ctx);
+            field_execution.on_response_field(ty, field, value, ctx);
         }
-        self.custom.on_response_field(typed_value, ctx);
+        self.custom.on_response_field(ty, field, value, ctx);
     }
 }
 
@@ -222,9 +230,28 @@ struct GraphQLInstrumentsVisitor<'a> {
     instruments: &'a GraphQLInstruments,
 }
 
-impl<'a> Visitor for GraphQLInstrumentsVisitor<'a> {
-    fn visit_field(&self, value: &TypedValue) {
-        self.instruments.on_response_field(value, self.ctx);
+impl<'a> ResponseVisitor for GraphQLInstrumentsVisitor<'a> {
+    fn visit_field(
+        &mut self,
+        request: &ExecutableDocument,
+        ty: &NamedType,
+        field: &Field,
+        value: &Value,
+    ) {
+        self.instruments
+            .on_response_field(ty, field, value, self.ctx);
+
+        match value {
+            Value::Array(items) => {
+                for item in items {
+                    self.visit_list_item(request, field.ty().inner_named_type(), field, item);
+                }
+            }
+            Value::Object(children) => {
+                self.visit_selections(request, &field.selection_set, children);
+            }
+            _ => {}
+        }
     }
 }
 
@@ -430,7 +457,9 @@ pub(crate) mod test {
             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
                 .unwrap();
         let context = Context::new();
-        context.extensions().lock().insert(query);
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert(query));
 
         context
     }

@@ -11,6 +11,8 @@ info:
           http.server.request.duration: true
 ---
 - name: http.server.request.duration
+  description: Duration of HTTP server requests.
+  unit: s
   data:
     datapoints:
       - sum: 0.1

@@ -306,6 +306,16 @@ fn supergraph_service(service) {
 }
 ```
 
+## Unix timestamp (in milliseconds)
+
+Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_ms_now();
+}
+```
+
 ## Unique IDs (UUID)
 
 Your Rhai customization can use the function `uuid_v4()` to obtain a UUIDv4 ID.
@@ -574,7 +584,7 @@ The following fields are identical in behavior to their `request` counterparts:
 
 ### `response.is_primary()`
 
-Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+Be particularly careful when interacting with `headers` or `status_code` in a response context. For `router_service()`, `supergraph_service()` and `execution_service()`, response `headers` and `status_code` only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the `headers` or `status_code` in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
 
 ```rhai
     if response.is_primary() {
@@ -659,3 +669,7 @@ if response.status_code == status_code_from_int(200) {
     print(`ok`);
 }
 ```
+
+<Note>
+The `response.status_code` object is available _only_ for `map_response` callbacks registered in `router_service` or `subgraph_service`.
+</Note>

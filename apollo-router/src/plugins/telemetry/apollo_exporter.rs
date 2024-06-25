@@ -32,11 +32,14 @@ use url::Url;
 
 use super::apollo::Report;
 use super::apollo::SingleReport;
+use super::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 
 const BACKOFF_INCREMENT: Duration = Duration::from_millis(50);
 const ROUTER_REPORT_TYPE_METRICS: &str = "metrics";
-const ROUTER_REPORT_TYPE_TRACES: &str = "traces";
+pub(crate) const ROUTER_REPORT_TYPE_TRACES: &str = "traces";
+const ROUTER_TRACING_PROTOCOL_APOLLO: &str = "apollo";
+pub(crate) const ROUTER_TRACING_PROTOCOL_OTLP: &str = "otlp";
 
 #[derive(thiserror::Error, Debug)]
 pub(crate) enum ApolloExportError {
@@ -93,6 +96,7 @@ pub(crate) struct ApolloExporter {
     client: Client,
     strip_traces: AtomicBool,
     studio_backoff: Mutex<Instant>,
+    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 impl ApolloExporter {
@@ -102,6 +106,7 @@ impl ApolloExporter {
         apollo_key: &str,
         apollo_graph_ref: &str,
         schema_id: &str,
+        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<ApolloExporter, BoxError> {
         let header = proto::reports::ReportHeader {
             graph_ref: apollo_graph_ref.to_string(),
@@ -130,6 +135,7 @@ impl ApolloExporter {
             header,
             strip_traces: Default::default(),
             studio_backoff: Mutex::new(Instant::now()),
+            metrics_reference_mode,
         })
     }
 
@@ -200,10 +206,16 @@ impl ApolloExporter {
             ));
         }
 
+        let extended_references_enabled = matches!(
+            self.metrics_reference_mode,
+            ApolloMetricsReferenceMode::Extended
+        );
+
         tracing::debug!("submitting report: {:?}", report);
         // Protobuf encode message
         let mut content = BytesMut::new();
-        let mut proto_report = report.build_proto_report(self.header.clone());
+        let mut proto_report =
+            report.build_proto_report(self.header.clone(), extended_references_enabled);
         prost::Message::encode(&proto_report, &mut content)
             .map_err(|e| ApolloExportError::ClientError(e.to_string()))?;
         // Create a gzip encoder
@@ -301,7 +313,9 @@ impl ApolloExporter {
                             "apollo.router.telemetry.studio.reports",
                             "The number of reports submitted to Studio by the Router",
                             1,
-                            report.type = report_type
+                            report.type = report_type,
+                            report.protocol = ROUTER_TRACING_PROTOCOL_APOLLO,
+                            report.extended_references_enabled = extended_references_enabled
                         );
                         if has_traces && !self.strip_traces.load(Ordering::SeqCst) {
                             // If we had traces then maybe disable sending traces from this exporter based on the response.

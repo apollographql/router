@@ -122,7 +122,7 @@ async fn test_local_root_no_sample() -> Result<(), BoxError> {
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
     let (_, response) = router.execute_untraced_query(&query).await;
-    assert!(response.headers().get("apollo-custom-trace-id").is_none());
+    assert!(response.headers().get("apollo-custom-trace-id").is_some());
 
     router.graceful_shutdown().await;
     Ok(())
@@ -414,7 +414,7 @@ fn verify_router_span_fields(
         );
         assert_eq!(
             router_span
-                .select_path("$.tags[?(@.key == 'studio.trace.id')].value")?
+                .select_path("$.tags[?(@.key == 'studio.operation.id')].value")?
                 .first(),
             Some(&&Value::String(
                 "f60e643d7f52ecda23216f86409d7e2e5c3aa68c".to_string()

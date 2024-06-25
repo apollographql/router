@@ -51,9 +51,7 @@ where
                     let doc = match req
                         .context
                         .extensions()
-                        .lock()
-                        .get::<ParsedDocument>()
-                        .cloned()
+                        .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
                     {
                         None => {
                             let errors = vec![Error::builder()
@@ -286,14 +284,13 @@ mod forbid_http_get_mutations_tests {
         let (_schema, executable) = ast.to_mixed_validate().unwrap();
 
         let context = Context::new();
-        context
-            .extensions()
-            .lock()
-            .insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
+        context.extensions().with_lock(|mut lock| {
+            lock.insert::<ParsedDocument>(Arc::new(ParsedDocumentInner {
                 ast,
                 executable: Arc::new(executable),
                 hash: Default::default(),
-            }));
+            }))
+        });
 
         SupergraphRequest::fake_builder()
             .method(method)

@@ -24,7 +24,6 @@ use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http_body::Body as _;
-use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use tower::BoxError;
@@ -41,6 +40,7 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -57,6 +57,8 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::RouterBody;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
@@ -261,9 +263,7 @@ impl RouterService {
             multipart_subscription: accepts_multipart_subscription,
         } = context
             .extensions()
-            .lock()
-            .get()
-            .cloned()
+            .with_lock(|lock| lock.get().cloned())
             .unwrap_or_default();
 
         let (mut parts, mut body) = response.into_parts();
@@ -271,9 +271,7 @@ impl RouterService {
 
         if context
             .extensions()
-            .lock()
-            .get::<CanceledRequest>()
-            .is_some()
+            .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
         {
             parts.status = StatusCode::from_u16(499)
                 .expect("499 is not a standard status code but common enough");
@@ -285,9 +283,10 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(Body::from(
-                            "router service is not available to process request",
-                        ))
+                        .body(
+                            RouterBody::from("router service is not available to process request")
+                                .into_inner(),
+                        )
                         .expect("cannot fail"),
                     context,
                 })
@@ -307,7 +306,10 @@ impl RouterService {
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
                         Ok(router::Response {
-                            response: http::Response::from_parts(parts, Body::from(body)),
+                            response: http::Response::from_parts(
+                                parts,
+                                RouterBody::from(body).into_inner(),
+                            ),
                             context,
                         })
                     })
@@ -357,7 +359,10 @@ impl RouterService {
                         let mut body = Box::pin(body);
                         // We make a stream based on its `poll_data` method
                         // in order to create a `hyper::Body`.
-                        Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
+                        RouterBody::wrap_stream(stream::poll_fn(move |ctx| {
+                            body.as_mut().poll_data(ctx)
+                        }))
+                        .into_inner()
                         // … but we ignore the `poll_trailers` method:
                         // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
                         // Apparently HTTP/2 trailers are like headers, except after the response body.
@@ -372,6 +377,11 @@ impl RouterService {
                     tracing::info!(
                         monotonic_counter.apollo.router.graphql_error = 1u64,
                         code = "INVALID_ACCEPT_HEADER"
+                    );
+                    // Useful for selector in spans/instruments/events
+                    context.insert_json_value(
+                        CONTAINS_GRAPHQL_ERROR,
+                        serde_json_bytes::Value::Bool(true),
                     );
 
                     // this should be unreachable due to a previous check, but just to be sure...
@@ -410,6 +420,9 @@ impl RouterService {
                     status = err.status.as_u16() as i64,
                     error = err.error.to_string()
                 );
+                // Useful for selector in spans/instruments/events
+                context
+                    .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
 
                 return router::Response::error_builder()
                     .error(
@@ -441,7 +454,9 @@ impl RouterService {
                 // Regardless of the result, we need to make sure that we cancel any potential batch queries. This is because
                 // custom rust plugins, rhai scripts, and coprocessors can cancel requests at any time and return a GraphQL
                 // error wrapped in an `Ok` or in a `BoxError` wrapped in an `Err`.
-                let batch_query_opt = context.extensions().lock().remove::<BatchQuery>();
+                let batch_query_opt = context
+                    .extensions()
+                    .with_lock(|mut lock| lock.remove::<BatchQuery>());
                 if let Some(batch_query) = batch_query_opt {
                     // Only proceed with signalling cancelled if the batch_query is not finished
                     if !batch_query.finished() {
@@ -475,15 +490,18 @@ impl RouterService {
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
-            bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
+            bytes.extend_from_slice(&get_body_bytes(body).await?);
             for result in results_it {
                 bytes.put(&b", "[..]);
-                bytes.extend_from_slice(&hyper::body::to_bytes(result.response.into_body()).await?);
+                bytes.extend_from_slice(&get_body_bytes(result.response.into_body()).await?);
             }
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
-                response: http::Response::from_parts(parts, Body::from(bytes.freeze())),
+                response: http::Response::from_parts(
+                    parts,
+                    RouterBody::from(bytes.freeze()).into_inner(),
+                ),
                 context,
             })
         } else {
@@ -663,7 +681,7 @@ impl RouterService {
                 })
             } else {
                 let body = http_body::Limited::new(body, self.http_max_request_bytes);
-                hyper::body::to_bytes(body)
+                get_body_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await
                     .map_err(|e| {
@@ -698,7 +716,9 @@ impl RouterService {
         // If subgraph batching configuration exists and is enabled for any of our subgraphs, we create our shared batch details
         let shared_batch_details = (is_batch)
             .then(|| {
-                context.extensions().lock().insert(self.batching.clone());
+                context
+                    .extensions()
+                    .with_lock(|mut lock| lock.insert(self.batching.clone()));
 
                 self.batching.subgraph.as_ref()
             })
@@ -742,31 +762,32 @@ impl RouterService {
             new_context.extend(&context);
             let client_request_accepts_opt = context
                 .extensions()
-                .lock()
-                .get::<ClientRequestAccepts>()
-                .cloned();
-            // Sub-scope so that new_context_guard is dropped before pushing into the new
-            // SupergraphRequest
-            {
-                let mut new_context_guard = new_context.extensions().lock();
+                .with_lock(|lock| lock.get::<ClientRequestAccepts>().cloned());
+            // We are only going to insert a BatchQuery if Subgraph processing is enabled
+            let b_for_index_opt = if let Some(shared_batch_details) = &shared_batch_details {
+                Some(
+                    Batch::query_for_index(shared_batch_details.clone(), index + 1).map_err(
+                        |err| TranslateError {
+                            status: StatusCode::INTERNAL_SERVER_ERROR,
+                            error: "failed to create batch",
+                            extension_code: "BATCHING_ERROR",
+                            extension_details: format!("failed to create batch entry: {err}"),
+                        },
+                    )?,
+                )
+            } else {
+                None
+            };
+            new_context.extensions().with_lock(|mut lock| {
                 if let Some(client_request_accepts) = client_request_accepts_opt {
-                    new_context_guard.insert(client_request_accepts);
+                    lock.insert(client_request_accepts);
                 }
-                new_context_guard.insert(self.batching.clone());
+                lock.insert(self.batching.clone());
                 // We are only going to insert a BatchQuery if Subgraph processing is enabled
-                if let Some(shared_batch_details) = &shared_batch_details {
-                    new_context_guard.insert(
-                        Batch::query_for_index(shared_batch_details.clone(), index + 1).map_err(
-                            |err| TranslateError {
-                                status: StatusCode::INTERNAL_SERVER_ERROR,
-                                error: "failed to create batch",
-                                extension_code: "BATCHING_ERROR",
-                                extension_details: format!("failed to create batch entry: {err}"),
-                            },
-                        )?,
-                    );
+                if let Some(b_for_index) = b_for_index_opt {
+                    lock.insert(b_for_index);
                 }
-            }
+            });
             results.push(SupergraphRequest {
                 supergraph_request: new,
                 context: new_context,
@@ -774,14 +795,16 @@ impl RouterService {
         }
 
         if let Some(shared_batch_details) = shared_batch_details {
-            context.extensions().lock().insert(
+            let b_for_index =
                 Batch::query_for_index(shared_batch_details, 0).map_err(|err| TranslateError {
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                     error: "failed to create batch",
                     extension_code: "BATCHING_ERROR",
                     extension_details: format!("failed to create batch entry: {err}"),
-                })?,
-            );
+                })?;
+            context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(b_for_index));
         }
 
         results.insert(

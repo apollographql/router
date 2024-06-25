@@ -1,21 +1,24 @@
+use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 use petgraph::csr::NodeIndex;
 use petgraph::stable_graph::IndexType;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
-use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
-use crate::link::spec::Identity;
+use crate::operation::normalize_operation;
+use crate::operation::NamedFragments;
+use crate::operation::RebasedFragments;
+use crate::operation::SelectionSet;
 use crate::query_graph::build_federated_query_graph;
 use crate::query_graph::path_tree::OpPathTree;
 use crate::query_graph::QueryGraph;
@@ -25,11 +28,6 @@ use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
-use crate::query_plan::operation::normalize_operation;
-use crate::query_plan::operation::NamedFragments;
-use crate::query_plan::operation::NormalizedDefer;
-use crate::query_plan::operation::RebasedFragments;
-use crate::query_plan::operation::SelectionSet;
 use crate::query_plan::query_planning_traversal::BestQueryPlanInfo;
 use crate::query_plan::query_planning_traversal::QueryPlanningParameters;
 use crate::query_plan::query_planning_traversal::QueryPlanningTraversal;
@@ -66,6 +64,16 @@ pub struct QueryPlannerConfig {
     /// Defaults to true.
     pub reuse_query_fragments: bool,
 
+    /// NOTE: **not implemented yet**
+    ///
+    /// If enabled, the query planner will extract inline fragments into fragment
+    /// definitions before sending queries to subgraphs. This can significantly
+    /// reduce the size of the query sent to subgraphs, but may increase the time
+    /// it takes to plan the query.
+    ///
+    /// Defaults to false.
+    pub generate_query_fragments: bool,
+
     /// Whether to run GraphQL validation against the extracted subgraph schemas. Recommended in
     /// non-production settings or when debugging.
     ///
@@ -90,6 +98,7 @@ impl Default for QueryPlannerConfig {
         Self {
             reuse_query_fragments: true,
             subgraph_graphql_validation: false,
+            generate_query_fragments: false,
             incremental_delivery: Default::default(),
             debug: Default::default(),
         }
@@ -159,9 +168,9 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, PartialEq, Default)]
 pub struct QueryPlanningStatistics {
-    pub evaluated_plan_count: usize,
+    pub evaluated_plan_count: Cell<usize>,
 }
 
 impl QueryPlannerConfig {
@@ -208,17 +217,6 @@ impl QueryPlanner {
             Some(true),
         )?;
 
-        let metadata = supergraph_schema.metadata().unwrap();
-
-        let federation_link = metadata.for_identity(&Identity::federation_identity());
-        let interface_object_directive =
-            federation_link.map_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC, |link| {
-                link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
-            });
-
-        let is_interface_object =
-            |ty: &ExtendedType| ty.is_object() && ty.directives().has(&interface_object_directive);
-
         let interface_types_with_interface_objects = supergraph
             .schema
             .get_types()
@@ -226,19 +224,31 @@ impl QueryPlanner {
                 TypeDefinitionPosition::Interface(interface_position) => Some(interface_position),
                 _ => None,
             })
-            .filter(|position| {
-                query_graph.sources().any(|(_name, schema)| {
-                    schema
-                        .schema()
-                        .types
-                        .get(&position.type_name)
-                        .is_some_and(is_interface_object)
-                })
+            .map(|position| {
+                let is_interface_object = query_graph
+                    .subgraphs()
+                    .map(|(_name, schema)| {
+                        let Some(position) = schema.try_get_type(position.type_name.clone()) else {
+                            return Ok(false);
+                        };
+                        schema.is_interface_object_type(position)
+                    })
+                    .process_results(|mut iter| iter.any(|b| b))?;
+                Ok::<_, FederationError>((position, is_interface_object))
             })
-            .collect::<IndexSet<_>>();
+            .process_results(|iter| {
+                iter.flat_map(|(position, is_interface_object)| {
+                    if is_interface_object {
+                        Some(position)
+                    } else {
+                        None
+                    }
+                })
+                .collect::<IndexSet<_>>()
+            })?;
 
         let is_inconsistent = |position: AbstractTypeDefinitionPosition| {
-            let mut sources = query_graph.sources().filter_map(|(_name, subgraph)| {
+            let mut sources = query_graph.subgraphs().filter_map(|(_name, subgraph)| {
                 match subgraph.try_get_type(position.type_name().clone())? {
                     // This is only called for type names that are abstract in the supergraph, so it
                     // can only be an object in a subgraph if it is an `@interfaceObject`. And as `@interfaceObject`s
@@ -268,7 +278,7 @@ impl QueryPlanner {
             let Some(expected_runtimes) = sources.next() else {
                 return false;
             };
-            sources.all(|runtimes| runtimes == expected_runtimes)
+            !sources.all(|runtimes| runtimes == expected_runtimes)
         };
 
         let abstract_types_with_inconsistent_runtime_types = supergraph
@@ -297,7 +307,7 @@ impl QueryPlanner {
     }
 
     pub fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
-        &self.federated_query_graph.sources
+        self.federated_query_graph.subgraph_schemas()
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
@@ -321,17 +331,10 @@ impl QueryPlanner {
 
         let is_subscription = operation.is_subscription();
 
-        let statistics = QueryPlanningStatistics {
-            evaluated_plan_count: 0,
-        };
+        let statistics = QueryPlanningStatistics::default();
 
         if self.config.debug.bypass_planner_for_single_subgraph {
-            // A federated query graph always have 1 more sources than there is subgraph, because the root vertices
-            // belong to no subgraphs and use a special source named '_'. So we skip that "fake" source.
-            let mut subgraphs = self
-                .federated_query_graph
-                .sources()
-                .filter(|&(name, _schema)| name != "_");
+            let mut subgraphs = self.federated_query_graph.subgraphs();
             if let (Some((subgraph_name, _subgraph_schema)), None) =
                 (subgraphs.next(), subgraphs.next())
             {
@@ -364,29 +367,37 @@ impl QueryPlanner {
             &self.interface_types_with_interface_objects,
         )?;
 
-        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) =
-            if self.config.incremental_delivery.enable_defer {
-                let NormalizedDefer {
-                    operation,
-                    assigned_defer_labels,
-                    defer_conditions,
-                    has_defers,
-                } = normalized_operation.with_normalized_defer();
-                if has_defers && is_subscription {
-                    return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
-                }
-                (
-                    operation,
-                    Some(assigned_defer_labels),
-                    Some(defer_conditions),
-                    has_defers,
-                )
-            } else {
-                // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
-                // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
-                // to end up passing through a @defer to a subgraph by mistake).
-                (normalized_operation.without_defer(), None, None, false)
-            };
+        let (normalized_operation, assigned_defer_labels, defer_conditions, has_defers) = (
+            normalized_operation.without_defer(),
+            None,
+            None::<IndexMap<String, IndexSet<String>>>,
+            false,
+        );
+        /* TODO(TylerBloom): After defer is impl-ed and after the private preview, the call
+         * above needs to be replaced with this if-else expression.
+        if self.config.incremental_delivery.enable_defer {
+            let NormalizedDefer {
+                operation,
+                assigned_defer_labels,
+                defer_conditions,
+                has_defers,
+            } = normalized_operation.with_normalized_defer();
+            if has_defers && is_subscription {
+                return Err(SingleFederationError::DeferredSubscriptionUnsupported.into());
+            }
+            (
+                operation,
+                Some(assigned_defer_labels),
+                Some(defer_conditions),
+                has_defers,
+            )
+        } else {
+            // If defer is not enabled, we remove all @defer from the query. This feels cleaner do this once here than
+            // having to guard all the code dealing with defer later, and is probably less error prone too (less likely
+            // to end up passing through a @defer to a subgraph by mistake).
+            (normalized_operation.without_defer(), None, None, false)
+        };
+        */
 
         if normalized_operation.selection_set.selections.is_empty() {
             return Ok(QueryPlan::default());
@@ -431,7 +442,7 @@ impl QueryPlanner {
             // PORT_NOTE(@goto-bus-stop): In JS, `root` is a `RootVertex`, which is dynamically
             // checked at various points in query planning. This is our Rust equivalent of that.
             head_must_be_root: true,
-            statistics,
+            statistics: &statistics,
             abstract_types_with_inconsistent_runtime_types: self
                 .abstract_types_with_inconsistent_runtime_types
                 .clone()
@@ -490,7 +501,7 @@ impl QueryPlanner {
 
         Ok(QueryPlan {
             node: root_node,
-            statistics: parameters.statistics,
+            statistics,
         })
     }
 
@@ -681,7 +692,11 @@ fn compute_plan_internal(
             deferred.extend(local_deferred);
             let new_selection = dependency_graph.defer_tracking.primary_selection;
             match primary_selection.as_mut() {
-                Some(selection) => selection.merge_into(new_selection.iter())?,
+                Some(selection) => {
+                    if let Some(new_selection) = new_selection {
+                        selection.add_local_selection_set(&new_selection)?
+                    }
+                }
                 None => primary_selection = new_selection,
             }
         }
@@ -708,11 +723,15 @@ fn compute_plan_internal(
     }
 }
 
+// TODO: FED-95
 fn compute_plan_for_defer_conditionals(
     _parameters: &mut QueryPlanningParameters,
     _defer_conditions: IndexMap<String, IndexSet<String>>,
 ) -> Result<Option<PlanNode>, FederationError> {
-    todo!("FED-95")
+    Err(SingleFederationError::Internal {
+        message: String::from("@defer is currently not supported"),
+    }
+    .into())
 }
 
 #[cfg(test)]
@@ -909,13 +928,13 @@ type User
         )
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
-        // TODO: This is the current output, but it's wrong: it's not fetching `vendor.name` at all.
         insta::assert_snapshot!(plan, @r###"
         QueryPlan {
           Sequence {
             Fetch(service: "reviews") {
               {
                 bestRatedProducts {
+                  __typename
                   ... on Book {
                     __typename
                     id
@@ -927,76 +946,47 @@ type User
                 }
               }
             },
-            Parallel {
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Movie {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Movie {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
+            Flatten(path: "bestRatedProducts.@") {
+              Fetch(service: "products") {
+                {
+                  ... on Book {
+                    __typename
+                    id
+                  }
+                  ... on Movie {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on Book {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
+                  }
+                  ... on Movie {
+                    vendor {
+                      __typename
+                      id
                     }
-                  },
-                },
+                  }
+                }
               },
-              Sequence {
-                Flatten(path: "bestRatedProducts.@") {
-                  Fetch(service: "products") {
-                    {
-                      ... on Book {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on Book {
-                        vendor {
-                          __typename
-                          id
-                        }
-                      }
-                    }
-                  },
-                },
-                Flatten(path: "bestRatedProducts.@.vendor") {
-                  Fetch(service: "accounts") {
-                    {
-                      ... on User {
-                        __typename
-                        id
-                      }
-                    } =>
-                    {
-                      ... on User {
-                        name
-                      }
-                    }
-                  },
-                },
+            },
+            Flatten(path: "bestRatedProducts.@.vendor") {
+              Fetch(service: "accounts") {
+                {
+                  ... on User {
+                    __typename
+                    id
+                  }
+                } =>
+                {
+                  ... on User {
+                    name
+                  }
+                }
               },
             },
           },
@@ -1004,10 +994,7 @@ type User
         "###);
     }
 
-    // TODO: This fails with "Subgraph unexpectedly does not use federation spec"
-    // which seems...unusual
     #[test]
-    #[ignore]
     fn plan_simple_root_field_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -1031,26 +1018,70 @@ type User
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
         insta::assert_snapshot!(plan, @r###"
-        QueryPlan {
-          Parallel {
-            Fetch(service: "accounts") {
-              {
+              QueryPlan {
+                Parallel {
+                  Fetch(service: "accounts") {
+                    {
                       userById(id: 1) {
-                  name
-                  email
-                }
+                        name
+                        email
+                      }
+                    }
+                  },
+                  Sequence {
+                    Fetch(service: "reviews") {
+                      {
+                        bestRatedProducts {
+                          __typename
+                          id
+                          ... on Book {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                          ... on Movie {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                        }
+                      }
+                    },
+                    Flatten(path: "bestRatedProducts.@") {
+                      Fetch(service: "products") {
+                        {
+                          ... on Book {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                          ... on Movie {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                        } =>
+                        {
+                          ... on Book {
+                            avg_rating
+                          }
+                          ... on Movie {
+                            avg_rating
+                          }
+                        }
+                      },
+                    },
+                  },
+                },
               }
-            }
-            Fetch(service: "products") {
-              {
-                      bestRatedProducts {
-                  id
-                  avg_rating
-                }
-              }
-            }
-          }
-        }
         "###);
     }
 

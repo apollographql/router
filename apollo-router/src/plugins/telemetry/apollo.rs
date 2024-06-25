@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::ops::AddAssign;
+use std::sync::OnceLock;
 use std::time::SystemTime;
 
 use http::header::HeaderName;
@@ -12,10 +13,15 @@ use serde::ser::SerializeMap;
 use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
+use uuid::Uuid;
 
+use super::config::ApolloMetricsReferenceMode;
+use super::config::ApolloSignatureNormalizationAlgorithm;
+use super::config::Sampler;
 use super::metrics::apollo::studio::ContextualizedStats;
 use super::metrics::apollo::studio::SingleStats;
 use super::metrics::apollo::studio::SingleStatsReport;
+use super::otlp::Protocol;
 use super::tracing::apollo::TracesReport;
 use crate::plugin::serde::deserialize_header_name;
 use crate::plugin::serde::deserialize_vec_header_name;
@@ -33,6 +39,14 @@ pub(crate) const ENDPOINT_DEFAULT: &str =
     "https://usage-reporting.api.apollographql.com/api/ingress/traces";
 
 pub(crate) const OTLP_ENDPOINT_DEFAULT: &str = "https://usage-reporting.api.apollographql.com";
+
+// Random unique UUID for the Router. This doesn't actually identify the router, it just allows disambiguation between multiple routers with the same metadata.
+static ROUTER_ID: OnceLock<Uuid> = OnceLock::new();
+
+/// Returns the current unique UUID for this instance of the Router.
+pub(crate) fn router_id() -> String {
+    ROUTER_ID.get_or_init(Uuid::new_v4).to_string()
+}
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -69,6 +83,13 @@ pub(crate) struct Config {
     /// Field level instrumentation for subgraphs via ftv1. ftv1 tracing can cause performance issues as it is transmitted in band with subgraph responses.
     pub(crate) field_level_instrumentation_sampler: SamplerOption,
 
+    /// Percentage of traces to send via the OTel protocol when sending to Apollo Studio.
+    pub(crate) experimental_otlp_tracing_sampler: SamplerOption,
+
+    /// OTLP protocol used for OTel traces.
+    /// Note this only applies if OTel traces are enabled and is only intended for use in tests.
+    pub(crate) experimental_otlp_tracing_protocol: Protocol,
+
     /// To configure which request header names and values are included in trace data that's sent to Apollo Studio.
     pub(crate) send_headers: ForwardHeaders,
     /// To configure which GraphQL variable values are included in trace data that's sent to Apollo Studio
@@ -84,6 +105,16 @@ pub(crate) struct Config {
 
     /// Configure the way errors are transmitted to Apollo Studio
     pub(crate) errors: ErrorsConfiguration,
+
+    /// Set the signature normalization algorithm to use when sending Apollo usage reports.
+    pub(crate) experimental_apollo_signature_normalization_algorithm:
+        ApolloSignatureNormalizationAlgorithm,
+
+    /// Set the Apollo usage report reference reporting mode to use.
+    pub(crate) experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode,
+
+    /// Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.
+    pub(crate) experimental_local_field_metrics: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
@@ -134,6 +165,10 @@ const fn default_field_level_instrumentation_sampler() -> SamplerOption {
     SamplerOption::TraceIdRatioBased(0.01)
 }
 
+const fn default_experimental_otlp_tracing_sampler() -> SamplerOption {
+    SamplerOption::Always(Sampler::AlwaysOff)
+}
+
 fn endpoint_default() -> Url {
     Url::parse(ENDPOINT_DEFAULT).expect("must be valid url")
 }
@@ -167,6 +202,7 @@ impl Default for Config {
         Self {
             endpoint: endpoint_default(),
             experimental_otlp_endpoint: otlp_endpoint_default(),
+            experimental_otlp_tracing_protocol: Protocol::default(),
             apollo_key: apollo_key(),
             apollo_graph_ref: apollo_graph_reference(),
             client_name_header: client_name_header_default(),
@@ -174,10 +210,15 @@ impl Default for Config {
             schema_id: "<no_schema_id>".to_string(),
             buffer_size: default_buffer_size(),
             field_level_instrumentation_sampler: default_field_level_instrumentation_sampler(),
+            experimental_otlp_tracing_sampler: default_experimental_otlp_tracing_sampler(),
             send_headers: ForwardHeaders::None,
             send_variable_values: ForwardValues::None,
             batch_processor: BatchProcessorConfig::default(),
             errors: ErrorsConfiguration::default(),
+            experimental_apollo_signature_normalization_algorithm:
+                ApolloSignatureNormalizationAlgorithm::default(),
+            experimental_local_field_metrics: false,
+            experimental_apollo_metrics_reference_mode: ApolloMetricsReferenceMode::default(),
         }
     }
 }
@@ -348,6 +389,7 @@ impl Report {
     pub(crate) fn build_proto_report(
         &self,
         header: ReportHeader,
+        extended_references_enabled: bool,
     ) -> crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
         let mut report = crate::plugins::telemetry::apollo_exporter::proto::reports::Report {
             header: Some(header),
@@ -359,6 +401,7 @@ impl Report {
                 .map(|op| op.into())
                 .collect(),
             traces_pre_aggregated: true,
+            extended_references_enabled,
             ..Default::default()
         };
 
@@ -367,6 +410,7 @@ impl Report {
                 .traces_per_query
                 .insert(key.clone(), traces_and_stats.clone().into());
         }
+
         report
     }
 }
