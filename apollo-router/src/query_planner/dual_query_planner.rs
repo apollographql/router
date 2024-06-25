@@ -69,7 +69,6 @@ impl BothModeComparisonJob {
     fn execute(self) {
         // TODO: once the Rust query planner does not use `todo!()` anymore,
         // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
-        //
         let rust_result = std::panic::catch_unwind(|| {
             let name = self.operation_name.clone().map(Name::new).transpose()?;
             USING_CATCH_UNWIND.set(true);
