@@ -2,7 +2,7 @@
 
 While the STS `CredentialsProvider` chain has a cache, it is not the case for `AssumeRoleProvider`.
 
-This changeset introduces a custom CredentialsProvider that operates as a caching layer, with a couple of business rules related to it:
+This changeset introduces a custom `CredentialsProvider` that operates as a caching layer, with a couple of business rules related to it:
 
 1. When credentials are retrieved, they will be kept in cache for:
      - `credentials.expiry()` if it is set
