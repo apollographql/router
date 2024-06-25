@@ -16,7 +16,7 @@ telemetry:
           description: "count of name field"
           type: counter
           unit: "unit"
-          value: field_unit
+          value: unit
           attributes:
             graphql.type.name: true
             graphql.field.type: true
@@ -34,8 +34,7 @@ telemetry:
             graphql.field.type: true
             graphql.field.name: true
           value:
-            field_custom:
-              list_length: value
+            list_length: value
           condition:
             eq:
               - field_name: string

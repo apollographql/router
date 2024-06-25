@@ -377,7 +377,7 @@ impl ProcessingState {
             };
 
             // The uhandled are the one that are unhandled on both side.
-            in_edges.retain(|e| !other_node.unhandled_parents.contains(e));
+            in_edges.retain(|e| other_node.unhandled_parents.contains(e));
             other_nodes.remove(other_index);
             in_edges
         }
@@ -416,7 +416,7 @@ impl ProcessingState {
         {
             // Remove any of the processed nodes from the unhandled edges of that node.
             // And if there is no remaining edge, that node can be handled.
-            edges.retain(|edge| processed.contains(&edge.parent_node_id));
+            edges.retain(|edge| !processed.contains(&edge.parent_node_id));
             if edges.is_empty() {
                 if !next.contains(&g) {
                     next.push(g);
@@ -2368,6 +2368,7 @@ impl FetchDependencyGraphNode {
         }))
     }
 
+    // - `self.selection_set` must be fragment-spread-free.
     fn finalize_selection(
         &self,
         variable_definitions: &[Node<VariableDefinition>],
@@ -3974,6 +3975,15 @@ fn handle_requires(
         let parent_type = new_node.parent_type.clone();
         for created_node_id in &new_created_nodes {
             let created_node = dependency_graph.node_weight(*created_node_id)?;
+            // Usually, computing the path of our new group into the created groups
+            // is not entirely trivial, but there is at least the relatively common
+            // case where the 2 groups we look at have:
+            // 1) the same `mergeAt`, and
+            // 2) the same parentType; in that case, we can basically infer those 2
+            //    groups apply at the same "place" and so the "path in parent" is
+            //    empty. TODO: it should probably be possible to generalize this by
+            //    checking the `mergeAt` plus analyzing the selection but that
+            //    warrants some reflection...
             let new_path =
                 if merge_at == created_node.merge_at && parent_type == created_node.parent_type {
                     Some(Arc::new(OpPath::default()))
@@ -3981,20 +3991,10 @@ fn handle_requires(
                     None
                 };
             let new_parent_relation = ParentRelation {
-                parent_node_id: new_node_id,
-                // Usually, computing the path of our new group into the created groups
-                // is not entirely trivial, but there is at least the relatively common
-                // case where the 2 groups we look at have:
-                // 1) the same `mergeAt`, and
-                // 2) the same parentType; in that case, we can basically infer those 2
-                //    groups apply at the same "place" and so the "path in parent" is
-                //    empty. TODO: it should probably be possible to generalize this by
-                //    checking the `mergeAt` plus analyzing the selection but that
-                //    warrants some reflection...
+                parent_node_id: *created_node_id,
                 path_in_parent: new_path,
             };
-            dependency_graph.add_parent(*created_node_id, new_parent_relation);
-            created_nodes.insert(*created_node_id);
+            dependency_graph.add_parent(new_node_id, new_parent_relation);
         }
 
         add_post_require_inputs(

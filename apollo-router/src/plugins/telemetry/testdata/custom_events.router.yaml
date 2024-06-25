@@ -15,9 +15,13 @@ telemetry:
         response:
           level: info
           condition:
-            eq:
-            - on_graphql_error: true
-            - true
+            any:
+            - eq:
+              - on_graphql_error: true
+              - true
+            - eq:
+              - response_header: x-log-response
+              - "log"
         error: info
 
         # Custom events
@@ -94,9 +98,13 @@ telemetry:
           level: warn
           on: response
           condition:
-            eq:
+            any:
+            - eq:
+              - on_graphql_error: true
+              - true
+            - eq:
+              - response_header: x-log-response
               - "log"
-              - response_header: "x-log-request"
       subgraph:
         # Standard events
         request:
@@ -109,8 +117,8 @@ telemetry:
           level: warn
           condition:
             eq:
-            - subgraph_request_header: x-log-request
-            - "log" 
+            - subgraph_response_header: x-log-response
+            - "log"
         error: error
 
         # Custom events

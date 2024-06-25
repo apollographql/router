@@ -1,10 +1,10 @@
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::sync::Arc;
 
 #[cfg(test)]
 use http::HeaderValue;
 use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -167,7 +167,7 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = HashMap::with_capacity(5);
+            let mut attrs = Vec::with_capacity(5);
             #[cfg(test)]
             let mut headers: indexmap::IndexMap<String, HeaderValue> = request
                 .router_request
@@ -181,23 +181,28 @@ impl Instrumented
             #[cfg(not(test))]
             let headers = request.router_request.headers();
 
-            attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
-            attrs.insert(
-                "http.request.method".to_string(),
-                format!("{}", request.router_request.method()),
-            );
-            attrs.insert(
-                "http.request.uri".to_string(),
-                format!("{}", request.router_request.uri()),
-            );
-            attrs.insert(
-                "http.request.version".to_string(),
-                format!("{:?}", request.router_request.version()),
-            );
-            attrs.insert(
-                "http.request.body".to_string(),
-                format!("{:?}", request.router_request.body()),
-            );
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.headers"),
+                opentelemetry::Value::String(format!("{:?}", headers).into()),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.method"),
+                opentelemetry::Value::String(format!("{}", request.router_request.method()).into()),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.uri"),
+                opentelemetry::Value::String(format!("{}", request.router_request.uri()).into()),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.version"),
+                opentelemetry::Value::String(
+                    format!("{:?}", request.router_request.version()).into(),
+                ),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.body"),
+                opentelemetry::Value::String(format!("{:?}", request.router_request.body()).into()),
+            ));
             log_event(self.request.level(), "router.request", attrs, "");
         }
         for custom_event in &self.custom {
@@ -212,7 +217,7 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = HashMap::with_capacity(4);
+            let mut attrs = Vec::with_capacity(4);
 
             #[cfg(test)]
             let mut headers: indexmap::IndexMap<String, HeaderValue> = response
@@ -226,22 +231,22 @@ impl Instrumented
             headers.sort_keys();
             #[cfg(not(test))]
             let headers = response.response.headers();
-            attrs.insert(
-                "http.response.headers".to_string(),
-                format!("{:?}", headers),
-            );
-            attrs.insert(
-                "http.response.status".to_string(),
-                format!("{}", response.response.status()),
-            );
-            attrs.insert(
-                "http.response.version".to_string(),
-                format!("{:?}", response.response.version()),
-            );
-            attrs.insert(
-                "http.response.body".to_string(),
-                format!("{:?}", response.response.body()),
-            );
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.response.headers"),
+                opentelemetry::Value::String(format!("{:?}", headers).into()),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.response.status"),
+                opentelemetry::Value::String(format!("{}", response.response.status()).into()),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.response.version"),
+                opentelemetry::Value::String(format!("{:?}", response.response.version()).into()),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.response.body"),
+                opentelemetry::Value::String(format!("{:?}", response.response.body()).into()),
+            ));
             log_event(self.response.level(), "router.response", attrs, "");
         }
         for custom_event in &self.custom {
@@ -256,9 +261,15 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = HashMap::with_capacity(1);
-            attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error.level(), "router.error", attrs, "");
+            log_event(
+                self.error.level(),
+                "router.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -285,7 +296,7 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = HashMap::with_capacity(5);
+            let mut attrs = Vec::with_capacity(5);
             #[cfg(test)]
             let mut headers: indexmap::IndexMap<String, HeaderValue> = request
                 .supergraph_request
@@ -298,23 +309,36 @@ impl Instrumented
             headers.sort_keys();
             #[cfg(not(test))]
             let headers = request.supergraph_request.headers();
-            attrs.insert("http.request.headers".to_string(), format!("{:?}", headers));
-            attrs.insert(
-                "http.request.method".to_string(),
-                format!("{}", request.supergraph_request.method()),
-            );
-            attrs.insert(
-                "http.request.uri".to_string(),
-                format!("{}", request.supergraph_request.uri()),
-            );
-            attrs.insert(
-                "http.request.version".to_string(),
-                format!("{:?}", request.supergraph_request.version()),
-            );
-            attrs.insert(
-                "http.request.body".to_string(),
-                serde_json::to_string(request.supergraph_request.body()).unwrap_or_default(),
-            );
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.headers"),
+                opentelemetry::Value::String(format!("{:?}", headers).into()),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.method"),
+                opentelemetry::Value::String(
+                    format!("{}", request.supergraph_request.method()).into(),
+                ),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.uri"),
+                opentelemetry::Value::String(
+                    format!("{}", request.supergraph_request.uri()).into(),
+                ),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.version"),
+                opentelemetry::Value::String(
+                    format!("{:?}", request.supergraph_request.version()).into(),
+                ),
+            ));
+            attrs.push(KeyValue::new(
+                Key::from_static_str("http.request.body"),
+                opentelemetry::Value::String(
+                    serde_json::to_string(request.supergraph_request.body())
+                        .unwrap_or_default()
+                        .into(),
+                ),
+            ));
             log_event(self.request.level(), "supergraph.request", attrs, "");
         }
         if self.response.level() != EventLevel::Off {
@@ -347,9 +371,15 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = HashMap::with_capacity(1);
-            attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error.level(), "supergraph.error", attrs, "");
+            log_event(
+                self.error.level(),
+                "supergraph.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -400,10 +430,15 @@ impl Instrumented
                     return;
                 }
             }
-            let mut attrs = HashMap::with_capacity(1);
-
-            attrs.insert("error".to_string(), error.to_string());
-            log_event(self.error.level(), "subgraph.error", attrs, "");
+            log_event(
+                self.error.level(),
+                "subgraph.error",
+                vec![KeyValue::new(
+                    Key::from_static_str("error"),
+                    opentelemetry::Value::String(error.to_string().into()),
+                )],
+                "",
+            );
         }
         for custom_event in &self.custom {
             custom_event.on_error(error, ctx);
@@ -602,7 +637,8 @@ where
         if inner.event_on == EventOn::Request
             && inner.condition.evaluate_request(request) != Some(false)
         {
-            inner.send_event();
+            let attrs = std::mem::take(&mut inner.attributes);
+            inner.send_event(attrs);
         }
     }
 
@@ -620,11 +656,12 @@ where
             inner.attributes.append(&mut new_attributes);
         }
 
-        inner.send_event();
+        let attrs = std::mem::take(&mut inner.attributes);
+        inner.send_event(attrs);
     }
 
     fn on_response_event(&self, response: &Self::EventResponse, ctx: &Context) {
-        let mut inner = self.inner.lock();
+        let inner = self.inner.lock();
         if inner.event_on != EventOn::EventResponse {
             return;
         }
@@ -632,12 +669,13 @@ where
         if !inner.condition.evaluate_event_response(response, ctx) {
             return;
         }
+        let mut attributes = inner.attributes.clone();
         if let Some(selectors) = &inner.selectors {
             let mut new_attributes = selectors.on_response_event(response, ctx);
-            inner.attributes.append(&mut new_attributes);
+            attributes.append(&mut new_attributes);
         }
 
-        inner.send_event();
+        inner.send_event(attributes);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &Context) {
@@ -650,7 +688,8 @@ where
             inner.attributes.append(&mut new_attributes);
         }
 
-        inner.send_event();
+        let attrs = std::mem::take(&mut inner.attributes);
+        inner.send_event(attrs);
     }
 }
 
@@ -660,35 +699,19 @@ where
     T: Selector<Request = Request, Response = Response> + Debug + Debug,
 {
     #[inline]
-    fn send_event(&self) {
-        let attributes: HashMap<String, String> = self
-            .attributes
-            .iter()
-            .map(|kv| (kv.key.to_string(), kv.value.to_string()))
-            .collect();
-
+    fn send_event(&self, attributes: Vec<KeyValue>) {
         log_event(self.level, &self.name, attributes, &self.message);
     }
 }
 
 #[inline]
-pub(crate) fn log_event(
-    level: EventLevel,
-    kind: &str,
-    attributes: HashMap<String, String>,
-    message: &str,
-) {
-    #[cfg(test)]
-    let mut attributes: indexmap::IndexMap<String, String> =
-        attributes.clone().into_iter().collect();
-    #[cfg(test)]
-    attributes.sort_keys();
+pub(crate) fn log_event(level: EventLevel, kind: &str, attributes: Vec<KeyValue>, message: &str) {
     let span = Span::current();
-    span.set_event_dyn_attributes(
-        attributes
-            .into_iter()
-            .map(|(key, value)| Key::from(key).string(value)),
-    );
+    #[cfg(test)]
+    let mut attributes = attributes;
+    #[cfg(test)]
+    attributes.sort_by(|a, b| a.key.partial_cmp(&b.key).unwrap());
+    span.set_event_dyn_attributes(attributes);
 
     match level {
         EventLevel::Info => {
@@ -745,6 +768,21 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+        }
+        .with_subscriber(
+            assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
+        )
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_router_events_graphql_error() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
             // Without the header to enable custom event
             test_harness
                 .call_router(
@@ -761,6 +799,40 @@ mod tests {
                             .header("custom-header", "val1")
                             .context(context_with_error)
                             .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(
+            assert_snapshot_subscriber!({r#"[].span["apollo_private.duration_ns"]"# => "[duration]", r#"[].spans[]["apollo_private.duration_ns"]"# => "[duration]", "[].fields.attributes" => insta::sorted_redaction()}),
+        )
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_router_events_graphql_response() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            // Without the header to enable custom event
+            test_harness
+                .call_router(
+                    router::Request::fake_builder()
+                        .header("custom-header", "val1")
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        router::Response::fake_builder()
+                            .header("custom-header", "val1")
+                            .header(CONTENT_LENGTH, "25")
+                            .header("x-log-response", HeaderValue::from_static("log"))
+                            .data(serde_json_bytes::json!({"data": "res"}))
                             .build()
                             .expect("expecting valid response")
                     },
@@ -800,6 +872,19 @@ mod tests {
                 )
                 .await
                 .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_supergraph_events_on_graphql_error() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
             test_harness
                 .call_supergraph(
                     supergraph::Request::fake_builder()
@@ -815,6 +900,36 @@ mod tests {
                             .header("custom-header", "val1")
                             .header("x-log-request", HeaderValue::from_static("log"))
                             .context(context_with_error)
+                            .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_supergraph_events_on_response() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            test_harness
+                .call_supergraph(
+                    supergraph::Request::fake_builder()
+                        .query("query { foo }")
+                        .build()
+                        .unwrap(),
+                    |_r| {
+                        supergraph::Response::fake_builder()
+                            .header("custom-header", "val1")
+                            .header("x-log-response", HeaderValue::from_static("log"))
                             .data(serde_json_bytes::json!({"errors": [{"message": "res"}]}))
                             .build()
                             .expect("expecting valid response")
@@ -853,6 +968,44 @@ mod tests {
                         subgraph::Response::fake2_builder()
                             .header("custom-header", "val1")
                             .header("x-log-request", HeaderValue::from_static("log"))
+                            .data(serde_json::json!({"data": "res"}).to_string())
+                            .build()
+                            .expect("expecting valid response")
+                    },
+                )
+                .await
+                .expect("expecting successful response");
+        }
+        .with_subscriber(assert_snapshot_subscriber!())
+        .await
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_subgraph_events_response() {
+        let test_harness: PluginTestHarness<Telemetry> = PluginTestHarness::builder()
+            .config(include_str!("../testdata/custom_events.router.yaml"))
+            .build()
+            .await;
+
+        async {
+            let mut subgraph_req = http::Request::new(
+                graphql::Request::fake_builder()
+                    .query("query { foo }")
+                    .build(),
+            );
+            subgraph_req
+                .headers_mut()
+                .insert("x-log-request", HeaderValue::from_static("log"));
+            test_harness
+                .call_subgraph(
+                    subgraph::Request::fake_builder()
+                        .subgraph_name("subgraph")
+                        .subgraph_request(subgraph_req)
+                        .build(),
+                    |_r| {
+                        subgraph::Response::fake2_builder()
+                            .header("custom-header", "val1")
+                            .header("x-log-response", HeaderValue::from_static("log"))
                             .data(serde_json::json!({"data": "res"}).to_string())
                             .build()
                             .expect("expecting valid response")

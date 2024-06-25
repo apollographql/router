@@ -1,6 +1,5 @@
 //! Implements the router phase of the request lifecycle.
 
-use std::collections::HashMap;
 use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use std::task::Poll;
@@ -11,6 +10,8 @@ use futures::stream::StreamExt;
 use futures::TryFutureExt;
 use http::StatusCode;
 use indexmap::IndexMap;
+use opentelemetry::Key;
+use opentelemetry::KeyValue;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::mpsc;
@@ -344,19 +345,19 @@ async fn service_call(
                     .with_lock(|lock| lock.get::<SupergraphEventResponse>().cloned());
                 match supergraph_response_event {
                     Some(supergraph_response_event) => {
-                        let mut attrs = HashMap::with_capacity(4);
-                        attrs.insert(
-                            "http.response.headers".to_string(),
-                            format!("{:?}", parts.headers),
-                        );
-                        attrs.insert(
-                            "http.response.status".to_string(),
-                            format!("{}", parts.status),
-                        );
-                        attrs.insert(
-                            "http.response.version".to_string(),
-                            format!("{:?}", parts.version),
-                        );
+                        let mut attrs = Vec::with_capacity(4);
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.headers"),
+                            opentelemetry::Value::String(format!("{:?}", parts.headers).into()),
+                        ));
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.status"),
+                            opentelemetry::Value::String(format!("{}", parts.status).into()),
+                        ));
+                        attrs.push(KeyValue::new(
+                            Key::from_static_str("http.response.version"),
+                            opentelemetry::Value::String(format!("{:?}", parts.version).into()),
+                        ));
                         let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
                             if let Some(condition) = supergraph_response_event.0.condition() {
@@ -364,10 +365,12 @@ async fn service_call(
                                     return;
                                 }
                             }
-                            attrs.insert(
-                                "http.response.body".to_string(),
-                                serde_json::to_string(resp).unwrap_or_default(),
-                            );
+                            attrs.push(KeyValue::new(
+                                Key::from_static_str("http.response.body"),
+                                opentelemetry::Value::String(
+                                    serde_json::to_string(resp).unwrap_or_default().into(),
+                                ),
+                            ));
                             log_event(
                                 supergraph_response_event.0.level(),
                                 "supergraph.response",

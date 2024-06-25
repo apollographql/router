@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::sync::Arc;
+use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
@@ -61,6 +62,9 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
 
+pub(crate) const RUST_QP_MODE: &str = "rust";
+const JS_QP_MODE: &str = "js";
+
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
 ///
@@ -73,6 +77,7 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
+    signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
 }
 
 #[derive(Clone)]
@@ -197,12 +202,17 @@ impl PlannerMode {
     ) -> Result<PlanSuccess<QueryPlanResult>, QueryPlannerError> {
         match self {
             PlannerMode::Js(js) => {
-                let mut success = js
-                    .plan(filtered_query, operation, plan_options)
-                    .await
+                let start = Instant::now();
+
+                let result = js.plan(filtered_query, operation, plan_options).await;
+
+                metric_query_planning_plan_duration(JS_QP_MODE, start);
+
+                let mut success = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
                     .into_result()
                     .map_err(PlanErrors::from)?;
+
                 if let Some(root_node) = &mut success.data.query_plan.node {
                     // Arc freshly deserialized from Deno should be unique, so this doesn’t clone:
                     let root_node = Arc::make_mut(root_node);
@@ -211,12 +221,18 @@ impl PlannerMode {
                 Ok(success)
             }
             PlannerMode::Rust { rust, .. } => {
-                let plan = operation
+                let start = Instant::now();
+
+                let result = operation
                     .as_deref()
                     .map(|n| Name::new(n).map_err(FederationError::from))
                     .transpose()
                     .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
-                    .map_err(|e| QueryPlannerError::FederationError(e.to_string()))?;
+                    .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+
+                metric_query_planning_plan_duration(RUST_QP_MODE, start);
+
+                let plan = result?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
                 // `Configuration::validate` ensures that we only take this path
@@ -242,9 +258,14 @@ impl PlannerMode {
             }
             PlannerMode::Both { js, rust } => {
                 let operation_name = operation.as_deref().map(NodeStr::from);
-                let mut js_result = js
-                    .plan(filtered_query, operation, plan_options)
-                    .await
+
+                let start = Instant::now();
+
+                let result = js.plan(filtered_query, operation, plan_options).await;
+
+                metric_query_planning_plan_duration(JS_QP_MODE, start);
+
+                let mut js_result = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
                     .into_result()
                     .map_err(PlanErrors::from);
@@ -400,6 +421,9 @@ impl BridgeQueryPlanner {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
         let federation_instrument = federation_version_instrument(schema.federation_version());
+        let signature_normalization_algorithm =
+            TelemetryConfig::signature_normalization_algorithm(&configuration);
+
         Ok(Self {
             planner,
             schema,
@@ -408,6 +432,7 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
+            signature_normalization_algorithm,
         })
     }
 
@@ -561,28 +586,12 @@ impl BridgeQueryPlanner {
                         doc.clone()
                     };
 
-                    let signature_normalization_mode =
-                        match self.configuration.apollo_plugins.plugins.get("telemetry") {
-                            Some(telemetry_config) => {
-                                match serde_json::from_value::<TelemetryConfig>(
-                                    telemetry_config.clone(),
-                                ) {
-                                    Ok(conf) => {
-                                        conf.apollo
-                                            .experimental_apollo_signature_normalization_algorithm
-                                    }
-                                    _ => ApolloSignatureNormalizationAlgorithm::default(),
-                                }
-                            }
-                            None => ApolloSignatureNormalizationAlgorithm::default(),
-                        };
-
                     let generated_usage_reporting = generate_usage_reporting(
                         &signature_doc.executable,
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
-                        &signature_normalization_mode,
+                        &self.signature_normalization_algorithm,
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where
@@ -1103,6 +1112,15 @@ pub(crate) fn render_diff(differences: &[diff::Result<&str>]) -> String {
         }
     }
     output
+}
+
+pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: Instant) {
+    f64_histogram!(
+        "apollo.router.query_planning.plan.duration",
+        "Duration of the query planning.",
+        start.elapsed().as_secs_f64(),
+        "planner" = planner
+    );
 }
 
 #[cfg(test)]
@@ -1726,5 +1744,24 @@ mod tests {
         insta::assert_snapshot!(*subgraph_queries, @r###"
         { topProducts { name } }
         "###)
+    }
+
+    #[test]
+    fn test_metric_query_planning_plan_duration() {
+        let start = Instant::now();
+        metric_query_planning_plan_duration(RUST_QP_MODE, start);
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust"
+        );
+
+        let start = Instant::now();
+        metric_query_planning_plan_duration(JS_QP_MODE, start);
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "js"
+        );
     }
 }
