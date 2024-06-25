@@ -3327,11 +3327,10 @@ fn compute_nodes_for_op_path_element<'a>(
     // See the comment on the `optimize_sibling_typenames()` method to see why this exists.
     if let Some(sibling_typename) = operation.sibling_typename() {
         // We need to add the query __typename for the current type in the current node.
-        let alias = sibling_typename.alias();
         let typename_field = Arc::new(OpPathElement::Field(Field::new_introspection_typename(
             &dependency_graph.supergraph_schema,
             &operation.parent_type_position(),
-            alias.cloned(),
+            sibling_typename.alias().cloned(),
         )));
         let typename_path = stack_item
             .node_path

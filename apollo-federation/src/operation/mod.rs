@@ -2707,11 +2707,10 @@ impl SelectionSet {
                 return Ok(updated.into());
             };
             // We need to add the query __typename for the current type in the current group.
-            let alias = sibling_typename.alias();
             let field_element = Field::new_introspection_typename(
                 &self.schema,
                 &selection.element()?.parent_type_position(),
-                alias.cloned(),
+                sibling_typename.alias().cloned(),
             );
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
