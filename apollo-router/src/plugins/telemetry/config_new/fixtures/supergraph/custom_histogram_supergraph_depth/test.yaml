@@ -1,0 +1,15 @@
+description: Query Depth histogram with value from context
+events:
+  - - supergraph_request:
+        uri: "/hello"
+        method: GET
+        headers:
+          count_header: "10"
+        query: "query { hello }"
+    - extension:
+        map:
+          "apollo_private.query.depth": 2
+    - supergraph_response:
+        status: 200
+        data:
+          hello: "world"

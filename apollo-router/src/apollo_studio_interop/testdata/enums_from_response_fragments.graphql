@@ -1,0 +1,23 @@
+fragment EnumResponseFragment on EnumResponse {
+    list
+    listOfLists
+    singleValue
+}
+
+query EnumResponseQueryFragments {
+  enumInputQuery(enumInput: SOME_VALUE_20) {
+    enumResponse
+  }
+  alias1: enumResponseQuery {
+    ...EnumResponseFragment
+  }
+  alias2: enumResponseQuery {
+    ...on EnumResponse {
+      nestedObject {
+        singleValue
+        listOfLists
+        list
+      }
+    }
+  }
+}
