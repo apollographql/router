@@ -1,18 +1,18 @@
 ---
-source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
+source: apollo-router/src/plugins/telemetry/metrics/apollo/mod.rs
 expression: results
 ---
 [
   {
     "request_id": "[REDACTED]",
     "stats": {
-      "# -\nsubscription{reviewAdded{body}}": {
+      "## GraphQLUnknownOperationName\n": {
         "stats_with_context": {
           "context": {
             "client_name": "test_client",
             "client_version": "1.0-test",
-            "operation_type": "subscription",
-            "operation_subtype": "subscription-request",
+            "operation_type": "query",
+            "operation_subtype": "",
             "result": ""
           },
           "query_latency_stats": {
@@ -35,32 +35,25 @@ expression: results
             "forbidden_operation": false,
             "without_field_instrumentation": false
           },
+          "limits_stats": {
+            "strategy": null,
+            "cost_estimated": null,
+            "cost_actual": null,
+            "depth": 0,
+            "height": 0,
+            "alias_count": 0,
+            "root_field_count": 0
+          },
           "per_type_stat": {},
           "extended_references": {
             "referenced_input_fields": {},
             "referenced_enums": {}
-          }
-        },
-        "referenced_fields_by_type": {
-          "Review": {
-            "field_names": [
-              "body"
-            ],
-            "is_interface": false
           },
-          "Subscription": {
-            "field_names": [
-              "reviewAdded"
-            ],
-            "is_interface": false
-          }
-        }
+          "local_per_type_stat": {}
+        },
+        "referenced_fields_by_type": {}
       }
     },
-    "licensed_operation_count_by_type": {
-      "type": "subscription",
-      "subtype": "subscription-request",
-      "licensed_operation_count": 1
-    }
+    "licensed_operation_count_by_type": null
   }
 ]

@@ -5,7 +5,9 @@ use std::time::Duration;
 use serde::Serialize;
 use uuid::Uuid;
 
-use super::duration_histogram::DurationHistogram;
+use super::histogram::CostHistogram;
+use super::histogram::DurationHistogram;
+use super::histogram::ListLengthHistogram;
 use crate::apollo_studio_interop::AggregatedExtendedReferenceStats;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::plugins::telemetry::apollo::LicensedOperationCountByType;
@@ -38,8 +40,10 @@ pub(crate) struct Stats {
 pub(crate) struct SingleContextualizedStats {
     pub(crate) context: StatsContext,
     pub(crate) query_latency_stats: SingleQueryLatencyStats,
+    pub(crate) limits_stats: SingleLimitsStats,
     pub(crate) per_type_stat: HashMap<String, SingleTypeStat>,
     pub(crate) extended_references: ExtendedReferenceStats,
+    pub(crate) local_per_type_stat: HashMap<String, LocalTypeStat>,
 }
 // TODO Make some of these fields bool
 #[derive(Default, Debug, Serialize)]
@@ -80,6 +84,7 @@ pub(crate) struct SingleFieldStat {
     // a number of requests.
     pub(crate) observed_execution_count: u64,
     pub(crate) latency: DurationHistogram<f64>,
+    pub(crate) length: ListLengthHistogram,
 }
 
 #[derive(Clone, Default, Debug, Serialize)]
@@ -88,16 +93,26 @@ pub(crate) struct ContextualizedStats {
     query_latency_stats: QueryLatencyStats,
     per_type_stat: HashMap<String, TypeStat>,
     extended_references: AggregatedExtendedReferenceStats,
+    limits_stats: Option<LimitsStats>,
+    local_per_type_stat: HashMap<String, LocalTypeStat>,
 }
 
 impl AddAssign<SingleContextualizedStats> for ContextualizedStats {
     fn add_assign(&mut self, stats: SingleContextualizedStats) {
         self.context = stats.context;
         self.query_latency_stats += stats.query_latency_stats;
+        if let Some(limits_stats) = &mut self.limits_stats {
+            *limits_stats += stats.limits_stats;
+        } else {
+            self.limits_stats = Some(stats.limits_stats.into());
+        }
         for (k, v) in stats.per_type_stat {
             *self.per_type_stat.entry(k).or_default() += v;
         }
         self.extended_references += stats.extended_references;
+        for (k, v) in stats.local_per_type_stat {
+            *self.local_per_type_stat.entry(k).or_default() += v;
+        }
     }
 }
 
@@ -118,20 +133,19 @@ pub(crate) struct QueryLatencyStats {
 
 impl AddAssign<SingleQueryLatencyStats> for QueryLatencyStats {
     fn add_assign(&mut self, stats: SingleQueryLatencyStats) {
-        self.request_latencies
-            .increment_duration(Some(stats.latency), 1);
+        self.request_latencies.record(Some(stats.latency), 1);
         match stats.persisted_query_hit {
             Some(true) => self.persisted_query_hits += 1,
             Some(false) => self.persisted_query_misses += 1,
             None => {}
         }
-        self.cache_hits.increment_duration(stats.cache_latency, 1);
+        self.cache_hits.record(stats.cache_latency, 1);
         self.root_error_stats += stats.root_error_stats;
         self.requests_with_errors_count += stats.has_errors as u64;
         self.public_cache_ttl_count
-            .increment_duration(stats.public_cache_ttl_latency, 1);
+            .record(stats.public_cache_ttl_latency, 1);
         self.private_cache_ttl_count
-            .increment_duration(stats.private_cache_ttl_latency, 1);
+            .record(stats.private_cache_ttl_latency, 1);
         self.registered_operation_count += stats.registered_operation as u64;
         self.forbidden_operation_count += stats.forbidden_operation as u64;
         self.requests_without_field_instrumentation += stats.without_field_instrumentation as u64;
@@ -202,13 +216,17 @@ impl From<ContextualizedStats>
                 .collect(),
             query_latency_stats: Some(stats.query_latency_stats.into()),
             context: Some(stats.context),
+            limits_stats: stats.limits_stats.map(|ls| ls.into()),
+            local_per_type_stat: stats
+                .local_per_type_stat
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
             extended_references: if stats.extended_references.is_empty() {
                 None
             } else {
                 Some(stats.extended_references.into())
             },
-            limits_stats: None,
-            local_per_type_stat: HashMap::new(),
             operation_count: 0,
         }
     }
@@ -219,9 +237,9 @@ impl From<QueryLatencyStats>
 {
     fn from(stats: QueryLatencyStats) -> Self {
         Self {
-            request_count: stats.request_latencies.total,
+            request_count: stats.request_latencies.total_u64(),
             latency_count: stats.request_latencies.buckets_to_i64(),
-            cache_hits: stats.cache_hits.total,
+            cache_hits: stats.cache_hits.total_u64(),
             cache_latency_count: stats.cache_hits.buckets_to_i64(),
             persisted_query_hits: stats.persisted_query_hits,
             persisted_query_misses: stats.persisted_query_misses,
@@ -273,9 +291,143 @@ impl From<FieldStat> for crate::plugins::telemetry::apollo_exporter::proto::repo
 
             observed_execution_count: stat.observed_execution_count,
             // Round sampling-rate-compensated floating-point estimates to nearest integers:
-            estimated_execution_count: stat.latency.total as u64,
+            estimated_execution_count: stat.latency.total_u64(),
             latency_count: stat.latency.buckets_to_i64(),
         }
+    }
+}
+
+#[derive(Clone, Debug, Serialize)]
+
+pub(crate) struct LimitsStats {
+    strategy: String,
+    cost_estimated: CostHistogram,
+    cost_actual: CostHistogram,
+    depth: u64,
+    height: u64,
+    alias_count: u64,
+    root_field_count: u64,
+}
+
+impl From<LimitsStats> for crate::plugins::telemetry::apollo_exporter::proto::reports::LimitsStats {
+    fn from(value: LimitsStats) -> Self {
+        Self {
+            strategy: value.strategy,
+            max_cost_estimated: value.cost_estimated.max_u64(),
+            cost_estimated: value.cost_estimated.buckets_to_i64(),
+            max_cost_actual: value.cost_actual.max_u64(),
+            cost_actual: value.cost_actual.buckets_to_i64(),
+            depth: value.depth,
+            height: value.height,
+            alias_count: value.alias_count,
+            root_field_count: value.root_field_count,
+        }
+    }
+}
+
+impl AddAssign<SingleLimitsStats> for LimitsStats {
+    fn add_assign(&mut self, rhs: SingleLimitsStats) {
+        if let Some(cost) = rhs.cost_estimated {
+            self.cost_estimated.record(Some(cost), 1.0)
+        }
+
+        if let Some(cost) = rhs.cost_actual {
+            self.cost_actual.record(Some(cost), 1.0)
+        }
+
+        // These are derived from the query and thus shouldn't change when we collect metrics
+        // for subsequent responses. We overwrite here in case the `LimitsStats` instance
+        // was created with default values before adding in `rhs`.
+        self.height = rhs.height;
+        self.depth = rhs.depth;
+        self.alias_count = rhs.alias_count;
+        self.root_field_count = rhs.root_field_count;
+    }
+}
+
+impl From<SingleLimitsStats> for LimitsStats {
+    fn from(value: SingleLimitsStats) -> Self {
+        let mut cost_estimated = CostHistogram::default();
+        if let Some(cost) = value.cost_estimated {
+            cost_estimated.record(Some(cost), 1.0)
+        }
+
+        let mut cost_actual = CostHistogram::default();
+        if let Some(cost) = value.cost_actual {
+            cost_actual.record(Some(cost), 1.0)
+        }
+
+        Self {
+            strategy: value.strategy.unwrap_or_default(),
+            cost_estimated,
+            cost_actual,
+            depth: value.depth,
+            height: value.height,
+            alias_count: value.alias_count,
+            root_field_count: value.root_field_count,
+        }
+    }
+}
+
+#[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct SingleLimitsStats {
+    pub(crate) strategy: Option<String>,
+    pub(crate) cost_estimated: Option<f64>,
+    pub(crate) cost_actual: Option<f64>,
+    pub(crate) depth: u64,
+    pub(crate) height: u64,
+    pub(crate) alias_count: u64,
+    pub(crate) root_field_count: u64,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub(crate) struct LocalTypeStat {
+    pub(crate) local_per_field_stat: HashMap<String, LocalFieldStat>,
+}
+
+impl From<LocalTypeStat>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::LocalTypeStat
+{
+    fn from(value: LocalTypeStat) -> Self {
+        Self {
+            local_per_field_stat: value
+                .local_per_field_stat
+                .into_iter()
+                .map(|(k, v)| (k, v.into()))
+                .collect(),
+        }
+    }
+}
+
+impl AddAssign<LocalTypeStat> for LocalTypeStat {
+    fn add_assign(&mut self, rhs: LocalTypeStat) {
+        for (k, v) in rhs.local_per_field_stat {
+            *self.local_per_field_stat.entry(k).or_default() += v;
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub(crate) struct LocalFieldStat {
+    pub(crate) return_type: String,
+    pub(crate) list_lengths: ListLengthHistogram,
+}
+
+impl From<LocalFieldStat>
+    for crate::plugins::telemetry::apollo_exporter::proto::reports::LocalFieldStat
+{
+    fn from(value: LocalFieldStat) -> Self {
+        Self {
+            return_type: value.return_type,
+            array_size: value.list_lengths.buckets_to_i64(),
+        }
+    }
+}
+
+impl AddAssign<LocalFieldStat> for LocalFieldStat {
+    fn add_assign(&mut self, rhs: LocalFieldStat) {
+        self.return_type = rhs.return_type;
+        self.list_lengths += rhs.list_lengths;
     }
 }
 
@@ -420,6 +572,15 @@ mod test {
                             forbidden_operation: true,
                             without_field_instrumentation: true,
                         },
+                        limits_stats: SingleLimitsStats {
+                            strategy: Some("test".to_string()),
+                            cost_estimated: Some(10.0),
+                            cost_actual: Some(7.0),
+                            depth: 2,
+                            height: 4,
+                            alias_count: 0,
+                            root_field_count: 1,
+                        },
                         per_type_stat: HashMap::from([
                             (
                                 "type1".into(),
@@ -440,6 +601,10 @@ mod test {
                                 },
                             ),
                         ]),
+                        local_per_type_stat: HashMap::from([
+                            ("type1".into(), local_type_stat(&mut count)),
+                            ("type2".into(), local_type_stat(&mut count)),
+                        ]),
                         extended_references: ExtendedReferenceStats::new(),
                     },
                     referenced_fields_by_type: HashMap::from([(
@@ -456,13 +621,34 @@ mod test {
 
     fn field_stat(count: &mut Count) -> SingleFieldStat {
         let mut latency = DurationHistogram::default();
-        latency.increment_duration(Some(Duration::from_secs(1)), 1.0);
+        latency.record(Some(Duration::from_secs(1)), 1.0);
+
+        let mut length = ListLengthHistogram::default();
+        length.record(Some(1), 1);
+
         SingleFieldStat {
             return_type: "String".into(),
             errors_count: count.inc_u64(),
             observed_execution_count: count.inc_u64(),
             requests_with_errors_count: count.inc_u64(),
             latency,
+            length,
+        }
+    }
+
+    fn local_type_stat(count: &mut Count) -> LocalTypeStat {
+        LocalTypeStat {
+            local_per_field_stat: HashMap::from([("field1".into(), local_field_stat(count))]),
+        }
+    }
+
+    fn local_field_stat(count: &mut Count) -> LocalFieldStat {
+        let mut length = ListLengthHistogram::default();
+        length.record(Some(count.inc_u64()), 1);
+
+        LocalFieldStat {
+            return_type: "String".into(),
+            list_lengths: length,
         }
     }
 
