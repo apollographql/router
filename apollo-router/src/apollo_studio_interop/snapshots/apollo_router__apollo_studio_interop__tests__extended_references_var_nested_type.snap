@@ -1,0 +1,56 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: "&generated"
+---
+referenced_input_fields:
+  EnumInputType:
+    enumInput:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    enumListInput:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    enumListOfListInput:
+      referenced: true
+      null_reference: true
+      undefined_reference: true
+    nestedEnumType:
+      referenced: true
+      null_reference: false
+      undefined_reference: true
+    nullableEnumInput:
+      referenced: false
+      null_reference: false
+      undefined_reference: true
+  NestedEnumInputType:
+    someEnum:
+      referenced: true
+      null_reference: false
+      undefined_reference: false
+    someEnumList:
+      referenced: false
+      null_reference: false
+      undefined_reference: true
+    someEnumListOfList:
+      referenced: false
+      null_reference: false
+      undefined_reference: true
+    someNullableEnum:
+      referenced: true
+      null_reference: true
+      undefined_reference: false
+referenced_enums:
+  SomeEnum:
+    - SOME_VALUE_1
+    - SOME_VALUE_10
+    - SOME_VALUE_11
+    - SOME_VALUE_19
+    - SOME_VALUE_20
+    - SOME_VALUE_21
+    - SOME_VALUE_31
+    - SOME_VALUE_32
+    - SOME_VALUE_33
+    - SOME_VALUE_34
+    - SOME_VALUE_8

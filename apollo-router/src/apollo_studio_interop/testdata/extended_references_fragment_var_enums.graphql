@@ -1,0 +1,17 @@
+fragment EnumVarFragment on Query {
+  enumUsageQuery(
+    nonNullEnumInput: $nonNullEnumInput, 
+    nullableEnumInput: $nullableEnumInput, 
+    enumInputList: $enumInputList,
+    enumInputListOfLists: $enumInputListOfLists,
+    enumInputObject: $enumInputObject,
+    enumInputObjectList: $enumInputObjectList,
+    enumInputObjectListOfLists: $enumInputObjectListOfLists,
+  ) {
+    id
+  }
+}
+
+query EnumVarQueryWithFragment($nonNullEnumInput: SomeEnum!, $nullableEnumInput: SomeEnum, $enumInputList: [SomeEnum], $enumInputListOfLists: [[SomeEnum]], $enumInputObject: EnumInputType, $enumInputObjectList: [EnumInputType], $enumInputObjectListOfLists: [[EnumInputType]]) {
+  ...EnumVarFragment
+}

@@ -3538,11 +3538,11 @@ dependencies = [
 
 [[package]]
 name = "hdrhistogram"
-version = "7.5.2"
+version = "7.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f19b9f54f7c7f55e31401bb647626ce0cf0f67b0004982ce815b3ee72a02aa8"
+checksum = "765c9198f173dd59ce26ff9f95ef0aafd0a0fe01fb9d72841bc5066a4c06511d"
 dependencies = [
- "base64 0.13.1",
+ "base64 0.21.7",
  "byteorder",
  "flate2",
  "nom",
@@ -4764,9 +4764,9 @@ dependencies = [
 
 [[package]]
 name = "num-traits"
-version = "0.2.18"
+version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "da0df0e5185db44f69b44f26786fe401b6c293d1907744beaa7fa62b2e5a517a"
+checksum = "071dfc062690e90b734c0b2273ce72ad0ffa95f0c74596bc250dcfd960262841"
 dependencies = [
  "autocfg",
 ]
@@ -6502,10 +6502,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json_bytes"
-version = "0.2.3"
+version = "0.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9eb67259abd83636e3b2f4700ddc3ecfdbfe7b1b89e824da42bfea6530caf03b"
+checksum = "0ecd92a088fb2500b2f146c9ddc5da9950bb7264d3f00932cd2a6fb369c26c46"
 dependencies = [
+ "ahash",
  "bytes",
  "indexmap 2.2.3",
  "jsonpath-rust",
