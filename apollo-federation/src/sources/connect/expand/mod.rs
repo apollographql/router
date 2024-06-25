@@ -1,8 +1,11 @@
+use apollo_compiler::ast::Directive;
+use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
+use indexmap::IndexSet;
 use itertools::Itertools;
 
 use crate::error::FederationError;
@@ -18,6 +21,8 @@ use crate::Supergraph;
 use crate::ValidFederationSubgraph;
 
 mod carryover;
+mod visitor;
+use visitor::ToSchemaVisitor;
 
 /// The result of a supergraph expansion of connect-aware subgraphs
 pub enum ExpansionResult {
@@ -153,6 +158,23 @@ fn split_subgraph(
         .try_collect()
 }
 
+/// Filter out directives from a directive list
+fn filter_directives<'a, D, I, U>(deny_list: &IndexSet<&Name>, directives: D) -> U
+where
+    D: IntoIterator<Item = &'a I>,
+    I: 'a + AsRef<Directive> + Clone,
+    U: FromIterator<I>,
+{
+    directives
+        .into_iter()
+        .filter(|d| {
+            println!("Checking if `{}` is in `{:?}`", d.as_ref().name, deny_list);
+            !deny_list.contains(&d.as_ref().name)
+        })
+        .cloned()
+        .collect()
+}
+
 mod helpers {
     use apollo_compiler::ast;
     use apollo_compiler::ast::FieldDefinition;
@@ -168,20 +190,20 @@ mod helpers {
     use indexmap::IndexMap;
     use indexmap::IndexSet;
 
+    use super::filter_directives;
+    use super::ToSchemaVisitor;
     use crate::error::FederationError;
     use crate::link::Link;
     use crate::query_graph::extract_subgraphs_from_supergraph::new_empty_fed_2_subgraph_schema;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::position::SchemaRootDefinitionPosition;
-    use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ObjectFieldDefinitionPosition;
     use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
-    use crate::sources::connect::JSONSelection;
     use crate::ValidFederationSubgraph;
 
     /// A helper struct for expanding a subgraph into one per connect directive.
@@ -257,8 +279,6 @@ mod helpers {
 
         /// Expand an object into the schema, copying over fields / types specified by the
         /// JSONSelection.
-        ///
-        // TODO: This needs to support walking the JSONSelection AST to allow for nested types.
         fn expand_object(
             &self,
             to_schema: &mut FederationSchema,
@@ -273,44 +293,17 @@ mod helpers {
             let extended_output_type = output_type.get(self.original_schema.schema())?;
 
             // If the type is built-in, then there isn't anything that we need to do for the output type
+            let directive_deny_list = IndexSet::from([&self.connect_name, &self.source_name]);
             if !extended_output_type.is_built_in() {
-                match output_type {
-                    TypeDefinitionPosition::Object(out) => {
-                        // Extract the needed fields from the selection
-                        let JSONSelection::Named(ref selections) = connector.selection else {
-                            unimplemented!()
-                        };
-                        let mut field_selections = IndexMap::new();
-                        for selection in selections.selections_iter() {
-                            let as_name = Name::new(selection.name())?;
-                            let field = out
-                                .field(as_name.clone())
-                                .get(self.original_schema.schema())?;
-                            let field = FieldDefinition {
-                                description: field.description.clone(),
-                                name: field.name.clone(),
-                                arguments: field.arguments.clone(),
-                                ty: field.ty.clone(),
-                                directives: ast::DirectiveList::new(),
-                            };
+                let visitor = ToSchemaVisitor::new(
+                    self.original_schema,
+                    to_schema,
+                    output_type,
+                    extended_output_type,
+                    &directive_deny_list,
+                );
 
-                            field_selections.insert(as_name, Component::new(field));
-                        }
-
-                        let out_def = out.get(self.original_schema.schema())?;
-                        let out_type = ObjectType {
-                            description: out_def.description.clone(),
-                            name: out_def.name.clone(),
-                            implements_interfaces: out_def.implements_interfaces.clone(),
-                            directives: DirectiveList::new(),
-                            fields: field_selections,
-                        };
-
-                        out.pre_insert(to_schema)?;
-                        out.insert(to_schema, Node::new(out_type))?
-                    }
-                    o => todo!("not yet done for {o:?}"),
-                };
+                connector.selection.visit(visitor)?;
             }
 
             let parent = object_field.parent();
@@ -321,13 +314,13 @@ mod helpers {
                 name: field_def.name.clone(),
                 arguments: field_def.arguments.clone(),
                 ty: field_def.ty.clone(),
-                directives: ast::DirectiveList::new(),
+                directives: filter_directives(&directive_deny_list, &field_def.directives),
             };
             let connector_parent_type = ObjectType {
                 description: parent_type.description.clone(),
                 name: parent_type.name.clone(),
                 implements_interfaces: parent_type.implements_interfaces.clone(),
-                directives: DirectiveList::new(),
+                directives: filter_directives(&directive_deny_list, &parent_type.directives),
                 fields: IndexMap::from([(
                     field_type.ty.inner_named_type().clone(),
                     Component::new(field_type),

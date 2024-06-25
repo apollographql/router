@@ -1,0 +1,118 @@
+---
+source: apollo-federation/src/sources/connect/json_selection/iter.rs
+expression: iter.collect_vec()
+---
+[
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: false,
+        name: "id",
+    },
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: false,
+        name: "name",
+    },
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: false,
+        name: "username",
+    },
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: false,
+        name: "email",
+    },
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: true,
+        name: "address",
+    },
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: false,
+        name: "phone",
+    },
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: false,
+        name: "website",
+    },
+    JSONSelectionOutput {
+        ancestors: [],
+        is_group: true,
+        name: "company",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "address",
+        ],
+        is_group: false,
+        name: "street",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "address",
+        ],
+        is_group: false,
+        name: "suite",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "address",
+        ],
+        is_group: false,
+        name: "city",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "address",
+        ],
+        is_group: false,
+        name: "zipcode",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "address",
+        ],
+        is_group: true,
+        name: "geo",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "company",
+        ],
+        is_group: false,
+        name: "name",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "company",
+        ],
+        is_group: false,
+        name: "catchPhrase",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "company",
+        ],
+        is_group: false,
+        name: "bs",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "address",
+            "geo",
+        ],
+        is_group: false,
+        name: "lat",
+    },
+    JSONSelectionOutput {
+        ancestors: [
+            "address",
+            "geo",
+        ],
+        is_group: false,
+        name: "lng",
+    },
+]
