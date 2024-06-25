@@ -173,6 +173,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "persisted_query_hits": 2,
@@ -326,6 +327,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "root_error_stats": {
@@ -495,6 +497,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "private_cache_ttl_count": {
@@ -646,6 +649,7 @@ expression: aggregated_metrics
                   0,
                   2
                 ],
+                "max": 1000000,
                 "total": 2
               },
               "registered_operation_count": 2,
@@ -809,6 +813,7 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     }
                   },
@@ -966,6 +971,7 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     }
                   }
@@ -1127,6 +1133,7 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     }
                   },
@@ -1284,6 +1291,7 @@ expression: aggregated_metrics
                         0.0,
                         2.0
                       ],
+                      "max": 1000000.0,
                       "total": 2.0
                     }
                   }
@@ -1293,6 +1301,144 @@ expression: aggregated_metrics
             "extended_references": {
               "referenced_input_fields": {},
               "referenced_enums": {}
+            },
+            "limits_stats": {
+              "strategy": "test",
+              "cost_estimated": {
+                "buckets": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  2.0
+                ],
+                "max": 10.0,
+                "total": 2.0
+              },
+              "cost_actual": {
+                "buckets": [
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  0.0,
+                  2.0
+                ],
+                "max": 7.0,
+                "total": 2.0
+              },
+              "depth": 2,
+              "height": 4,
+              "alias_count": 0,
+              "root_field_count": 1
+            },
+            "local_per_type_stat": {
+              "type1": {
+                "local_per_field_stat": {
+                  "field1": {
+                    "return_type": "String",
+                    "list_lengths": {
+                      "buckets": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        2.0
+                      ],
+                      "max": 20.0,
+                      "total": 2.0
+                    }
+                  }
+                }
+              },
+              "type2": {
+                "local_per_field_stat": {
+                  "field1": {
+                    "return_type": "String",
+                    "list_lengths": {
+                      "buckets": [
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        0.0,
+                        2.0
+                      ],
+                      "max": 21.0,
+                      "total": 2.0
+                    }
+                  }
+                }
+              }
             }
           }
         ]

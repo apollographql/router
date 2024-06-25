@@ -1,18 +1,18 @@
 ---
-source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
+source: apollo-router/src/plugins/telemetry/metrics/apollo/mod.rs
 expression: results
 ---
 [
   {
     "request_id": "[REDACTED]",
     "stats": {
-      "# -\nsubscription{reviewAdded{body}}": {
+      "# -\n{topProducts{name}}": {
         "stats_with_context": {
           "context": {
             "client_name": "test_client",
             "client_version": "1.0-test",
-            "operation_type": "subscription",
-            "operation_subtype": "subscription-request",
+            "operation_type": "query",
+            "operation_subtype": "",
             "result": ""
           },
           "query_latency_stats": {
@@ -35,22 +35,33 @@ expression: results
             "forbidden_operation": false,
             "without_field_instrumentation": false
           },
+          "limits_stats": {
+            "strategy": null,
+            "cost_estimated": null,
+            "cost_actual": null,
+            "depth": 0,
+            "height": 0,
+            "alias_count": 0,
+            "root_field_count": 0
+          },
           "per_type_stat": {},
           "extended_references": {
             "referenced_input_fields": {},
             "referenced_enums": {}
-          }
+          },
+          "enum_response_references": {},
+          "local_per_type_stat": {}
         },
         "referenced_fields_by_type": {
-          "Review": {
+          "Product": {
             "field_names": [
-              "body"
+              "name"
             ],
             "is_interface": false
           },
-          "Subscription": {
+          "Query": {
             "field_names": [
-              "reviewAdded"
+              "topProducts"
             ],
             "is_interface": false
           }
@@ -58,8 +69,8 @@ expression: results
       }
     },
     "licensed_operation_count_by_type": {
-      "type": "subscription",
-      "subtype": "subscription-request",
+      "type": "query",
+      "subtype": null,
       "licensed_operation_count": 1
     }
   }
