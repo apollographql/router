@@ -6,6 +6,7 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
+use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
 use super::otel::layer::SPAN_KIND_FIELD;
@@ -14,7 +15,6 @@ use super::otel::layer::SPAN_STATUS_CODE_FIELD;
 use super::otel::layer::SPAN_STATUS_MESSAGE_FIELD;
 use super::otel::OtelData;
 use super::reload::IsSampled;
-use super::tracing::APOLLO_PRIVATE_PREFIX;
 
 #[derive(Debug, Default)]
 pub(crate) struct LogAttributes {
