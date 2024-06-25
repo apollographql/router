@@ -13,9 +13,9 @@ For general tracing configuration, refer to [Router Tracing Configuration](./ove
 To configure the router:
 
 - Enable the [OTLP exporter](./otlp#configuration)
-- You must use the `http` protocol as `grpc` is currently not supported by Dynatrace (See: https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export)
+-  Set the `protocol` as `http`;  Dynatrace [doesn't currently support](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export) `grpc`
 - Provide your Dynatrace endpoint
-- Provide your API token in the `Authorization` header
+- Provide your Dynatrace API token in the `Authorization` header; the header should start with [`Api-token` and then your Dynatrace token](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export#authentication-export-to-activegate)
 
 ```yaml title="router.yaml"
 telemetry:
