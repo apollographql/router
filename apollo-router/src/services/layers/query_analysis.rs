@@ -174,6 +174,7 @@ impl QueryAnalysisLayer {
                             .expect("cannot insert operation name into context; this is a bug");
                         let operation_kind =
                             operation.map(|op| OperationKind::from(op.operation_type));
+                        // FIXME: I think we should not add an operation kind by default. If it's an invalid graphql operation for example it might be useful to detect there isn't operation_kind
                         context
                             .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
                             .expect("cannot insert operation kind in the context; this is a bug");
