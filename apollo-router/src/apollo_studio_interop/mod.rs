@@ -231,7 +231,6 @@ impl ComparableUsageReporting {
 /// Generate a ComparableUsageReporting containing the stats_report_key (a normalized version of the operation signature)
 /// and referenced fields of an operation. The document used to generate the signature and for the references can be
 /// different to handle cases where the operation has been filtered, but we want to keep the same signature.
-#[tracing::instrument(skip_all, level = "debug")]
 pub(crate) fn generate_usage_reporting(
     signature_doc: &ExecutableDocument,
     references_doc: &ExecutableDocument,
@@ -257,7 +256,6 @@ pub(crate) fn generate_usage_reporting(
     generator.generate_usage_reporting()
 }
 
-#[tracing::instrument(skip_all, level = "debug")]
 pub(crate) fn generate_extended_references(
     doc: Arc<Valid<ExecutableDocument>>,
     operation_name: Option<String>,
@@ -282,23 +280,23 @@ pub(crate) fn generate_extended_references(
     generator.generate_extended_references()
 }
 
-#[tracing::instrument(skip_all, level = "debug")]
 pub(crate) fn extract_enums_from_response(
     query: Arc<Query>,
     operation_name: Option<&str>,
     schema: &Valid<Schema>,
     response_body: &Object,
-    result_set: &mut ReferencedEnums,
-) {
+) -> ReferencedEnums {
+    let mut result = ReferencedEnums::new();
     if let Some(operation) = query.operation(operation_name) {
         extract_enums_from_selection_set(
             &operation.selection_set,
             &query.fragments,
             schema,
             response_body,
-            result_set,
-        );
+            &mut result,
+        )
     }
+    result
 }
 
 fn add_enum_value_to_map(
@@ -308,14 +306,13 @@ fn add_enum_value_to_map(
 ) {
     match enum_value {
         JsonValue::String(val_str) => {
-            let enum_name_str = enum_name.to_string();
             // Not using entry API here due to performance impact
-            let enum_name_stats = match referenced_enums.get_mut(&enum_name_str) {
+            let enum_name_stats = match referenced_enums.get_mut(enum_name.as_str()) {
                 Some(existing_stats) => existing_stats,
                 None => {
-                    referenced_enums.insert(enum_name_str.clone(), HashSet::new());
+                    referenced_enums.insert(enum_name.to_string(), HashSet::new());
                     referenced_enums
-                        .get_mut(&enum_name_str)
+                        .get_mut(enum_name.as_str())
                         .expect("value is expected to be in map")
                 }
             };

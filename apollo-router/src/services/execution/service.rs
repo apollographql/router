@@ -329,8 +329,6 @@ impl ExecutionService {
                 }
             }
 
-            let mut referenced_enums = HashMap::new();
-
             if let Some(filtered_query) = query.filtered_query.as_ref() {
                 paths = filtered_query.format_response(
                     &mut response,
@@ -339,31 +337,7 @@ impl ExecutionService {
                     schema.api_schema(),
                     variables_set,
                 );
-
-                if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
-                    extract_enums_from_response(
-                        filtered_query.clone(),
-                        operation_name,
-                        schema.api_schema(),
-                        response_body,
-                        &mut referenced_enums,
-                    );
-                }
             }
-
-            if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
-                extract_enums_from_response(
-                    query.clone(),
-                    operation_name,
-                    schema.api_schema(),
-                    response_body,
-                    &mut referenced_enums,
-                );
-            }
-
-            context
-                    .extensions()
-                    .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
 
             paths.extend(
                 query
@@ -378,6 +352,20 @@ impl ExecutionService {
             );
 
             nullified_paths.extend(paths);
+
+            let referenced_enums = if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
+                extract_enums_from_response(
+                    query.clone(),
+                    operation_name,
+                    schema.api_schema(),
+                    response_body,
+                )
+            } else {
+                ReferencedEnums::new()
+            };
+            context
+                    .extensions()
+                    .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {

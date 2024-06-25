@@ -133,16 +133,12 @@ fn enums_from_response(
     let query = Query::parse(query_str, operation_name, &spec_schema, &config).unwrap();
     let response_body: Object = serde_json::from_str(response_body_str).unwrap();
 
-    let mut result = ReferencedEnums::new();
     extract_enums_from_response(
         Arc::new(query),
         operation_name,
         &compiler_schema,
         &response_body,
-        &mut result,
-    );
-
-    result
+    )
 }
 
 #[test(tokio::test)]
