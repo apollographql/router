@@ -34,6 +34,7 @@ pub(crate) const FEDERATION_FIELDS_ARGUMENT_NAME: Name = name!("fields");
 pub(crate) const FEDERATION_RESOLVABLE_ARGUMENT_NAME: Name = name!("resolvable");
 pub(crate) const FEDERATION_REASON_ARGUMENT_NAME: Name = name!("reason");
 pub(crate) const FEDERATION_FROM_ARGUMENT_NAME: Name = name!("from");
+pub(crate) const FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("label");
 
 pub(crate) struct KeyDirectiveArguments<'doc> {
     pub(crate) fields: &'doc str,
@@ -362,18 +363,28 @@ impl FederationSpecDefinition {
         &self,
         schema: &FederationSchema,
         from: String,
+        label: &Option<&str>,
     ) -> Result<Directive, FederationError> {
         let name_in_schema = self
             .directive_name_in_schema(schema, &FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC)?
             .ok_or_else(|| SingleFederationError::Internal {
                 message: "Unexpectedly could not find federation spec in schema".to_owned(),
             })?;
+
+        let mut arguments = vec![Node::new(Argument {
+            name: FEDERATION_FROM_ARGUMENT_NAME,
+            value: Node::new(Value::String(from)),
+        })];
+
+        if let Some(label) = label {
+            arguments.push(Node::new(Argument {
+                name: FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME,
+                value: Node::new(Value::String(label.to_string())),
+            }));
+        }
         Ok(Directive {
             name: name_in_schema,
-            arguments: vec![Node::new(Argument {
-                name: FEDERATION_FROM_ARGUMENT_NAME,
-                value: Node::new(Value::String(from)),
-            })],
+            arguments,
         })
     }
 }
