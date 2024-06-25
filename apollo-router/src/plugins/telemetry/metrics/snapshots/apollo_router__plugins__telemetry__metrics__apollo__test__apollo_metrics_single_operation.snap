@@ -35,7 +35,11 @@ expression: results
             "forbidden_operation": false,
             "without_field_instrumentation": false
           },
-          "per_type_stat": {}
+          "per_type_stat": {},
+          "extended_references": {
+            "referenced_input_fields": {},
+            "referenced_enums": {}
+          }
         },
         "referenced_fields_by_type": {
           "Product": {
