@@ -566,7 +566,9 @@ subgraph:
         .boxed();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             || {
                 let test_span = info_span!(
                     "test",
@@ -576,12 +578,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("another".into(), 2.into());
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
-                let mut attributes = HashMap::new();
-                attributes.insert("http.response.body.size".to_string(), "125".to_string());
-                attributes.insert(
-                    "http.response.body".to_string(),
-                    r#"{"foo": "bar"}"#.to_string(),
-                );
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::String("125".to_string().into()),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
@@ -613,7 +619,9 @@ subgraph:
         .boxed();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             || {
                 let test_span = info_span!(
                     "test",
@@ -623,12 +631,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("another".into(), 2.into());
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
-                let mut attributes = HashMap::new();
-                attributes.insert("http.response.body.size".to_string(), "125".to_string());
-                attributes.insert(
-                    "http.response.body".to_string(),
-                    r#"{"foo": "bar"}"#.to_string(),
-                );
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::String("125".to_string().into()),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
@@ -662,7 +674,9 @@ subgraph:
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             move || {
                 let test_span = info_span!(
                     "test",
@@ -673,12 +687,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
 
-                let mut attributes = HashMap::new();
-                attributes.insert("http.response.body.size".to_string(), "125".to_string());
-                attributes.insert(
-                    "http.response.body".to_string(),
-                    r#"{"foo": "bar"}"#.to_string(),
-                );
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::I64(125),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
@@ -795,7 +813,9 @@ subgraph:
         let event_config: events::Events = serde_yaml::from_str(EVENT_CONFIGURATION).unwrap();
 
         ::tracing::subscriber::with_default(
-            fmt::Subscriber::new().with(otel::layer()).with(fmt_layer),
+            fmt::Subscriber::new()
+                .with(otel::layer().force_sampling())
+                .with(fmt_layer),
             move || {
                 let test_span = info_span!(
                     "test",
@@ -806,12 +826,16 @@ subgraph:
                 test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
                 let _enter = test_span.enter();
 
-                let mut attributes = HashMap::new();
-                attributes.insert("http.response.body.size".to_string(), "125".to_string());
-                attributes.insert(
-                    "http.response.body".to_string(),
-                    r#"{"foo": "bar"}"#.to_string(),
-                );
+                let attributes = vec![
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body.size"),
+                        opentelemetry::Value::String("125".to_string().into()),
+                    ),
+                    KeyValue::new(
+                        Key::from_static_str("http.response.body"),
+                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
+                    ),
+                ];
                 log_event(
                     EventLevel::Info,
                     "my_custom_event",
