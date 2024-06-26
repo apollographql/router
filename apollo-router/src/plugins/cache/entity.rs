@@ -65,7 +65,7 @@ pub(crate) struct EntityCache {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Config {
     redis: RedisCache,
-    /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
+    /// Enable or disable the entity caching feature
     #[serde(default)]
     enabled: Option<bool>,
 
