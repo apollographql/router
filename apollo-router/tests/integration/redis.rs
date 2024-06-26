@@ -368,6 +368,7 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
@@ -477,6 +478,7 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
@@ -679,6 +681,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
