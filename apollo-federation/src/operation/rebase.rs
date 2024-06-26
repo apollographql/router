@@ -13,7 +13,6 @@ use super::InlineFragment;
 use super::InlineFragmentData;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
-use super::NormalizeSelectionOption;
 use super::OperationElement;
 use super::Selection;
 use super::SelectionId;
@@ -738,7 +737,7 @@ impl NamedFragments {
                         &rebased_type,
                         &rebased_fragments,
                         schema,
-                        NormalizeSelectionOption::NormalizeRecursively,
+                        Default::default(),
                     )?;
                     if NamedFragments::is_selection_set_worth_using(&rebased_selection) {
                         let fragment = Fragment {
