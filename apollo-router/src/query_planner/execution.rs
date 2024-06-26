@@ -3,7 +3,6 @@ use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
-use apollo_federation::sources::connect::Connectors;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
@@ -61,7 +60,6 @@ impl QueryPlan {
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
         initial_value: Option<Value>,
-        connectors: &'a Connectors, // TODO: remove (source-aware)
     ) -> Response {
         let root = Path::empty();
 
@@ -81,7 +79,6 @@ impl QueryPlan {
                     root_node: &self.root,
                     subscription_handle: &subscription_handle,
                     subscription_config,
-                    connectors,
                     subgraph_schemas,
                 },
                 &root,
@@ -117,7 +114,6 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
     pub(crate) subscription_config: &'a Option<SubscriptionConfig>,
-    pub(crate) connectors: &'a Connectors,
 }
 
 impl PlanNode {
@@ -330,7 +326,6 @@ impl PlanNode {
                                         root_node: parameters.root_node,
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
-                                        connectors: parameters.connectors,
                                         subgraph_schemas: parameters.subgraph_schemas,
                                     },
                                     current_dir,
@@ -477,7 +472,6 @@ impl DeferredNode {
         let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
-        let connectors = parameters.connectors.clone();
 
         let root_node = parameters.root_node.clone();
         let ctx = parameters.context.clone();
@@ -523,7 +517,6 @@ impl DeferredNode {
                             root_node: &root_node,
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
-                            connectors: &connectors,
                             subgraph_schemas: &subgraph_schemas,
                         },
                         &Path::default(),
