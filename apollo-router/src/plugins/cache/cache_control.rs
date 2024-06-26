@@ -403,5 +403,57 @@ mod tests {
 
         assert_eq!(merged.ttl(), Some(30));
         assert_eq!(merged.remaining_time(now), Some(30));
+        assert!(merged.can_use());
+    }
+
+    #[test]
+    fn merge_nostore() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            created: now,
+            max_age: Some(40),
+            no_store: true,
+            ..Default::default()
+        };
+
+        let second = CacheControl {
+            created: now,
+            max_age: Some(60),
+            no_store: false,
+            public: true,
+            ..Default::default()
+        };
+
+        let merged = first.merge_inner(&second, now);
+        assert!(merged.no_store);
+        assert!(merged.public);
+        assert!(!merged.can_use());
+    }
+
+    #[test]
+    fn merge_public_private() {
+        let now = now_epoch_seconds();
+
+        let first = CacheControl {
+            created: now,
+            max_age: Some(40),
+            public: true,
+            private: false,
+            ..Default::default()
+        };
+
+        let second = CacheControl {
+            created: now,
+            max_age: Some(60),
+            public: false,
+            private: true,
+            ..Default::default()
+        };
+
+        let merged = first.merge_inner(&second, now);
+        assert!(!merged.public);
+        assert!(merged.private);
+        assert!(merged.can_use());
     }
 }
