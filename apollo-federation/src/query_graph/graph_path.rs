@@ -544,7 +544,7 @@ impl SimultaneousPaths {
         match self.0.as_slice() {
             [] => f.write("<no path>"),
 
-            [first] => f.write_fmt(format_args!("{{ {first} }}")),
+            [first] => f.write_fmt(format_args!("{first}")),
 
             _ => {
                 f.write("{")?;
@@ -3015,10 +3015,11 @@ impl Display for OpGraphPath {
         // If the path is length is 0 return "[]"
         // Traverse the path, getting the of the edge.
         let head = &self.graph.graph()[self.head];
-        if head.root_kind.is_some() && self.edges.is_empty() {
+        let head_is_root_node = head.is_root_node();
+        if head_is_root_node && self.edges.is_empty() {
             return write!(f, "_");
         }
-        if head.root_kind.is_some() {
+        if !head_is_root_node {
             write!(f, "{head}")?;
         }
         self.edges
@@ -3029,9 +3030,23 @@ impl Display for OpGraphPath {
                 Some(e) => {
                     let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
                     let node = &self.graph.graph()[tail];
-                    let edge = &self.graph.graph()[e];
-                    let label = edge.transition.to_string();
-                    write!(f, " --[{label}]--> {node}")
+                    if i == 0 && head_is_root_node {
+                        write!(f, "{node}")
+                    } else {
+                        let edge = &self.graph.graph()[e];
+                        let label = edge.transition.to_string();
+
+                        if let Some(conditions) = &edge.conditions {
+                            write!(f, " --[{conditions} ⊢ {label}]--> {node}")
+                        } else if !matches!(
+                            edge.transition,
+                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                        ) {
+                            write!(f, " --[{label}]--> {node}")
+                        } else {
+                            core::fmt::Result::Ok(())
+                        }
+                    }
                 }
                 None => write!(f, " ({}) ", self.edge_triggers[i].as_ref()),
             })?;
@@ -3736,7 +3751,10 @@ mod tests {
         let name = NodeStr::new("S1");
         let graph = build_query_graph(name, schema.clone()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
-        assert_eq!(path.to_string(), "_");
+        // NOTE: in general GraphPath would be used against a federated supergraph which would have
+        // a root node [query](_)* followed by a Query(S1) node
+        // This test is run against subgraph schema meaning it will start from Query(S1) node instead
+        assert_eq!(path.to_string(), "Query(S1) (types: [Query])");
         let pos = ObjectFieldDefinitionPosition {
             type_name: Name::new("T").unwrap(),
             field_name: Name::new("t").unwrap(),
@@ -3761,7 +3779,7 @@ mod tests {
                 None,
             )
             .unwrap();
-        assert_eq!(path.to_string(), "Query(S1)* --[t]--> T(S1) (types: [T])");
+        assert_eq!(path.to_string(), "Query(S1) --[t]--> T(S1) (types: [T])");
         let pos = ObjectFieldDefinitionPosition {
             type_name: Name::new("ID").unwrap(),
             field_name: Name::new("id").unwrap(),
@@ -3788,7 +3806,7 @@ mod tests {
             .unwrap();
         assert_eq!(
             path.to_string(),
-            "Query(S1)* --[t]--> T(S1) --[id]--> ID(S1)"
+            "Query(S1) --[t]--> T(S1) --[id]--> ID(S1)"
         );
     }
 }

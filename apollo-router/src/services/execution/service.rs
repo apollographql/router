@@ -31,6 +31,8 @@ use tracing::Instrument;
 use tracing::Span;
 use tracing_core::Level;
 
+use crate::apollo_studio_interop::extract_enums_from_response;
+use crate::apollo_studio_interop::ReferencedEnums;
 use crate::graphql::Error;
 use crate::graphql::IncrementalResponse;
 use crate::graphql::Response;
@@ -42,6 +44,9 @@ use crate::plugins::authentication::APOLLO_AUTHENTICATION_JWT_CLAIMS;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
+use crate::plugins::telemetry::apollo::Config as ApolloTelemetryConfig;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::Telemetry;
 use crate::query_planner::subscription::SubscriptionHandle;
 use crate::services::execution;
 use crate::services::new_service::ServiceFactory;
@@ -61,6 +66,7 @@ pub(crate) struct ExecutionService {
     pub(crate) subgraph_service_factory: Arc<SubgraphServiceFactory>,
     /// Subscription config if enabled
     subscription_config: Option<SubscriptionConfig>,
+    apollo_telemetry_config: Option<ApolloTelemetryConfig>,
 }
 
 type CloseSignal = broadcast::Sender<()>;
@@ -183,6 +189,11 @@ impl ExecutionService {
         let schema = self.schema.clone();
         let mut nullified_paths: Vec<Path> = vec![];
 
+        let metrics_ref_mode = match &self.apollo_telemetry_config {
+            Some(conf) => conf.experimental_apollo_metrics_reference_mode,
+            _ => ApolloMetricsReferenceMode::default(),
+        };
+
         let execution_span = Span::current();
 
         let stream = stream
@@ -234,6 +245,8 @@ impl ExecutionService {
                         is_deferred,
                         &schema,
                         &mut nullified_paths,
+                        metrics_ref_mode,
+                        &context,
                         response,
                     )
                 }))
@@ -243,6 +256,7 @@ impl ExecutionService {
         ExecutionResponse::new_from_response(http::Response::new(stream as _), ctx)
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn process_graphql_response(
         query: &Arc<Query>,
         operation_name: Option<&str>,
@@ -250,6 +264,8 @@ impl ExecutionService {
         is_deferred: bool,
         schema: &Arc<Schema>,
         nullified_paths: &mut Vec<Path>,
+        metrics_ref_mode: ApolloMetricsReferenceMode,
+        context: &crate::Context,
         mut response: Response,
     ) -> Option<Response> {
         // responses that would fall under a path that was previously nullified are not sent
@@ -334,7 +350,22 @@ impl ExecutionService {
                     )
                     ,
             );
+
             nullified_paths.extend(paths);
+
+            let referenced_enums = if let (ApolloMetricsReferenceMode::Extended, Some(Value::Object(response_body))) = (metrics_ref_mode, &response.data) {
+                extract_enums_from_response(
+                    query.clone(),
+                    operation_name,
+                    schema.api_schema(),
+                    response_body,
+                )
+            } else {
+                ReferencedEnums::new()
+            };
+            context
+                    .extensions()
+                    .with_lock(|mut lock| lock.insert::<ReferencedEnums>(referenced_enums));
         });
 
         match (response.path.as_ref(), response.data.as_ref()) {
@@ -612,6 +643,12 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
             .find(|i| i.0.as_str() == APOLLO_SUBSCRIPTION_PLUGIN)
             .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Subscription>())
             .map(|p| p.config.clone());
+        let apollo_telemetry_conf = self
+            .plugins
+            .iter()
+            .find(|i| i.0.as_str() == "apollo.telemetry")
+            .and_then(|plugin| (*plugin.1).as_any().downcast_ref::<Telemetry>())
+            .map(|t| t.config.apollo.clone());
 
         ServiceBuilder::new()
             .service(
@@ -621,6 +658,7 @@ impl ServiceFactory<ExecutionRequest> for ExecutionServiceFactory {
                         subgraph_service_factory: self.subgraph_service_factory.clone(),
                         subscription_config: subscription_plugin_conf,
                         subgraph_schemas: self.subgraph_schemas.clone(),
+                        apollo_telemetry_config: apollo_telemetry_conf,
                     }
                     .boxed(),
                     |acc, (_, e)| e.execution_service(acc),
