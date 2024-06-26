@@ -1,6 +1,6 @@
 ---
-source: tests/composition_tests.rs
-expression: print_sdl(&supergraph.schema)
+source: apollo-federation/tests/composition_tests.rs
+expression: print_sdl(supergraph.schema.schema())
 ---
 """A cool schema"""
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
@@ -61,4 +61,3 @@ enum link__Purpose {
   """EXECUTION features provide metadata necessary for operation execution."""
   EXECUTION
 }
-

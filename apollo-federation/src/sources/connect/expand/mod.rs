@@ -1,12 +1,14 @@
 use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
+use carryover::carryover_directives;
 use indexmap::IndexMap;
 use itertools::Itertools;
 
 use crate::error::FederationError;
 use crate::link::Link;
 use crate::merge::merge_subgraphs;
+use crate::schema::FederationSchema;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::sources::connect::Connector;
 use crate::subgraph::Subgraph;
@@ -14,6 +16,8 @@ use crate::subgraph::ValidSubgraph;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 use crate::ValidFederationSubgraph;
+
+mod carryover;
 
 /// The result of a supergraph expansion of connect-aware subgraphs
 pub enum ExpansionResult {
@@ -76,9 +80,13 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         .iter()
         .chain(connect_subgraphs.iter().map(|(_, sub)| sub))
         .collect();
-    let supergraph = merge_subgraphs(all_subgraphs).map_err(|e| {
+    let new_supergraph = merge_subgraphs(all_subgraphs).map_err(|e| {
         FederationError::internal(format!("could not merge expanded subgraphs: {e:?}"))
     })?;
+
+    let mut new_supergraph = FederationSchema::new(new_supergraph.schema.into_inner())?;
+    carryover_directives(&supergraph.schema, &mut new_supergraph)
+        .map_err(|_e| FederationError::internal("could not carry over directives"))?;
 
     let connectors_by_service_name: IndexMap<NodeStr, Connector> = connect_subgraphs
         .into_iter()
@@ -86,7 +94,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         .collect();
 
     Ok(ExpansionResult::Expanded {
-        raw_sdl: supergraph.schema.serialize().to_string(),
+        raw_sdl: new_supergraph.schema().serialize().to_string(),
         api_schema: api_schema.schema().clone(),
         connectors_by_service_name,
     })

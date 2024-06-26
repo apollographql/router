@@ -1,0 +1,35 @@
+# rover supergraph compose --config apollo-federation/src/sources/connect/expand/tests/schemas/directives.yaml > apollo-federation/src/sources/connect/expand/tests/schemas/directives.graphql
+federation_version: =2.8.1
+subgraphs:
+  one:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8", import: [
+              "@override", "@inaccessible", "@tag",
+              "@authenticated", "@requiresScopes", "@policy",
+              "@composeDirective"
+            ]
+          )
+          @link(url: "http://specs.example.org/custom/v0.1", import: ["@custom"])
+          @composeDirective(name: "@custom")
+        directive @custom on OBJECT | FIELD_DEFINITION
+        type Query {
+          tagged: String @tag(name: "tag")
+          hidden: String @inaccessible
+          custom: String @custom
+          authenticated: String @authenticated
+          requiresScopes: String @requiresScopes(scopes: ["scope"])
+          policy: String @policy(policies: [["admin"]])
+          overridden: String @override(from: "two", label: "label")
+        }
+  two:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8")
+        type Query {
+          overridden: String
+        }

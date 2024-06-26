@@ -1,5 +1,5 @@
 ---
-source: tests/extract_subgraphs.rs
+source: apollo-federation/tests/extract_subgraphs.rs
 expression: snapshot
 ---
 Subgraph1: https://Subgraph1
