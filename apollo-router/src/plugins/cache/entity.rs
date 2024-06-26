@@ -67,7 +67,7 @@ pub(crate) struct Config {
     redis: RedisCache,
     /// Enable or disable the entity caching feature
     #[serde(default)]
-    enabled: Option<bool>,
+    enabled: bool,
 
     subgraph: SubgraphConfiguration<Subgraph>,
 
