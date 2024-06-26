@@ -18,6 +18,5 @@ expression: query_plan
     "is_authenticated": false,
     "scopes": [],
     "policies": []
-  },
-  "protocol": "graphQL"
+  }
 }

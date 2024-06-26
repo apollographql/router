@@ -19,8 +19,6 @@ use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::Protocol;
-use crate::query_planner::fetch::RestFetchNode;
 use crate::services::FetchRequest;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
@@ -129,19 +127,6 @@ impl FetchService {
             ..
         } = fetch_node;
 
-        // TODO: remove this when older private preview and source-aware code is removed
-        let (service_name, subgraph_service_name) = match &*fetch_node.protocol {
-            Protocol::RestFetch(RestFetchNode {
-                connector_service_name,
-                parent_service_name,
-                ..
-            }) => (parent_service_name.clone(), connector_service_name.clone()),
-            _ => {
-                let service_name_string = service_name.to_string();
-                (service_name_string.clone(), service_name_string.clone())
-            }
-        };
-
         let uri = schema
             .subgraph_url(service_name.as_ref())
             .unwrap_or_else(|| {
@@ -200,7 +185,7 @@ impl FetchService {
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
-            .subgraph_name(subgraph_service_name)
+            .subgraph_name(service_name.to_string())
             .operation_kind(operation_kind)
             .context(context.clone())
             .build();

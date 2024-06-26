@@ -268,7 +268,9 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
         .create(
             false,
             Arc::new(serde_json::from_value(config).unwrap()),
-            SCHEMA.to_string().replace("https://jsonplaceholder.typicode.com/", uri),
+            SCHEMA
+                .to_string()
+                .replace("https://jsonplaceholder.typicode.com/", uri),
             None,
             None,
         )

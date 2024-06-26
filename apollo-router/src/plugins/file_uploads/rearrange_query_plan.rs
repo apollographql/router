@@ -199,10 +199,7 @@ fn rearrange_plan_node<'a>(
             if has_overlap {
                 return Err(FileUploadError::MisorderedVariables);
             }
-            PlanNode::Sequence {
-                nodes: sequence,
-                connector: None,
-            }
+            PlanNode::Sequence { nodes: sequence }
         }
         PlanNode::Parallel { nodes } => {
             // We can rearange nodes inside a Parallel, so we order all nodes based on the first file they use and wrap them into Sequence node.
@@ -265,16 +262,10 @@ fn rearrange_plan_node<'a>(
 
                 if parallel.is_empty() {
                     // if all nodes competing for files replace Parallel with Sequence
-                    PlanNode::Sequence {
-                        nodes,
-                        connector: None,
-                    }
+                    PlanNode::Sequence { nodes }
                 } else {
                     // if some of the nodes competing for files wrap them with Sequence within Parallel
-                    parallel.push(PlanNode::Sequence {
-                        nodes,
-                        connector: None,
-                    });
+                    parallel.push(PlanNode::Sequence { nodes });
                     PlanNode::Parallel { nodes: parallel }
                 }
             }
@@ -381,7 +372,6 @@ mod tests {
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
             ],
-            "connector": null
           }
         }));
 
@@ -408,7 +398,6 @@ mod tests {
             },
             fake_fetch("uploads3", vec!["file"]),
           ],
-          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -454,7 +443,6 @@ mod tests {
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
             ],
-            "connector": null
            }
         }));
 
@@ -503,7 +491,6 @@ mod tests {
                   fake_fetch("uploads1", vec!["file2"]),
                   fake_fetch("uploads2", vec!["file1"])
                 ],
-                "connector": null
               }))
           ],
         }));
@@ -531,7 +518,6 @@ mod tests {
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
             ],
-            "connector": null
           })),
           "deferred":  []
         }));
@@ -558,7 +544,6 @@ mod tests {
             },
             fake_fetch("uploads2", vec!["file"]),
           ],
-          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -602,7 +587,6 @@ mod tests {
               fake_fetch("uploads1", vec!["file2"]),
               fake_fetch("uploads2", vec!["file1"])
             ],
-            "connector": null
           },
         }));
 
@@ -628,7 +612,6 @@ mod tests {
             },
             fake_fetch("uploads2", vec!["file"]),
           ],
-          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -651,7 +634,6 @@ mod tests {
             fake_fetch("uploads1", vec!["file1"]),
             fake_fetch("uploads2", vec!["file2"])
           ],
-          "connector": null
         });
         let query_plan = fake_query_plan(root_json.clone());
 
@@ -673,7 +655,6 @@ mod tests {
             fake_fetch("uploads1", vec!["file2"]),
             fake_fetch("uploads2", vec!["file1"])
           ],
-          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -694,7 +675,6 @@ mod tests {
             fake_fetch("uploads1", vec!["files1"]),
             fake_fetch("uploads2", vec!["files2"])
           ],
-          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -718,7 +698,6 @@ mod tests {
             fake_fetch("uploads3", vec!["file1"]),
             fake_fetch("uploads4", vec!["file2", "file4"])
           ],
-          "connector": null
         }));
 
         let map_field = MapField::new(indexmap! {
@@ -791,7 +770,6 @@ mod tests {
                 fake_fetch("uploads1", vec!["file1"]),
                 fake_fetch("uploads2", vec!["file2"])
               ],
-              "connector": null
             })
         );
     }
@@ -826,7 +804,6 @@ mod tests {
                     fake_fetch("uploads1", vec!["file1"]),
                     fake_fetch("uploads2", vec!["file2"])
                   ],
-                  "connector": null
                 }
               ]
             })
@@ -858,7 +835,6 @@ mod tests {
                 fake_fetch("uploads2", vec!["file0"]),
                 fake_fetch("uploads1", vec!["file1"])
               ],
-              "connector": null
             })
         );
     }
