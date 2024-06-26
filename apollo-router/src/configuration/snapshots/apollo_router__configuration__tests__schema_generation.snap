@@ -1546,9 +1546,8 @@ expression: "&schema"
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
-          "default": null,
-          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
-          "nullable": true,
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
         "metrics": {
@@ -1559,17 +1558,14 @@ expression: "&schema"
           "$ref": "#/definitions/RedisCache",
           "description": "#/definitions/RedisCache"
         },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/Subgraph",
-            "description": "#/definitions/Subgraph"
-          },
-          "description": "Per subgraph configuration",
-          "type": "object"
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
         }
       },
       "required": [
-        "redis"
+        "redis",
+        "subgraph"
       ],
       "type": "object"
     },
@@ -5430,13 +5426,11 @@ expression: "&schema"
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
-          "default": null,
           "description": "activates caching for this subgraph, overrides the global configuration",
           "nullable": true,
           "type": "boolean"
         },
         "private_id": {
-          "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
@@ -5521,6 +5515,25 @@ expression: "&schema"
           "additionalProperties": {
             "$ref": "#/definitions/CommonBatchingConfig",
             "description": "#/definitions/CommonBatchingConfig"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphConfiguration_for_Subgraph": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/Subgraph",
+          "description": "#/definitions/Subgraph"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Subgraph",
+            "description": "#/definitions/Subgraph"
           },
           "default": {},
           "description": "per subgraph options",

@@ -27,6 +27,7 @@ use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
@@ -53,8 +54,8 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 #[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
-    subgraphs: Arc<HashMap<String, Subgraph>>,
-    enabled: Option<bool>,
+    subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
+    enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
 }
@@ -64,12 +65,11 @@ pub(crate) struct EntityCache {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Config {
     redis: RedisCache,
-    /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
+    /// Enable or disable the entity caching feature
     #[serde(default)]
-    enabled: Option<bool>,
-    /// Per subgraph configuration
-    #[serde(default)]
-    subgraphs: HashMap<String, Subgraph>,
+    enabled: bool,
+
+    subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Entity caching evaluation metrics
     #[serde(default)]
@@ -77,24 +77,21 @@ pub(crate) struct Config {
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Subgraph {
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
-    #[serde(default)]
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    #[serde(default)]
     pub(crate) enabled: Option<bool>,
 
     /// Context key used to separate cache sections per user
-    #[serde(default)]
     pub(crate) private_id: Option<String>,
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -144,7 +141,12 @@ impl Plugin for EntityCache {
         };
 
         if init.config.redis.ttl.is_none()
-            && init.config.subgraphs.values().any(|s| s.ttl.is_none())
+            && init
+                .config
+                .subgraph
+                .subgraphs
+                .values()
+                .any(|s| s.ttl.is_none())
         {
             return Err("a TTL must be configured for all subgraphs or globally"
                 .to_string()
@@ -154,7 +156,7 @@ impl Plugin for EntityCache {
         Ok(Self {
             storage,
             enabled: init.config.enabled,
-            subgraphs: Arc::new(init.config.subgraphs),
+            subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
         })
@@ -187,16 +189,22 @@ impl Plugin for EntityCache {
             None => return service,
         };
 
-        let (subgraph_ttl, subgraph_enabled, private_id) =
-            if let Some(config) = self.subgraphs.get(name) {
-                (
-                    config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
-                    config.enabled.or(self.enabled).unwrap_or(false),
-                    config.private_id.clone(),
-                )
-            } else {
-                (storage.ttl(), self.enabled.unwrap_or(false), None)
-            };
+        let subgraph_ttl = self
+            .subgraphs
+            .get(name)
+            .ttl
+            .clone()
+            .map(|t| t.0)
+            .or_else(|| storage.ttl());
+        let subgraph_enabled = self.enabled
+            && self
+                .subgraphs
+                .get(name)
+                .enabled
+                // if the top level `enabled` is true but there is no other configuration, caching is enabled for this plugin
+                .unwrap_or(true);
+        let private_id = self.subgraphs.get(name).private_id.clone();
+
         let name = name.to_string();
 
         if self.metrics.enabled {
@@ -235,8 +243,11 @@ impl EntityCache {
     {
         Ok(Self {
             storage: Some(storage),
-            enabled: Some(true),
-            subgraphs: Arc::new(subgraphs),
+            enabled: true,
+            subgraphs: Arc::new(SubgraphConfiguration {
+                all: Subgraph::default(),
+                subgraphs,
+            }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
         })
