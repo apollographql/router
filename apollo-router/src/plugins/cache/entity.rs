@@ -414,9 +414,7 @@ impl InnerCacheService {
                         if response.response.headers().contains_key(CACHE_CONTROL) {
                             CacheControl::new(response.response.headers(), self.storage.ttl)?
                         } else {
-                            let mut c = CacheControl::default();
-                            c.no_store = true;
-                            c
+                            CacheControl::no_store()
                         };
 
                     if let Some(control_from_cached) = cache_result.1 {
