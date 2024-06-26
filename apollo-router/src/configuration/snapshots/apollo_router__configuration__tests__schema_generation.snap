@@ -1528,7 +1528,7 @@ expression: "&schema"
       "properties": {
         "enabled": {
           "default": null,
-          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
+          "description": "Enable or disable the entity caching feature",
           "nullable": true,
           "type": "boolean"
         },
