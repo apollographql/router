@@ -1,9 +1,9 @@
 //! Running two query planner implementations and comparing their results
 
 use std::borrow::Borrow;
+use std::hash::DefaultHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::hash::DefaultHasher;
 use std::sync::Arc;
 use std::sync::OnceLock;
 use std::time::Instant;
@@ -13,8 +13,8 @@ use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
-use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
+use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::subgraph::spec::ENTITIES_QUERY;
 
 use super::fetch::FetchNode;
@@ -214,18 +214,14 @@ fn subscription_primary_matches(this: &SubscriptionNode, other: &SubscriptionNod
 
 fn operation_matches(this: &SubgraphOperation, other: &SubgraphOperation) -> bool {
     let this_ast = match ast::Document::parse(this.as_serialized(), "this_operation.graphql") {
-        Ok(document) => {
-            document
-        },
+        Ok(document) => document,
         Err(_) => {
             // TODO: log error
             return false;
         }
     };
     let other_ast = match ast::Document::parse(other.as_serialized(), "other_operation.graphql") {
-        Ok(document) => {
-            document
-        },
+        Ok(document) => document,
         Err(_) => {
             // TODO: log error
             return false;
@@ -255,12 +251,12 @@ fn opt_plan_node_matches(
     }
 }
 
-fn vec_matches<T>(this: &Vec<T>, other: &Vec<T>, item_matches: impl Fn(&T, &T) -> bool) -> bool {
+fn vec_matches<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     this.len() == other.len()
         && std::iter::zip(this, other).all(|(this, other)| item_matches(this, other))
 }
 
-fn vec_matches_sorted<T: Ord + Clone>(this: &Vec<T>, other: &Vec<T>) -> bool {
+fn vec_matches_sorted<T: Ord + Clone>(this: &[T], other: &[T]) -> bool {
     let mut this_sorted = this.to_owned();
     let mut other_sorted = other.to_owned();
     this_sorted.sort();
@@ -268,7 +264,11 @@ fn vec_matches_sorted<T: Ord + Clone>(this: &Vec<T>, other: &Vec<T>) -> bool {
     vec_matches(&this_sorted, &other_sorted, T::eq)
 }
 
-fn vec_matches_sorted_by<T: Eq + Clone>(this: &Vec<T>, other: &Vec<T>, compare: impl Fn(&T, &T) -> std::cmp::Ordering) -> bool {
+fn vec_matches_sorted_by<T: Eq + Clone>(
+    this: &[T],
+    other: &[T],
+    compare: impl Fn(&T, &T) -> std::cmp::Ordering,
+) -> bool {
     let mut this_sorted = this.to_owned();
     let mut other_sorted = other.to_owned();
     this_sorted.sort_by(&compare);
@@ -276,7 +276,11 @@ fn vec_matches_sorted_by<T: Eq + Clone>(this: &Vec<T>, other: &Vec<T>, compare: 
     vec_matches(&this_sorted, &other_sorted, T::eq)
 }
 
-fn vec_matches_sorted_by_key<T: Eq + Hash + Clone>(this: &Vec<T>, other: &Vec<T>, key_fn: impl Fn(&T) -> u64) -> bool {
+fn vec_matches_sorted_by_key<T: Eq + Hash + Clone>(
+    this: &[T],
+    other: &[T],
+    key_fn: impl Fn(&T) -> u64,
+) -> bool {
     let mut this_sorted = this.to_owned();
     let mut other_sorted = other.to_owned();
     this_sorted.sort_by_key(&key_fn);
@@ -285,14 +289,17 @@ fn vec_matches_sorted_by_key<T: Eq + Hash + Clone>(this: &Vec<T>, other: &Vec<T>
 }
 
 // performs a set comparison, ignoring order
-fn vec_matches_as_set<T>(this: &Vec<T>, other: &Vec<T>, item_matches: impl Fn(&T, &T) -> bool) -> bool {
+fn vec_matches_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     // Set-inclusion test in both directions
     this.len() == other.len()
         && this.iter().all(|this_node| {
-            other.iter().any(|other_node| item_matches(this_node, other_node))
+            other
+                .iter()
+                .any(|other_node| item_matches(this_node, other_node))
         })
         && other.iter().all(|other_node| {
-            this.iter().any(|this_node| item_matches(this_node, other_node))
+            this.iter()
+                .any(|this_node| item_matches(this_node, other_node))
         })
 }
 
@@ -371,12 +378,12 @@ fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> bool {
     *path == other.path && plan_node_matches(node, &other.node)
 }
 
-
 //==================================================================================================
 // AST comparison functions
 
 fn same_ast_document(x: &ast::Document, y: &ast::Document) -> bool {
-    x.definitions.iter()
+    x.definitions
+        .iter()
         .zip(y.definitions.iter())
         .all(|(x_def, y_def)| same_ast_definition(x_def, y_def))
 }
@@ -386,12 +393,8 @@ fn same_ast_definition(x: &ast::Definition, y: &ast::Definition) -> bool {
         (ast::Definition::OperationDefinition(x), ast::Definition::OperationDefinition(y)) => {
             same_ast_operation_definition(x, y)
         }
-        (ast::Definition::FragmentDefinition(x), ast::Definition::FragmentDefinition(y)) => {
-            x == y
-        }
-        _ => {
-            false
-        }
+        (ast::Definition::FragmentDefinition(x), ast::Definition::FragmentDefinition(y)) => x == y,
+        _ => false,
     }
 }
 
@@ -401,31 +404,34 @@ fn hash_value<T: Hash>(x: &T) -> u64 {
     hasher.finish()
 }
 
-fn same_ast_operation_definition(x: &ast::OperationDefinition, y: &ast::OperationDefinition) -> bool {
+fn same_ast_operation_definition(
+    x: &ast::OperationDefinition,
+    y: &ast::OperationDefinition,
+) -> bool {
     // Note: Operation names are ignored, since parallel fetches may have different names.
     x.operation_type == y.operation_type
-    && vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x.name.cmp(&y.name))
-    && x.directives == y.directives
-    && same_ast_top_level_selection_set(&x.selection_set, &y.selection_set)
+        && vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x.name.cmp(&y.name))
+        && x.directives == y.directives
+        && same_ast_top_level_selection_set(&x.selection_set, &y.selection_set)
 }
 
-fn same_ast_top_level_selection_set(x: &Vec<ast::Selection>, y: &Vec<ast::Selection>) -> bool {
+fn same_ast_top_level_selection_set(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
     match (x.split_first(), y.split_first()) {
         (Some((ast::Selection::Field(x0), [])), Some((ast::Selection::Field(y0), [])))
-            if x0.name == ENTITIES_QUERY && y0.name == ENTITIES_QUERY
-        => {
+            if x0.name == ENTITIES_QUERY && y0.name == ENTITIES_QUERY =>
+        {
             // Note: Entity-fetch query selection sets may be reordered.
             same_ast_selection_set_sorted(&x0.selection_set, &y0.selection_set)
         }
-        _ => x == y
+        _ => x == y,
     }
 }
 
 // This comparison does not sort selection sets recursively. This is good enough to handle
 // reordered `_entities` selection sets.
 // TODO: Make this recursive.
-fn same_ast_selection_set_sorted(x: &Vec<ast::Selection>, y: &Vec<ast::Selection>) -> bool {
-    vec_matches_sorted_by_key(&x, &y, hash_value)
+fn same_ast_selection_set_sorted(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
+    vec_matches_sorted_by_key(x, y, hash_value)
 }
 
 #[cfg(test)]
