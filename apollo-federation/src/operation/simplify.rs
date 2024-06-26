@@ -25,31 +25,20 @@ pub(crate) enum SelectionOrSet {
     SelectionSet(SelectionSet),
 }
 
-/// Options for normalizing the selection sets
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) enum NormalizeSelectionOption {
-    #[default]
-    NormalizeRecursively,
-    NormalizeSingleSelection,
-}
-
 impl Selection {
     fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        option: NormalizeSelectionOption,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
         match self {
-            Selection::Field(field) => {
-                field.normalize(parent_type, named_fragments, schema, option)
-            }
+            Selection::Field(field) => field.normalize(parent_type, named_fragments, schema),
             Selection::FragmentSpread(spread) => {
                 spread.normalize(parent_type, named_fragments, schema)
             }
             Selection::InlineFragment(inline) => {
-                inline.normalize(parent_type, named_fragments, schema, option)
+                inline.normalize(parent_type, named_fragments, schema)
             }
         }
     }
@@ -61,7 +50,6 @@ impl FieldSelection {
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        option: NormalizeSelectionOption,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
         let field_position =
             if self.field.schema() == schema && self.field.parent_type_position() == *parent_type {
@@ -72,7 +60,7 @@ impl FieldSelection {
 
         let field_element =
             if self.field.schema() == schema && self.field.field_position == field_position {
-                self.field.clone()
+                self.field.data().clone()
             } else {
                 self.field
                     .with_updated_position(schema.clone(), field_position)
@@ -82,16 +70,7 @@ impl FieldSelection {
             let field_composite_type_position: CompositeTypeDefinitionPosition =
                 field_element.output_base_type()?.try_into()?;
             let mut normalized_selection: SelectionSet =
-                if NormalizeSelectionOption::NormalizeRecursively == option {
-                    selection_set.normalize(
-                        &field_composite_type_position,
-                        named_fragments,
-                        schema,
-                        option,
-                    )?
-                } else {
-                    selection_set.clone()
-                };
+                selection_set.normalize(&field_composite_type_position, named_fragments, schema)?;
 
             let mut selection = self.with_updated_element(field_element);
             if normalized_selection.is_empty() {
@@ -184,7 +163,6 @@ impl InlineFragmentSelection {
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        option: NormalizeSelectionOption,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
         let this_condition = self.inline_fragment.type_condition_position.clone();
         // This method assumes by contract that `parent_type` runtimes intersects `self.inline_fragment.parent_type_position`'s,
@@ -217,7 +195,7 @@ impl InlineFragmentSelection {
                 // instead of its original type.
                 let normalized_selection_set =
                     self.selection_set
-                        .normalize(parent_type, named_fragments, schema, option)?;
+                        .normalize(parent_type, named_fragments, schema)?;
                 return if normalized_selection_set.is_empty() {
                     Ok(None)
                 } else {
@@ -243,68 +221,59 @@ impl InlineFragmentSelection {
         // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
         // (note that even if we're not recursive, we may still have some "lifting" to do)
         // Note: This normalized_selection_set is not rebased here yet. It will be rebased later as necessary.
-        let normalized_selection_set = if NormalizeSelectionOption::NormalizeRecursively == option {
-            let normalized = self.selection_set.normalize(
-                &self.selection_set.type_position,
-                named_fragments,
-                &self.selection_set.schema,
-                option,
-            )?;
-            // It could be that nothing was satisfiable.
-            if normalized.is_empty() {
-                if self.inline_fragment.directives.is_empty() {
-                    return Ok(None);
-                } else if let Some(rebased_fragment) = self.inline_fragment.rebase_on(
-                    parent_type,
-                    schema,
-                    RebaseErrorHandlingOption::ThrowError,
-                )? {
-                    // We should be able to rebase, or there is a bug, so error if that is the case.
-                    // If we rebased successfully then we add "non-included" __typename field selection
-                    // just to keep the query valid.
-                    let directives =
-                        executable::DirectiveList(vec![Node::new(executable::Directive {
-                            name: name!("include"),
-                            arguments: vec![Node::new(executable::Argument {
-                                name: name!("if"),
-                                value: Node::new(executable::Value::Boolean(false)),
-                            })],
-                        })]);
-                    let parent_typename_field = if let Some(condition) = this_condition {
-                        condition.introspection_typename_field()
-                    } else {
-                        parent_type.introspection_typename_field()
-                    };
-                    let typename_field_selection = Selection::from_field(
-                        Field::new(FieldData {
-                            schema: schema.clone(),
-                            field_position: parent_typename_field,
-                            alias: None,
-                            arguments: Arc::new(vec![]),
-                            directives: Arc::new(directives),
-                            sibling_typename: None,
-                        }),
-                        None,
-                    );
+        let normalized_selection_set = self.selection_set.normalize(
+            &self.selection_set.type_position,
+            named_fragments,
+            &self.selection_set.schema,
+        )?;
+        // It could be that nothing was satisfiable.
+        if normalized_selection_set.is_empty() {
+            if self.inline_fragment.directives.is_empty() {
+                return Ok(None);
+            } else if let Some(rebased_fragment) = self.inline_fragment.rebase_on(
+                parent_type,
+                schema,
+                RebaseErrorHandlingOption::ThrowError,
+            )? {
+                // We should be able to rebase, or there is a bug, so error if that is the case.
+                // If we rebased successfully then we add "non-included" __typename field selection
+                // just to keep the query valid.
+                let directives =
+                    executable::DirectiveList(vec![Node::new(executable::Directive {
+                        name: name!("include"),
+                        arguments: vec![Node::new(executable::Argument {
+                            name: name!("if"),
+                            value: Node::new(executable::Value::Boolean(false)),
+                        })],
+                    })]);
+                let parent_typename_field = if let Some(condition) = this_condition {
+                    condition.introspection_typename_field()
+                } else {
+                    parent_type.introspection_typename_field()
+                };
+                let typename_field_selection = Selection::from_field(
+                    Field::new(FieldData {
+                        schema: schema.clone(),
+                        field_position: parent_typename_field,
+                        alias: None,
+                        arguments: Arc::new(vec![]),
+                        directives: Arc::new(directives),
+                        sibling_typename: None,
+                    }),
+                    None,
+                );
 
-                    // Return `... [on <rebased condition>] { __typename @include(if: false) }`
-                    let rebased_casted_type = rebased_fragment.casted_type();
-                    return Ok(Some(SelectionOrSet::Selection(
-                        InlineFragmentSelection::new(
-                            rebased_fragment,
-                            SelectionSet::from_selection(
-                                rebased_casted_type,
-                                typename_field_selection,
-                            ),
-                        )
-                        .into(),
-                    )));
-                }
+                // Return `... [on <rebased condition>] { __typename @include(if: false) }`
+                let rebased_casted_type = rebased_fragment.casted_type();
+                return Ok(Some(SelectionOrSet::Selection(
+                    InlineFragmentSelection::new(
+                        rebased_fragment,
+                        SelectionSet::from_selection(rebased_casted_type, typename_field_selection),
+                    )
+                    .into(),
+                )));
             }
-            normalized
-        } else {
-            self.selection_set.clone()
-        };
+        }
 
         // Second, we check if some of the sub-selection fragments can be "lifted" outside of this fragment. This can happen if:
         // 1. the current fragment is an abstract type,
@@ -520,17 +489,15 @@ impl SelectionSet {
     /// also possible to pass a `parent_type` that is more "restrictive" than the selection current type position
     /// (as long as the top-level fields of this selection set can be rebased on that type).
     ///
-    /// Passing the option `recursive == false` makes the normalization only apply at the top-level, removing
-    /// any unnecessary top-level inline fragments, possibly multiple layers of them, but we never recurse
-    /// inside the sub-selection of an selection that is not removed by the normalization.
     // PORT_NOTE: this is now module-private, because it looks like it *can* be. If some place
     // outside this module *does* need it, feel free to mark it pub(crate).
+    // PORT_NOTE: in JS, this had a `recursive: false` flag, which would only apply the
+    // simplification at the top level. This appears to be unused.
     pub(super) fn normalize(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        option: NormalizeSelectionOption,
     ) -> Result<SelectionSet, FederationError> {
         let mut normalized_selections = Self {
             schema: schema.clone(),
@@ -539,7 +506,7 @@ impl SelectionSet {
         };
         for (_, selection) in self.selections.iter() {
             if let Some(selection_or_set) =
-                selection.normalize(parent_type, named_fragments, schema, option)?
+                selection.normalize(parent_type, named_fragments, schema)?
             {
                 match selection_or_set {
                     SelectionOrSet::Selection(normalized_selection) => {

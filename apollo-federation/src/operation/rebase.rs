@@ -733,12 +733,8 @@ impl NamedFragments {
                 ) {
                     // Rebasing can leave some inefficiencies in some case (particularly when a spread has to be "expanded", see `FragmentSpreadSelection.rebaseOn`),
                     // so we do a top-level normalization to keep things clean.
-                    rebased_selection = rebased_selection.normalize(
-                        &rebased_type,
-                        &rebased_fragments,
-                        schema,
-                        Default::default(),
-                    )?;
+                    rebased_selection =
+                        rebased_selection.normalize(&rebased_type, &rebased_fragments, schema)?;
                     if NamedFragments::is_selection_set_worth_using(&rebased_selection) {
                         let fragment = Fragment {
                             schema: schema.clone(),

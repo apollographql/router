@@ -4378,7 +4378,6 @@ pub(crate) fn normalize_operation(
         &normalized_selection_set.type_position,
         &named_fragments,
         schema,
-        Default::default(),
     )?;
     remove_introspection(&mut normalized_selection_set);
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;

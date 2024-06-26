@@ -81,7 +81,6 @@ impl NamedFragments {
                 &fragment.type_condition_position,
                 &Default::default(),
                 &fragment.schema,
-                Default::default(),
             )?;
             let mut mapped_selection_set = mapper(&expanded_selection_set)?;
             // `mapped_selection_set` must be fragment-spread-free.
@@ -649,7 +648,6 @@ impl Fragment {
             ty,
             /*named_fragments*/ &Default::default(),
             &self.schema,
-            Default::default(),
         )?;
 
         if !self.type_condition_position.is_object_type() {
@@ -1164,7 +1162,6 @@ impl NamedFragments {
                     &fragment.selection_set.type_position,
                     &fragments_to_keep,
                     &fragment.schema,
-                    Default::default(),
                 )?;
         }
 
@@ -1183,7 +1180,6 @@ impl NamedFragments {
             &reduced_selection_set.type_position,
             self,
             &selection_set.schema,
-            Default::default(),
         )
     }
 
@@ -1475,7 +1471,6 @@ impl Operation {
             &self.selection_set.type_position,
             &self.named_fragments,
             &self.schema,
-            Default::default(),
         )?;
         Ok(Self {
             named_fragments: Default::default(),
