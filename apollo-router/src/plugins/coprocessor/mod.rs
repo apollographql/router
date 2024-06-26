@@ -29,11 +29,13 @@ use tower::Service;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
 
+use crate::configuration::shared::Client;
 use crate::error::Error;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
 use crate::services::external::externalize_header_map;
@@ -82,18 +84,29 @@ impl Plugin for CoprocessorPlugin<HTTPClientService> {
             .with_native_roots()
             .with_no_client_auth();
 
-        let connector = hyper_rustls::HttpsConnectorBuilder::new()
+        let builder = hyper_rustls::HttpsConnectorBuilder::new()
             .with_tls_config(tls_config)
             .https_or_http()
-            .enable_http1()
-            .enable_http2()
-            .wrap_connector(http_connector);
+            .enable_http1();
+
+        let connector = if init.config.client.is_none()
+            || init.config.client.as_ref().unwrap().experimental_http2 != Some(Http2Config::Disable)
+        {
+            builder.enable_http2().wrap_connector(http_connector)
+        } else {
+            builder.wrap_connector(http_connector)
+        };
 
         let http_client = RouterBodyConverter {
             inner: ServiceBuilder::new()
                 .layer(TimeoutLayer::new(init.config.timeout))
                 .service(
                     hyper::Client::builder()
+                        .http2_only(
+                            init.config.client.is_some()
+                                && init.config.client.as_ref().unwrap().experimental_http2
+                                    == Some(Http2Config::Http2Only),
+                        )
                         .pool_idle_timeout(POOL_IDLE_TIMEOUT_DURATION)
                         .build(connector),
                 ),
@@ -289,6 +302,7 @@ pub(super) struct SubgraphResponseConf {
 struct Conf {
     /// The url you'd like to offload processing to
     url: String,
+    client: Option<Client>,
     /// The timeout for external requests
     #[serde(deserialize_with = "humantime_serde::deserialize")]
     #[schemars(with = "String", default = "default_timeout")]

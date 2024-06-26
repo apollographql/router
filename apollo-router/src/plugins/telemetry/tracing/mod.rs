@@ -16,6 +16,7 @@ use serde::Deserialize;
 use tower::BoxError;
 
 use super::config_new::spans::Spans;
+use super::formatters::APOLLO_PRIVATE_PREFIX;
 use crate::plugins::telemetry::config::TracingCommon;
 
 pub(crate) mod apollo;
@@ -40,8 +41,6 @@ pub(crate) trait TracingConfigurator {
 struct ApolloFilterSpanProcessor<T: SpanProcessor> {
     delegate: T,
 }
-
-pub(crate) static APOLLO_PRIVATE_PREFIX: &str = "apollo_private.";
 
 impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
     fn on_start(&self, span: &mut Span, cx: &Context) {

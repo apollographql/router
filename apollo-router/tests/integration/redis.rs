@@ -368,19 +368,24 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -473,19 +478,24 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -671,19 +681,24 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },

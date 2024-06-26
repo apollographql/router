@@ -586,9 +586,9 @@ telemetry:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5022
 
-### Add support for `status_code` response to Rhai ([Issue #5042](https://github.com/apollographql/router/issues/5042))
+### Add support for `status_code` subgraph response to Rhai ([Issue #5042](https://github.com/apollographql/router/issues/5042))
 
-The router now supports `response.status_code` on the `Response` interface in Rhai.
+The router now supports `response.status_code` on the subgraph `Response` interface in Rhai.
 
 Examples using the response status code:
 
