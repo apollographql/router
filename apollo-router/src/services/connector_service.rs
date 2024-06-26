@@ -46,10 +46,9 @@ impl tower::Service<ConnectRequest> for ConnectorService {
             .get(&request.service_name)
             .cloned();
 
-        let http_client_factory = connector
-            .as_ref()
-            .map(|c| c.id.subgraph_name.clone())
-            .and_then(|subgraph_name| self.http_service_factory.get(&subgraph_name.to_string()))
+        let http_client_factory = self
+            .http_service_factory
+            .get(&request.service_name.to_string())
             .cloned();
 
         let schema = self.schema.supergraph_schema().clone();

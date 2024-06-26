@@ -87,8 +87,6 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
             context_rewrites: option_vec(context_rewrites),
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-            protocol: Default::default(),
-            source_node: None,
         })
     }
 }
@@ -96,10 +94,7 @@ impl From<&'_ Box<next::FetchNode>> for plan::PlanNode {
 impl From<&'_ next::SequenceNode> for plan::PlanNode {
     fn from(value: &'_ next::SequenceNode) -> Self {
         let next::SequenceNode { nodes } = value;
-        Self::Sequence {
-            nodes: vec(nodes),
-            connector: Default::default(),
-        }
+        Self::Sequence { nodes: vec(nodes) }
     }
 }
 

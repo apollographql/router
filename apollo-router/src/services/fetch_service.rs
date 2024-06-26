@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
-// use apollo_federation::sources::connect::Connectors;
 use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -20,8 +19,6 @@ use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
-use crate::query_planner::fetch::Protocol;
-use crate::query_planner::fetch::RestFetchNode;
 use crate::services::FetchRequest;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
@@ -47,6 +44,70 @@ impl tower::Service<FetchRequest> for FetchService {
 
     fn call(&mut self, request: FetchRequest) -> Self::Future {
         let FetchRequest {
+            fetch_node: FetchNode {
+                ref service_name, ..
+            },
+            ..
+        } = request;
+        if self
+            .connector_service_factory
+            .connectors_by_service_name
+            .contains_key(service_name.to_string().as_str())
+        {
+            Self::fetch_with_connector_service(self.connector_service_factory.clone(), request)
+        } else {
+            Self::fetch_with_subgraph_service(
+                self.schema.clone(),
+                self.subgraph_service_factory.clone(),
+                self.subgraph_schemas.clone(),
+                request,
+            )
+        }
+    }
+}
+
+impl FetchService {
+    fn fetch_with_connector_service(
+        connector_service_factory: Arc<ConnectorServiceFactory>,
+        request: FetchRequest,
+    ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
+        let FetchRequest {
+            fetch_node,
+            supergraph_request,
+            variables,
+            context,
+            ..
+        } = request;
+
+        let FetchNode {
+            operation,
+            service_name,
+            ..
+        } = fetch_node;
+
+        Box::pin(async move {
+            connector_service_factory
+                .create()
+                .oneshot(
+                    ConnectRequest::builder()
+                        .service_name(service_name)
+                        .context(context)
+                        .operation_str(operation.to_string())
+                        .supergraph_request(supergraph_request)
+                        .variables(variables)
+                        .build(),
+                )
+                .await
+        })
+    }
+
+    fn fetch_with_subgraph_service(
+        schema: Arc<Schema>,
+        subgraph_service_factory: Arc<SubgraphServiceFactory>,
+        subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
+        request: FetchRequest,
+    ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
+        let FetchRequest {
             fetch_node,
             supergraph_request,
             deferred_fetches,
@@ -56,30 +117,17 @@ impl tower::Service<FetchRequest> for FetchService {
         } = request;
 
         let FetchNode {
+            service_name,
             operation,
             operation_kind,
             operation_name,
-            service_name,
             requires,
             output_rewrites,
             id,
             ..
         } = fetch_node;
 
-        let service_name_string = service_name.to_string();
-
-        // TODO: perf
-        let (service_name, subgraph_service_name) = match &*fetch_node.protocol {
-            Protocol::RestFetch(RestFetchNode {
-                connector_service_name,
-                parent_service_name,
-                ..
-            }) => (parent_service_name.clone(), connector_service_name.clone()),
-            _ => (service_name_string.clone(), service_name_string.clone()),
-        };
-
-        let uri = self
-            .schema
+        let uri = schema
             .subgraph_url(service_name.as_ref())
             .unwrap_or_else(|| {
                 panic!("schema uri for subgraph '{service_name}' should already have been checked")
@@ -88,7 +136,7 @@ impl tower::Service<FetchRequest> for FetchService {
 
         let alias_query_string; // this exists outside the if block to allow the as_str() to be longer lived
         let aliased_operation = if let Some(ctx_arg) = &variables.contextual_arguments {
-            if let Some(subgraph_schema) = self.subgraph_schemas.get(&service_name.to_string()) {
+            if let Some(subgraph_schema) = subgraph_schemas.get(&service_name.to_string()) {
                 match build_operation_with_aliasing(&operation, ctx_arg, subgraph_schema) {
                     Ok(op) => {
                         alias_query_string = op.serialize().no_indent().to_string();
@@ -113,6 +161,14 @@ impl tower::Service<FetchRequest> for FetchService {
             operation.as_serialized()
         };
 
+        let aqs = aliased_operation.to_string(); // TODO
+        let sns = service_name.clone();
+        let current_dir = current_dir.clone();
+        let deferred_fetches = deferred_fetches.clone();
+        let service = subgraph_service_factory
+            .create(&sns)
+            .expect("we already checked that the service exists during planning; qed");
+
         let mut subgraph_request = SubgraphRequest::builder()
             .supergraph_request(supergraph_request.clone())
             .subgraph_request(
@@ -129,44 +185,13 @@ impl tower::Service<FetchRequest> for FetchService {
                     .build()
                     .expect("it won't fail because the url is correct and already checked; qed"),
             )
-            .subgraph_name(subgraph_service_name)
+            .subgraph_name(service_name.to_string())
             .operation_kind(operation_kind)
             .context(context.clone())
             .build();
         subgraph_request.query_hash = fetch_node.schema_aware_hash.clone();
         subgraph_request.authorization = fetch_node.authorization.clone();
-
-        let schema = self.schema.clone();
-        let aqs = aliased_operation.to_string(); // TODO
-        let sns = service_name.clone();
-        let subgraph_service_factory = self.subgraph_service_factory.clone();
-        let current_dir = current_dir.clone();
-        let deferred_fetches = deferred_fetches.clone();
-        let connector_service_factory = self.connector_service_factory.clone();
-        let service = subgraph_service_factory
-            .create(&sns)
-            .expect("we already checked that the service exists during planning; qed");
-
         Box::pin(async move {
-            if let Some(apollo_federation::sources::to_remove::FetchNode::Connect(_connect_node)) =
-                fetch_node.source_node.as_deref()
-            {
-                // TODO: return eventually
-                let _ = connector_service_factory
-                    .create()
-                    .oneshot(
-                        ConnectRequest::builder()
-                            .service_name(service_name_string)
-                            .context(context)
-                            .operation_str(operation.to_string())
-                            .supergraph_request(supergraph_request)
-                            // TODO: remove clone once it returns
-                            .variables(variables.clone())
-                            .build(),
-                    )
-                    .await;
-            }
-
             Ok(FetchNode::subgraph_fetch(
                 service,
                 subgraph_request,

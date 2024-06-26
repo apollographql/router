@@ -61,7 +61,7 @@ impl QueryPlan {
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
         initial_value: Option<Value>,
-        connectors: &'a Connectors,
+        connectors: &'a Connectors, // TODO: remove (source-aware)
     ) -> Response {
         let root = Path::empty();
 
@@ -134,50 +134,7 @@ impl PlanNode {
             let mut errors;
 
             match self {
-                PlanNode::Sequence {
-                    nodes,
-                    connector: Some(connector_node),
-                } => {
-                    value = parent_value.clone();
-                    errors = Vec::new();
-
-                    debug_assert_eq!(
-                        1,
-                        nodes.len(),
-                        "connector sequence should only contain 1 node"
-                    );
-
-                    if let Some(node) = nodes.first() {
-                        match connector_node
-                            .connector_execution(
-                                parameters,
-                                current_dir,
-                                parent_value,
-                                sender,
-                                node,
-                            )
-                            .instrument(tracing::info_span!(
-                                SEQUENCE_SPAN_NAME,
-                                "otel.kind" = "INTERNAL"
-                            ))
-                            .await
-                        {
-                            Ok((v, e)) => {
-                                value = v;
-                                errors = e;
-                            }
-                            Err(err) => {
-                                failfast_error!("Fetch error: {}", err);
-                                errors = vec![err.to_graphql_error(Some(current_dir.to_owned()))];
-                                value = Value::default();
-                            }
-                        }
-                    }
-                }
-                PlanNode::Sequence {
-                    nodes,
-                    connector: None,
-                } => {
+                PlanNode::Sequence { nodes } => {
                     value = parent_value.clone();
                     errors = Vec::new();
                     async {

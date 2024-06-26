@@ -22,7 +22,5 @@ Fetch(
             scopes: [],
             policies: [],
         },
-        protocol: GraphQL,
-        source_node: None,
     },
 )

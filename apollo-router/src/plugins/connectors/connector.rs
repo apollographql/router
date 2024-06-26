@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Selection as GraphQLSelection;
@@ -68,17 +66,6 @@ impl ConnectorTransport {
             Self::HttpJson(transport) => transport.debug_name().clone(),
         }
     }
-}
-
-/// The list of the subgraph names that should use the inner query planner
-/// instead of making a normal subgraph request.
-pub(crate) fn connector_subgraph_names(
-    connectors: &HashMap<Arc<String>, Connector>,
-) -> HashSet<Arc<String>> {
-    connectors
-        .values()
-        .map(|c| c.origin_subgraph.clone())
-        .collect()
 }
 
 impl Connector {
