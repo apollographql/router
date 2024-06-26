@@ -820,7 +820,6 @@ mod tests {
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),
-                    connectors: Default::default(),
                 };
 
                 Ok(QueryPlannerResponse::builder()
