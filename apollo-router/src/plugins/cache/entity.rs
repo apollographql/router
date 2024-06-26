@@ -55,7 +55,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
     subgraphs: Arc<HashMap<String, Subgraph>>,
-    enabled: Option<bool>,
+    enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
 }
@@ -193,11 +193,11 @@ impl Plugin for EntityCache {
             if let Some(config) = self.subgraphs.get(name) {
                 (
                     config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
-                    config.enabled.or(self.enabled).unwrap_or(false),
+                    config.enabled.unwrap_or(self.enabled),
                     config.private_id.clone(),
                 )
             } else {
-                (storage.ttl(), self.enabled.unwrap_or(false), None)
+                (storage.ttl(), self.enabled, None)
             };
         let name = name.to_string();
 
@@ -237,7 +237,7 @@ impl EntityCache {
     {
         Ok(Self {
             storage: Some(storage),
-            enabled: Some(true),
+            enabled: true,
             subgraphs: Arc::new(subgraphs),
             metrics: Metrics::default(),
             private_queries: Default::default(),
