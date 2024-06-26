@@ -587,10 +587,10 @@ In practice, you should tune `experimental_parallelism` based on metrics and ben
 
 <ExperimentalFeature />
 
+Beginning in v1.49.0, the router supports enhanced operation signature normalization.
 Apollo's legacy operation signature algorithm removes information about certain fields, such as input objects and aliases.
 This removal means some operations may have the same normalized signature though they are distinct operations.
 
-Beginning in v1.49.0, the router supports enhanced operation signature normalization.
 Enhanced normalization incorporates [input types](#input-types) and [aliases](#aliases) in signature generation.
 It also includes other improvements that make it more likely that two operations that only vary slightly have the same signature.
 
@@ -752,8 +752,9 @@ query AliasedQuery {
 
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
-Apollo's legacy reporting didn't include input and enum references, meaning you couldn't see input and enum field usage in GraphOS insights and some operation checks may have flagged non-issues.
-Beginning in v1.50.0, you can configure the router to report input and enum usage.
+Beginning in v1.50.0, you can configure the router to report enum and input object references for enhanced insights and operation checks.
+Apollo's legacy reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
+Legacy reporting also causes some [operation checks to flag non-issues](#enhanced-operation-checks).
 
 Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.experimental_apollo_metrics_reference_mode` option like so:
 
@@ -762,14 +763,66 @@ telemetry:
   apollo:
     experimental_apollo_metrics_reference_mode: extended # Default is legacy
 ```
+#### Configuration effect timing
 
-Once you enable this configuration, you can view enum and input usage along with other types of [field usage in GraphOS Studio](/graphos/metrics/field-usage). To-do: Information about enhanced checks + link to relevant GraphOS docs.
+Once you enable extended reference reporting, you can view enum and input object field usage along with the other types of [field usage in GraphOS Studio](/graphos/metrics/field-usage) for all operations that occur after you've enabled the configuration.
 
-<Note>
+Enabling this configuration also automatically enables [enhanced operation checks](#enhanced-operation-checks), though you won't see an immediate change in your operations check behavior. This is because operation checks rely on historical client operation data.
+To ensure sufficient data to distinguish between genuinely unused values and those simply not reported in legacy data, enhanced checks require some historical operations with extended reference reporting enabled.
 
-Once you enable `extended` reference reporting, you won't see an immediate change in your operations check behavior. This is because operation checks use historical client operation data and need some historical operations with the `extended` reporting for comparison.
+#### Enhanced operation checks
 
-</Note>
+Thanks to extended reference reporting, enhanced operation checks can more accurately flag issues with enum values and input object fields. See the comparison table below for differences between standard operation checks that come with legacy reference reporting and enhanced checks that are automatically enabled with extended reference reporting.
+
+<table>
+<tr>
+<th></th>
+<th>
+Standard Check Behavior<br/>
+(Legacy reference reporting)
+</th>
+<th>
+Enhanced Check Behavior<br/>
+(Extended reference reporting)
+</th>
+</tr>
+<tr>
+<td>
+
+##### Enum value removal
+
+</td>
+<td>Removing any enum values is considered a breaking change if any operations use the enum.</td>
+<td>Removing enum values is only a breaking change if historical operations use the specific enum value(s) that were removed.</td>
+</tr>
+<tr>
+<td>
+
+##### Default argument changes or removals for input object fields
+
+</td>
+
+<td>In general, changing or removing a default argument is considered a breaking change, but changing or removing default values in input object fields isn't.</td>
+<td>Changing or removing default values in input object fields is considered a breaking change.</td>
+</tr>
+<tr>
+<td>
+
+##### Nullable input object field removals
+</td>
+<td>Removing a nullable input object field is always considered a breaking change.</td>
+<td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field was always omitted in historical operations, its removal isn't considered a breaking change.</td>
+</tr>
+<tr>
+<td>
+
+##### Changing nullable input object fields to non-nullable
+
+</td>
+<td>Changing a nullable input object field to non-nullable is considered a breaking change.</td>
+<td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
+</tr>
+</table>
 
 ### Safelisting with persisted queries
 
