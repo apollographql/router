@@ -167,9 +167,7 @@ where
 {
     directives
         .into_iter()
-        .filter(|d| {
-            !deny_list.contains(&d.as_ref().name)
-        })
+        .filter(|d| !deny_list.contains(&d.as_ref().name))
         .cloned()
         .collect()
 }
