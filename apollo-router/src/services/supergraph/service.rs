@@ -36,7 +36,7 @@ use crate::graphql::Response;
 use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
-use crate::plugins::telemetry::config_new::events::SupergraphEventResponseLevel;
+use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -70,6 +70,7 @@ use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
+use crate::spec::operation_limits::OperationLimits;
 use crate::spec::Schema;
 use crate::Configuration;
 use crate::Context;
@@ -225,6 +226,11 @@ async fn service_call(
         }
 
         Some(QueryPlannerContent::Plan { plan }) => {
+            let query_metrics = plan.query_metrics;
+            context.extensions().with_lock(|mut lock| {
+                let _ = lock.insert::<OperationLimits<u32>>(query_metrics);
+            });
+
             let operation_name = body.operation_name.clone();
             let is_deferred = plan.is_deferred(operation_name.as_deref(), &variables);
             let is_subscription = plan.is_subscription(operation_name.as_deref());
@@ -342,9 +348,9 @@ async fn service_call(
 
                 let supergraph_response_event = context
                     .extensions()
-                    .with_lock(|lock| lock.get::<SupergraphEventResponseLevel>().cloned());
+                    .with_lock(|lock| lock.get::<SupergraphEventResponse>().cloned());
                 match supergraph_response_event {
-                    Some(level) => {
+                    Some(supergraph_response_event) => {
                         let mut attrs = Vec::with_capacity(4);
                         attrs.push(KeyValue::new(
                             Key::from_static_str("http.response.headers"),
@@ -358,14 +364,25 @@ async fn service_call(
                             Key::from_static_str("http.response.version"),
                             opentelemetry::Value::String(format!("{:?}", parts.version).into()),
                         ));
+                        let ctx = context.clone();
                         let response_stream = Box::pin(response_stream.inspect(move |resp| {
+                            if let Some(condition) = supergraph_response_event.0.condition() {
+                                if !condition.lock().evaluate_event_response(resp, &ctx) {
+                                    return;
+                                }
+                            }
                             attrs.push(KeyValue::new(
                                 Key::from_static_str("http.response.body"),
                                 opentelemetry::Value::String(
                                     serde_json::to_string(resp).unwrap_or_default().into(),
                                 ),
                             ));
-                            log_event(level.0, "supergraph.response", attrs.clone(), "");
+                            log_event(
+                                supergraph_response_event.0.level(),
+                                "supergraph.response",
+                                attrs.clone(),
+                                "",
+                            );
                         }));
 
                         Ok(SupergraphResponse {
@@ -421,6 +438,7 @@ async fn subscription_task(
                 root: Arc::new(*r),
                 formatted_query_plan: query_plan.formatted_query_plan.clone(),
                 query: query_plan.query.clone(),
+                query_metrics: query_plan.query_metrics,
             })
         }),
         _ => {

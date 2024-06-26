@@ -882,6 +882,7 @@ mod tests {
                     }
                     .into(),
                     query: Arc::new(Query::empty()),
+                    query_metrics: Default::default(),
                 };
                 let qp_content = QueryPlannerContent::Plan {
                     plan: Arc::new(query_plan),

@@ -284,7 +284,7 @@ pub(crate) enum CostValue {
 
 pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
     context.extensions().with_lock(|c| {
-        if let Some(cost) = c.get::<CostContext>().cloned() {
+        if let Some(cost) = c.get::<CostContext>() {
             custom_attributes.push(KeyValue::new(
                 APOLLO_PRIVATE_COST_ESTIMATED.clone(),
                 AttributeValue::F64(cost.estimated),

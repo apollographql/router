@@ -7,6 +7,10 @@ use crate::integration::common::Telemetry;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_json() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
         .config(include_str!("fixtures/json.router.yaml"))
@@ -61,6 +65,10 @@ async fn test_json_sampler_off() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_text() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
         .config(include_str!("fixtures/text.router.yaml"))
@@ -84,6 +92,10 @@ async fn test_text() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_text_sampler_off() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Jaeger)
         .config(include_str!("fixtures/text.sampler_off.router.yaml"))
