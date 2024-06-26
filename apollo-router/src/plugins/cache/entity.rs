@@ -193,7 +193,7 @@ impl Plugin for EntityCache {
             if let Some(config) = self.subgraphs.get(name) {
                 (
                     config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
-                    config.enabled.unwrap_or(self.enabled),
+                    self.enabled && config.enabled.unwrap_or(false),
                     config.private_id.clone(),
                 )
             } else {

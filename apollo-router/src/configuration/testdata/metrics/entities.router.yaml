@@ -1,4 +1,5 @@
 preview_entity_cache:
+  enabled: false
   redis:
     urls: [ "redis://localhost:6379" ]
     timeout: 5ms

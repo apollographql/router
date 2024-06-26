@@ -9,9 +9,8 @@ preview_entity_cache:
       - "redis://localhost:6379"
     timeout: 5ms
     ttl: 60s
+  enabled: true
   subgraph:
-    all:
-      enabled: true
     subgraphs:
       accounts:
         enabled: false

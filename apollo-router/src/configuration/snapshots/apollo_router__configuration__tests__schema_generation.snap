@@ -1527,9 +1527,8 @@ expression: "&schema"
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
-          "default": null,
+          "default": false,
           "description": "Enable or disable the entity caching feature",
-          "nullable": true,
           "type": "boolean"
         },
         "metrics": {

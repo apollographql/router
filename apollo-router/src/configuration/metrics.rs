@@ -301,6 +301,8 @@ impl InstrumentData {
             apollo.router.config.entity_cache,
             "$.preview_entity_cache",
             opt.enabled,
+            "$[?(@.enabled)]",
+            opt.subgraph.enabled,
             "$[?(@.subgraph.all.enabled)]",
             opt.subgraph.enabled,
             "$[?(@.subgraph.subgraphs..enabled)]",
