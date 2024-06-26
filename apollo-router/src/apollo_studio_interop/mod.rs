@@ -32,6 +32,10 @@ use serde::Serialize;
 
 use crate::json_ext::Object;
 use crate::json_ext::Value as JsonValue;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
+use crate::spec::Fragments;
+use crate::spec::Query;
+use crate::spec::Selection as SpecSelection;
 
 /// The stats for a single execution of an input object field.
 #[derive(Clone, Default, Debug, Serialize)]
@@ -55,6 +59,8 @@ pub(crate) struct AggregatedInputObjectFieldStats {
     pub(crate) undefined_reference: u64,
 }
 
+pub(crate) type ReferencedEnums = HashMap<String, HashSet<String>>;
+
 /// The result of the generate_extended_references function which contains input object field and
 /// enum value stats for a single execution.
 #[derive(Clone, Default, Debug, Serialize)]
@@ -62,16 +68,7 @@ pub(crate) struct ExtendedReferenceStats {
     /// A map of parent type to a map of field name to stats
     pub(crate) referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     /// A map of enum name to a set of enum values that were referenced
-    pub(crate) referenced_enums: HashMap<String, HashSet<String>>,
-}
-
-impl ExtendedReferenceStats {
-    pub(crate) fn new() -> Self {
-        ExtendedReferenceStats {
-            referenced_input_fields: HashMap::new(),
-            referenced_enums: HashMap::new(),
-        }
-    }
+    pub(crate) referenced_enums: ReferencedEnums,
 }
 
 /// The aggregation of ExtendedReferenceStats across a number of executions.
@@ -134,8 +131,14 @@ impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
             }
         }
 
-        // Merge enum references
-        for (enum_name, enum_values) in other_stats.referenced_enums.iter() {
+        *self += other_stats.referenced_enums;
+    }
+}
+
+impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
+    fn add_assign(&mut self, other_enum_stats: ReferencedEnums) {
+        // Not using entry API here due to performance impact
+        for (enum_name, enum_values) in other_enum_stats.iter() {
             let enum_name_stats = match self.referenced_enums.get_mut(enum_name) {
                 Some(existing_stats) => existing_stats,
                 None => {
@@ -158,8 +161,6 @@ impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
         }
     }
 }
-
-use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
@@ -277,6 +278,116 @@ pub(crate) fn generate_extended_references(
     };
 
     generator.generate_extended_references()
+}
+
+pub(crate) fn extract_enums_from_response(
+    query: Arc<Query>,
+    operation_name: Option<&str>,
+    schema: &Valid<Schema>,
+    response_body: &Object,
+) -> ReferencedEnums {
+    let mut result = ReferencedEnums::new();
+    if let Some(operation) = query.operation(operation_name) {
+        extract_enums_from_selection_set(
+            &operation.selection_set,
+            &query.fragments,
+            schema,
+            response_body,
+            &mut result,
+        );
+    }
+    result
+}
+
+fn add_enum_value_to_map(
+    enum_name: &Name,
+    enum_value: &JsonValue,
+    referenced_enums: &mut ReferencedEnums,
+) {
+    match enum_value {
+        JsonValue::String(val_str) => {
+            // Not using entry API here due to performance impact
+            let enum_name_stats = match referenced_enums.get_mut(enum_name.as_str()) {
+                Some(existing_stats) => existing_stats,
+                None => {
+                    referenced_enums.insert(enum_name.to_string(), HashSet::new());
+                    referenced_enums
+                        .get_mut(enum_name.as_str())
+                        .expect("value is expected to be in map")
+                }
+            };
+
+            enum_name_stats.insert(val_str.as_str().to_string());
+        }
+        JsonValue::Array(val_list) => {
+            for val in val_list {
+                add_enum_value_to_map(enum_name, val, referenced_enums);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_enums_from_selection_set(
+    selection_set: &[SpecSelection],
+    fragments: &Fragments,
+    schema: &Valid<Schema>,
+    selection_response: &Object,
+    result_set: &mut ReferencedEnums,
+) {
+    for selection in selection_set.iter() {
+        match selection {
+            SpecSelection::Field {
+                name,
+                alias,
+                field_type,
+                selection_set,
+                ..
+            } => {
+                let field_name = alias.as_ref().unwrap_or(name).as_str();
+                if let Some(field_value) = selection_response.get(field_name) {
+                    let field_type_def = schema.types.get(field_type.0.inner_named_type());
+
+                    // If the value is an enum, we want to add all values to the map
+                    if let Some(ExtendedType::Enum(enum_type)) = field_type_def {
+                        add_enum_value_to_map(&enum_type.name, field_value, result_set);
+                    }
+                    // Otherwise if the response value is an object, add any enums from the field's selection set
+                    else if let JsonValue::Object(value_object) = field_value {
+                        if let Some(selection_set) = selection_set {
+                            extract_enums_from_selection_set(
+                                selection_set,
+                                fragments,
+                                schema,
+                                value_object,
+                                result_set,
+                            );
+                        }
+                    }
+                }
+            }
+            SpecSelection::InlineFragment { selection_set, .. } => {
+                extract_enums_from_selection_set(
+                    selection_set,
+                    fragments,
+                    schema,
+                    selection_response,
+                    result_set,
+                );
+            }
+            SpecSelection::FragmentSpread { name, .. } => {
+                if let Some(fragment) = fragments.get(name) {
+                    extract_enums_from_selection_set(
+                        &fragment.selection_set,
+                        fragments,
+                        schema,
+                        selection_response,
+                        result_set,
+                    );
+                }
+            }
+        }
+    }
 }
 
 struct UsageGenerator<'a> {

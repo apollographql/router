@@ -1962,9 +1962,14 @@ mod tests {
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+    use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
     use crate::services::OperationKind;
     use crate::services::RouterRequest;
     use crate::services::RouterResponse;
+    use crate::spec::operation_limits::OperationLimits;
     use crate::Context;
 
     type JsonMap = serde_json_bytes::Map<ByteString, Value>;
@@ -1976,6 +1981,9 @@ mod tests {
     #[derive(Deserialize, JsonSchema)]
     #[serde(rename_all = "snake_case", deny_unknown_fields)]
     enum Event {
+        Extension {
+            map: serde_json::Map<String, serde_json::Value>,
+        },
         Context {
             map: serde_json::Map<String, serde_json::Value>,
         },
@@ -2432,6 +2440,42 @@ mod tests {
                                 Event::Context { map } => {
                                     for (key, value) in map {
                                         context.insert(key, value).expect("insert context");
+                                    }
+                                }
+                                Event::Extension { map } => {
+                                    for (key, value) in map {
+                                        if key == APOLLO_PRIVATE_QUERY_ALIASES.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.aliases = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_DEPTH.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.depth = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_HEIGHT.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.height = value_as_u32;
+                                            });
+                                        }
+                                        if key == APOLLO_PRIVATE_QUERY_ROOT_FIELDS.to_string() {
+                                            context.extensions().with_lock(|mut lock| {
+                                                let limits = lock
+                                                    .get_or_default_mut::<OperationLimits<u32>>();
+                                                let value_as_u32 = value.as_u64().unwrap() as u32;
+                                                limits.root_fields = value_as_u32;
+                                            });
+                                        }
                                     }
                                 }
                             }
