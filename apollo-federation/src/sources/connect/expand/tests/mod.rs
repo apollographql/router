@@ -45,3 +45,20 @@ fn it_expands_a_realistic_supergraph() {
     assert_debug_snapshot!(connectors_by_service_name);
     assert_snapshot!(raw_sdl);
 }
+
+#[test]
+fn it_expands_steelthread_supergraph() {
+    let to_expand = include_str!("./schemas/steelthread.graphql");
+    let ExpansionResult::Expanded {
+        raw_sdl,
+        api_schema,
+        connectors_by_service_name,
+    } = expand_connectors(to_expand).unwrap()
+    else {
+        panic!("expected expansion to actually expand subgraphs");
+    };
+
+    assert_snapshot!(api_schema);
+    assert_debug_snapshot!(connectors_by_service_name);
+    assert_snapshot!(raw_sdl);
+}
