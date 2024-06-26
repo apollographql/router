@@ -262,7 +262,7 @@ impl StaticCostCalculator {
 
     fn score_plan_node(&self, plan_node: &PlanNode) -> Result<f64, DemandControlError> {
         match plan_node {
-            PlanNode::Sequence { nodes, .. } => self.summed_score_of_nodes(nodes),
+            PlanNode::Sequence { nodes } => self.summed_score_of_nodes(nodes),
             PlanNode::Parallel { nodes } => self.summed_score_of_nodes(nodes),
             PlanNode::Flatten(flatten_node) => self.score_plan_node(&flatten_node.node),
             PlanNode::Condition {

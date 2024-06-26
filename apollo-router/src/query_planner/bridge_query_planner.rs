@@ -221,7 +221,7 @@ impl PlannerMode {
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
                 // `Configuration::validate` ensures that we only take this path
-                // when we also have `ApolloMetricsGenerationMode::New`
+                // when we also have `ApolloMetricsGenerationMode::New``
                 let usage_reporting = UsageReporting {
                     stats_report_key: Default::default(),
                     referenced_fields_by_type: Default::default(),
@@ -1482,7 +1482,7 @@ mod tests {
                         }
                     }
                 }
-                PlanNode::Sequence { nodes, .. } | PlanNode::Parallel { nodes } => {
+                PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                     for node in nodes {
                         check_query_plan_coverage(node, parent_label, subselections)
                     }

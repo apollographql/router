@@ -2,6 +2,7 @@
 //! Please ensure that any tests added to this file use the tokio multi-threaded test executor.
 //!
 
+use apollo_compiler::execution::JsonMap;
 use apollo_router::graphql::Request;
 use apollo_router::graphql::Response;
 use apollo_router::plugin::test::MockSubgraph;
@@ -10,11 +11,7 @@ use apollo_router::MockedSubgraphs;
 use apollo_router::TestHarness;
 use serde::Deserialize;
 use serde_json::json;
-use serde_json_bytes::ByteString;
-use serde_json_bytes::Value;
 use tower::ServiceExt;
-
-type JsonMap = serde_json_bytes::Map<ByteString, Value>;
 
 #[derive(Deserialize)]
 struct SubgraphMock {

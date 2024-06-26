@@ -132,7 +132,7 @@ pub(crate) enum PlanNode {
 impl PlanNode {
     pub(crate) fn contains_mutations(&self) -> bool {
         match self {
-            Self::Sequence { nodes, .. } => nodes.iter().any(|n| n.contains_mutations()),
+            Self::Sequence { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Parallel { nodes } => nodes.iter().any(|n| n.contains_mutations()),
             Self::Fetch(fetch_node) => fetch_node.operation_kind() == &OperationKind::Mutation,
             Self::Defer { primary, .. } => primary
@@ -169,7 +169,7 @@ impl PlanNode {
         query: &Query,
     ) -> bool {
         match self {
-            Self::Sequence { nodes, .. } => nodes
+            Self::Sequence { nodes } => nodes
                 .iter()
                 .any(|n| n.is_deferred(operation, variables, query)),
             Self::Parallel { nodes } => nodes
@@ -238,7 +238,7 @@ impl PlanNode {
             new_targets = vec![];
             for target in targets {
                 match target {
-                    PlanNode::Sequence { nodes, .. } | PlanNode::Parallel { nodes } => {
+                    PlanNode::Sequence { nodes } | PlanNode::Parallel { nodes } => {
                         new_targets.extend(nodes);
                     }
                     PlanNode::Fetch(node) => {
@@ -287,7 +287,7 @@ impl PlanNode {
 
     pub(crate) fn subgraph_fetches(&self) -> usize {
         match self {
-            PlanNode::Sequence { nodes, .. } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
+            PlanNode::Sequence { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
             PlanNode::Parallel { nodes } => nodes.iter().map(|n| n.subgraph_fetches()).sum(),
             PlanNode::Fetch(_) => 1,
             PlanNode::Flatten(node) => node.node.subgraph_fetches(),
@@ -328,6 +328,7 @@ impl PlanNode {
             PlanNode::Fetch(fetch_node) => {
                 fetch_node.init_parsed_operation(subgraph_schemas)?;
             }
+
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
                     node.init_parsed_operations(subgraph_schemas)?;
@@ -382,6 +383,7 @@ impl PlanNode {
                     supergraph_schema_hash,
                 )?;
             }
+
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
                     node.init_parsed_operations_and_hash_subqueries(
@@ -454,10 +456,10 @@ impl PlanNode {
     /// Note that duplicates are not filtered.
     pub(crate) fn service_usage<'a>(&'a self) -> Box<dyn Iterator<Item = &'a str> + 'a> {
         match self {
-            Self::Sequence { nodes, .. } | Self::Parallel { nodes } => {
+            Self::Sequence { nodes } | Self::Parallel { nodes } => {
                 Box::new(nodes.iter().flat_map(|x| x.service_usage()))
             }
-            Self::Fetch(fetch) => Box::new(Some(fetch.service_name.as_str()).into_iter()),
+            Self::Fetch(fetch) => Box::new(Some(fetch.service_name()).into_iter()),
             Self::Subscription { primary, rest } => match rest {
                 Some(rest) => Box::new(
                     rest.service_usage()
@@ -507,7 +509,7 @@ impl PlanNode {
                 fetch_node.extract_authorization_metadata(schema, key);
             }
 
-            PlanNode::Sequence { nodes, .. } => {
+            PlanNode::Sequence { nodes } => {
                 for node in nodes {
                     node.extract_authorization_metadata(schema, key);
                 }

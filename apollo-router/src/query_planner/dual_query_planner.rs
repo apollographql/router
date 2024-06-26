@@ -165,7 +165,6 @@ fn fetch_node_matches(this: &FetchNode, other: &FetchNode) -> bool {
         context_rewrites,
         schema_aware_hash: _, // ignored
         authorization,
-        ..
     } = this;
     *service_name == other.service_name
         && *requires == other.requires
@@ -228,7 +227,7 @@ fn vec_matches<T>(this: &Vec<T>, other: &Vec<T>, item_matches: impl Fn(&T, &T) -
 
 fn plan_node_matches(this: &PlanNode, other: &PlanNode) -> bool {
     match (this, other) {
-        (PlanNode::Sequence { nodes: this, .. }, PlanNode::Sequence { nodes: other, .. })
+        (PlanNode::Sequence { nodes: this }, PlanNode::Sequence { nodes: other })
         | (PlanNode::Parallel { nodes: this }, PlanNode::Parallel { nodes: other }) => {
             vec_matches(this, other, plan_node_matches)
         }
