@@ -436,7 +436,6 @@ impl InnerCacheService {
                     )
                     .await?;
 
-                    // FIXME: will the header be duplicated?
                     cache_control.to_headers(response.response.headers_mut())?;
 
                     Ok(response)
