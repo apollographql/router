@@ -1484,7 +1484,7 @@ impl FederatedQueryGraphBuilder {
                                     return None;
                                 };
                                 if field_definition_position.field_name()
-                                    == field_selection.field.data().name()
+                                    == field_selection.field.name()
                                 {
                                     Some((edge_ref.id(), edge_ref.target()))
                                 } else {
@@ -1517,9 +1517,8 @@ impl FederatedQueryGraphBuilder {
                             // fix this below by filtering by provide_id.
                             let field = field_selection
                                 .field
-                                .data()
                                 .field_position
-                                .get(field_selection.field.data().schema.schema())?;
+                                .get(field_selection.field.schema.schema())?;
                             let tail_type = field.ty.inner_named_type();
                             let possible_tails = base
                                 .query_graph
@@ -1561,7 +1560,6 @@ impl FederatedQueryGraphBuilder {
                                 source: source.clone(),
                                 field_definition_position: field_selection
                                     .field
-                                    .data()
                                     .field_position
                                     .clone(),
                                 is_part_of_provides: true,
@@ -1578,7 +1576,6 @@ impl FederatedQueryGraphBuilder {
                     Selection::InlineFragment(inline_fragment_selection) => {
                         if let Some(type_condition_pos) = &inline_fragment_selection
                             .inline_fragment
-                            .data()
                             .type_condition_position
                         {
                             // We should always have an edge: otherwise it would mean we list a type

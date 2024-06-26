@@ -458,15 +458,9 @@ impl FetchDependencyGraphNodePath {
     ) -> Result<Vec<FetchDataPathElement>, FederationError> {
         let mut new_path = self.response_path.clone();
         if let OpPathElement::Field(field) = element {
-            new_path.push(FetchDataPathElement::Key(
-                field.data().response_name().into(),
-            ));
+            new_path.push(FetchDataPathElement::Key(field.response_name().into()));
             // TODO: is there a simpler we to find a field’s type from `&Field`?
-            let mut type_ = &field
-                .data()
-                .field_position
-                .get(field.data().schema.schema())?
-                .ty;
+            let mut type_ = &field.field_position.get(field.schema.schema())?.ty;
             loop {
                 match type_ {
                     schema::Type::Named(_) | schema::Type::NonNullNamed(_) => break,
@@ -1138,14 +1132,12 @@ impl FetchDependencyGraph {
 
         let try_get_type_condition = |selection: &Selection| match selection {
             Selection::FragmentSpread(fragment) => {
-                Some(fragment.spread.data().type_condition_position.clone())
+                Some(fragment.spread.type_condition_position.clone())
             }
 
-            Selection::InlineFragment(inline) => inline
-                .inline_fragment
-                .data()
-                .type_condition_position
-                .clone(),
+            Selection::InlineFragment(inline) => {
+                inline.inline_fragment.type_condition_position.clone()
+            }
 
             _ => None,
         };
@@ -2124,7 +2116,7 @@ impl FetchDependencyGraph {
         for element in path.0.iter() {
             match &**element {
                 OpPathElement::Field(field) => {
-                    let field_position = type_.field(field.data().name().clone())?;
+                    let field_position = type_.field(field.name().clone())?;
                     let field_definition = field_position.get(schema.schema())?;
                     let field_type = field_definition.ty.inner_named_type();
                     type_ = schema
@@ -2141,8 +2133,7 @@ impl FetchDependencyGraph {
                         )?;
                 }
                 OpPathElement::InlineFragment(fragment) => {
-                    if let Some(type_condition_position) = &fragment.data().type_condition_position
-                    {
+                    if let Some(type_condition_position) = &fragment.type_condition_position {
                         type_ = schema
                             .get_type(type_condition_position.type_name().clone())?
                             .try_into()
@@ -3388,7 +3379,7 @@ fn compute_nodes_for_op_path_element<'a>(
         updated.node_path = require_path;
     }
     if let OpPathElement::Field(field) = &updated_operation {
-        if *field.data().name() == TYPENAME_FIELD {
+        if *field.name() == TYPENAME_FIELD {
             // Because of the optimization done in `QueryPlanner.optimizeSiblingTypenames`,
             // we will rarely get an explicit `__typename` edge here.
             // But one case where it can happen is where an @interfaceObject was involved,
@@ -3438,7 +3429,7 @@ fn compute_nodes_for_op_path_element<'a>(
                 "Unexpected operation {updated_operation} for edge {edge}"
             )));
         };
-        if !inline.data().directives.is_empty() {
+        if !inline.directives.is_empty() {
             // We want to keep the directives, but we clear the condition
             // since it's to a type that doesn't exists in the subgraph we're currently in.
             updated.node_path = updated
@@ -3531,7 +3522,7 @@ fn wrap_input_selections(
                    }
                }
             */
-            let parent_type_position = fragment.data().parent_type_position.clone();
+            let parent_type_position = fragment.parent_type_position.clone();
             let selection = InlineFragmentSelection::new(fragment, sub_selections);
             SelectionSet::from_selection(parent_type_position, selection.into())
         },

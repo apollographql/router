@@ -33,7 +33,7 @@ fn check_absence_of_aliases(
         let OpPathElement::Field(field) = elem else {
             return Ok(());
         };
-        let Some(alias) = &field.data().alias else {
+        let Some(alias) = &field.alias else {
             return Ok(());
         };
         alias_errors.push(SingleFederationError::UnsupportedFeature {

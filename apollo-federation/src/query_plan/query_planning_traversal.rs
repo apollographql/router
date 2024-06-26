@@ -480,7 +480,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             None => {
                 let check_result = selection.any_element(&mut |element| match element {
                     OpPathElement::InlineFragment(inline_fragment) => {
-                        match &inline_fragment.data().type_condition_position {
+                        match &inline_fragment.type_condition_position {
                             Some(type_condition) => Ok(self
                                 .parameters
                                 .abstract_types_with_inconsistent_runtime_types

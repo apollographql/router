@@ -299,8 +299,8 @@ impl HasSelectionKey for OpPathElement {
 impl OpPathElement {
     pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
         match self {
-            OpPathElement::Field(field) => &field.data().directives,
-            OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.data().directives,
+            OpPathElement::Field(field) => &field.directives,
+            OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.directives,
         }
     }
 
@@ -313,7 +313,7 @@ impl OpPathElement {
 
     pub(crate) fn is_terminal(&self) -> Result<bool, FederationError> {
         match self {
-            OpPathElement::Field(field) => field.data().is_leaf(),
+            OpPathElement::Field(field) => field.is_leaf(),
             OpPathElement::InlineFragment(_) => Ok(false),
         }
     }
@@ -327,8 +327,8 @@ impl OpPathElement {
 
     pub(crate) fn parent_type_position(&self) -> CompositeTypeDefinitionPosition {
         match self {
-            OpPathElement::Field(field) => field.data().field_position.parent(),
-            OpPathElement::InlineFragment(inline) => inline.data().parent_type_position.clone(),
+            OpPathElement::Field(field) => field.field_position.parent(),
+            OpPathElement::InlineFragment(inline) => inline.parent_type_position.clone(),
         }
     }
 
@@ -336,8 +336,8 @@ impl OpPathElement {
         &self,
     ) -> Result<Option<CompositeTypeDefinitionPosition>, FederationError> {
         match self {
-            OpPathElement::Field(field) => Ok(field.data().output_base_type()?.try_into().ok()),
-            OpPathElement::InlineFragment(inline) => Ok(Some(inline.data().casted_type())),
+            OpPathElement::Field(field) => Ok(field.output_base_type()?.try_into().ok()),
+            OpPathElement::InlineFragment(inline) => Ok(Some(inline.casted_type())),
         }
     }
 
@@ -399,11 +399,9 @@ impl OpPathElement {
     pub(crate) fn defer_directive_args(&self) -> Option<DeferDirectiveArguments> {
         match self {
             OpPathElement::Field(_) => None, // @defer cannot be on field at the moment
-            OpPathElement::InlineFragment(inline_fragment) => inline_fragment
-                .data()
-                .defer_directive_arguments()
-                .ok()
-                .flatten(),
+            OpPathElement::InlineFragment(inline_fragment) => {
+                inline_fragment.defer_directive_arguments().ok().flatten()
+            }
         }
     }
 
@@ -417,17 +415,16 @@ impl OpPathElement {
             Self::Field(_) => Some(self.clone()), // unchanged
             Self::InlineFragment(inline_fragment) => {
                 let updated_directives: DirectiveList = inline_fragment
-                    .data()
                     .directives
                     .get_all("defer")
                     .cloned()
                     .collect();
-                if inline_fragment.data().type_condition_position.is_none()
+                if inline_fragment.type_condition_position.is_none()
                     && updated_directives.is_empty()
                 {
                     return None;
                 }
-                if inline_fragment.data().directives.len() == updated_directives.len() {
+                if inline_fragment.directives.len() == updated_directives.len() {
                     Some(self.clone())
                 } else {
                     // PORT_NOTE: We won't need to port `this.copyAttachementsTo(updated);` line here
@@ -693,7 +690,7 @@ impl OpIndirectPaths {
         field: &Field,
     ) -> Result<OpIndirectPaths, FederationError> {
         // We only handle leaves; Things are more complex for non-leaves.
-        if !field.data().is_leaf()? {
+        if !field.is_leaf()? {
             return Ok(self.clone());
         }
 
@@ -942,7 +939,7 @@ where
                         last_operation_element,
                     )) = last_operation_element.as_ref()
                     {
-                        if last_operation_element.data().directives.is_empty() {
+                        if last_operation_element.directives.is_empty() {
                             // This mean we have 2 typecasts back-to-back, and that means the
                             // previous operation element might not be useful on this path. More
                             // precisely, the previous typecast was only useful if it restricted the
@@ -2367,11 +2364,11 @@ impl OpGraphPath {
                         // on triggers being valid within a subgraph.
                         let mut operation_field = operation_field.clone();
                         if self.tail_is_interface_object()?
-                            && *operation_field.data().field_position.type_name()
+                            && *operation_field.field_position.type_name()
                                 != tail_type_pos.type_name
                         {
                             let field_on_tail_type = tail_type_pos
-                                .field(operation_field.data().field_position.field_name().clone());
+                                .field(operation_field.field_position.field_name().clone());
                             if field_on_tail_type
                                 .try_get(self.graph.schema_by_source(&tail_weight.source)?.schema())
                                 .is_none()
@@ -2385,10 +2382,10 @@ impl OpGraphPath {
                             operation_field = Field::new(FieldData {
                                 schema: self.graph.schema_by_source(&tail_weight.source)?.clone(),
                                 field_position: field_on_tail_type.into(),
-                                alias: operation_field.data().alias.clone(),
-                                arguments: operation_field.data().arguments.clone(),
-                                directives: operation_field.data().directives.clone(),
-                                sibling_typename: operation_field.data().sibling_typename.clone(),
+                                alias: operation_field.alias.clone(),
+                                arguments: operation_field.arguments.clone(),
+                                directives: operation_field.directives.clone(),
+                                sibling_typename: operation_field.sibling_typename.clone(),
                             })
                         }
 
@@ -2408,8 +2405,7 @@ impl OpGraphPath {
                         // for a direct interface edge and simply cast into that implementation
                         // below.
                         let field_is_of_an_implementation =
-                            *operation_field.data().field_position.type_name()
-                                != tail_type_pos.type_name;
+                            *operation_field.field_position.type_name() != tail_type_pos.type_name;
 
                         // First, we check if there is a direct edge from the interface (which only
                         // happens if we're in a subgraph that knows all of the implementations of
@@ -2467,18 +2463,13 @@ impl OpGraphPath {
                                 // `direct_path_overrides_type_explosion` indicates that we're in
                                 // the 2nd case above, not the 1st one.
                                 operation_field
-                                    .data()
                                     .field_position
                                     .is_introspection_typename_field()
                                     || (!self.graph.is_provides_edge(*interface_edge)?
                                         && !self.graph.has_an_implementation_with_provides(
                                             &tail_weight.source,
                                             tail_type_pos.field(
-                                                operation_field
-                                                    .data()
-                                                    .field_position
-                                                    .field_name()
-                                                    .clone(),
+                                                operation_field.field_position.field_name().clone(),
                                             ),
                                         )?)
                             } else {
@@ -2498,14 +2489,12 @@ impl OpGraphPath {
                             // if the direct edge cannot be satisfied? Probably depends on the exact
                             // semantics of `@requires` on interface fields).
                             let operation_field_type_name = operation_field
-                                .data()
                                 .field_position
-                                .get(operation_field.data().schema.schema())?
+                                .get(operation_field.schema.schema())?
                                 .ty
                                 .inner_named_type();
                             let is_operation_field_type_leaf = matches!(
                                 operation_field
-                                    .data()
                                     .schema
                                     .get_type(operation_field_type_name.clone())?,
                                 TypeDefinitionPosition::Scalar(_) | TypeDefinitionPosition::Enum(_)
@@ -2513,9 +2502,8 @@ impl OpGraphPath {
                             if is_operation_field_type_leaf
                                 || !self.has_an_entity_implementation_with_shareable_field(
                                     &tail_weight.source,
-                                    tail_type_pos.field(
-                                        operation_field.data().field_position.field_name().clone(),
-                                    ),
+                                    tail_type_pos
+                                        .field(operation_field.field_position.field_name().clone()),
                                 )?
                             {
                                 let Some(interface_path) = interface_path else {
@@ -2537,14 +2525,14 @@ impl OpGraphPath {
                         //   that case, we only want to consider that one implementation.
                         let implementations = if field_is_of_an_implementation {
                             let CompositeTypeDefinitionPosition::Object(field_parent_pos) =
-                                &operation_field.data().field_position.parent()
+                                &operation_field.field_position.parent()
                             else {
                                 return Err(FederationError::internal(
                                         format!(
                                             "{} requested on {}, but field's parent {} is not an object type",
-                                            operation_field.data().field_position,
+                                            operation_field.field_position,
                                             tail_type_pos,
-                                            operation_field.data().field_position.type_name()
+                                            operation_field.field_position.type_name()
                                         )
                                     ));
                             };
@@ -2552,9 +2540,9 @@ impl OpGraphPath {
                                 return Err(FederationError::internal(
                                     format!(
                                         "{} requested on {}, but field's parent {} is not an implementation type",
-                                        operation_field.data().field_position,
+                                        operation_field.field_position,
                                         tail_type_pos,
-                                        operation_field.data().field_position.type_name()
+                                        operation_field.field_position.type_name()
                                     )
                                 ));
                             }
@@ -2693,7 +2681,6 @@ impl OpGraphPath {
             }
             OpPathElement::InlineFragment(operation_inline_fragment) => {
                 let type_condition_name = operation_inline_fragment
-                    .data()
                     .type_condition_position
                     .as_ref()
                     .map(|pos| pos.type_name())
@@ -2704,16 +2691,14 @@ impl OpGraphPath {
                     // on), it means we're essentially just applying some directives (could be a
                     // `@skip`/`@include` for instance). This doesn't make us take any edge, but if
                     // the operation element does has directives, we record it.
-                    let fragment_path = if operation_inline_fragment.data().directives.is_empty() {
+                    let fragment_path = if operation_inline_fragment.directives.is_empty() {
                         self.clone()
                     } else {
                         self.add(
                             operation_inline_fragment.clone().into(),
                             None,
                             ConditionResolution::no_conditions(),
-                            operation_inline_fragment
-                                .data()
-                                .defer_directive_arguments()?,
+                            operation_inline_fragment.defer_directive_arguments()?,
                         )?
                     };
                     return Ok((Some(vec![fragment_path.into()]), None));
@@ -2738,9 +2723,7 @@ impl OpGraphPath {
                                 operation_inline_fragment.clone().into(),
                                 Some(edge),
                                 ConditionResolution::no_conditions(),
-                                operation_inline_fragment
-                                    .data()
-                                    .defer_directive_arguments()?,
+                                operation_inline_fragment.defer_directive_arguments()?,
                             )?;
                             return Ok((Some(vec![fragment_path.into()]), None));
                         }
@@ -2767,7 +2750,7 @@ impl OpGraphPath {
                                     type_condition_position: Some(
                                         implementation_type_pos.clone().into(),
                                     ),
-                                    directives: operation_inline_fragment.data().directives.clone(),
+                                    directives: operation_inline_fragment.directives.clone(),
                                     selection_id: SelectionId::new(),
                                 });
                             let implementation_options =
@@ -2833,7 +2816,7 @@ impl OpGraphPath {
                                 // If the operation element has applied directives we need to
                                 // convert it to an inline fragment without type condition,
                                 // otherwise we ignore the fragment altogether.
-                                if operation_inline_fragment.data().directives.is_empty() {
+                                if operation_inline_fragment.directives.is_empty() {
                                     return Ok((Some(vec![self.clone().into()]), None));
                                 }
                                 let operation_inline_fragment =
@@ -2844,15 +2827,11 @@ impl OpGraphPath {
                                             .clone(),
                                         parent_type_position: tail_type_pos.clone().into(),
                                         type_condition_position: None,
-                                        directives: operation_inline_fragment
-                                            .data()
-                                            .directives
-                                            .clone(),
+                                        directives: operation_inline_fragment.directives.clone(),
                                         selection_id: SelectionId::new(),
                                     });
-                                let defer_directive_arguments = operation_inline_fragment
-                                    .data()
-                                    .defer_directive_arguments()?;
+                                let defer_directive_arguments =
+                                    operation_inline_fragment.defer_directive_arguments()?;
                                 let fragment_path = self.add(
                                     operation_inline_fragment.into(),
                                     None,
@@ -2897,9 +2876,7 @@ impl OpGraphPath {
                                     operation_inline_fragment.clone().into(),
                                     Some(fake_downcast_edge),
                                     condition_resolution,
-                                    operation_inline_fragment
-                                        .data()
-                                        .defer_directive_arguments()?,
+                                    operation_inline_fragment.defer_directive_arguments()?,
                                 )?;
                                 return Ok((Some(vec![fragment_path.into()]), None));
                             }
@@ -3576,7 +3553,7 @@ impl OpPath {
         for element in &self.0 {
             match element.as_ref() {
                 OpPathElement::InlineFragment(fragment) => {
-                    if let Some(type_condition) = &fragment.data().type_condition_position {
+                    if let Some(type_condition) = &fragment.type_condition_position {
                         if schema.get_type(type_condition.type_name().clone()).is_err() {
                             if element.directives().is_empty() {
                                 continue; // skip this element
@@ -3677,8 +3654,8 @@ fn is_useless_followup_element(
     conditionals: &DirectiveList,
 ) -> Result<bool, FederationError> {
     let type_of_first: Option<CompositeTypeDefinitionPosition> = match first {
-        OpPathElement::Field(field) => Some(field.data().output_base_type()?.try_into()?),
-        OpPathElement::InlineFragment(fragment) => fragment.data().type_condition_position.clone(),
+        OpPathElement::Field(field) => Some(field.output_base_type()?.try_into()?),
+        OpPathElement::InlineFragment(fragment) => fragment.type_condition_position.clone(),
     };
 
     let Some(type_of_first) = type_of_first else {
@@ -3690,13 +3667,12 @@ fn is_useless_followup_element(
     return match followup {
         OpPathElement::Field(_) => Ok(false),
         OpPathElement::InlineFragment(fragment) => {
-            let Some(type_of_second) = fragment.data().type_condition_position.clone() else {
+            let Some(type_of_second) = fragment.type_condition_position.clone() else {
                 return Ok(false);
             };
 
-            let are_useless_directives = fragment.data().directives.is_empty()
+            let are_useless_directives = fragment.directives.is_empty()
                 || fragment
-                    .data()
                     .directives
                     .iter()
                     .any(|d| !conditionals.contains(d));
