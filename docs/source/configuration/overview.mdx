@@ -753,8 +753,8 @@ query AliasedQuery {
 <EnterpriseFeature linkWithAnchor="https://www.apollographql.com/pricing#graphos-router" />
 
 Beginning in v1.50.0, you can configure the router to report enum and input object references for enhanced insights and operation checks.
-Apollo's legacy reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
-Legacy reporting also causes some [operation checks to flag non-issues](#enhanced-operation-checks).
+Apollo's legacy reference reporting doesn't include data about enum values and input object fields, meaning you can't view enum and input object field usage in GraphOS Studio.
+Legacy reporting can also cause [inaccurate operation checks](#enhanced-operation-checks).
 
 Configure extended reference reporting in `router.yaml` with the `telemetry.apollo.experimental_apollo_metrics_reference_mode` option like so:
 
@@ -765,19 +765,21 @@ telemetry:
 ```
 #### Configuration effect timing
 
-Once you enable extended reference reporting, you can view enum and input object field usage along with the other types of [field usage in GraphOS Studio](/graphos/metrics/field-usage) for all operations that occur after you've enabled the configuration.
+Once you configure extended reference reporting, you can view enum value and input field usage alongside object [field usage in GraphOS Studio](/graphos/metrics/field-usage) for all subsequent operations.
 
-Enabling this configuration also automatically enables [enhanced operation checks](#enhanced-operation-checks), though you won't see an immediate change in your operations check behavior. This is because operation checks rely on historical client operation data.
-To ensure sufficient data to distinguish between genuinely unused values and those simply not reported in legacy data, enhanced checks require some historical operations with extended reference reporting enabled.
+Configuring extended reference reporting automatically turns on [enhanced operation checks](#enhanced-operation-checks), though you won't see an immediate change in your operations check behavior.
+
+This delay is because operation checks rely on historical operation data.
+To ensure sufficient data to distinguish between genuinely unused values and those simply not reported in legacy data, enhanced checks require some historical operations with extended reference reporting turned on.
 
 #### Enhanced operation checks
 
-Thanks to extended reference reporting, enhanced operation checks can more accurately flag issues with enum values and input object fields. See the comparison table below for differences between standard operation checks that come with legacy reference reporting and enhanced checks that are automatically enabled with extended reference reporting.
+Thanks to extended reference reporting, operation checks can more accurately flag issues for changes to enum values and input object fields. See the comparison table below for differences between standard operation checks based on legacy reference reporting and enhanced checks based on extended reference reporting.
 
-<table>
+<table class="field-table api-ref">
 <tr>
-<th></th>
-<th>
+<th style="min-width: 100px;"></th>
+<th style="min-width: 200px;">
 Standard Check Behavior<br/>
 (Legacy reference reporting)
 </th>
@@ -798,20 +800,20 @@ Enhanced Check Behavior<br/>
 <tr>
 <td>
 
-##### Default argument changes or removals for input object fields
+##### Default argument changes for input object fields
 
 </td>
 
-<td>In general, changing or removing a default argument is considered a breaking change, but changing or removing default values in input object fields isn't.</td>
-<td>Changing or removing default values in input object fields is considered a breaking change.</td>
+<td>Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.</td>
+<td>Changing or removing default values for input object fields is considered a breaking change.</td>
 </tr>
 <tr>
 <td>
 
-##### Nullable input object field removals
+##### Nullable input object field removal
 </td>
 <td>Removing a nullable input object field is always considered a breaking change.</td>
-<td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field was always omitted in historical operations, its removal isn't considered a breaking change.</td>
+<td>Removing a nullable input object field is only considered a breaking change if the nullable field is present in historical operations. If the nullable field is always omitted in historical operations, its removal isn't considered a breaking change.</td>
 </tr>
 <tr>
 <td>
@@ -823,6 +825,13 @@ Enhanced Check Behavior<br/>
 <td>Changing a nullable input object field to non-nullable is only considered a breaking change if the field had a <code>null</code> value in historical operations. If the field was always a non-null value in historical operations, changing it to non-nullable isn't considered a breaking change.</td>
 </tr>
 </table>
+
+<Note>
+
+You won't see an immediate change in checks behavior when you first turn on extended reference reporting.
+[Learn more.](#configuration-effect-timing)
+
+</Note>
 
 ### Safelisting with persisted queries
 
