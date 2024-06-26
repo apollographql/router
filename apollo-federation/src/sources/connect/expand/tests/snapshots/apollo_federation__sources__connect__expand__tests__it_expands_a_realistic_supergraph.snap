@@ -1,0 +1,39 @@
+---
+source: apollo-federation/src/sources/connect/expand/tests/mod.rs
+expression: api_schema
+---
+directive @defer(label: String, if: Boolean! = true) on FRAGMENT_SPREAD | INLINE_FRAGMENT
+
+type Address {
+  street: String
+  suite: String
+  city: String
+  zipcode: String
+  geo: AddressGeo
+}
+
+type AddressGeo {
+  lat: Float
+  lng: Float
+}
+
+type CompanyInfo {
+  name: String
+  catchPhrase: String
+  bs: String
+}
+
+type Query {
+  user(id: ID!): User
+}
+
+type User {
+  id: ID!
+  name: String
+  username: String
+  email: String
+  address: Address
+  phone: String
+  website: String
+  company: CompanyInfo
+}
