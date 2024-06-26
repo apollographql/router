@@ -7,7 +7,7 @@ use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 
-use super::http_json_transport::http_json_transport::make_request;
+use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
