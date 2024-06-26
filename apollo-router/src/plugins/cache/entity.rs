@@ -54,7 +54,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 #[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
-    subgraphs: Arc<HashMap<String, Subgraph>>,
+    subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
@@ -156,7 +156,7 @@ impl Plugin for EntityCache {
         Ok(Self {
             storage,
             enabled: init.config.enabled,
-            subgraphs: Arc::new(init.config.subgraph.subgraphs),
+            subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
         })
@@ -189,16 +189,22 @@ impl Plugin for EntityCache {
             None => return service,
         };
 
-        let (subgraph_ttl, subgraph_enabled, private_id) =
-            if let Some(config) = self.subgraphs.get(name) {
-                (
-                    config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
-                    self.enabled && config.enabled.unwrap_or(false),
-                    config.private_id.clone(),
-                )
-            } else {
-                (storage.ttl(), self.enabled, None)
-            };
+        let subgraph_ttl = self
+            .subgraphs
+            .get(name)
+            .ttl
+            .clone()
+            .map(|t| t.0)
+            .or_else(|| storage.ttl());
+        let subgraph_enabled = self.enabled
+            && self
+                .subgraphs
+                .get(name)
+                .enabled
+                // if the top level `enabled` is true but there is no other configuration, caching is enabled for this plugin
+                .unwrap_or(true);
+        let private_id = self.subgraphs.get(name).private_id.clone();
+
         let name = name.to_string();
 
         if self.metrics.enabled {
@@ -238,7 +244,10 @@ impl EntityCache {
         Ok(Self {
             storage: Some(storage),
             enabled: true,
-            subgraphs: Arc::new(subgraphs),
+            subgraphs: Arc::new(SubgraphConfiguration {
+                all: Subgraph::default(),
+                subgraphs,
+            }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
         })
