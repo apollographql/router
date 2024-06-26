@@ -168,7 +168,6 @@ where
     directives
         .into_iter()
         .filter(|d| {
-            println!("Checking if `{}` is in `{:?}`", d.as_ref().name, deny_list);
             !deny_list.contains(&d.as_ref().name)
         })
         .cloned()
