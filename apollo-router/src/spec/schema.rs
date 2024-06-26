@@ -9,7 +9,6 @@ use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
-use apollo_federation::error::FederationError;
 use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::sources::connect::Connector;
@@ -24,7 +23,6 @@ use crate::configuration::ApiSchemaMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
-use crate::plugins::connectors::Source;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -36,11 +34,6 @@ pub(crate) struct Schema {
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<ApiSchema>,
     pub(crate) schema_id: Arc<String>,
-
-    /// If the schema contains connectors, we'll extract them and the inner
-    /// supergraph schema here for use in the router factory and query planner.
-    pub(crate) source: Option<Source>,
-
     pub(crate) connectors_by_service_name: Option<IndexMap<NodeStr, Connector>>,
 }
 
@@ -165,12 +158,6 @@ impl Schema {
 
         let implementers_map = definitions.implementers_map();
 
-        let source = Source::new(&definitions).map_err(|_| {
-            SchemaError::Connector(FederationError::internal(
-                "TODO remove when we remove Source",
-            ))
-        })?;
-
         let legacy_only = config.experimental_query_planner_mode == QueryPlannerMode::Legacy
             && config.experimental_api_schema_generation_mode == ApiSchemaMode::Legacy;
         let supergraph = if cfg!(test) || !legacy_only {
@@ -188,7 +175,6 @@ impl Schema {
             implementers_map,
             api_schema,
             schema_id,
-            source,
             connectors_by_service_name,
         })
     }
