@@ -31,6 +31,7 @@ use tower::ServiceExt;
 
 use crate::configuration::shared::Client;
 use crate::error::Error;
+use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
@@ -1150,10 +1151,8 @@ where
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
 
-    let new_body: crate::graphql::Response = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
-        None => body,
-    };
+    let new_body: crate::graphql::Response =
+        handle_graphql_response(body, co_processor_output.body)?;
 
     response.response = http::Response::from_parts(parts, new_body);
 
@@ -1220,4 +1219,31 @@ pub(super) fn internalize_header_map(
         }
     }
     Ok(output)
+}
+
+pub(super) fn handle_graphql_response(
+    original_response_body: graphql::Response,
+    copro_response_body: Option<serde_json::Value>,
+) -> Result<graphql::Response, BoxError> {
+    let new_body: graphql::Response = match copro_response_body {
+        Some(value) => {
+            let mut new_body: graphql::Response = serde_json::from_value(value)?;
+            // Needs to take back these 2 fields because it's skipped by serde
+            new_body.subscribed = original_response_body.subscribed;
+            new_body.created_at = original_response_body.created_at;
+            // Required because for subscription if data is Some(Null) it won't cut the subscription
+            // And in some languages they don't have any differences between Some(Null) and Null
+            if original_response_body.data == Some(serde_json_bytes::Value::Null)
+                && new_body.data.is_none()
+                && new_body.subscribed == Some(true)
+            {
+                new_body.data = Some(serde_json_bytes::Value::Null);
+            }
+
+            new_body
+        }
+        None => original_response_body,
+    };
+
+    Ok(new_body)
 }
