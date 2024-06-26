@@ -116,6 +116,36 @@ pub(crate) mod mock_subgraph {
 }
 
 #[tokio::test]
+async fn test_root_field() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    let response = execute(&mock_server.uri(), "query { users { id name } }", None).await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "users": [
+          {
+            "id": 1,
+            "name": "Leanne Graham"
+          },
+          {
+            "id": 2,
+            "name": "Ervin Howell"
+          }
+        ]
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users").build()],
+    );
+}
+
+#[tokio::test]
 #[ignore] // TODO remove after the tests are wired up
 async fn test_root_field_plus_entity_plus_requires() {
     let mock_server = MockServer::start().await;
@@ -199,7 +229,7 @@ async fn basic_errors() {
     "###);
 }
 
-const SCHEMA: &str = include_str!("./steelthread.graphql");
+const SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 
 async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {
     let connector_uri = format!("{}/", uri);
@@ -212,6 +242,7 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
       "include_subgraph_errors": { "all": true },
     }));
 
+    // TODO: implement override_url handling
     let config_object = config.as_object_mut().unwrap();
     config_object.insert(
         "preview_connectors".to_string(),
@@ -237,7 +268,7 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
         .create(
             false,
             Arc::new(serde_json::from_value(config).unwrap()),
-            SCHEMA.to_string(),
+            SCHEMA.to_string().replace("https://jsonplaceholder.typicode.com/", uri),
             None,
             None,
         )
