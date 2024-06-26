@@ -94,13 +94,14 @@ In this case, the `RouterService` only sends a coprocessor request whenever it r
 
 ### Client configuration
 
-You can control the coprocessor client configuration as needed.  At the moment only experimental_http2 is supported.
+<HttpConnection type="coprocessor" />
 
-For example to enable h2c (http2 cleartext) communication:
+For example, to enable h2c (http2 cleartext) communication with a coprocessor you can use this configuration::
 
 ```yaml title="router.yaml"
 coprocessor:
-  url: http://127.0.0.1:8081 # When using an http (not https) url and http2only will result in connections that use h2c
+  url: http://127.0.0.1:8081
+  # Using an HTTP (not HTTPS) URL and experimental_http2: http2only results in connections that use h2c
   client:
     experimental_http2: http2only
 
