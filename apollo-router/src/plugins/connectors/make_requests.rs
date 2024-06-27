@@ -1301,6 +1301,7 @@ mod tests {
         let connector = Connector {
             id: ConnectId::new(
                 "subgraph_name".into(),
+                None,
                 name!(Query),
                 name!(users),
                 0,

@@ -199,6 +199,7 @@ mod tests {
         let connector = Connector {
             id: ConnectId::new(
                 "subgraph_name".into(),
+                None,
                 name!(Query),
                 name!(hello),
                 0,
@@ -271,6 +272,7 @@ mod tests {
         let connector = Connector {
             id: ConnectId::new(
                 "subgraph_name".into(),
+                None,
                 name!(Query),
                 name!(user),
                 0,
@@ -360,6 +362,7 @@ mod tests {
         let connector = Connector {
             id: ConnectId::new(
                 "subgraph_name".into(),
+                None,
                 name!(User),
                 name!(field),
                 0,
@@ -451,6 +454,7 @@ mod tests {
         let connector = Connector {
             id: ConnectId::new(
                 "subgraph_name".into(),
+                None,
                 name!(Query),
                 name!(user),
                 0,

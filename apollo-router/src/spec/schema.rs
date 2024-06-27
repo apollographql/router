@@ -23,6 +23,7 @@ use crate::configuration::ApiSchemaMode;
 use crate::configuration::QueryPlannerMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
+use crate::plugins::connectors::configuration::override_connector_base_urls;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -89,8 +90,9 @@ impl Schema {
             ExpansionResult::Expanded {
                 ref raw_sdl,
                 api_schema: api,
-                connectors_by_service_name: connectors,
+                connectors_by_service_name: mut connectors,
             } => {
+                override_connector_base_urls(config, connectors.values_mut());
                 api_schema = Some(ApiSchema(api));
                 connectors_by_service_name = Some(connectors);
                 raw_sdl

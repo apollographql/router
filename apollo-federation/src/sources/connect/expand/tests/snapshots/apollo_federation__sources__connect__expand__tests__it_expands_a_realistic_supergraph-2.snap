@@ -7,6 +7,9 @@ expression: connectors_by_service_name
         id: ConnectId {
             label: "connectors.example http: Get /{$args.id!}",
             subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
             directive: ObjectOrInterfaceFieldDirectivePosition {
                 field: Object(Query.user),
                 directive_name: "connect",

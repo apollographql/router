@@ -242,7 +242,6 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
       "include_subgraph_errors": { "all": true },
     }));
 
-    // TODO: implement override_url handling
     let config_object = config.as_object_mut().unwrap();
     config_object.insert(
         "preview_connectors".to_string(),
@@ -268,9 +267,7 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
         .create(
             false,
             Arc::new(serde_json::from_value(config).unwrap()),
-            SCHEMA
-                .to_string()
-                .replace("https://jsonplaceholder.typicode.com/", uri),
+            SCHEMA.to_string(),
             None,
             None,
         )

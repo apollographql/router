@@ -95,8 +95,9 @@ impl Connector {
                     .unwrap_or(false);
 
                 let id = ConnectId {
-                    label: make_label(&subgraph_name, source_name, &transport),
+                    label: make_label(&subgraph_name, source_name.clone(), &transport),
                     subgraph_name: subgraph_name.clone(),
+                    source_name: source_name.clone(),
                     directive: args.position,
                 };
 
@@ -217,6 +218,9 @@ mod tests {
             ConnectId {
                 label: "connectors.json http: Get /users",
                 subgraph_name: "connectors",
+                source_name: Some(
+                    "json",
+                ),
                 directive: ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.users),
                     directive_name: "connect",
@@ -226,6 +230,9 @@ mod tests {
                 id: ConnectId {
                     label: "connectors.json http: Get /users",
                     subgraph_name: "connectors",
+                    source_name: Some(
+                        "json",
+                    ),
                     directive: ObjectOrInterfaceFieldDirectivePosition {
                         field: Object(Query.users),
                         directive_name: "connect",
@@ -289,6 +296,9 @@ mod tests {
             ConnectId {
                 label: "connectors.json http: Get /posts",
                 subgraph_name: "connectors",
+                source_name: Some(
+                    "json",
+                ),
                 directive: ObjectOrInterfaceFieldDirectivePosition {
                     field: Object(Query.posts),
                     directive_name: "connect",
@@ -298,6 +308,9 @@ mod tests {
                 id: ConnectId {
                     label: "connectors.json http: Get /posts",
                     subgraph_name: "connectors",
+                    source_name: Some(
+                        "json",
+                    ),
                     directive: ObjectOrInterfaceFieldDirectivePosition {
                         field: Object(Query.posts),
                         directive_name: "connect",
