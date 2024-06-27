@@ -1,18 +1,19 @@
 use fred::types::Scanner;
+use futures::SinkExt;
 use futures::StreamExt;
 use tower::BoxError;
 use tracing::Instrument;
 
-use crate::{
-    cache::redis::{RedisCacheStorage, RedisKey},
-    notification::HandleStream,
-    Notify,
-};
+use crate::cache::redis::RedisCacheStorage;
+use crate::cache::redis::RedisKey;
+use crate::notification::Handle;
+use crate::notification::HandleStream;
+use crate::Notify;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     enabled: bool,
-    notify: Notify<InvalidationTopic, Vec<InvalidationRequest>>,
+    handle: Handle<InvalidationTopic, Vec<InvalidationRequest>>,
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
@@ -27,9 +28,23 @@ impl Invalidation {
         let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
         let enabled = storage.is_some();
         if let Some(storage) = storage {
-            tokio::task::spawn(async move { start(storage, handle.into_stream()).await });
+            let h = handle.clone();
+
+            tokio::task::spawn(async move { start(storage, h.into_stream()).await });
         }
-        Ok(Self { enabled, notify })
+        Ok(Self { enabled, handle })
+    }
+
+    pub(crate) async fn invalidate(
+        &mut self,
+        requests: Vec<InvalidationRequest>,
+    ) -> Result<(), BoxError> {
+        if self.enabled {
+            let mut sink = self.handle.clone().into_sink();
+            sink.send(requests).await;
+        }
+
+        Ok(())
     }
 }
 
