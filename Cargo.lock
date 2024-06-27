@@ -192,10 +192,11 @@ checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
 
 [[package]]
 name = "apollo-compiler"
-version = "1.0.0-beta.17"
-source = "git+https://github.com/apollographql/apollo-rs?rev=91f3c93097a7d28e91609571eb1041006401a4f8#91f3c93097a7d28e91609571eb1041006401a4f8"
+version = "1.0.0-beta.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "16a61580d9ee85ec35b892efb1f3eec193c520fc957b612989dc823551e2639d"
 dependencies = [
- "apollo-parser 0.7.7 (git+https://github.com/apollographql/apollo-rs?rev=91f3c93097a7d28e91609571eb1041006401a4f8)",
+ "apollo-parser",
  "ariadne",
  "indexmap 2.2.3",
  "rowan",
@@ -212,7 +213,7 @@ version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee9f27b20841d14923dd5f0714a79f86360b23492d2f98ab5d1651471a56b7a4"
 dependencies = [
- "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "thiserror",
 ]
 
@@ -256,16 +257,6 @@ name = "apollo-parser"
 version = "0.7.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6bb7c8a9776825e5524b5ab3a7f478bf091a054180f244dff85814452cb87d90"
-dependencies = [
- "memchr",
- "rowan",
- "thiserror",
-]
-
-[[package]]
-name = "apollo-parser"
-version = "0.7.7"
-source = "git+https://github.com/apollographql/apollo-rs?rev=91f3c93097a7d28e91609571eb1041006401a4f8#91f3c93097a7d28e91609571eb1041006401a4f8"
 dependencies = [
  "memchr",
  "rowan",
@@ -440,7 +431,7 @@ dependencies = [
 name = "apollo-router-benchmarks"
 version = "1.48.1"
 dependencies = [
- "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "apollo-router",
  "apollo-smith",
  "arbitrary",
@@ -491,7 +482,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "441a51f1055d2eebcda41b55066de925502e11c97097c6d1bab0da5bdeb5c70f"
 dependencies = [
  "apollo-encoder",
- "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "arbitrary",
  "once_cell",
  "thiserror",
@@ -5827,7 +5818,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "apollo-compiler",
- "apollo-parser 0.7.7 (registry+https://github.com/rust-lang/crates.io-index)",
+ "apollo-parser",
  "apollo-router",
  "apollo-smith",
  "async-trait",
