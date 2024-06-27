@@ -1,0 +1,18 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: result
+---
+statsReportKey: "# VariableScalarInputQuery\nquery VariableScalarInputQuery($boolInput:Boolean!,$floatInput:Float!,$idInput:ID!,$intInput:Int!,$listInput:[String!]!,$nullableStringInput:String,$stringInput:String!){sortQuery(INTInput:$intInput boolInput:$boolInput floatInput:$floatInput idInput:$idInput listInput:$listInput nullableStringInput:$nullableStringInput stringInput:$stringInput){CCC aaa id nullableId zzz}}"
+referencedFieldsByType:
+  Query:
+    fieldNames:
+      - sortQuery
+    isInterface: false
+  SortResponse:
+    fieldNames:
+      - CCC
+      - aaa
+      - id
+      - nullableId
+      - zzz
+    isInterface: false

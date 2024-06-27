@@ -138,7 +138,7 @@ fn process_response(response) {
 }
 
 fn supergraph_service(service) {
-    const response_callback = Fn("process_request");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 ```
@@ -303,6 +303,16 @@ Your Rhai customization can use the function `unix_now()` to obtain the current 
 ```rhai
 fn supergraph_service(service) {
     let now = unix_now();
+}
+```
+
+## Unix timestamp (in milliseconds)
+
+Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_ms_now();
 }
 ```
 

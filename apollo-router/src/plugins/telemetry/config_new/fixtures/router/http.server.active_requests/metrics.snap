@@ -1,6 +1,6 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Test standard router metrics
+description: Active requests metrics
 expression: "&metrics.all()"
 info:
   telemetry:
@@ -9,8 +9,12 @@ info:
         router:
           http.server.active_requests: true
           http.server.request.duration: false
+        subgraph:
+          http.client.request.duration: false
 ---
 - name: http.server.active_requests
+  description: Number of active HTTP server requests.
+  unit: request
   data:
     datapoints:
       - value: 0

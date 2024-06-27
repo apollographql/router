@@ -257,7 +257,7 @@ impl Plugin for Replay {
 
 #[derive(Debug)]
 pub(crate) enum ReplayReport {
-    QueryPlanDifference(String, String),
+    QueryPlanDifference(Arc<String>, Arc<String>),
     ClientResponseChunkDifference(usize, String, String),
     SubgraphRequestMissed(String, String),
     HeaderDifference {

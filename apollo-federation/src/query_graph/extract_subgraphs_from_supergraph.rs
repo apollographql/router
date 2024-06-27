@@ -97,8 +97,11 @@ pub(crate) fn extract_subgraphs_from_supergraph(
         }
     }
     if is_fed_1 {
-        // Handle Fed 1 supergraphs eventually, the extraction logic is gnarly
-        todo!()
+        let unsupported =
+            SingleFederationError::UnsupportedFederationVersion {
+                message: String::from("Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater")
+            };
+        return Err(unsupported.into());
     } else {
         extract_subgraphs_from_fed_2_supergraph(
             supergraph_schema,
@@ -132,8 +135,12 @@ pub(crate) fn extract_subgraphs_from_supergraph(
                 Err((schema, error)) => {
                     subgraph.schema = schema;
                     if is_fed_1 {
-                        // See message above about Fed 1 supergraphs
-                        todo!()
+                        let message =
+                                String::from("Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater");
+                        return Err(SingleFederationError::UnsupportedFederationVersion {
+                            message,
+                        }
+                        .into());
                     } else {
                         let mut message = format!(
                                     "Unexpected error extracting {} from the supergraph: this is either a bug, or the supergraph has been corrupted.\n\nDetails:\n{error}",
@@ -397,10 +404,11 @@ fn extract_subgraphs_from_fed_2_supergraph(
         remove_inactive_requires_and_provides_from_subgraph(&mut subgraph.schema)?;
         remove_unused_types_from_subgraph(&mut subgraph.schema)?;
         for definition in all_executable_directive_definitions.iter() {
-            DirectiveDefinitionPosition {
+            let pos = DirectiveDefinitionPosition {
                 directive_name: definition.name.clone(),
-            }
-            .insert(&mut subgraph.schema, definition.clone())?;
+            };
+            pos.pre_insert(&mut subgraph.schema)?;
+            pos.insert(&mut subgraph.schema, definition.clone())?;
         }
     }
 

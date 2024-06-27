@@ -59,13 +59,15 @@ impl Selectors for SupergraphCostAttributes {
         Vec::default()
     }
 
-    fn on_error(&self, _error: &BoxError) -> Vec<KeyValue> {
+    fn on_error(&self, _error: &BoxError, _ctx: &Context) -> Vec<KeyValue> {
         Vec::default()
     }
 
     fn on_response_event(&self, _response: &Self::EventResponse, ctx: &Context) -> Vec<KeyValue> {
         let mut attrs = Vec::with_capacity(4);
-        let cost_result = ctx.extensions().lock().get::<CostContext>().cloned();
+        let cost_result = ctx
+            .extensions()
+            .with_lock(|lock| lock.get::<CostContext>().cloned());
         if let Some(cost_result) = cost_result {
             if let Some(true) = self.cost_estimated {
                 attrs.push(KeyValue::new("cost.estimated", cost_result.estimated));
@@ -377,14 +379,13 @@ mod test {
 
     fn make_request(instruments: &CostInstruments) {
         let context = Context::new();
-        {
-            let mut extensions = context.extensions().lock();
-            extensions.insert(CostContext::default());
-            let cost_result = extensions.get_or_default_mut::<CostContext>();
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(CostContext::default());
+            let cost_result = lock.get_or_default_mut::<CostContext>();
             cost_result.estimated = 100.0;
             cost_result.actual = 10.0;
             cost_result.result = "COST_TOO_EXPENSIVE"
-        }
+        });
         let _ = context.insert(OPERATION_NAME, "Test".to_string()).unwrap();
         instruments.on_request(
             &supergraph::Request::fake_builder()

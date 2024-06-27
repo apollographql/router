@@ -69,6 +69,13 @@
             "enterprise"
           ]
         ],
+        "Demand Control" : [
+          "/executing-operations/demand-control",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],
         "Privacy and Data Collection": "/privacy"
       }
     },
@@ -80,13 +87,6 @@
         "/executing-operations/query-batching",
         [
           "enterprise"
-        ]
-      ],
-      "Demand Control" : [
-        "/executing-operations/demand-control",
-        [
-          "enterprise",
-          "preview"
         ]
       ],
       "GraphQL Subscriptions": {
@@ -109,7 +109,14 @@
             "enterprise"
           ]
         ]
-      }
+      },
+      "Demand Control" : [
+        "/executing-operations/demand-control",
+        [
+          "enterprise",
+          "preview"
+        ]
+      ]
     },
     "Telemetry and Monitoring": {
       "Overview": "/configuration/telemetry/overview",

@@ -1,0 +1,15 @@
+---
+source: apollo-router/src/apollo_studio_interop/tests.rs
+expression: plan.usage_reporting
+---
+statsReportKey: "# QueryWithVars\nquery QueryWithVars($boolInput:Boolean!,$floatInput:Float!,$stringInput:String!){inputTypeQuery(input:{}){enumResponse}scalarInputQuery(boolInput:$boolInput floatInput:$floatInput idInput:\"\"intInput:0 listInput:[]stringInput:$stringInput){enumResponse}}"
+referencedFieldsByType:
+  EverythingResponse:
+    fieldNames:
+      - enumResponse
+    isInterface: false
+  Query:
+    fieldNames:
+      - inputTypeQuery
+      - scalarInputQuery
+    isInterface: false

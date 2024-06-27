@@ -534,7 +534,7 @@ fn ensure_expected_type_kind(
     actual: &TypeDefinitionPosition,
 ) -> Result<(), FederationError> {
     let actual_kind: TypeKind = TypeKind::from(actual);
-    if expected != actual_kind {
+    if expected == actual_kind {
         Ok(())
     } else {
         let actual_type_name = actual.type_name();
