@@ -442,6 +442,7 @@ dependencies = [
  "tempfile",
  "thiserror",
  "time",
+ "tracing",
  "url",
 ]
 

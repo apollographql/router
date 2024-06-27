@@ -15,6 +15,8 @@ use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
+use tracing::debug;
+use tracing::debug_span;
 
 use crate::error::FederationError;
 use crate::indented_display::write_indented_lines;
@@ -805,9 +807,9 @@ pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPat
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
 where
-    TTrigger: Eq + Hash,
+    TTrigger: Eq + Hash + std::fmt::Debug,
     Arc<TTrigger>: Into<GraphPathTrigger>,
-    TEdge: Copy + Into<Option<EdgeIndex>>,
+    TEdge: Copy + Into<Option<EdgeIndex>> + std::fmt::Debug,
     EdgeIndex: Into<TEdge>,
 {
     pub(crate) fn new(graph: Arc<QueryGraph>, head: NodeIndex) -> Result<Self, FederationError> {
@@ -974,6 +976,7 @@ where
                             if !new_runtime_types_of_tail.is_empty()
                                 && new_runtime_types_of_tail.is_subset(&self.runtime_types_of_tail)
                             {
+                                debug!("Previous cast {last_operation_element:?} is made obsolete by new cast {trigger:?}, removing from path.");
                                 // Note that `edge` starts at the node we wish to eliminate from the
                                 // path. So we need to replace it with the edge going directly from
                                 // the previous node to the new tail for this path.
@@ -1321,6 +1324,7 @@ where
         if edge_weight.conditions.is_none() {
             return Ok(ConditionResolution::no_conditions());
         }
+        debug_span!("Checking conditions {conditions} on edge {edge_weight}");
         let resolution = condition_resolver.resolve(
             edge,
             context,
@@ -1347,8 +1351,12 @@ where
                         true
                     };
                     if in_same_subgraph {
+                        debug!(
+                            "@requires conditions are satisfied, but validating post-require key."
+                        );
                         let (edge_head, _) = self.graph.edge_endpoints(edge)?;
                         if self.graph.get_locally_satisfiable_key(edge_head)?.is_none() {
+                            debug!("Post-require conditions cannot be satisfied");
                             return Ok(ConditionResolution::Unsatisfied {
                                 reason: Some(UnsatisfiedConditionReason::NoPostRequireKey),
                             });
@@ -1373,6 +1381,7 @@ where
                 }
             }
         }
+        debug!("Condition resolution: {resolution:?}");
         Ok(resolution)
     }
 
@@ -1429,8 +1438,13 @@ where
         // not A -> C -> B -> D.
         let mut heap: BinaryHeap<HeapElement<TTrigger, TEdge>> = BinaryHeap::new();
         heap.push(HeapElement(self.clone()));
+
         while let Some(HeapElement(to_advance)) = heap.pop() {
+            let span = debug_span!("From {to_advance:?}");
+            let _guard = span.enter();
             for edge in to_advance.next_edges()? {
+                let span = debug_span!("Testing edge {edge:?}");
+                let _guard = span.enter();
                 let edge_weight = self.graph.edge_weight(edge)?;
                 if edge_weight.transition.collect_operation_elements() {
                     continue;
@@ -1439,6 +1453,7 @@ where
                 let edge_tail_weight = self.graph.node_weight(edge_tail)?;
 
                 if excluded_destinations.is_excluded(&edge_tail_weight.source) {
+                    debug!("Ignored: edge is excluded");
                     continue;
                 }
 
@@ -1448,6 +1463,7 @@ where
                 // re-entering the current subgraph is actually useful.
                 if edge_tail_weight.source == original_source && to_advance.defer_on_tail.is_none()
                 {
+                    debug!("Ignored: edge get us back to our original source");
                     continue;
                 }
 
@@ -1463,13 +1479,17 @@ where
                     && !(to_advance.defer_on_tail.is_some()
                         && self.graph.is_self_key_or_root_edge(edge)?)
                 {
+                    debug!(r#"Ignored: edge is a top-level "RootTypeResolution""#);
                     continue;
                 }
 
                 let prev_for_source = best_path_by_source.get(&edge_tail_weight.source);
                 let prev_for_source = match prev_for_source {
                     Some(Some(prev_for_source)) => Some(prev_for_source),
-                    Some(None) => continue,
+                    Some(None) => {
+                        debug!("Ignored: we've shown before than going to {original_source:?} is not productive");
+                        continue;
+                    }
                     None => None,
                 };
 
@@ -1478,6 +1498,9 @@ where
                         || (prev_for_source.0.edges.len() == to_advance.edges.len() + 1
                             && prev_for_source.1 <= 1.0)
                     {
+                        debug!(
+                            "Ignored: a better (shorter) path to the same subgraph already added"
+                        );
                         // We've already found another path that gets us to the same subgraph rather
                         // than the edge we're about to check. If that previous path is strictly
                         // shorter than the path we'd obtain with the new edge, then we don't
@@ -1495,9 +1518,12 @@ where
                 }
 
                 if excluded_conditions.is_excluded(edge_weight.conditions.as_ref()) {
+                    debug!("Ignored: edge condition is excluded");
                     continue;
                 }
 
+                let span = debug_span!("Validating conditions {edge_weight}");
+                let guard = span.enter();
                 // As we validate the condition for this edge, it might be necessary to jump to
                 // another subgraph, but if for that we need to jump to the same subgraph we're
                 // trying to get to, then it means there is another, shorter way to go to our
@@ -1511,6 +1537,8 @@ where
                     excluded_conditions,
                 )?;
                 if let ConditionResolution::Satisfied { path_tree, cost } = condition_resolution {
+                    debug!("Condition satisfied");
+                    drop(guard);
                     // We can get to `edge_tail_weight.source` with that edge. But if we had already
                     // found another path to the same subgraph, we want to replace it with this one
                     // only if either 1) it is shorter or 2) if it's of equal size, only if the
@@ -1519,6 +1547,7 @@ where
                         if prev_for_source.0.edges.len() == to_advance.edges.len() + 1
                             && prev_for_source.1 <= cost
                         {
+                            debug!("Ignored: a better (less costly) path to the same subgraph already added");
                             continue;
                         }
                     }
@@ -1647,6 +1676,23 @@ where
                                         direct_key_edge_max_cost,
                                     )?
                                 {
+                                    debug!("Ignored: edge correspond to a detour by subgraph {} from subgraph {:?}: ", edge_tail_weight.source, self.graph.node_weight(last_subgraph_entering_edge_head)?.source);
+                                    debug!(
+                                        "we have a direct path from {} to {} in {}.",
+                                        self.graph
+                                            .node_weight(last_subgraph_entering_edge_head)?
+                                            .type_,
+                                        edge_tail_weight.type_,
+                                        self.graph
+                                            .node_weight(last_subgraph_entering_edge_head)?
+                                            .source
+                                    );
+                                    if !is_edge_to_previous_subgraph {
+                                        debug!(
+                                            "And, it can move to {} from there",
+                                            edge_tail_weight.source
+                                        );
+                                    }
                                     // We just found that going to the previous subgraph is useless
                                     // because there is a more direct path. But we additionally
                                     // record that this previous subgraph should be avoided
@@ -1683,6 +1729,7 @@ where
                         edge_tail_weight.source.clone(),
                         Some((updated_path.clone(), cost)),
                     );
+                    debug!("Using edge, advance path: {updated_path:?}");
                     // It can be necessary to "chain" keys, because different subgraphs may have
                     // different keys exposed, and so we when we took a key, we want to check if
                     // there is a new key we can now use that takes us to other subgraphs. For other
@@ -1702,6 +1749,8 @@ where
                             heap.push(HeapElement(updated_path));
                         }
                     }
+                } else {
+                    debug!("Condition unsatisfiable: {condition_resolution:?}");
                 }
             }
         }
@@ -3224,6 +3273,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
+        let span = debug_span!("Trying to advance {} for {operation_element}", %self.paths);
+        let _gaurd = span.enter();
         let updated_context = self.context.with_context_of(operation_element)?;
         let mut options_for_each_path = vec![];
 
@@ -3231,10 +3282,14 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         // references to `self`, which means cloning these paths when iterating.
         let paths = self.paths.0.clone();
         for (path_index, path) in paths.iter().enumerate() {
+            let span = debug_span!("Computing options for {path}");
+            let _gaurd = span.enter();
             let mut options = None;
             let should_reenter_subgraph = path.defer_on_tail.is_some()
                 && matches!(operation_element, OpPathElement::Field(_));
             if !should_reenter_subgraph {
+                let span = debug_span!("Direct options");
+                let gaurd = span.enter();
                 let (advance_options, has_only_type_exploded_results) = path
                     .advance_with_operation_element(
                         supergraph_schema.clone(),
@@ -3242,6 +3297,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         &updated_context,
                         condition_resolver,
                     )?;
+                debug!("{advance_options:?}");
+                drop(gaurd);
                 // If we've got some options, there are a number of cases where there is no point
                 // looking for indirect paths:
                 // - If the operation element is terminal: this means we just found a direct edge
@@ -3267,6 +3324,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                             && !has_only_type_exploded_results.unwrap_or(false))
                         || matches!(operation_element, OpPathElement::InlineFragment(_))
                     {
+                        debug!("Final options for {path}: {advance_options:?}");
                         // Note that if options is empty, that means this particular "branch" is
                         // unsatisfiable, so we should just ignore it.
                         if !advance_options.is_empty() {
@@ -3283,14 +3341,25 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             // defer), that's ok, we'll just try with non-collecting edges.
             let mut options = options.unwrap_or_else(Vec::new);
             if let OpPathElement::Field(operation_field) = operation_element {
+                let span = debug_span!("Computing indirect paths:");
+                let _gaurd = span.enter();
                 // Add whatever options can be obtained by taking some non-collecting edges first.
                 let paths_with_non_collecting_edges = self
                     .indirect_options(&updated_context, path_index, condition_resolver)?
                     .filter_non_collecting_paths_for_field(operation_field)?;
                 if !paths_with_non_collecting_edges.paths.is_empty() {
+                    debug!(
+                        "{} indirect paths",
+                        paths_with_non_collecting_edges.paths.len()
+                    );
+                    let span = debug_span!("Validating indirect options:");
+                    let _gaurd = span.enter();
                     for paths_with_non_collecting_edges in
                         paths_with_non_collecting_edges.paths.iter()
                     {
+                        let span =
+                            debug_span!("For indirect path {paths_with_non_collecting_edges}:");
+                        let _gaurd = span.enter();
                         let (advance_options, _) = paths_with_non_collecting_edges
                             .advance_with_operation_element(
                                 supergraph_schema.clone(),
@@ -3301,8 +3370,10 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         // If we can't advance the operation element after that path, ignore it,
                         // it's just not an option.
                         let Some(advance_options) = advance_options else {
+                            debug!("Ignoring: cannot be advanced with {operation_element}");
                             continue;
                         };
+                        debug!("Adding valid option: {advance_options:?}");
                         // `advance_with_operation_element()` can return an empty `Vec` only if the
                         // operation element is a fragment with a type condition that, on top of the
                         // "current" type is unsatisfiable. But as we've only taken type-preserving
@@ -3362,6 +3433,8 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                         }
                         options.extend(advance_options);
                     }
+                } else {
+                    debug!("no indirect paths");
                 }
             }
 
