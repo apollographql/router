@@ -12,6 +12,7 @@ use apollo_compiler::NodeStr;
 use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::Transport;
 use http::Uri;
 use indexmap::IndexMap;
 use semver::Version;
@@ -89,8 +90,9 @@ impl Schema {
             ExpansionResult::Expanded {
                 ref raw_sdl,
                 api_schema: api,
-                connectors_by_service_name: connectors,
+                connectors_by_service_name: mut connectors,
             } => {
+                Self::override_connector_base_urls(config, &mut connectors);
                 api_schema = Some(ApiSchema(api));
                 connectors_by_service_name = Some(connectors);
                 raw_sdl
@@ -177,6 +179,29 @@ impl Schema {
             schema_id,
             connectors_by_service_name,
         })
+    }
+
+    /// If a base URL override is specified for a source API, apply it to the connectors using
+    /// that source.
+    fn override_connector_base_urls(
+        config: &Configuration,
+        connectors: &mut IndexMap<NodeStr, Connector>,
+    ) {
+        for connector in connectors.values_mut() {
+            if let Some(url) = config
+                .preview_connectors
+                .subgraphs
+                .get(&connector.id.subgraph_name.to_string())
+                .and_then(|map| map.get(&connector.id.source_name.clone()?.to_string()))
+                .and_then(|api_config| api_config.override_url.as_ref())
+            {
+                match &mut connector.transport {
+                    Transport::HttpJson(transport) => {
+                        transport.base_url = NodeStr::from(url.as_str())
+                    }
+                }
+            }
+        }
     }
 
     pub(crate) fn federation_supergraph(&self) -> &apollo_federation::Supergraph {

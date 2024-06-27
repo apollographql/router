@@ -37,6 +37,7 @@ use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
 pub struct ConnectId {
     pub label: String,
     pub subgraph_name: NodeStr,
+    pub source_name: Option<NodeStr>,
     pub directive: ObjectOrInterfaceFieldDirectivePosition,
 }
 
@@ -82,6 +83,7 @@ impl ConnectId {
     /// Mostly intended for tests in apollo-router
     pub fn new(
         subgraph_name: NodeStr,
+        source_name: Option<NodeStr>,
         type_name: Name,
         field_name: Name,
         index: usize,
@@ -90,6 +92,7 @@ impl ConnectId {
         Self {
             label: label.to_string(),
             subgraph_name,
+            source_name,
             directive: ObjectOrInterfaceFieldDirectivePosition {
                 field: ObjectOrInterfaceFieldDefinitionPosition::Object(
                     ObjectFieldDefinitionPosition {

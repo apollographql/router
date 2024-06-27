@@ -7,6 +7,9 @@ expression: connectors_by_service_name
         id: ConnectId {
             label: "connectors.example http: Get ",
             subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
             directive: ObjectOrInterfaceFieldDirectivePosition {
                 field: Object(Query.users),
                 directive_name: "connect",
@@ -49,6 +52,9 @@ expression: connectors_by_service_name
         id: ConnectId {
             label: "connectors.example http: Get /{$args.id!}",
             subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
             directive: ObjectOrInterfaceFieldDirectivePosition {
                 field: Object(Query.user),
                 directive_name: "connect",
@@ -108,6 +114,9 @@ expression: connectors_by_service_name
         id: ConnectId {
             label: "connectors.example http: Get /{$this.c!}/d",
             subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
             directive: ObjectOrInterfaceFieldDirectivePosition {
                 field: Object(User.d),
                 directive_name: "connect",
