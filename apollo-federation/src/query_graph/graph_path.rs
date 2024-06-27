@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;

@@ -209,7 +209,6 @@ mod selection_map {
     use std::sync::Arc;
 
     use apollo_compiler::executable;
-    use apollo_compiler::Name;
     use indexmap::IndexMap;
 
     use crate::error::FederationError;
