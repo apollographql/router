@@ -1,5 +1,7 @@
 //! Configuration for datadog tracing.
 
+use std::collections::HashMap;
+
 use http::Uri;
 use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
@@ -10,7 +12,6 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::collections::HashMap;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
@@ -97,10 +98,8 @@ impl TracingConfigurator for Config {
                 let resource_mappings = resource_mappings.clone();
                 builder.with_resource_mapping(move |span, _model_config| {
                     if let Some(mapping) = resource_mappings.get(span.name.as_ref()) {
-                        if let Some(value) = span.attributes.get(mapping) {
-                            if let Value::String(value) = value {
-                                return value.as_str();
-                            }
+                        if let Some(Value::String(value)) = span.attributes.get(mapping) {
+                            return value.as_str();
                         }
                     }
                     return span.name.as_ref();
