@@ -1,3 +1,4 @@
+use apollo_compiler::executable::Selection;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use apollo_federation::sources::connect::Connector;
@@ -37,26 +38,26 @@ pub(crate) enum ResponseKey {
         name: String,
         typename: ResponseTypeName,
         #[allow(dead_code)]
-        selection_set: Vec<apollo_compiler::ast::Selection>,
+        selection_set: apollo_compiler::executable::SelectionSet,
     },
     Entity {
         index: usize,
         typename: ResponseTypeName,
         #[allow(dead_code)]
-        selection_set: Vec<apollo_compiler::ast::Selection>,
+        selection_set: apollo_compiler::executable::SelectionSet,
     },
     EntityField {
         index: usize,
         field_name: String,
         typename: ResponseTypeName,
         #[allow(dead_code)]
-        selection_set: Vec<apollo_compiler::ast::Selection>,
+        selection_set: apollo_compiler::executable::SelectionSet,
     },
 }
 
 impl ResponseKey {
     #[allow(dead_code)]
-    pub(crate) fn selection_set(&self) -> &Vec<apollo_compiler::ast::Selection> {
+    pub(crate) fn selection_set(&self) -> &apollo_compiler::executable::SelectionSet {
         match self {
             ResponseKey::RootField { selection_set, .. } => selection_set,
             ResponseKey::Entity { selection_set, .. } => selection_set,
@@ -70,6 +71,7 @@ impl std::fmt::Debug for ResponseKey {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> std::fmt::Result {
         let selection_set = self
             .selection_set()
+            .selections
             .iter()
             .map(|s| format!("{}", s))
             .join(" ");
@@ -192,21 +194,12 @@ fn root_fields(
     request: &connect::Request,
     schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
-    use apollo_compiler::ast::Selection;
     use MakeRequestError::*;
 
-    let doc = apollo_compiler::ast::Document::parse(&request.operation_str, "op.graphql")
-        .map_err(|_| InvalidOperation("cannot parse operation document".into()))?;
-
-    // Assume a single operation (because this is from a query plan)
-    let op = doc
-        .definitions
-        .into_iter()
-        .find_map(|d| match d {
-            apollo_compiler::ast::Definition::OperationDefinition(op) => Some(op),
-            _ => None,
-        })
-        .ok_or_else(|| InvalidOperation("missing operation".into()))?;
+    let op = request
+        .operation
+        .get_operation(None)
+        .map_err(|_| InvalidOperation("no operation document".into()))?;
 
     let parent_type_name = schema.root_operation(op.operation_type).ok_or_else(|| {
         InvalidOperation(format!(
@@ -216,6 +209,7 @@ fn root_fields(
     })?;
 
     op.selection_set
+        .selections
         .iter()
         .map(|s| match s {
             Selection::Field(field) => {
@@ -241,13 +235,12 @@ fn root_fields(
                     selection_set: field.selection_set.clone(),
                 };
 
-                let args =
-                    graphql_utils::ast_field_arguments_map(field, &request.variables.variables)
-                        .map_err(|_| {
-                            MakeRequestError::InvalidArguments(
-                                "cannot get inputs from field arguments".into(),
-                            )
-                        })?;
+                let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
+                    .map_err(|_| {
+                        MakeRequestError::InvalidArguments(
+                            "cannot get inputs from field arguments".into(),
+                        )
+                    })?;
 
                 let request_inputs = RequestInputs {
                     args,
@@ -291,14 +284,18 @@ fn entities_from_request(
     request: &connect::Request,
     schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
-    use MakeRequestError::InvalidRepresentations;
+    use MakeRequestError::*;
 
     let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
         return root_fields(request, schema);
     };
 
-    let (entities_field, typename_requested) =
-        graphql_utils::get_entity_fields(&request.operation_str)?;
+    let op = request
+        .operation
+        .get_operation(None)
+        .map_err(|_| InvalidOperation("no operation document".into()))?;
+
+    let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;
 
     representations
         .as_array()
@@ -371,14 +368,18 @@ fn entities_with_fields_from_request(
     request: &connect::Request,
     _schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
-    use apollo_compiler::ast::Selection;
     use MakeRequestError::*;
 
-    let (entities_field, typename_requested) =
-        graphql_utils::get_entity_fields(&request.operation_str)?;
+    let op = request
+        .operation
+        .get_operation(None)
+        .map_err(|_| InvalidOperation("no operation document".into()))?;
+
+    let (entities_field, typename_requested) = graphql_utils::get_entity_fields(op)?;
 
     let types_and_fields = entities_field
         .selection_set
+        .selections
         .iter()
         .map(|selection| match selection {
             Selection::Field(_) => Ok(vec![]),
@@ -394,6 +395,7 @@ fn entities_with_fields_from_request(
                     .ok_or_else(|| InvalidOperation("missing type condition".into()))?;
                 Ok(frag
                     .selection_set
+                    .selections
                     .iter()
                     .map(|sel| {
                         let field = match sel {
@@ -430,11 +432,10 @@ fn entities_with_fields_from_request(
         .flatten()
         .flat_map(|(typename, field)| {
             representations.iter().map(move |(i, representation)| {
-                let args =
-                    graphql_utils::ast_field_arguments_map(field, &request.variables.variables)
-                        .map_err(|_| {
-                            InvalidArguments("cannot build inputs from field arguments".into())
-                        })?;
+                let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
+                    .map_err(|_| {
+                        InvalidArguments("cannot build inputs from field arguments".into())
+                    })?;
 
                 // if the fetch node operation doesn't include __typename, then
                 // we're assuming this is for an interface object and we don't want
@@ -445,10 +446,16 @@ fn entities_with_fields_from_request(
                     ResponseTypeName::Omitted
                 };
 
+                let response_name = field
+                    .alias
+                    .as_ref()
+                    .unwrap_or_else(|| &field.name)
+                    .to_string();
+
                 Ok::<_, MakeRequestError>((
                     ResponseKey::EntityField {
                         index: *i,
-                        field_name: field.response_name().to_string(),
+                        field_name: response_name.to_string(),
                         typename,
                         selection_set: field.selection_set.clone(),
                     },
@@ -472,6 +479,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::name;
+    use apollo_compiler::ExecutableDocument;
     use apollo_compiler::NodeStr;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
@@ -495,7 +503,14 @@ mod tests {
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Query_a_0"))
             .context(Context::default())
-            .operation_str("query { a { f } a2: a { f2: f } }".to_string())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query { a { f } a2: a { f2: f } }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
             .variables(Variables {
                 variables: Default::default(),
                 inverted_paths: Default::default(),
@@ -551,9 +566,14 @@ mod tests {
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Query_b_0"))
             .context(Context::default())
-            .operation_str(
-                "query($var: String) { b(var: \"inline\") b2: b(var: $var) }".to_string(),
-            )
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query($var: String) { b(var: \"inline\") b2: b(var: $var) }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
             .variables(Variables {
                 variables: serde_json_bytes::json!({ "var": "variable" })
                     .as_object()
@@ -626,10 +646,12 @@ mod tests {
         let req = crate::services::connect::Request::builder()
         .service_name(NodeStr::from("subgraph_Query_c_0"))
             .context(Context::default())
-            .operation_str(
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
                 r#"
                 query(
-                    $var1: Int, $var2: Bool, $var3: Float, $var4: ID, $var5: JSON, $var6: [String], $var7: String
+                    $var1: Int, $var2: Boolean, $var3: Float, $var4: ID, $var5: JSON, $var6: [String], $var7: String
                 ) {
                     c(var1: $var1, var2: $var2, var3: $var3, var4: $var4, var5: $var5, var6: $var6, var7: $var7)
                     c2: c(
@@ -643,6 +665,10 @@ mod tests {
                     )
                 }
                 "#.to_string(),
+                    "./",
+                )
+                .unwrap(),
+            )
             )
             .variables(Variables {
                 variables: serde_json_bytes::json!({
@@ -745,12 +771,29 @@ mod tests {
         }
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
 
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Query_entity_0"))
             .context(Context::default())
-            .operation_str(
-                r#"
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
                 query($representations: [_Any!]!) {
                     _entities(representations: $representations) {
                         __typename
@@ -761,8 +804,11 @@ mod tests {
                     }
                 }
                 "#
-                .to_string(),
-            )
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
             .variables(Variables {
                 variables: serde_json_bytes::json!({
                     "representations": [
@@ -849,15 +895,20 @@ mod tests {
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Query_entity_0"))
             .context(Context::default())
-            .operation_str(
-                r#"
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    r#"
                 query($a: ID!, $b: ID!) {
                     a: entity(id: $a) { field { field } }
                     b: entity(id: $b) { field { alias: field } }
                 }
             "#
-                .to_string(),
-            )
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
             .variables(Variables {
                 variables: serde_json_bytes::json!({
                     "a": "1",
@@ -931,12 +982,29 @@ mod tests {
         }
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
 
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Entity_field_0"))
             .context(Context::default())
-            .operation_str(
-                r#"
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
                 query($representations: [_Any!]!, $bye: String) {
                     _entities(representations: $representations) {
                         __typename
@@ -947,8 +1015,11 @@ mod tests {
                     }
                 }
             "#
-                .to_string(),
-            )
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
             .variables(Variables {
                 variables: serde_json_bytes::json!({
                     "representations": [
@@ -1091,12 +1162,29 @@ mod tests {
         }
         "#;
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
+        let subgraph_schema = Arc::new(
+            Schema::parse_and_validate(
+                format!(
+                    r#"{partial_sdl}
+        extend type Query {{
+          _entities(representations: [_Any!]!): _Entity
+        }}
+        scalar _Any
+        union _Entity = Entity
+        "#
+                ),
+                "./",
+            )
+            .unwrap(),
+        );
 
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Entity_field_0"))
             .context(Context::default())
-            .operation_str(
-                r#"
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &subgraph_schema,
+                    r#"
                 query($representations: [_Any!]!, $foo: String) {
                     _entities(representations: $representations) {
                         ... on Entity {
@@ -1105,8 +1193,11 @@ mod tests {
                     }
                 }
             "#
-                .to_string(),
-            )
+                    .to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
             .variables(Variables {
                 variables: serde_json_bytes::json!({
                   "representations": [
@@ -1182,10 +1273,19 @@ mod tests {
 
     #[test]
     fn make_requests() {
+        let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
+
         let req = crate::services::connect::Request::builder()
             .service_name(NodeStr::from("subgraph_Query_a_0"))
             .context(Context::default())
-            .operation_str("query { a: hello }".to_string())
+            .operation(Arc::new(
+                ExecutableDocument::parse_and_validate(
+                    &schema,
+                    "query { a: hello }".to_string(),
+                    "./",
+                )
+                .unwrap(),
+            ))
             .variables(Variables {
                 variables: Default::default(),
                 inverted_paths: Default::default(),
@@ -1197,8 +1297,6 @@ mod tests {
                     .unwrap(),
             ))
             .build();
-
-        let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
 
         let connector = Connector {
             id: ConnectId::new(
@@ -1252,8 +1350,9 @@ mod tests {
 }
 
 mod graphql_utils {
-    use apollo_compiler::ast;
-    use apollo_compiler::ast::Definition;
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::executable::Operation;
+    use apollo_compiler::executable::Selection;
     use apollo_compiler::schema::Value;
     use apollo_compiler::Node;
     use serde_json::Number;
@@ -1265,8 +1364,8 @@ mod graphql_utils {
     use super::MakeRequestError;
     use super::ENTITIES;
 
-    pub(super) fn ast_field_arguments_map(
-        field: &apollo_compiler::Node<apollo_compiler::ast::Field>,
+    pub(super) fn field_arguments_map(
+        field: &Node<Field>,
         variables: &Map<ByteString, JSONValue>,
     ) -> Result<Map<ByteString, JSONValue>, BoxError> {
         let mut arguments = Map::new();
@@ -1321,55 +1420,41 @@ mod graphql_utils {
     }
 
     pub(super) fn get_entity_fields(
-        query: &str,
-    ) -> Result<(Node<ast::Field>, bool), MakeRequestError> {
+        op: &Node<Operation>,
+    ) -> Result<(&Node<Field>, bool), MakeRequestError> {
         use MakeRequestError::*;
-
-        // Use the AST because the `_entities` field is not actually present in the supergraph
-        let doc = apollo_compiler::ast::Document::parse(query, "op.graphql")
-            .map_err(|_| InvalidOperation("cannot parse operation document".into()))?;
-
-        // Assume a single operation (because this is from a query plan)
-        let op = doc
-            .definitions
-            .into_iter()
-            .find_map(|d| match d {
-                Definition::OperationDefinition(op) => Some(op),
-                _ => None,
-            })
-            .ok_or_else(|| InvalidOperation("missing operation".into()))?;
 
         let root_field = op
             .selection_set
+            .selections
             .iter()
             .find_map(|s| match s {
-                apollo_compiler::ast::Selection::Field(f) if f.name == ENTITIES => Some(f),
+                Selection::Field(f) if f.name == ENTITIES => Some(f),
                 _ => None,
             })
             .ok_or_else(|| InvalidOperation("missing entities root field".into()))?;
 
         let mut typename_requested = false;
 
-        for selection in root_field.selection_set.iter() {
+        for selection in root_field.selection_set.selections.iter() {
             match selection {
-                apollo_compiler::ast::Selection::Field(f) => {
+                Selection::Field(f) => {
                     if f.name == "__typename" {
                         typename_requested = true;
                     }
                 }
-                apollo_compiler::ast::Selection::FragmentSpread(_) => {
+                Selection::FragmentSpread(_) => {
                     return Err(UnsupportedOperation("fragment spread not supported".into()))
                 }
-                apollo_compiler::ast::Selection::InlineFragment(f) => {
-                    for selection in f.selection_set.iter() {
+                Selection::InlineFragment(f) => {
+                    for selection in f.selection_set.selections.iter() {
                         match selection {
-                            apollo_compiler::ast::Selection::Field(f) => {
+                            Selection::Field(f) => {
                                 if f.name == "__typename" {
                                     typename_requested = true;
                                 }
                             }
-                            apollo_compiler::ast::Selection::FragmentSpread(_)
-                            | apollo_compiler::ast::Selection::InlineFragment(_) => {
+                            Selection::FragmentSpread(_) | Selection::InlineFragment(_) => {
                                 return Err(UnsupportedOperation(
                                     "fragment spread not supported".into(),
                                 ))
@@ -1380,6 +1465,6 @@ mod graphql_utils {
             }
         }
 
-        Ok((root_field.clone(), typename_requested))
+        Ok((root_field, typename_requested))
     }
 }

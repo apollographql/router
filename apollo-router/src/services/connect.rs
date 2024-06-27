@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use apollo_compiler::validation::Valid;
+use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
 use serde_json_bytes::Value;
 use tower::BoxError;
@@ -16,9 +18,8 @@ pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError
 #[non_exhaustive]
 pub(crate) struct Request {
     pub(crate) service_name: NodeStr,
-    #[allow(dead_code)]
     pub(crate) context: Context,
-    pub(crate) operation_str: String,
+    pub(crate) operation: Arc<Valid<ExecutableDocument>>,
     pub(crate) _supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
 }
@@ -34,14 +35,14 @@ impl Request {
     fn new(
         service_name: NodeStr,
         context: Context,
-        operation_str: String,
+        operation: Arc<Valid<ExecutableDocument>>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
         variables: Variables,
     ) -> Self {
         Self {
             service_name,
             context,
-            operation_str,
+            operation,
             _supergraph_request: supergraph_request,
             variables,
         }
