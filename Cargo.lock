@@ -692,9 +692,9 @@ dependencies = [
 
 [[package]]
 name = "apollo-smith"
-version = "0.7.0"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0d75bb8c2d542c5fa6b9d8bdff73edb003bba0272ea7b8d196bb4cd803083b3b"
+checksum = "901bd689b4c67883d0fde26d7af952a4b2a50815c6b92c790d3fae8f6ea46cd3"
 dependencies = [
  "apollo-compiler",
  "apollo-parser",
@@ -6117,7 +6117,7 @@ dependencies = [
  "apollo-compiler",
  "apollo-parser",
  "apollo-router",
- "apollo-smith 0.7.0",
+ "apollo-smith 0.8.0",
  "async-trait",
  "env_logger 0.10.2",
  "http 0.2.11",
