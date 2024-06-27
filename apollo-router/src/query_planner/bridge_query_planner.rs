@@ -257,10 +257,11 @@ impl PlannerMode {
                 })
             }
             PlannerMode::Both { js, rust } => {
-
                 let start = Instant::now();
 
-                let result = js.plan(filtered_query, operation.clone(), plan_options).await;
+                let result = js
+                    .plan(filtered_query, operation.clone(), plan_options)
+                    .await;
 
                 metric_query_planning_plan_duration(JS_QP_MODE, start);
 
