@@ -243,6 +243,9 @@ pub(crate) enum TraceIdFormat {
     ///
     /// (e.g. Trace ID 16 -> 16)
     Decimal,
+
+    /// Datadog
+    Datadog,
 }
 
 /// Apollo usage report signature normalization algorithm

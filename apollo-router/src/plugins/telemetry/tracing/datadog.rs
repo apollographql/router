@@ -1,12 +1,11 @@
 //! Configuration for datadog tracing.
 
 use http::Uri;
-use lazy_static::lazy_static;
 use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
-use opentelemetry_api::{Key, StringValue};
+use opentelemetry_api::Key;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -97,14 +96,14 @@ impl TracingConfigurator for Config {
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
                 builder.with_resource_mapping(move |span, _model_config| {
-                    resource_mappings
-                        .get(span.name.as_ref())
-                        .and_then(|key| span.attributes.get(&key))
-                        .and_then(|value| match value {
-                            Value::String(value) => Some(value.as_str()),
-                            _ => None,
-                        })
-                        .unwrap_or(span.name.as_ref())
+                    if let Some(mapping) = resource_mappings.get(span.name.as_ref()) {
+                        if let Some(value) = span.attributes.get(mapping) {
+                            if let Value::String(value) = value {
+                                return value.as_str();
+                            }
+                        }
+                    }
+                    return span.name.as_ref();
                 })
             })
             .with(

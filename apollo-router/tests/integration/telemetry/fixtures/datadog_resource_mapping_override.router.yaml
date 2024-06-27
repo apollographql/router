@@ -9,12 +9,27 @@ telemetry:
         service_name: router
       datadog:
         enabled: true
+        enable_span_mapping: true
         batch_processor:
           scheduled_delay: 100ms
+        resource_mappings:
+          router: graphql.operation.name
+
   instrumentation:
     spans:
+      mode: spec_compliant
       router:
         attributes:
           otel.name: router
+          graphql.operation.name:
+            operation_name: string
+      supergraph:
+        attributes:
+          otel.name: supergraph
+      subgraph:
+        attributes:
+          otel.name: subgraph
+
+
 
 

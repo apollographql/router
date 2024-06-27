@@ -9,12 +9,9 @@ telemetry:
         service_name: router
       datadog:
         enabled: true
+        enable_span_mapping: true
         batch_processor:
           scheduled_delay: 100ms
-  instrumentation:
-    spans:
-      router:
-        attributes:
-          otel.name: router
+
 
 

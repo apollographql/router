@@ -39,6 +39,7 @@ use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use rand::Rng;
@@ -100,6 +101,7 @@ use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::cost::add_cost_attributes;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
+use crate::plugins::telemetry::config_new::{trace_id, DatadogId};
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
@@ -134,7 +136,6 @@ use crate::services::SubgraphResponse;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::spec::operation_limits::OperationLimits;
-use crate::tracer::TraceId;
 use crate::Context;
 use crate::ListenAddr;
 
@@ -556,17 +557,18 @@ impl Plugin for Telemetry {
                 });
 
                 // Append the trace ID with the right format, based on the config
-                let format_id = |trace: TraceId| {
+                let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
-                        TraceIdFormat::Hexadecimal => format!("{:032x}", trace.to_u128()),
-                        TraceIdFormat::Decimal => format!("{}", trace.to_u128()),
+                        TraceIdFormat::Hexadecimal => format!("{:032x}", trace_id),
+                        TraceIdFormat::Decimal => format!("{}", trace_id),
+                        TraceIdFormat::Datadog => trace_id.to_datadog()
                     };
 
                     HeaderValue::from_str(&id).ok()
                 };
                 if let (Some(header_name), Some(trace_id)) = (
                     expose_trace_id_header,
-                    TraceId::current().and_then(format_id),
+                    trace_id().and_then(format_id),
                 ) {
                     resp.response.headers_mut().append(header_name, trace_id);
                 }

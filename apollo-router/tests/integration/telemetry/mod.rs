@@ -1,3 +1,4 @@
+mod datadog;
 mod jaeger;
 mod logging;
 mod metrics;
