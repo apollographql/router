@@ -62,8 +62,7 @@ const SCHEMA: &str = r#"schema
        name: String
        nonNullId: ID!
        suborga: [Organization]
-   }
-"#;
+   }"#;
 
 #[tokio::test]
 async fn nullability_formatting() {
