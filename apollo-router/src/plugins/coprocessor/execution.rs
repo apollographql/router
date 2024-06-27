@@ -397,10 +397,7 @@ where
     // that we replace "bits" of our incoming response with the updated bits if they
     // are present in our co_processor_output. If they aren't present, just use the
     // bits that we sent to the co_processor.
-    let new_body: graphql::Response = match co_processor_output.body {
-        Some(value) => serde_json::from_value(value)?,
-        None => first,
-    };
+    let new_body: graphql::Response = handle_graphql_response(first, co_processor_output.body)?;
 
     if let Some(control) = co_processor_output.control {
         parts.status = control.get_http_status()?
@@ -467,10 +464,8 @@ where
                 // that we replace "bits" of our incoming response with the updated bits if they
                 // are present in our co_processor_output. If they aren't present, just use the
                 // bits that we sent to the co_processor.
-                let new_deferred_response: graphql::Response = match co_processor_output.body {
-                    Some(value) => serde_json::from_value(value)?,
-                    None => deferred_response,
-                };
+                let new_deferred_response: graphql::Response =
+                    handle_graphql_response(deferred_response, co_processor_output.body)?;
 
                 if let Some(context) = co_processor_output.context {
                     for (key, value) in context.try_into_iter()? {

@@ -1,7 +1,10 @@
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
+use std::time::Duration;
 use std::time::SystemTime;
 
+use aws_credential_types::provider::error::CredentialsError;
 use aws_credential_types::provider::ProvideCredentials;
 use aws_credential_types::Credentials;
 use aws_sigv4::http_request::sign;
@@ -11,10 +14,13 @@ use aws_sigv4::http_request::SignableRequest;
 use aws_sigv4::http_request::SigningSettings;
 use aws_smithy_runtime_api::client::identity::Identity;
 use aws_types::region::Region;
+use aws_types::sdk_config::SharedCredentialsProvider;
 use http::HeaderMap;
 use http::Request;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use tokio::sync::mpsc::Sender;
+use tokio::task::JoinHandle;
 use tower::BoxError;
 use tower::ServiceBuilder;
 use tower::ServiceExt;
@@ -192,10 +198,107 @@ pub(crate) struct SigningParams {
 
 #[derive(Clone)]
 pub(crate) struct SigningParamsConfig {
-    credentials_provider: Arc<dyn ProvideCredentials>,
+    credentials_provider: CredentialsProvider,
     region: Region,
     service_name: String,
     subgraph_name: String,
+}
+
+#[derive(Clone, Debug)]
+struct CredentialsProvider {
+    credentials: Arc<RwLock<Credentials>>,
+    _credentials_updater_handle: Arc<JoinHandle<()>>,
+    #[allow(dead_code)]
+    refresh_credentials: Sender<()>,
+}
+
+// Refresh token if it will expire within the next 5 minutes
+const MIN_REMAINING_DURATION: Duration = std::time::Duration::from_secs(60 * 5);
+// If the token couldn't be refreshed, try again in 1 minute
+const RETRY_DURATION: Duration = std::time::Duration::from_secs(60);
+
+impl CredentialsProvider {
+    async fn from_provide_credentials(
+        provide_credentials: impl ProvideCredentials + 'static,
+    ) -> Result<Self, CredentialsError> {
+        let credentials_provider = SharedCredentialsProvider::new(provide_credentials);
+        let (sender, mut refresh_credentials_receiver) = tokio::sync::mpsc::channel(1);
+        let credentials = credentials_provider.provide_credentials().await?;
+        let mut refresh_timer = next_refresh_timer(&credentials);
+        let credentials = Arc::new(RwLock::new(credentials));
+        let c2 = credentials.clone();
+        let crp2 = credentials_provider.clone();
+        let handle = tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    _ = tokio::time::sleep(refresh_timer.unwrap_or(Duration::MAX)) => {
+                       refresh_timer = refresh_credentials(&crp2, &c2).await;
+                    },
+                    rcr = refresh_credentials_receiver.recv() => {
+                        if rcr.is_some() {
+                            refresh_timer = refresh_credentials(&crp2, &c2).await;
+                        } else {
+                            return;
+                        }
+                    },
+                }
+            }
+        });
+        Ok(Self {
+            _credentials_updater_handle: Arc::new(handle),
+            refresh_credentials: sender,
+            credentials,
+        })
+    }
+
+    #[allow(dead_code)]
+    pub(crate) async fn refresh_credentials(&self) {
+        let _ = self.refresh_credentials.send(()).await;
+    }
+}
+
+async fn refresh_credentials(
+    credentials_provider: &(impl ProvideCredentials + 'static),
+    credentials: &RwLock<Credentials>,
+) -> Option<Duration> {
+    match credentials_provider.provide_credentials().await {
+        Ok(new_credentials) => {
+            let mut credentials = credentials
+                .write()
+                .expect("authentication: credentials RwLock poisoned");
+            *credentials = new_credentials;
+            next_refresh_timer(&credentials)
+        }
+        Err(e) => {
+            tracing::warn!("authentication: couldn't refresh credentials {e}");
+            Some(RETRY_DURATION)
+        }
+    }
+}
+
+fn next_refresh_timer(credentials: &Credentials) -> Option<Duration> {
+    credentials
+        .expiry()
+        .and_then(|e| e.duration_since(SystemTime::now()).ok())
+        .and_then(|d| {
+            d.checked_sub(MIN_REMAINING_DURATION)
+                .or(Some(Duration::from_secs(0)))
+        })
+}
+
+impl ProvideCredentials for CredentialsProvider {
+    fn provide_credentials<'a>(
+        &'a self,
+    ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+    where
+        Self: 'a,
+    {
+        aws_credential_types::provider::future::ProvideCredentials::ready(Ok(self
+            .credentials
+            .read()
+            .expect("authentication: credentials RwLock poisoned")
+            .clone()))
+    }
 }
 
 impl SigningParamsConfig {
@@ -327,23 +430,14 @@ pub(super) async fn make_signing_params(
     match config {
         AuthConfig::AWSSigV4(config) => {
             let credentials_provider = config.get_credentials_provider().await;
-            if let Err(e) = credentials_provider.provide_credentials().await {
-                let error_subgraph_name = if subgraph_name == "all" {
-                    "all subgraphs".to_string()
-                } else {
-                    format!("{} subgraph", subgraph_name)
-                };
-                return Err(format!(
-                    "auth: {}: couldn't get credentials from provider: {}",
-                    error_subgraph_name, e,
-                )
-                .into());
-            }
-
             Ok(SigningParamsConfig {
                 region: config.region(),
                 service_name: config.service_name(),
-                credentials_provider,
+                credentials_provider: CredentialsProvider::from_provide_credentials(
+                    credentials_provider,
+                )
+                .await
+                .map_err(BoxError::from)?,
                 subgraph_name: subgraph_name.to_string(),
             })
         }
@@ -400,6 +494,8 @@ impl SubgraphAuth {
 
 #[cfg(test)]
 mod test {
+    use std::sync::atomic::AtomicUsize;
+    use std::sync::atomic::Ordering;
     use std::sync::Arc;
 
     use http::header::CONTENT_LENGTH;
@@ -604,6 +700,104 @@ mod test {
         .subgraph_service("test_subgraph", mock.boxed());
 
         service.ready().await?.call(subgraph_request).await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_credentials_provider_keeps_credentials_in_cache() -> Result<(), BoxError> {
+        #[derive(Debug, Default, Clone)]
+        struct TestCredentialsProvider {
+            times_called: Arc<AtomicUsize>,
+        }
+
+        impl ProvideCredentials for TestCredentialsProvider {
+            fn provide_credentials<'a>(
+                &'a self,
+            ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                self.times_called.fetch_add(1, Ordering::SeqCst);
+                aws_credential_types::provider::future::ProvideCredentials::ready(Ok(
+                    Credentials::new("test_key", "test_secret", None, None, "test_provider"),
+                ))
+            }
+        }
+
+        let tcp = TestCredentialsProvider::default();
+
+        let cp = CredentialsProvider::from_provide_credentials(tcp.clone())
+            .await
+            .unwrap();
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
+
+        cp.refresh_credentials().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(2, tcp.times_called.load(Ordering::SeqCst));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_credentials_provider_refresh_on_stale() -> Result<(), BoxError> {
+        #[derive(Debug, Default, Clone)]
+        struct TestCredentialsProvider {
+            times_called: Arc<AtomicUsize>,
+        }
+
+        impl ProvideCredentials for TestCredentialsProvider {
+            fn provide_credentials<'a>(
+                &'a self,
+            ) -> aws_credential_types::provider::future::ProvideCredentials<'a>
+            where
+                Self: 'a,
+            {
+                self.times_called.fetch_add(1, Ordering::SeqCst);
+                aws_credential_types::provider::future::ProvideCredentials::ready(Ok(
+                    // The token will expire immediately, it should be refreshed fairly fast
+                    Credentials::new(
+                        "test_key",
+                        "test_secret",
+                        None,
+                        // 5 minutes + 1 second
+                        SystemTime::now().checked_add(Duration::from_secs(60 * 5 + 1)),
+                        "test_provider",
+                    ),
+                ))
+            }
+        }
+
+        let tcp = TestCredentialsProvider::default();
+
+        let cp = CredentialsProvider::from_provide_credentials(tcp.clone())
+            .await
+            .unwrap();
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(1, tcp.times_called.load(Ordering::SeqCst));
+
+        cp.refresh_credentials().await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        let _ = cp.provide_credentials().await.unwrap();
+        let _ = cp.provide_credentials().await.unwrap();
+
+        assert_eq!(2, tcp.times_called.load(Ordering::SeqCst));
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert_eq!(3, tcp.times_called.load(Ordering::SeqCst));
+
         Ok(())
     }
 

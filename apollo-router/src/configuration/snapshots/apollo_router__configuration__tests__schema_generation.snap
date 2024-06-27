@@ -159,6 +159,25 @@ expression: "&schema"
         }
       ]
     },
+    "ApolloMetricsReferenceMode": {
+      "description": "Apollo usage report reference generation modes.",
+      "oneOf": [
+        {
+          "description": "Use the extended mode to report input object fields and enum value references as well as object fields.",
+          "enum": [
+            "extended"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Use the standard mode that only reports referenced object fields.",
+          "enum": [
+            "standard"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "ApolloSignatureNormalizationAlgorithm": {
       "description": "Apollo usage report signature normalization algorithm",
       "oneOf": [
@@ -541,6 +560,17 @@ expression: "&schema"
           "description": "Force a hot reload of the Router (as if the schema or configuration had changed) at a regular time interval.",
           "nullable": true,
           "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "Client": {
+      "additionalProperties": false,
+      "properties": {
+        "experimental_http2": {
+          "$ref": "#/definitions/Http2Config",
+          "description": "#/definitions/Http2Config",
+          "nullable": true
         }
       },
       "type": "object"
@@ -1209,6 +1239,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configures the externalization plugin",
       "properties": {
+        "client": {
+          "$ref": "#/definitions/Client",
+          "description": "#/definitions/Client",
+          "nullable": true
+        },
         "execution": {
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
@@ -1527,9 +1562,8 @@ expression: "&schema"
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
-          "default": null,
-          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
-          "nullable": true,
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
         "metrics": {
@@ -1540,17 +1574,14 @@ expression: "&schema"
           "$ref": "#/definitions/RedisCache",
           "description": "#/definitions/RedisCache"
         },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/Subgraph",
-            "description": "#/definitions/Subgraph"
-          },
-          "description": "Per subgraph configuration",
-          "type": "object"
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
         }
       },
       "required": [
-        "redis"
+        "redis",
+        "subgraph"
       ],
       "type": "object"
     },
@@ -1593,9 +1624,18 @@ expression: "&schema"
           "$ref": "#/definitions/ErrorsConfiguration",
           "description": "#/definitions/ErrorsConfiguration"
         },
+        "experimental_apollo_metrics_reference_mode": {
+          "$ref": "#/definitions/ApolloMetricsReferenceMode",
+          "description": "#/definitions/ApolloMetricsReferenceMode"
+        },
         "experimental_apollo_signature_normalization_algorithm": {
           "$ref": "#/definitions/ApolloSignatureNormalizationAlgorithm",
           "description": "#/definitions/ApolloSignatureNormalizationAlgorithm"
+        },
+        "experimental_local_field_metrics": {
+          "default": false,
+          "description": "Enable field metrics that are generated without FTV1 to be sent to Apollo Studio.",
+          "type": "boolean"
         },
         "experimental_otlp_endpoint": {
           "default": "https://usage-reporting.api.apollographql.com/",
@@ -2174,38 +2214,6 @@ expression: "&schema"
         }
       ]
     },
-    "Event_for_GraphQLSelector": {
-      "oneOf": [
-        {
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "enum": [
-            "event_duration"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "enum": [
-            "event_unit"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "properties": {
-            "event_custom": {
-              "$ref": "#/definitions/GraphQLSelector",
-              "description": "#/definitions/GraphQLSelector"
-            }
-          },
-          "required": [
-            "event_custom"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Event_for_RouterAttributes_and_RouterSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
@@ -2237,38 +2245,6 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Event_for_RouterSelector": {
-      "oneOf": [
-        {
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "enum": [
-            "event_duration"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "enum": [
-            "event_unit"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "properties": {
-            "event_custom": {
-              "$ref": "#/definitions/RouterSelector",
-              "description": "#/definitions/RouterSelector"
-            }
-          },
-          "required": [
-            "event_custom"
-          ],
-          "type": "object"
-        }
-      ]
-    },
     "Event_for_SubgraphAttributes_and_SubgraphSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
       "properties": {
@@ -2299,38 +2275,6 @@ expression: "&schema"
         "on"
       ],
       "type": "object"
-    },
-    "Event_for_SubgraphSelector": {
-      "oneOf": [
-        {
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "enum": [
-            "event_duration"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "enum": [
-            "event_unit"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "For every supergraph response payload (including subscription events and defer events)",
-          "properties": {
-            "event_custom": {
-              "$ref": "#/definitions/SubgraphSelector",
-              "description": "#/definitions/SubgraphSelector"
-            }
-          },
-          "required": [
-            "event_custom"
-          ],
-          "type": "object"
-        }
-      ]
     },
     "Event_for_SupergraphAttributes_and_SupergraphSelector": {
       "description": "An event that can be logged as part of a trace. The event has an implicit `type` attribute that matches the name of the event in the yaml and a message that can be used to provide additional information.",
@@ -2565,102 +2509,6 @@ expression: "&schema"
             "type"
           ],
           "type": "string"
-        }
-      ]
-    },
-    "Field_for_GraphQLSelector": {
-      "oneOf": [
-        {
-          "enum": [
-            "field_unit"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "For every field",
-          "properties": {
-            "field_custom": {
-              "$ref": "#/definitions/GraphQLSelector",
-              "description": "#/definitions/GraphQLSelector"
-            }
-          },
-          "required": [
-            "field_custom"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Field_for_RouterSelector": {
-      "oneOf": [
-        {
-          "enum": [
-            "field_unit"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "For every field",
-          "properties": {
-            "field_custom": {
-              "$ref": "#/definitions/RouterSelector",
-              "description": "#/definitions/RouterSelector"
-            }
-          },
-          "required": [
-            "field_custom"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Field_for_SubgraphSelector": {
-      "oneOf": [
-        {
-          "enum": [
-            "field_unit"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "For every field",
-          "properties": {
-            "field_custom": {
-              "$ref": "#/definitions/SubgraphSelector",
-              "description": "#/definitions/SubgraphSelector"
-            }
-          },
-          "required": [
-            "field_custom"
-          ],
-          "type": "object"
-        }
-      ]
-    },
-    "Field_for_SupergraphSelector": {
-      "oneOf": [
-        {
-          "enum": [
-            "field_unit"
-          ],
-          "type": "string"
-        },
-        {
-          "additionalProperties": false,
-          "description": "For every field",
-          "properties": {
-            "field_custom": {
-              "$ref": "#/definitions/SupergraphSelector",
-              "description": "#/definitions/SupergraphSelector"
-            }
-          },
-          "required": [
-            "field_custom"
-          ],
-          "type": "object"
         }
       ]
     },
@@ -2968,6 +2816,18 @@ expression: "&schema"
             "static"
           ],
           "type": "object"
+        }
+      ]
+    },
+    "GraphQLValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/StandardUnit",
+          "description": "#/definitions/StandardUnit"
+        },
+        {
+          "$ref": "#/definitions/GraphQLSelector",
+          "description": "#/definitions/GraphQLSelector"
         }
       ]
     },
@@ -3374,87 +3234,7 @@ expression: "&schema"
         }
       ]
     },
-    "InstrumentValue_for_GraphQLSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
-        },
-        {
-          "$ref": "#/definitions/Event_for_GraphQLSelector",
-          "description": "#/definitions/Event_for_GraphQLSelector"
-        },
-        {
-          "$ref": "#/definitions/Field_for_GraphQLSelector",
-          "description": "#/definitions/Field_for_GraphQLSelector"
-        },
-        {
-          "$ref": "#/definitions/GraphQLSelector",
-          "description": "#/definitions/GraphQLSelector"
-        }
-      ]
-    },
-    "InstrumentValue_for_RouterSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
-        },
-        {
-          "$ref": "#/definitions/Event_for_RouterSelector",
-          "description": "#/definitions/Event_for_RouterSelector"
-        },
-        {
-          "$ref": "#/definitions/Field_for_RouterSelector",
-          "description": "#/definitions/Field_for_RouterSelector"
-        },
-        {
-          "$ref": "#/definitions/RouterSelector",
-          "description": "#/definitions/RouterSelector"
-        }
-      ]
-    },
-    "InstrumentValue_for_SubgraphSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
-        },
-        {
-          "$ref": "#/definitions/Event_for_SubgraphSelector",
-          "description": "#/definitions/Event_for_SubgraphSelector"
-        },
-        {
-          "$ref": "#/definitions/Field_for_SubgraphSelector",
-          "description": "#/definitions/Field_for_SubgraphSelector"
-        },
-        {
-          "$ref": "#/definitions/SubgraphSelector",
-          "description": "#/definitions/SubgraphSelector"
-        }
-      ]
-    },
-    "InstrumentValue_for_SupergraphSelector": {
-      "anyOf": [
-        {
-          "$ref": "#/definitions/Standard",
-          "description": "#/definitions/Standard"
-        },
-        {
-          "$ref": "#/definitions/Event_for_SupergraphSelector",
-          "description": "#/definitions/Event_for_SupergraphSelector"
-        },
-        {
-          "$ref": "#/definitions/Field_for_SupergraphSelector",
-          "description": "#/definitions/Field_for_SupergraphSelector"
-        },
-        {
-          "$ref": "#/definitions/SupergraphSelector",
-          "description": "#/definitions/SupergraphSelector"
-        }
-      ]
-    },
-    "Instrument_for_GraphQLAttributes_and_GraphQLSelector": {
+    "Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
@@ -3478,8 +3258,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/InstrumentValue_for_GraphQLSelector",
-          "description": "#/definitions/InstrumentValue_for_GraphQLSelector"
+          "$ref": "#/definitions/GraphQLValue",
+          "description": "#/definitions/GraphQLValue"
         }
       },
       "required": [
@@ -3490,7 +3270,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Instrument_for_RouterAttributes_and_RouterSelector": {
+    "Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
@@ -3514,8 +3294,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/InstrumentValue_for_RouterSelector",
-          "description": "#/definitions/InstrumentValue_for_RouterSelector"
+          "$ref": "#/definitions/RouterValue",
+          "description": "#/definitions/RouterValue"
         }
       },
       "required": [
@@ -3526,7 +3306,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Instrument_for_SubgraphAttributes_and_SubgraphSelector": {
+    "Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
@@ -3550,8 +3330,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/InstrumentValue_for_SubgraphSelector",
-          "description": "#/definitions/InstrumentValue_for_SubgraphSelector"
+          "$ref": "#/definitions/SubgraphValue",
+          "description": "#/definitions/SubgraphValue"
         }
       },
       "required": [
@@ -3562,7 +3342,7 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Instrument_for_SupergraphAttributes_and_SupergraphSelector": {
+    "Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue": {
       "additionalProperties": false,
       "properties": {
         "attributes": {
@@ -3586,8 +3366,8 @@ expression: "&schema"
           "type": "string"
         },
         "value": {
-          "$ref": "#/definitions/InstrumentValue_for_SupergraphSelector",
-          "description": "#/definitions/InstrumentValue_for_SupergraphSelector"
+          "$ref": "#/definitions/SupergraphValue",
+          "description": "#/definitions/SupergraphValue"
         }
       },
       "required": [
@@ -3625,20 +3405,20 @@ expression: "&schema"
           "description": "#/definitions/DefaultAttributeRequirementLevel"
         },
         "graphql": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector, apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>"
         },
         "router": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::selectors::RouterValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes, apollo_router::plugins::telemetry::config_new::selectors::RouterSelector, apollo_router::plugins::telemetry::config_new::selectors::RouterValue>"
         },
         "subgraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>"
         },
         "supergraph": {
-          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>",
-          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>"
+          "$ref": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>",
+          "description": "#/definitions/extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes, apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector, apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>"
         }
       },
       "type": "object"
@@ -3892,6 +3672,13 @@ expression: "&schema"
             "histogram"
           ],
           "type": "object"
+        },
+        {
+          "description": "Simply drop the metrics matching this view",
+          "enum": [
+            "drop"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -4359,6 +4146,34 @@ expression: "&schema"
           "description": "The raw query kind.",
           "enum": [
             "string"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query aliases.",
+          "enum": [
+            "aliases"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query depth.",
+          "enum": [
+            "depth"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query height.",
+          "enum": [
+            "height"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The query root fields.",
+          "enum": [
+            "root_fields"
           ],
           "type": "string"
         }
@@ -4905,16 +4720,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         }
       },
       "type": "object"
@@ -5266,6 +5081,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "RouterValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/RouterSelector",
+          "description": "#/definitions/RouterSelector"
+        }
+      ]
+    },
     "Sampler": {
       "oneOf": [
         {
@@ -5475,6 +5302,87 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "StandardEventConfig_for_RouterSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_RouterSelector",
+              "description": "#/definitions/Condition_for_RouterSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_SubgraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SubgraphSelector",
+              "description": "#/definitions/Condition_for_SubgraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_SupergraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SupergraphSelector",
+              "description": "#/definitions/Condition_for_SupergraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardUnit": {
+      "enum": [
+        "unit"
+      ],
+      "type": "string"
+    },
     "StdOut": {
       "additionalProperties": false,
       "properties": {
@@ -5567,13 +5475,11 @@ expression: "&schema"
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
-          "default": null,
           "description": "activates caching for this subgraph, overrides the global configuration",
           "nullable": true,
           "type": "boolean"
         },
         "private_id": {
-          "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
@@ -5666,6 +5572,25 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphConfiguration_for_Subgraph": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/Subgraph",
+          "description": "#/definitions/Subgraph"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Subgraph",
+            "description": "#/definitions/Subgraph"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphConfiguration_for_SubgraphApq": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -5726,16 +5651,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -5777,6 +5702,17 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "SubgraphQuery": {
+      "oneOf": [
+        {
+          "description": "The raw query kind.",
+          "enum": [
+            "string"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "SubgraphRequestConf": {
       "additionalProperties": false,
@@ -5889,8 +5825,8 @@ expression: "&schema"
               "type": "string"
             },
             "subgraph_query": {
-              "$ref": "#/definitions/Query",
-              "description": "#/definitions/Query"
+              "$ref": "#/definitions/SubgraphQuery",
+              "description": "#/definitions/SubgraphQuery"
             }
           },
           "required": [
@@ -6282,6 +6218,18 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/SubgraphSelector",
+          "description": "#/definitions/SubgraphSelector"
+        }
+      ]
+    },
     "SubscriptionConfig": {
       "additionalProperties": false,
       "description": "Subscriptions configuration",
@@ -6439,16 +6387,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         }
       },
       "type": "object"
@@ -6843,6 +6791,22 @@ expression: "&schema"
         }
       },
       "type": "object"
+    },
+    "SupergraphValue": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/Standard",
+          "description": "#/definitions/Standard"
+        },
+        {
+          "$ref": "#/definitions/Event_for_SupergraphSelector",
+          "description": "#/definitions/Event_for_SupergraphSelector"
+        },
+        {
+          "$ref": "#/definitions/SupergraphSelector",
+          "description": "#/definitions/SupergraphSelector"
+        }
+      ]
     },
     "Temporality": {
       "oneOf": [
@@ -7669,16 +7633,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         }
       },
       "type": "object"
@@ -7690,16 +7654,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -7711,24 +7675,24 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         }
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector,_apollo_router::plugins::telemetry::config_new::graphql::selectors::GraphQLValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector",
-        "description": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector"
+        "$ref": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue",
+        "description": "#/definitions/Instrument_for_GraphQLAttributes_and_GraphQLSelector_and_GraphQLValue"
       },
       "properties": {
         "field.execution": {
@@ -7781,10 +7745,10 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::RouterInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::RouterAttributes,_apollo_router::plugins::telemetry::config_new::selectors::RouterSelector,_apollo_router::plugins::telemetry::config_new::selectors::RouterValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector",
-        "description": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector"
+        "$ref": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue",
+        "description": "#/definitions/Instrument_for_RouterAttributes_and_RouterSelector_and_RouterValue"
       },
       "properties": {
         "http.server.active_requests": {
@@ -7806,10 +7770,10 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SubgraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SubgraphValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector",
-        "description": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector"
+        "$ref": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue",
+        "description": "#/definitions/Instrument_for_SubgraphAttributes_and_SubgraphSelector_and_SubgraphValue"
       },
       "properties": {
         "http.client.request.body.size": {
@@ -7827,10 +7791,10 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector>": {
+    "extendable_attribute_apollo_router::plugins::telemetry::config_new::instruments::SupergraphInstrumentsConfig_apollo_router::plugins::telemetry::config_new::instruments::Instrument<apollo_router::plugins::telemetry::config_new::attributes::SupergraphAttributes,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphSelector,_apollo_router::plugins::telemetry::config_new::selectors::SupergraphValue>": {
       "additionalProperties": {
-        "$ref": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector",
-        "description": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector"
+        "$ref": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue",
+        "description": "#/definitions/Instrument_for_SupergraphAttributes_and_SupergraphSelector_and_SupergraphValue"
       },
       "properties": {
         "cost.actual": {

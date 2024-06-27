@@ -1,5 +1,5 @@
 ---
-source: apollo-router/src/plugins/telemetry/metrics/apollo.rs
+source: apollo-router/src/plugins/telemetry/metrics/apollo/mod.rs
 expression: results
 ---
 [
@@ -35,7 +35,22 @@ expression: results
             "forbidden_operation": false,
             "without_field_instrumentation": false
           },
-          "per_type_stat": {}
+          "limits_stats": {
+            "strategy": null,
+            "cost_estimated": null,
+            "cost_actual": null,
+            "depth": 2,
+            "height": 2,
+            "alias_count": 0,
+            "root_field_count": 1
+          },
+          "per_type_stat": {},
+          "extended_references": {
+            "referenced_input_fields": {},
+            "referenced_enums": {}
+          },
+          "enum_response_references": {},
+          "local_per_type_stat": {}
         },
         "referenced_fields_by_type": {
           "Subscription": {

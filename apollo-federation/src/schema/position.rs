@@ -2119,7 +2119,7 @@ impl ObjectTypeDefinitionPosition {
         &self,
         schema: &mut FederationSchema,
     ) -> Result<Option<ObjectTypeReferencers>, FederationError> {
-        let Some(referencers) = schema.referencers.object_types.swap_remove(&self.type_name) else {
+        let Some(referencers) = self.remove_internal(schema)? else {
             return Ok(None);
         };
         for root in &referencers.schema_roots {
@@ -2134,7 +2134,6 @@ impl ObjectTypeDefinitionPosition {
         for type_ in &referencers.union_types {
             type_.remove_member(schema, &self.type_name);
         }
-        self.remove_internal(schema)?;
         Ok(Some(referencers))
     }
 
@@ -2143,7 +2142,7 @@ impl ObjectTypeDefinitionPosition {
         &self,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(referencers) = schema.referencers.object_types.swap_remove(&self.type_name) else {
+        let Some(referencers) = self.remove_internal(schema)? else {
             return Ok(());
         };
         for root in referencers.schema_roots {
@@ -2158,17 +2157,27 @@ impl ObjectTypeDefinitionPosition {
         for type_ in referencers.union_types {
             type_.remove_member_recursive(schema, &self.type_name)?;
         }
-        self.remove_internal(schema)?;
         Ok(())
     }
 
-    fn remove_internal(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn remove_internal(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<Option<ObjectTypeReferencers>, FederationError> {
         let Some(type_) = self.try_get(&schema.schema) else {
-            return Ok(());
+            return Ok(None);
         };
         self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
         schema.schema.types.shift_remove(&self.type_name);
-        Ok(())
+        Ok(Some(
+            schema
+                .referencers
+                .object_types
+                .shift_remove(&self.type_name)
+                .ok_or_else(|| SingleFederationError::Internal {
+                    message: format!("Schema missing referencers for type \"{}\"", self),
+                })?,
+        ))
     }
 
     pub(crate) fn insert_directive(
@@ -2267,7 +2276,6 @@ impl ObjectTypeDefinitionPosition {
         let introspection_typename_field = self.introspection_typename_field();
         introspection_typename_field.insert_references(
             introspection_typename_field.get(schema)?,
-            schema,
             referencers,
             true,
         )?;
@@ -2288,7 +2296,7 @@ impl ObjectTypeDefinitionPosition {
         }
         for (field_name, field) in type_.fields.iter() {
             self.field(field_name.clone())
-                .insert_references(field, schema, referencers, false)?;
+                .insert_references(field, referencers, false)?;
         }
         Ok(())
     }
@@ -2311,7 +2319,6 @@ impl ObjectTypeDefinitionPosition {
         let introspection_typename_field = self.introspection_typename_field();
         introspection_typename_field.remove_references(
             introspection_typename_field.get(schema)?,
-            schema,
             referencers,
             true,
         )?;
@@ -2332,7 +2339,7 @@ impl ObjectTypeDefinitionPosition {
         }
         for (field_name, field) in type_.fields.iter() {
             self.field(field_name.clone())
-                .remove_references(field, schema, referencers, false)?;
+                .remove_references(field, referencers, false)?;
         }
         Ok(())
     }
@@ -2399,11 +2406,11 @@ impl ObjectTypeDefinitionPosition {
         // exist, so accordingly we don't use get() below/we don't error if try_get() returns None.
         let introspection_schema_field = self.introspection_schema_field();
         if let Some(field) = introspection_schema_field.try_get(schema) {
-            introspection_schema_field.insert_references(field, schema, referencers, true)?;
+            introspection_schema_field.insert_references(field, referencers, true)?;
         }
         let introspection_type_field = self.introspection_type_field();
         if let Some(field) = introspection_type_field.try_get(schema) {
-            introspection_type_field.insert_references(field, schema, referencers, true)?;
+            introspection_type_field.insert_references(field, referencers, true)?;
         }
         Ok(())
     }
@@ -2415,11 +2422,11 @@ impl ObjectTypeDefinitionPosition {
     ) -> Result<(), FederationError> {
         let introspection_schema_field = self.introspection_schema_field();
         if let Some(field) = introspection_schema_field.try_get(schema) {
-            introspection_schema_field.remove_references(field, schema, referencers, true)?;
+            introspection_schema_field.remove_references(field, referencers, true)?;
         }
         let introspection_type_field = self.introspection_type_field();
         if let Some(field) = introspection_type_field.try_get(schema) {
-            introspection_type_field.remove_references(field, schema, referencers, true)?;
+            introspection_type_field.remove_references(field, referencers, true)?;
         }
         Ok(())
     }
@@ -2549,12 +2556,7 @@ impl ObjectFieldDefinitionPosition {
             .make_mut()
             .fields
             .insert(self.field_name.clone(), field);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-            false,
-        )?;
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers, false)?;
         Ok(())
     }
 
@@ -2566,7 +2568,7 @@ impl ObjectFieldDefinitionPosition {
         let Some(field) = self.try_get(&schema.schema) else {
             return Ok(());
         };
-        self.remove_references(field, &schema.schema, &mut schema.referencers, false)?;
+        self.remove_references(field, &mut schema.referencers, false)?;
         self.parent()
             .make_mut(&mut schema.schema)?
             .make_mut()
@@ -2652,7 +2654,6 @@ impl ObjectFieldDefinitionPosition {
     fn insert_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -2666,14 +2667,11 @@ impl ObjectFieldDefinitionPosition {
         for directive_reference in field.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
-        self.insert_type_references(field, schema, referencers)?;
+        self.insert_type_references(field, referencers)?;
         validate_arguments(&field.arguments)?;
         for argument in field.arguments.iter() {
-            self.argument(argument.name.clone()).insert_references(
-                argument,
-                schema,
-                referencers,
-            )?;
+            self.argument(argument.name.clone())
+                .insert_references(argument, referencers)?;
         }
         Ok(())
     }
@@ -2681,7 +2679,6 @@ impl ObjectFieldDefinitionPosition {
     fn remove_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -2694,13 +2691,10 @@ impl ObjectFieldDefinitionPosition {
         for directive_reference in field.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
         }
-        self.remove_type_references(field, schema, referencers)?;
+        self.remove_type_references(field, referencers);
         for argument in field.arguments.iter() {
-            self.argument(argument.name.clone()).remove_references(
-                argument,
-                schema,
-                referencers,
-            )?;
+            self.argument(argument.name.clone())
+                .remove_references(argument, referencers)?;
         }
         Ok(())
     }
@@ -2733,84 +2727,41 @@ impl ObjectFieldDefinitionPosition {
     fn insert_type_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let output_type_reference = field.ty.inner_named_type();
-        match schema.types.get(output_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let scalar_type_referencers = referencers
-                    .scalar_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                scalar_type_referencers.object_fields.insert(self.clone());
-            }
-            Some(ExtendedType::Object(_)) => {
-                let object_type_referencers = referencers
-                    .object_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                object_type_referencers.object_fields.insert(self.clone());
-            }
-            Some(ExtendedType::Interface(_)) => {
-                let interface_type_referencers = referencers
-                    .interface_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                interface_type_referencers
-                    .object_fields
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Union(_)) => {
-                let union_type_referencers = referencers
-                    .union_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                union_type_referencers.object_fields.insert(self.clone());
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let enum_type_referencers = referencers
-                    .enum_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(
-                        "Schema missing referencers for type \"{}\"",
-                        output_type_reference
-                    ),
-                })?;
-                enum_type_referencers.object_fields.insert(self.clone());
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Object field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                            self,
-                            output_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(output_type_reference)
+        {
+            scalar_type_referencers.object_fields.insert(self.clone());
+        } else if let Some(object_type_referencers) =
+            referencers.object_types.get_mut(output_type_reference)
+        {
+            object_type_referencers.object_fields.insert(self.clone());
+        } else if let Some(interface_type_referencers) =
+            referencers.interface_types.get_mut(output_type_reference)
+        {
+            interface_type_referencers
+                .object_fields
+                .insert(self.clone());
+        } else if let Some(union_type_referencers) =
+            referencers.union_types.get_mut(output_type_reference)
+        {
+            union_type_referencers.object_fields.insert(self.clone());
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(output_type_reference)
+        {
+            enum_type_referencers.object_fields.insert(self.clone());
+        } else {
+            return Err(
+                FederationError::internal(
+                    format!(
+                        "Object field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
+                        self,
+                        output_type_reference.deref(),
+                    )
+                )
+            );
         }
         Ok(())
     }
@@ -2818,64 +2769,30 @@ impl ObjectFieldDefinitionPosition {
     fn remove_type_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
+    ) {
         let output_type_reference = field.ty.inner_named_type();
-        match schema.types.get(output_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let Some(scalar_type_referencers) =
-                    referencers.scalar_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                scalar_type_referencers.object_fields.shift_remove(self);
-            }
-            Some(ExtendedType::Object(_)) => {
-                let Some(object_type_referencers) =
-                    referencers.object_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                object_type_referencers.object_fields.shift_remove(self);
-            }
-            Some(ExtendedType::Interface(_)) => {
-                let Some(interface_type_referencers) =
-                    referencers.interface_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                interface_type_referencers.object_fields.shift_remove(self);
-            }
-            Some(ExtendedType::Union(_)) => {
-                let Some(union_type_referencers) =
-                    referencers.union_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                union_type_referencers.object_fields.shift_remove(self);
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let Some(enum_type_referencers) =
-                    referencers.enum_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                enum_type_referencers.object_fields.shift_remove(self);
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Object field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                            self,
-                            output_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(output_type_reference)
+        {
+            scalar_type_referencers.object_fields.shift_remove(self);
+        } else if let Some(object_type_referencers) =
+            referencers.object_types.get_mut(output_type_reference)
+        {
+            object_type_referencers.object_fields.shift_remove(self);
+        } else if let Some(interface_type_referencers) =
+            referencers.interface_types.get_mut(output_type_reference)
+        {
+            interface_type_referencers.object_fields.shift_remove(self);
+        } else if let Some(union_type_referencers) =
+            referencers.union_types.get_mut(output_type_reference)
+        {
+            union_type_referencers.object_fields.shift_remove(self);
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(output_type_reference)
+        {
+            enum_type_referencers.object_fields.shift_remove(self);
         }
-        Ok(())
     }
 }
 
@@ -2997,11 +2914,7 @@ impl ObjectFieldArgumentDefinitionPosition {
             .make_mut()
             .arguments
             .push(argument);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-        )
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
     /// Remove this argument from the field.
@@ -3011,7 +2924,7 @@ impl ObjectFieldArgumentDefinitionPosition {
         let Some(argument) = self.try_get(&schema.schema) else {
             return Ok(());
         };
-        self.remove_references(argument, &schema.schema, &mut schema.referencers)?;
+        self.remove_references(argument, &mut schema.referencers)?;
         self.parent()
             .make_mut(&mut schema.schema)?
             .make_mut()
@@ -3079,7 +2992,6 @@ impl ObjectFieldArgumentDefinitionPosition {
     fn insert_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
@@ -3092,13 +3004,12 @@ impl ObjectFieldArgumentDefinitionPosition {
         for directive_reference in argument.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
-        self.insert_type_references(argument, schema, referencers)
+        self.insert_type_references(argument, referencers)
     }
 
     fn remove_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
@@ -3110,7 +3021,8 @@ impl ObjectFieldArgumentDefinitionPosition {
         for directive_reference in argument.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
         }
-        self.remove_type_references(argument, schema, referencers)
+        self.remove_type_references(argument, referencers);
+        Ok(())
     }
 
     fn insert_directive_name_references(
@@ -3145,64 +3057,33 @@ impl ObjectFieldArgumentDefinitionPosition {
     fn insert_type_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let scalar_type_referencers = referencers
-                    .scalar_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                scalar_type_referencers
-                    .object_field_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let enum_type_referencers = referencers
-                    .enum_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                enum_type_referencers
-                    .object_field_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let input_object_type_referencers = referencers
-                    .input_object_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                input_object_type_referencers
-                    .object_field_arguments
-                    .insert(self.clone());
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Object field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .object_field_arguments
+                .insert(self.clone());
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers
+                .object_field_arguments
+                .insert(self.clone());
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .object_field_arguments
+                .insert(self.clone());
+        } else {
+            return Err(FederationError::internal(format!(
+                "Object field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                self,
+                input_type_reference.deref(),
+            )));
         }
         Ok(())
     }
@@ -3210,54 +3091,28 @@ impl ObjectFieldArgumentDefinitionPosition {
     fn remove_type_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
+    ) {
         let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let Some(scalar_type_referencers) =
-                    referencers.scalar_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                scalar_type_referencers
-                    .object_field_arguments
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let Some(enum_type_referencers) =
-                    referencers.enum_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                enum_type_referencers
-                    .object_field_arguments
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let Some(input_object_type_referencers) =
-                    referencers.input_object_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                input_object_type_referencers
-                    .object_field_arguments
-                    .shift_remove(self);
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Object field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .object_field_arguments
+                .shift_remove(self);
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers
+                .object_field_arguments
+                .shift_remove(self);
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .object_field_arguments
+                .shift_remove(self);
         }
-        Ok(())
     }
 }
 
@@ -3454,11 +3309,7 @@ impl InterfaceTypeDefinitionPosition {
         &self,
         schema: &mut FederationSchema,
     ) -> Result<Option<InterfaceTypeReferencers>, FederationError> {
-        let Some(referencers) = schema
-            .referencers
-            .interface_types
-            .swap_remove(&self.type_name)
-        else {
+        let Some(referencers) = self.remove_internal(schema)? else {
             return Ok(None);
         };
         for type_ in &referencers.object_types {
@@ -3473,7 +3324,6 @@ impl InterfaceTypeDefinitionPosition {
         for field in &referencers.interface_fields {
             field.remove(schema)?;
         }
-        self.remove_internal(schema)?;
         Ok(Some(referencers))
     }
 
@@ -3482,11 +3332,7 @@ impl InterfaceTypeDefinitionPosition {
         &self,
         schema: &mut FederationSchema,
     ) -> Result<(), FederationError> {
-        let Some(referencers) = schema
-            .referencers
-            .interface_types
-            .swap_remove(&self.type_name)
-        else {
+        let Some(referencers) = self.remove_internal(schema)? else {
             return Ok(());
         };
         for type_ in referencers.object_types {
@@ -3501,17 +3347,27 @@ impl InterfaceTypeDefinitionPosition {
         for field in referencers.interface_fields {
             field.remove_recursive(schema)?;
         }
-        self.remove_internal(schema)?;
         Ok(())
     }
 
-    fn remove_internal(&self, schema: &mut FederationSchema) -> Result<(), FederationError> {
+    fn remove_internal(
+        &self,
+        schema: &mut FederationSchema,
+    ) -> Result<Option<InterfaceTypeReferencers>, FederationError> {
         let Some(type_) = self.try_get(&schema.schema) else {
-            return Ok(());
+            return Ok(None);
         };
         self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
         schema.schema.types.shift_remove(&self.type_name);
-        Ok(())
+        Ok(Some(
+            schema
+                .referencers
+                .interface_types
+                .shift_remove(&self.type_name)
+                .ok_or_else(|| SingleFederationError::Internal {
+                    message: format!("Schema missing referencers for type \"{}\"", self),
+                })?,
+        ))
     }
 
     pub(crate) fn insert_directive(
@@ -3610,13 +3466,12 @@ impl InterfaceTypeDefinitionPosition {
         let introspection_typename_field = self.introspection_typename_field();
         introspection_typename_field.insert_references(
             introspection_typename_field.get(schema)?,
-            schema,
             referencers,
             true,
         )?;
         for (field_name, field) in type_.fields.iter() {
             self.field(field_name.clone())
-                .insert_references(field, schema, referencers, false)?;
+                .insert_references(field, referencers, false)?;
         }
         Ok(())
     }
@@ -3639,13 +3494,12 @@ impl InterfaceTypeDefinitionPosition {
         let introspection_typename_field = self.introspection_typename_field();
         introspection_typename_field.remove_references(
             introspection_typename_field.get(schema)?,
-            schema,
             referencers,
             true,
         )?;
         for (field_name, field) in type_.fields.iter() {
             self.field(field_name.clone())
-                .remove_references(field, schema, referencers, false)?;
+                .remove_references(field, referencers, false)?;
         }
         Ok(())
     }
@@ -3823,12 +3677,7 @@ impl InterfaceFieldDefinitionPosition {
             .make_mut()
             .fields
             .insert(self.field_name.clone(), field);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-            false,
-        )
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers, false)
     }
 
     /// Remove this field from its interface.
@@ -3839,7 +3688,7 @@ impl InterfaceFieldDefinitionPosition {
         let Some(field) = self.try_get(&schema.schema) else {
             return Ok(());
         };
-        self.remove_references(field, &schema.schema, &mut schema.referencers, false)?;
+        self.remove_references(field, &mut schema.referencers, false)?;
         self.parent()
             .make_mut(&mut schema.schema)?
             .make_mut()
@@ -3926,7 +3775,6 @@ impl InterfaceFieldDefinitionPosition {
     fn insert_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -3940,14 +3788,11 @@ impl InterfaceFieldDefinitionPosition {
         for directive_reference in field.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
-        self.insert_type_references(field, schema, referencers)?;
+        self.insert_type_references(field, referencers)?;
         validate_arguments(&field.arguments)?;
         for argument in field.arguments.iter() {
-            self.argument(argument.name.clone()).insert_references(
-                argument,
-                schema,
-                referencers,
-            )?;
+            self.argument(argument.name.clone())
+                .insert_references(argument, referencers)?;
         }
         Ok(())
     }
@@ -3955,7 +3800,6 @@ impl InterfaceFieldDefinitionPosition {
     fn remove_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
         allow_built_ins: bool,
     ) -> Result<(), FederationError> {
@@ -3968,13 +3812,10 @@ impl InterfaceFieldDefinitionPosition {
         for directive_reference in field.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
         }
-        self.remove_type_references(field, schema, referencers)?;
+        self.remove_type_references(field, referencers);
         for argument in field.arguments.iter() {
-            self.argument(argument.name.clone()).remove_references(
-                argument,
-                schema,
-                referencers,
-            )?;
+            self.argument(argument.name.clone())
+                .remove_references(argument, referencers)?;
         }
         Ok(())
     }
@@ -4007,88 +3848,43 @@ impl InterfaceFieldDefinitionPosition {
     fn insert_type_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let output_type_reference = field.ty.inner_named_type();
-        match schema.types.get(output_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let scalar_type_referencers = referencers
-                    .scalar_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                scalar_type_referencers
-                    .interface_fields
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Object(_)) => {
-                let object_type_referencers = referencers
-                    .object_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                object_type_referencers
-                    .interface_fields
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Interface(_)) => {
-                let interface_type_referencers = referencers
-                    .interface_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                interface_type_referencers
-                    .interface_fields
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Union(_)) => {
-                let union_type_referencers = referencers
-                    .union_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            output_type_reference
-                        ),
-                    })?;
-                union_type_referencers.interface_fields.insert(self.clone());
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let enum_type_referencers = referencers
-                    .enum_types
-                    .get_mut(output_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                    message: format!(
-                        "Schema missing referencers for type \"{}\"",
-                        output_type_reference
-                    ),
-                })?;
-                enum_type_referencers.interface_fields.insert(self.clone());
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Interface field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                            self,
-                            output_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(output_type_reference)
+        {
+            scalar_type_referencers
+                .interface_fields
+                .insert(self.clone());
+        } else if let Some(object_type_referencers) =
+            referencers.object_types.get_mut(output_type_reference)
+        {
+            object_type_referencers
+                .interface_fields
+                .insert(self.clone());
+        } else if let Some(interface_type_referencers) =
+            referencers.interface_types.get_mut(output_type_reference)
+        {
+            interface_type_referencers
+                .interface_fields
+                .insert(self.clone());
+        } else if let Some(union_type_referencers) =
+            referencers.union_types.get_mut(output_type_reference)
+        {
+            union_type_referencers.interface_fields.insert(self.clone());
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(output_type_reference)
+        {
+            enum_type_referencers.interface_fields.insert(self.clone());
+        } else {
+            return Err(FederationError::internal(
+                format!(
+                    "Interface field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
+                    self,
+                    output_type_reference.deref(),
+                )
+            ));
         }
         Ok(())
     }
@@ -4096,66 +3892,32 @@ impl InterfaceFieldDefinitionPosition {
     fn remove_type_references(
         &self,
         field: &Component<FieldDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
+    ) {
         let output_type_reference = field.ty.inner_named_type();
-        match schema.types.get(output_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let Some(scalar_type_referencers) =
-                    referencers.scalar_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                scalar_type_referencers.interface_fields.shift_remove(self);
-            }
-            Some(ExtendedType::Object(_)) => {
-                let Some(object_type_referencers) =
-                    referencers.object_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                object_type_referencers.interface_fields.shift_remove(self);
-            }
-            Some(ExtendedType::Interface(_)) => {
-                let Some(interface_type_referencers) =
-                    referencers.interface_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                interface_type_referencers
-                    .interface_fields
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::Union(_)) => {
-                let Some(union_type_referencers) =
-                    referencers.union_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                union_type_referencers.interface_fields.shift_remove(self);
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let Some(enum_type_referencers) =
-                    referencers.enum_types.get_mut(output_type_reference)
-                else {
-                    return Ok(());
-                };
-                enum_type_referencers.interface_fields.shift_remove(self);
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Interface field \"{}\"'s inner type \"{}\" does not refer to an existing output type.",
-                            self,
-                            output_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(output_type_reference)
+        {
+            scalar_type_referencers.interface_fields.shift_remove(self);
+        } else if let Some(object_type_referencers) =
+            referencers.object_types.get_mut(output_type_reference)
+        {
+            object_type_referencers.interface_fields.shift_remove(self);
+        } else if let Some(interface_type_referencers) =
+            referencers.interface_types.get_mut(output_type_reference)
+        {
+            interface_type_referencers
+                .interface_fields
+                .shift_remove(self);
+        } else if let Some(union_type_referencers) =
+            referencers.union_types.get_mut(output_type_reference)
+        {
+            union_type_referencers.interface_fields.shift_remove(self);
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(output_type_reference)
+        {
+            enum_type_referencers.interface_fields.shift_remove(self);
         }
-        Ok(())
     }
 }
 
@@ -4271,11 +4033,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .make_mut()
             .arguments
             .push(argument);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-        )
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
     /// Remove this argument from its field definition.
@@ -4286,7 +4044,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
         let Some(argument) = self.try_get(&schema.schema) else {
             return Ok(());
         };
-        self.remove_references(argument, &schema.schema, &mut schema.referencers)?;
+        self.remove_references(argument, &mut schema.referencers)?;
         self.parent()
             .make_mut(&mut schema.schema)?
             .make_mut()
@@ -4356,7 +4114,6 @@ impl InterfaceFieldArgumentDefinitionPosition {
     fn insert_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
@@ -4372,13 +4129,12 @@ impl InterfaceFieldArgumentDefinitionPosition {
         for directive_reference in argument.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
-        self.insert_type_references(argument, schema, referencers)
+        self.insert_type_references(argument, referencers)
     }
 
     fn remove_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
@@ -4393,7 +4149,8 @@ impl InterfaceFieldArgumentDefinitionPosition {
         for directive_reference in argument.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
         }
-        self.remove_type_references(argument, schema, referencers)
+        self.remove_type_references(argument, referencers);
+        Ok(())
     }
 
     fn insert_directive_name_references(
@@ -4428,64 +4185,35 @@ impl InterfaceFieldArgumentDefinitionPosition {
     fn insert_type_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let scalar_type_referencers = referencers
-                    .scalar_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                scalar_type_referencers
-                    .interface_field_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let enum_type_referencers = referencers
-                    .enum_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                enum_type_referencers
-                    .interface_field_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let input_object_type_referencers = referencers
-                    .input_object_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                input_object_type_referencers
-                    .interface_field_arguments
-                    .insert(self.clone());
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .interface_field_arguments
+                .insert(self.clone());
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers
+                .interface_field_arguments
+                .insert(self.clone());
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .interface_field_arguments
+                .insert(self.clone());
+        } else {
+            return Err(FederationError::internal(
+                format!(
+                    "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                    self,
+                    input_type_reference.deref(),
+                )
+            ));
         }
         Ok(())
     }
@@ -4493,54 +4221,28 @@ impl InterfaceFieldArgumentDefinitionPosition {
     fn remove_type_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
+    ) {
         let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let Some(scalar_type_referencers) =
-                    referencers.scalar_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                scalar_type_referencers
-                    .interface_field_arguments
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let Some(enum_type_referencers) =
-                    referencers.enum_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                enum_type_referencers
-                    .interface_field_arguments
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let Some(input_object_type_referencers) =
-                    referencers.input_object_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                input_object_type_referencers
-                    .interface_field_arguments
-                    .shift_remove(self);
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Interface field argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .interface_field_arguments
+                .shift_remove(self);
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers
+                .interface_field_arguments
+                .shift_remove(self);
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .interface_field_arguments
+                .shift_remove(self);
         }
-        Ok(())
     }
 }
 
@@ -4737,7 +4439,7 @@ impl UnionTypeDefinitionPosition {
         let Some(type_) = self.try_get(&schema.schema) else {
             return Ok(None);
         };
-        self.remove_references(type_, &mut schema.referencers)?;
+        self.remove_references(type_, &mut schema.referencers);
         schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
@@ -4858,11 +4560,7 @@ impl UnionTypeDefinitionPosition {
             .insert_references(referencers)
     }
 
-    fn remove_references(
-        &self,
-        type_: &Node<UnionType>,
-        referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
+    fn remove_references(&self, type_: &Node<UnionType>, referencers: &mut Referencers) {
         for directive_reference in type_.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
         }
@@ -4978,34 +4676,32 @@ impl UnionTypenameFieldDefinitionPosition {
         Ok(())
     }
 
-    fn remove_references(&self, referencers: &mut Referencers) -> Result<(), FederationError> {
-        self.remove_type_references(referencers)?;
-        Ok(())
+    fn remove_references(&self, referencers: &mut Referencers) {
+        self.remove_type_references(referencers);
     }
 
     fn insert_type_references(&self, referencers: &mut Referencers) -> Result<(), FederationError> {
         let output_type_reference = "String";
-        let scalar_type_referencers = referencers
-            .scalar_types
-            .get_mut(output_type_reference)
-            .ok_or_else(|| SingleFederationError::Internal {
-                message: format!(
-                    "Schema missing referencers for type \"{}\"",
-                    output_type_reference
-                ),
-            })?;
-        scalar_type_referencers.union_fields.insert(self.clone());
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(output_type_reference)
+        {
+            scalar_type_referencers.union_fields.insert(self.clone());
+        } else {
+            return Err(FederationError::internal(format!(
+                "Schema missing referencers for type \"{}\"",
+                output_type_reference
+            )));
+        }
         Ok(())
     }
 
-    fn remove_type_references(&self, referencers: &mut Referencers) -> Result<(), FederationError> {
+    fn remove_type_references(&self, referencers: &mut Referencers) {
         let output_type_reference = "String";
-        let Some(scalar_type_referencers) = referencers.scalar_types.get_mut(output_type_reference)
-        else {
-            return Ok(());
-        };
-        scalar_type_referencers.union_fields.shift_remove(self);
-        Ok(())
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(output_type_reference)
+        {
+            scalar_type_referencers.union_fields.shift_remove(self);
+        }
     }
 }
 
@@ -5737,11 +5433,7 @@ impl InputObjectTypeDefinitionPosition {
             .schema
             .types
             .insert(self.type_name.clone(), ExtendedType::InputObject(type_));
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-        )
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
     /// Remove this input type from the schema.
@@ -5801,7 +5493,7 @@ impl InputObjectTypeDefinitionPosition {
         let Some(type_) = self.try_get(&schema.schema) else {
             return Ok(None);
         };
-        self.remove_references(type_, &schema.schema, &mut schema.referencers)?;
+        self.remove_references(type_, &mut schema.referencers)?;
         schema.schema.types.shift_remove(&self.type_name);
         Ok(Some(
             schema
@@ -5873,7 +5565,6 @@ impl InputObjectTypeDefinitionPosition {
     fn insert_references(
         &self,
         type_: &Node<InputObjectType>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         validate_component_directives(type_.directives.deref())?;
@@ -5882,7 +5573,7 @@ impl InputObjectTypeDefinitionPosition {
         }
         for (field_name, field) in type_.fields.iter() {
             self.field(field_name.clone())
-                .insert_references(field, schema, referencers)?;
+                .insert_references(field, referencers)?;
         }
         Ok(())
     }
@@ -5890,7 +5581,6 @@ impl InputObjectTypeDefinitionPosition {
     fn remove_references(
         &self,
         type_: &Node<InputObjectType>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         for directive_reference in type_.directives.iter() {
@@ -5898,7 +5588,7 @@ impl InputObjectTypeDefinitionPosition {
         }
         for (field_name, field) in type_.fields.iter() {
             self.field(field_name.clone())
-                .remove_references(field, schema, referencers)?;
+                .remove_references(field, referencers)?;
         }
         Ok(())
     }
@@ -6029,11 +5719,7 @@ impl InputObjectFieldDefinitionPosition {
             .make_mut()
             .fields
             .insert(self.field_name.clone(), field);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-        )
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
     /// Remove this field from its input object type.
@@ -6043,7 +5729,7 @@ impl InputObjectFieldDefinitionPosition {
         let Some(field) = self.try_get(&schema.schema) else {
             return Ok(());
         };
-        self.remove_references(field, &schema.schema, &mut schema.referencers)?;
+        self.remove_references(field, &mut schema.referencers)?;
         self.parent()
             .make_mut(&mut schema.schema)?
             .make_mut()
@@ -6129,7 +5815,6 @@ impl InputObjectFieldDefinitionPosition {
     fn insert_references(
         &self,
         field: &Component<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
@@ -6142,13 +5827,12 @@ impl InputObjectFieldDefinitionPosition {
         for directive_reference in field.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
-        self.insert_type_references(field, schema, referencers)
+        self.insert_type_references(field, referencers)
     }
 
     fn remove_references(
         &self,
         field: &Component<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.field_name) {
@@ -6160,7 +5844,8 @@ impl InputObjectFieldDefinitionPosition {
         for directive_reference in field.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
         }
-        self.remove_type_references(field, schema, referencers)
+        self.remove_type_references(field, referencers);
+        Ok(())
     }
 
     fn insert_directive_name_references(
@@ -6193,64 +5878,35 @@ impl InputObjectFieldDefinitionPosition {
     fn insert_type_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let scalar_type_referencers = referencers
-                    .scalar_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                scalar_type_referencers
-                    .input_object_fields
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let enum_type_referencers = referencers
-                    .enum_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                enum_type_referencers
-                    .input_object_fields
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let input_object_type_referencers = referencers
-                    .input_object_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                input_object_type_referencers
-                    .input_object_fields
-                    .insert(self.clone());
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Input object field \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .input_object_fields
+                .insert(self.clone());
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers
+                .input_object_fields
+                .insert(self.clone());
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .input_object_fields
+                .insert(self.clone());
+        } else {
+            return Err(FederationError::internal(
+                format!(
+                    "Input object field \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                    self,
+                    input_type_reference.deref(),
+                )
+            ));
         }
         Ok(())
     }
@@ -6258,52 +5914,26 @@ impl InputObjectFieldDefinitionPosition {
     fn remove_type_references(
         &self,
         field: &Component<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
+    ) {
         let input_type_reference = field.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let Some(scalar_type_referencers) =
-                    referencers.scalar_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                scalar_type_referencers
-                    .input_object_fields
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let Some(enum_type_referencers) =
-                    referencers.enum_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                enum_type_referencers.input_object_fields.shift_remove(self);
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let Some(input_object_type_referencers) =
-                    referencers.input_object_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                input_object_type_referencers
-                    .input_object_fields
-                    .shift_remove(self);
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Input object field \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .input_object_fields
+                .shift_remove(self);
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers.input_object_fields.shift_remove(self);
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .input_object_fields
+                .shift_remove(self);
         }
-        Ok(())
     }
 }
 
@@ -6433,11 +6063,7 @@ impl DirectiveDefinitionPosition {
             .schema
             .directive_definitions
             .insert(self.directive_name.clone(), directive);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-        )
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
     /// Remove the directive definition and any applications.
@@ -6500,7 +6126,7 @@ impl DirectiveDefinitionPosition {
         let Some(directive) = self.try_get(&schema.schema) else {
             return Ok(None);
         };
-        self.remove_references(directive, &schema.schema, &mut schema.referencers)?;
+        self.remove_references(directive, &mut schema.referencers)?;
         schema
             .schema
             .directive_definitions
@@ -6519,15 +6145,11 @@ impl DirectiveDefinitionPosition {
     fn insert_references(
         &self,
         directive: &Node<DirectiveDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         for argument in directive.arguments.iter() {
-            self.argument(argument.name.clone()).insert_references(
-                argument,
-                schema,
-                referencers,
-            )?;
+            self.argument(argument.name.clone())
+                .insert_references(argument, referencers)?;
         }
         Ok(())
     }
@@ -6535,15 +6157,11 @@ impl DirectiveDefinitionPosition {
     fn remove_references(
         &self,
         directive: &Node<DirectiveDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         for argument in directive.arguments.iter() {
-            self.argument(argument.name.clone()).remove_references(
-                argument,
-                schema,
-                referencers,
-            )?;
+            self.argument(argument.name.clone())
+                .remove_references(argument, referencers)?;
         }
         Ok(())
     }
@@ -6656,11 +6274,7 @@ impl DirectiveArgumentDefinitionPosition {
             .make_mut()
             .arguments
             .push(argument);
-        self.insert_references(
-            self.get(&schema.schema)?,
-            &schema.schema,
-            &mut schema.referencers,
-        )
+        self.insert_references(self.get(&schema.schema)?, &mut schema.referencers)
     }
 
     /// Remove this argument definition from its directive. Any applications of the directive that
@@ -6669,7 +6283,7 @@ impl DirectiveArgumentDefinitionPosition {
         let Some(argument) = self.try_get(&schema.schema) else {
             return Ok(());
         };
-        self.remove_references(argument, &schema.schema, &mut schema.referencers)?;
+        self.remove_references(argument, &mut schema.referencers)?;
         self.parent()
             .make_mut(&mut schema.schema)?
             .make_mut()
@@ -6737,7 +6351,6 @@ impl DirectiveArgumentDefinitionPosition {
     fn insert_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
@@ -6750,13 +6363,12 @@ impl DirectiveArgumentDefinitionPosition {
         for directive_reference in argument.directives.iter() {
             self.insert_directive_name_references(referencers, &directive_reference.name)?;
         }
-        self.insert_type_references(argument, schema, referencers)
+        self.insert_type_references(argument, referencers)
     }
 
     fn remove_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         if is_graphql_reserved_name(&self.argument_name) {
@@ -6768,7 +6380,8 @@ impl DirectiveArgumentDefinitionPosition {
         for directive_reference in argument.directives.iter() {
             self.remove_directive_name_references(referencers, &directive_reference.name);
         }
-        self.remove_type_references(argument, schema, referencers)
+        self.remove_type_references(argument, referencers);
+        Ok(())
     }
 
     fn insert_directive_name_references(
@@ -6801,64 +6414,35 @@ impl DirectiveArgumentDefinitionPosition {
     fn insert_type_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
     ) -> Result<(), FederationError> {
         let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let scalar_type_referencers = referencers
-                    .scalar_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                scalar_type_referencers
-                    .directive_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let enum_type_referencers = referencers
-                    .enum_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                enum_type_referencers
-                    .directive_arguments
-                    .insert(self.clone());
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let input_object_type_referencers = referencers
-                    .input_object_types
-                    .get_mut(input_type_reference)
-                    .ok_or_else(|| SingleFederationError::Internal {
-                        message: format!(
-                            "Schema missing referencers for type \"{}\"",
-                            input_type_reference
-                        ),
-                    })?;
-                input_object_type_referencers
-                    .directive_arguments
-                    .insert(self.clone());
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Directive argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .directive_arguments
+                .insert(self.clone());
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers
+                .directive_arguments
+                .insert(self.clone());
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .directive_arguments
+                .insert(self.clone());
+        } else {
+            return Err(FederationError::internal(
+                format!(
+                    "Directive argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
+                    self,
+                    input_type_reference.deref(),
+                )
+            ));
         }
         Ok(())
     }
@@ -6866,52 +6450,26 @@ impl DirectiveArgumentDefinitionPosition {
     fn remove_type_references(
         &self,
         argument: &Node<InputValueDefinition>,
-        schema: &Schema,
         referencers: &mut Referencers,
-    ) -> Result<(), FederationError> {
+    ) {
         let input_type_reference = argument.ty.inner_named_type();
-        match schema.types.get(input_type_reference) {
-            Some(ExtendedType::Scalar(_)) => {
-                let Some(scalar_type_referencers) =
-                    referencers.scalar_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                scalar_type_referencers
-                    .directive_arguments
-                    .shift_remove(self);
-            }
-            Some(ExtendedType::Enum(_)) => {
-                let Some(enum_type_referencers) =
-                    referencers.enum_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                enum_type_referencers.directive_arguments.shift_remove(self);
-            }
-            Some(ExtendedType::InputObject(_)) => {
-                let Some(input_object_type_referencers) =
-                    referencers.input_object_types.get_mut(input_type_reference)
-                else {
-                    return Ok(());
-                };
-                input_object_type_referencers
-                    .directive_arguments
-                    .shift_remove(self);
-            }
-            _ => {
-                return Err(
-                    SingleFederationError::Internal {
-                        message: format!(
-                            "Directive argument \"{}\"'s inner type \"{}\" does not refer to an existing input type.",
-                            self,
-                            input_type_reference.deref(),
-                        )
-                    }.into()
-                );
-            }
+        if let Some(scalar_type_referencers) =
+            referencers.scalar_types.get_mut(input_type_reference)
+        {
+            scalar_type_referencers
+                .directive_arguments
+                .shift_remove(self);
+        } else if let Some(enum_type_referencers) =
+            referencers.enum_types.get_mut(input_type_reference)
+        {
+            enum_type_referencers.directive_arguments.shift_remove(self);
+        } else if let Some(input_object_type_referencers) =
+            referencers.input_object_types.get_mut(input_type_reference)
+        {
+            input_object_type_referencers
+                .directive_arguments
+                .shift_remove(self);
         }
-        Ok(())
     }
 }
 
@@ -7106,7 +6664,7 @@ impl FederationSchema {
                     InputObjectTypeDefinitionPosition {
                         type_name: type_name.clone(),
                     }
-                    .insert_references(type_, &schema, &mut referencers)?;
+                    .insert_references(type_, &mut referencers)?;
                 }
             }
         }
@@ -7114,7 +6672,7 @@ impl FederationSchema {
             DirectiveDefinitionPosition {
                 directive_name: directive_name.clone(),
             }
-            .insert_references(directive, &schema, &mut referencers)?;
+            .insert_references(directive, &mut referencers)?;
         }
 
         Ok(FederationSchema {

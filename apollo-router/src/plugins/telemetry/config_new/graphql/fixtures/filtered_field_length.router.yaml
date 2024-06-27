@@ -7,8 +7,7 @@ telemetry:
           type: histogram
           unit: count
           value:
-            field_custom:
-              list_length: value
+            list_length: value
           condition:
             eq:
               - field_name: string
