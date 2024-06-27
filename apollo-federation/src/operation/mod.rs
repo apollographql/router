@@ -221,6 +221,7 @@ mod selection_map {
     use crate::operation::Selection;
     use crate::operation::SelectionKey;
     use crate::operation::SelectionSet;
+    use crate::operation::SiblingTypename;
 
     /// A "normalized" selection map is an optimized representation of a selection set which does
     /// not contain selections with the same selection "key". Selections that do have the same key
@@ -456,7 +457,7 @@ mod selection_map {
             self.0
         }
 
-        pub(crate) fn get_sibling_typename_mut(&mut self) -> &mut Option<Name> {
+        pub(crate) fn get_sibling_typename_mut(&mut self) -> &mut Option<SiblingTypename> {
             Arc::make_mut(self.0).field.sibling_typename_mut()
         }
 
@@ -1201,6 +1202,8 @@ mod field_selection {
             Self::new(FieldData::from_position(schema, field_position))
         }
 
+        // Note: The `schema` argument must be a subgraph schema, so the __typename field won't
+        // need to be rebased, which would fail (since __typename fields are undefined).
         pub(crate) fn new_introspection_typename(
             schema: &ValidFederationSchema,
             parent_type: &CompositeTypeDefinitionPosition,
@@ -1271,11 +1274,11 @@ mod field_selection {
             &mut self.data.directives
         }
 
-        pub(crate) fn sibling_typename(&self) -> Option<&Name> {
+        pub(crate) fn sibling_typename(&self) -> Option<&SiblingTypename> {
             self.data.sibling_typename.as_ref()
         }
 
-        pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<Name> {
+        pub(crate) fn sibling_typename_mut(&mut self) -> &mut Option<SiblingTypename> {
             &mut self.data.sibling_typename
         }
 
@@ -1329,6 +1332,24 @@ mod field_selection {
         }
     }
 
+    // SiblingTypename indicates how the sibling __typename field should be restored.
+    // PORT_NOTE: The JS version used the empty string to indicate unaliased sibling typenames.
+    // Here we use an enum to make the distinction explicit.
+    #[derive(Debug, Clone)]
+    pub(crate) enum SiblingTypename {
+        Unaliased,
+        Aliased(Name), // the sibling __typename has been aliased
+    }
+
+    impl SiblingTypename {
+        pub(crate) fn alias(&self) -> Option<&Name> {
+            match self {
+                SiblingTypename::Unaliased => None,
+                SiblingTypename::Aliased(alias) => Some(alias),
+            }
+        }
+    }
+
     #[derive(Debug, Clone)]
     pub(crate) struct FieldData {
         pub(crate) schema: ValidFederationSchema,
@@ -1336,7 +1357,7 @@ mod field_selection {
         pub(crate) alias: Option<Name>,
         pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
         pub(crate) directives: Arc<executable::DirectiveList>,
-        pub(crate) sibling_typename: Option<Name>,
+        pub(crate) sibling_typename: Option<SiblingTypename>,
     }
 
     impl FieldData {
@@ -1397,6 +1418,7 @@ mod field_selection {
 pub(crate) use field_selection::Field;
 pub(crate) use field_selection::FieldData;
 pub(crate) use field_selection::FieldSelection;
+pub(crate) use field_selection::SiblingTypename;
 
 mod fragment_spread_selection {
     use std::sync::Arc;
@@ -2450,8 +2472,13 @@ impl SelectionSet {
                 mutable_selection_map.remove(&typename_key),
                 mutable_selection_map.get_mut(&sibling_field_key),
             ) {
-                *sibling_field.get_sibling_typename_mut() =
-                    Some(typename_field.field.data().response_name());
+                // Note that as we tag the element, we also record the alias used if any since that
+                // needs to be preserved.
+                let sibling_typename = match &typename_field.field.data().alias {
+                    None => SiblingTypename::Unaliased,
+                    Some(alias) => SiblingTypename::Aliased(alias.clone()),
+                };
+                *sibling_field.get_sibling_typename_mut() = Some(sibling_typename);
             } else {
                 unreachable!("typename and sibling fields must both exist at this point")
             }
@@ -2682,16 +2709,10 @@ impl SelectionSet {
                 return Ok(updated.into());
             };
             // We need to add the query __typename for the current type in the current group.
-            // Note that the value of the sibling_typename is the alias or "" if there is no alias
-            let alias = if sibling_typename.is_empty() {
-                None
-            } else {
-                Some(sibling_typename.clone())
-            };
             let field_element = Field::new_introspection_typename(
                 &self.schema,
                 &selection.element()?.parent_type_position(),
-                alias,
+                sibling_typename.alias().cloned(),
             );
             let typename_selection =
                 Selection::from_element(field_element.into(), /*subselection*/ None)?;
@@ -2787,16 +2808,34 @@ impl SelectionSet {
         self.merge_into(std::iter::once(selection_set))
     }
 
-    /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Should any sub
-    /// selection with the same key already exist in the map, the existing selection and the given
-    /// selection are merged, replacing the existing selection while keeping the same insertion index.
+    /// Rebase given `SelectionSet` on self and then inserts it into the inner map. Assumes that given
+    /// selection set does not reference ANY named fragments. If it does, Use `add_selection_set_with_fragments`
+    /// instead.
+    ///
+    /// Should any sub selection with the same key already exist in the map, the existing selection
+    /// and the given selection are merged, replacing the existing selection while keeping the same
+    /// insertion index.
     pub(crate) fn add_selection_set(
         &mut self,
         selection_set: &SelectionSet,
     ) -> Result<(), FederationError> {
+        self.add_selection_set_with_fragments(selection_set, &NamedFragments::default())
+    }
+
+    /// Rebase given `SelectionSet` on self with the specified fragments and then inserts it into the
+    /// inner map.
+    ///
+    /// Should any sub selection with the same key already exist in the map, the existing selection
+    /// and the given selection are merged, replacing the existing selection while keeping the same
+    /// insertion index.
+    pub(crate) fn add_selection_set_with_fragments(
+        &mut self,
+        selection_set: &SelectionSet,
+        named_fragments: &NamedFragments,
+    ) -> Result<(), FederationError> {
         let rebased = selection_set.rebase_on(
             &self.type_position,
-            &NamedFragments::default(),
+            named_fragments,
             &self.schema,
             RebaseErrorHandlingOption::ThrowError,
         )?;
@@ -3015,8 +3054,9 @@ impl SelectionSet {
                     }
                     SelectionOrSet::SelectionSet(normalized_set) => {
                         // Since the `selection` has been expanded/lifted, we use
-                        // `add_selection_set` to make sure it's rebased.
-                        normalized_selections.add_selection_set(&normalized_set)?;
+                        // `add_selection_set_with_fragments` to make sure it's rebased.
+                        normalized_selections
+                            .add_selection_set_with_fragments(&normalized_set, named_fragments)?;
                     }
                 }
             }
@@ -3039,6 +3079,7 @@ impl SelectionSet {
         self.selections.values().any(|s| s.has_defer())
     }
 
+    // - `self` must be fragment-spread-free.
     pub(crate) fn add_aliases_for_non_merging_fields(
         &self,
     ) -> Result<(SelectionSet, Vec<Arc<FetchDataRewrite>>), FederationError> {
@@ -3152,6 +3193,7 @@ impl SelectionSet {
         })
     }
 
+    // - `self.selections` must be fragment-spread-free.
     pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
         let mut fields = Vec::new();
 
@@ -3343,6 +3385,7 @@ struct FieldInPath {
     field: Arc<FieldSelection>,
 }
 
+// - `selections` must be fragment-spread-free.
 fn compute_aliases_for_non_merging_fields(
     selections: Vec<SelectionSetAtPath>,
     alias_collector: &mut Vec<FieldToAlias>,
@@ -3350,6 +3393,7 @@ fn compute_aliases_for_non_merging_fields(
 ) -> Result<(), FederationError> {
     let mut seen_response_names: HashMap<Name, SeenResponseName> = HashMap::new();
 
+    // - `s.selections` must be fragment-spread-free.
     fn rebased_fields_in_set(s: &SelectionSetAtPath) -> impl Iterator<Item = FieldInPath> + '_ {
         s.selections.iter().flat_map(|s2| {
             s2.fields_in_set()
@@ -4461,114 +4505,6 @@ impl NamedFragments {
             };
         }
         true
-    }
-
-    /// - Expands all nested fragments
-    /// - Applies the provided `mapper` to each selection set of the expanded fragments.
-    /// - Finally, re-fragments the nested fragments.
-    fn map_to_expanded_selection_sets(
-        &self,
-        mut mapper: impl FnMut(&SelectionSet) -> Result<SelectionSet, FederationError>,
-    ) -> Result<NamedFragments, FederationError> {
-        let mut result = NamedFragments::default();
-        // Note: `self.fragments` has insertion order topologically sorted.
-        for fragment in self.fragments.values() {
-            let expanded_selection_set = fragment.selection_set.expand_all_fragments()?.normalize(
-                &fragment.type_condition_position,
-                &Default::default(),
-                &fragment.schema,
-                NormalizeSelectionOption::NormalizeRecursively,
-            )?;
-            let mut mapped_selection_set = mapper(&expanded_selection_set)?;
-            mapped_selection_set.optimize_at_root(&result)?;
-            let updated = Fragment {
-                selection_set: mapped_selection_set,
-                schema: fragment.schema.clone(),
-                name: fragment.name.clone(),
-                type_condition_position: fragment.type_condition_position.clone(),
-                directives: fragment.directives.clone(),
-            };
-            result.insert(updated);
-        }
-        Ok(result)
-    }
-
-    pub(crate) fn add_typename_field_for_abstract_types_in_named_fragments(
-        &self,
-    ) -> Result<Self, FederationError> {
-        // This method is a bit tricky due to potentially nested fragments. More precisely, suppose that
-        // we have:
-        //   fragment MyFragment on T {
-        //     a {
-        //       b {
-        //         ...InnerB
-        //       }
-        //     }
-        //   }
-        //
-        //   fragment InnerB on B {
-        //     __typename
-        //     x
-        //     y
-        //   }
-        // then if we were to "naively" add `__typename`, the first fragment would end up being:
-        //   fragment MyFragment on T {
-        //     a {
-        //       __typename
-        //       b {
-        //         __typename
-        //         ...InnerX
-        //       }
-        //     }
-        //   }
-        // but that's not ideal because the inner-most `__typename` is already within `InnerX`. And that
-        // gets in the way to re-adding fragments (the `SelectionSet.optimize` method) because if we start
-        // with:
-        //   {
-        //     a {
-        //       __typename
-        //       b {
-        //         __typename
-        //         x
-        //         y
-        //       }
-        //     }
-        //   }
-        // and add `InnerB` first, we get:
-        //   {
-        //     a {
-        //       __typename
-        //       b {
-        //         ...InnerB
-        //       }
-        //     }
-        //   }
-        // and it becomes tricky to recognize the "updated-with-typename" version of `MyFragment` now (we "seem"
-        // to miss a `__typename`).
-        //
-        // Anyway, to avoid this issue, what we do is that for every fragment, we:
-        //  1. expand any nested fragments in its selection.
-        //  2. add `__typename` where we should in that expanded selection.
-        //  3. re-optimize all fragments (using the "updated-with-typename" versions).
-        // which is what `mapToExpandedSelectionSets` gives us.
-
-        if self.is_empty() {
-            // PORT_NOTE: This was an assertion failure in JS version. But, it's actually ok to
-            // return unchanged if empty.
-            return Ok(self.clone());
-        }
-        let updated = self.map_to_expanded_selection_sets(|ss| {
-            ss.add_typename_field_for_abstract_types(/*parent_type_if_abstract*/ None)
-        })?;
-        // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
-        // check the `updated` has the same set of fragments. To avoid performance hit, only the
-        // size is checked here.
-        if updated.size() != self.size() {
-            return Err(FederationError::internal(
-                "Unexpected change in the number of fragments",
-            ));
-        }
-        Ok(updated)
     }
 }
 

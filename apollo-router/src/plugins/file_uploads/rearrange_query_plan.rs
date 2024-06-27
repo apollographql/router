@@ -44,6 +44,7 @@ pub(super) fn rearrange_query_plan(
         usage_reporting: query_plan.usage_reporting.clone(),
         formatted_query_plan: query_plan.formatted_query_plan.clone(),
         query: query_plan.query.clone(),
+        query_metrics: query_plan.query_metrics,
     })
 }
 

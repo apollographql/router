@@ -8,6 +8,9 @@ use tower::BoxError;
 
 use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::instruments;
+use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::StandardUnit;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
@@ -45,6 +48,24 @@ pub(crate) enum FieldType {
 pub(crate) enum TypeName {
     /// The GraphQL type name
     String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum GraphQLValue {
+    Unit(StandardUnit),
+    Custom(GraphQLSelector),
+}
+
+impl From<&GraphQLValue> for InstrumentValue<GraphQLSelector> {
+    fn from(value: &GraphQLValue) -> Self {
+        match value {
+            GraphQLValue::Unit(_) => InstrumentValue::Field(instruments::Field::Unit),
+            GraphQLValue::Custom(selector) => {
+                InstrumentValue::Field(instruments::Field::Custom(selector.clone()))
+            }
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]

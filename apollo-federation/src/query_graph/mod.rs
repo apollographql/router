@@ -79,7 +79,7 @@ impl Display for QueryGraphNode {
         if let Some(provide_id) = self.provide_id {
             write!(f, "-{}", provide_id)?;
         }
-        if self.root_kind.is_some() {
+        if self.is_root_node() {
             write!(f, "*")?;
         }
         Ok(())

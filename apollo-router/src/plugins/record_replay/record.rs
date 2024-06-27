@@ -19,6 +19,7 @@ use crate::plugin::PluginInit;
 use crate::services::execution;
 use crate::services::external::externalize_header_map;
 use crate::services::router;
+use crate::services::router::body::RouterBody;
 use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::query::Query;
@@ -138,7 +139,7 @@ impl Plugin for Record {
                         context: res.context,
                         response: http::Response::from_parts(
                             parts,
-                            hyper::Body::wrap_stream(stream),
+                            RouterBody::wrap_stream(stream).into_inner(),
                         ),
                     })
                 }
