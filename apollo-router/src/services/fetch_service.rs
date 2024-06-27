@@ -14,6 +14,7 @@ use super::fetch::BoxService;
 use super::new_service::ServiceFactory;
 use super::ConnectRequest;
 use super::SubgraphRequest;
+use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -54,7 +55,11 @@ impl tower::Service<FetchRequest> for FetchService {
             .connectors_by_service_name
             .contains_key(service_name.to_string().as_str())
         {
-            Self::fetch_with_connector_service(self.connector_service_factory.clone(), request)
+            Self::fetch_with_connector_service(
+                self.schema.clone(),
+                self.connector_service_factory.clone(),
+                request,
+            )
         } else {
             Self::fetch_with_subgraph_service(
                 self.schema.clone(),
@@ -68,6 +73,7 @@ impl tower::Service<FetchRequest> for FetchService {
 
 impl FetchService {
     fn fetch_with_connector_service(
+        schema: Arc<Schema>,
         connector_service_factory: Arc<ConnectorServiceFactory>,
         request: FetchRequest,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
@@ -76,28 +82,49 @@ impl FetchService {
             supergraph_request,
             variables,
             context,
+            current_dir,
             ..
         } = request;
 
         let FetchNode {
             operation,
             service_name,
+            requires,
+            output_rewrites,
             ..
         } = fetch_node;
 
+        let paths = variables.inverted_paths.clone();
+
         Box::pin(async move {
-            connector_service_factory
+            let (data, errors) = connector_service_factory
                 .create()
                 .oneshot(
                     ConnectRequest::builder()
-                        .service_name(service_name)
+                        .service_name(service_name.clone())
                         .context(context)
                         .operation_str(operation.to_string())
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .build(),
                 )
-                .await
+                .await?;
+
+            let response = graphql::Response::builder()
+                .data(data)
+                .errors(errors)
+                .build();
+
+            let (value, errors) = FetchNode::response_at_path(
+                &schema,
+                &current_dir,
+                paths,
+                response,
+                &requires,
+                &output_rewrites,
+                &service_name,
+            );
+            Ok((value, errors))
         })
     }
 

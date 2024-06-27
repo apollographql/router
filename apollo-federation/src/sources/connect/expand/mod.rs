@@ -290,9 +290,10 @@ mod helpers {
             let extended_output_type = output_type.get(self.original_schema.schema())?;
 
             // If the type is built-in, then there isn't anything that we need to do for the output type
-            let directive_deny_list = IndexSet::from([&self.connect_name, &self.source_name]);
+            let mut directive_deny_list = IndexSet::from([&self.connect_name, &self.source_name]);
             if !extended_output_type.is_built_in() {
                 let visitor = ToSchemaVisitor::new(
+                    connector,
                     self.original_schema,
                     to_schema,
                     output_type,
@@ -305,6 +306,15 @@ mod helpers {
 
             let parent = object_field.parent();
             let parent_type = parent.get(self.original_schema.schema())?;
+
+            let federation_key = name!("federation__key");
+
+            // field on a type that's not Query or Mutation
+            if !connector.on_root_type {
+                directive_deny_list.insert(&federation_key);
+
+                // TODO: construct the correct key using input parameters/selections
+            }
 
             let field_type = FieldDefinition {
                 description: field_def.description.clone(),

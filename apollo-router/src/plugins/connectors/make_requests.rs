@@ -297,8 +297,7 @@ fn entities_from_request(
         return root_fields(request, schema);
     };
 
-    let (entities_field, typename_requested) =
-        graphql_utils::get_entity_fields(&request.operation_str)?;
+    let (entities_field, _) = graphql_utils::get_entity_fields(&request.operation_str)?;
 
     representations
         .as_array()
@@ -318,19 +317,13 @@ fn entities_from_request(
                 .ok_or_else(|| InvalidRepresentations("__typename is not a string".into()))?
                 .to_string();
 
-            // if the fetch node operation doesn't include __typename, then
-            // we're assuming this is for an interface object and we don't want
-            // to include a __typename in the response.
-            let typename = if typename_requested {
-                ResponseTypeName::Concrete(typename)
-            } else {
-                ResponseTypeName::Omitted
-            };
-
             Ok((
                 ResponseKey::Entity {
                     index: i,
-                    typename,
+                    // TODO: in the preview we used ::Omitted to indicate that
+                    // this is an interface object request, but we should
+                    // figure that out in a different way
+                    typename: ResponseTypeName::Concrete(typename),
                     selection_set: entities_field.selection_set.clone(),
                 },
                 RequestInputs {

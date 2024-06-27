@@ -119,8 +119,15 @@ pub(crate) mod mock_subgraph {
 async fn test_root_field() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
+    mock_api::user_1().mount(&mock_server).await;
+    mock_api::user_2().mount(&mock_server).await;
 
-    let response = execute(&mock_server.uri(), "query { users { id name } }", None).await;
+    let response = execute(
+        &mock_server.uri(),
+        "query { users { id name username } }",
+        None,
+    )
+    .await;
 
     insta::assert_json_snapshot!(response, @r###"
     {
@@ -128,11 +135,13 @@ async fn test_root_field() {
         "users": [
           {
             "id": 1,
-            "name": "Leanne Graham"
+            "name": "Leanne Graham",
+            "username": "Bret"
           },
           {
             "id": 2,
-            "name": "Ervin Howell"
+            "name": "Ervin Howell",
+            "username": "Antonette"
           }
         ]
       }
@@ -141,7 +150,11 @@ async fn test_root_field() {
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
-        vec![Matcher::new().method("GET").path("/users").build()],
+        vec![
+            Matcher::new().method("GET").path("/users").build(),
+            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users/2").build(),
+        ],
     );
 }
 

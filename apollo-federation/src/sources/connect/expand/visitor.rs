@@ -1,5 +1,6 @@
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Name;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
@@ -14,6 +15,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::FederationSchema;
 use crate::schema::ValidFederationSchema;
 use crate::sources::connect::json_selection::JSONSelectionVisitor;
+use crate::sources::connect::Connector;
 
 /// A JSONSelection visitor for schema building.
 ///
@@ -38,12 +40,23 @@ pub(super) struct ToSchemaVisitor<'a> {
 
 impl<'a> ToSchemaVisitor<'a> {
     pub fn new(
+        connector: &'a Connector,
         original_schema: &'a ValidFederationSchema,
         to_schema: &'a mut FederationSchema,
         initial_position: TypeDefinitionPosition,
         initial_type: &ExtendedType,
         directive_deny_list: &'a IndexSet<&'a Name>,
     ) -> ToSchemaVisitor<'a> {
+        let mut output_type_directive_deny_list = directive_deny_list.clone();
+
+        // never put a key on root connectors that don't provide entity resolvers
+        let federation_key = name!(federation__key);
+        if connector.on_root_type && !connector.entity {
+            output_type_directive_deny_list.insert(&federation_key);
+        }
+
+        // TODO: construct the correct key for connector.entity == true using input parameters/selections
+
         // Get the type information for the initial position, making sure to strip
         // off any unwanted directives.
         let initial_type = match initial_type {
@@ -51,7 +64,7 @@ impl<'a> ToSchemaVisitor<'a> {
                 description: object.description.clone(),
                 name: object.name.clone(),
                 implements_interfaces: object.implements_interfaces.clone(),
-                directives: filter_directives(directive_deny_list, &object.directives),
+                directives: filter_directives(&output_type_directive_deny_list, &object.directives),
                 fields: IndexMap::new(), // Will be filled in by subsequent visits
             })),
             ExtendedType::Scalar(_) => todo!(),
