@@ -86,7 +86,6 @@ use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
-
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::sources::connect::JSONSelection;
 
