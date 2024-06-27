@@ -1,11 +1,9 @@
 use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
-use std::sync::Arc;
 
 use apollo_compiler::ast::Name;
 use apollo_compiler::NodeStr;
-use indexmap::IndexMap;
 
 pub mod expand;
 mod json_selection;
@@ -31,12 +29,9 @@ pub use self::models::Connector;
 pub use self::models::HTTPMethod;
 pub use self::models::HttpJsonTransport;
 pub use self::models::Transport;
-use super::to_remove::SourceId;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::ObjectFieldDefinitionPosition;
 use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
-
-pub type Connectors = Arc<IndexMap<SourceId, Connector>>;
 
 #[derive(Debug, Clone)]
 pub struct ConnectId {
