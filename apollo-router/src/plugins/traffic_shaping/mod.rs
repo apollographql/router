@@ -9,7 +9,6 @@
 mod deduplication;
 pub(crate) mod rate;
 mod retry;
-pub(crate) mod timeout;
 
 use std::collections::HashMap;
 use std::num::NonZeroU64;
@@ -17,13 +16,15 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use futures::future::BoxFuture;
+use futures::Future;
+use futures::FutureExt;
+use futures::TryFutureExt;
 use http::header::CONTENT_ENCODING;
 use http::HeaderValue;
+use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use tower::retry::Retry;
 use tower::util::Either;
-use tower::util::Oneshot;
 use tower::BoxError;
 use tower::Service;
 use tower::ServiceBuilder;
@@ -33,9 +34,9 @@ use self::deduplication::QueryDeduplicationLayer;
 use self::rate::RateLimitLayer;
 pub(crate) use self::rate::RateLimited;
 pub(crate) use self::retry::RetryPolicy;
-pub(crate) use self::timeout::Elapsed;
-use self::timeout::TimeoutLayer;
 use crate::error::ConfigurationError;
+use crate::graphql;
+use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::register_plugin;
@@ -266,15 +267,7 @@ impl Plugin for TrafficShaping {
 pub(crate) type TrafficShapingSubgraphFuture<S> = Either<
     Either<
         BoxFuture<'static, Result<subgraph::Response, BoxError>>,
-        timeout::future::ResponseFuture<
-            Oneshot<
-                Either<
-                    Retry<RetryPolicy, Either<rate::service::RateLimit<S>, S>>,
-                    Either<rate::service::RateLimit<S>, S>,
-                >,
-                subgraph::Request,
-            >,
-        >,
+        BoxFuture<'static, Result<subgraph::Response, BoxError>>,
     >,
     <S as Service<subgraph::Request>>::Future,
 >;
@@ -295,9 +288,7 @@ impl TrafficShaping {
         supergraph::Request,
         Response = supergraph::Response,
         Error = BoxError,
-        Future = timeout::future::ResponseFuture<
-            Oneshot<tower::util::Either<rate::service::RateLimit<S>, S>, supergraph::Request>,
-        >,
+        Future = BoxFuture<'static, Result<supergraph::Response, BoxError>>,
     > + Clone
            + Send
            + Sync
@@ -310,14 +301,27 @@ impl TrafficShaping {
             + 'static,
         <S as Service<supergraph::Request>>::Future: std::marker::Send,
     {
+        let timeout = self
+            .config
+            .router
+            .as_ref()
+            .and_then(|r| r.timeout)
+            .unwrap_or(DEFAULT_TIMEOUT);
         ServiceBuilder::new()
-            .layer(TimeoutLayer::new(
-                self.config
-                    .router
-                    .as_ref()
-                    .and_then(|r| r.timeout)
-                    .unwrap_or(DEFAULT_TIMEOUT),
-            ))
+            .map_future_with_request_data(
+                |req: &supergraph::Request| req.context.clone(),
+                move |ctx, response| {
+                    request_timeout(timeout, response)
+                        .unwrap_or_else(|error| {
+                            supergraph::Response::error_builder()
+                                .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                .error(error)
+                                .context(ctx)
+                                .build()
+                        })
+                        .boxed()
+                },
+            )
             .option_layer(self.rate_limit_router.clone())
             .service(service)
     }
@@ -375,16 +379,23 @@ impl TrafficShaping {
                 tower::retry::RetryLayer::new(retry_policy)
             });
 
+            let timeout = config.shaping.timeout.unwrap_or(DEFAULT_TIMEOUT);
             Either::A(ServiceBuilder::new()
-
                 .option_layer(config.shaping.deduplicate_query.unwrap_or_default().then(
                   QueryDeduplicationLayer::default
                 ))
-                    .layer(TimeoutLayer::new(
-                        config.shaping
-                        .timeout
-                        .unwrap_or(DEFAULT_TIMEOUT),
-                    ))
+                    .map_future_with_request_data(
+                        |req: &subgraph::Request| req.context.clone(),
+                        move |ctx, response| {
+                            request_timeout(timeout, response).unwrap_or_else(|error| {
+                                subgraph::Response::error_builder()
+                                    .status_code(StatusCode::GATEWAY_TIMEOUT)
+                                    .error(error)
+                                    .context(ctx)
+                                    .build()
+                            }).boxed()
+                        },
+                    )
                     .option_layer(retry)
                     .option_layer(rate_limit)
                 .service(service)
@@ -412,6 +423,22 @@ impl TrafficShaping {
 }
 
 register_plugin!("apollo", "traffic_shaping", TrafficShaping);
+
+fn request_timeout<F, T>(
+    duration: Duration,
+    future: F,
+) -> impl Future<Output = Result<T, graphql::Error>>
+where
+    F: Future<Output = T> + std::marker::Send,
+{
+    tokio::time::timeout(duration, future).map_err(|_| {
+        tracing::info!(monotonic_counter.apollo_router_timeout = 1u64,);
+        graphql::Error::builder()
+            .message(String::from("Request timed out"))
+            .extension_code("REQUEST_TIMED_OUT")
+            .build()
+    })
+}
 
 #[cfg(test)]
 mod test {

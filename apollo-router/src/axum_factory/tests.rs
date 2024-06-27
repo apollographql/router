@@ -2384,6 +2384,15 @@ async fn test_supergraph_timeout() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
     let body = response.bytes().await.unwrap();
-    assert_eq!(std::str::from_utf8(&body).unwrap(), "request timed out");
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(body, json!({
+         "errors": [{
+             "message": "Request timed out",
+             "extensions": {
+                 "code": "REQUEST_TIMED_OUT"
+             }
+         }]
+    }));
 }
