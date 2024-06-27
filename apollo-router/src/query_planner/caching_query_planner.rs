@@ -225,10 +225,16 @@ where
         } else {
             cache_keys.len()
         };
-        tracing::info!(
-            "warming up the query plan cache with {} queries, this might take a while",
-            capacity
-        );
+
+        if capacity == 0 {
+            tracing::info!("no queries available to warm up the query plan cache",);
+            return;
+        } else {
+            tracing::info!(
+                "warming up the query plan cache with {} queries, this might take a while",
+                capacity
+            );
+        }
 
         // persisted queries are added first because they should get a lower priority in the LRU cache,
         // since a lot of them may be there to support old clients
