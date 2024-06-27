@@ -210,7 +210,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
 
     if let Some(http_arg) = directive
         .argument_by_name(&SOURCE_HTTP_ARGUMENT_NAME)
-        .and_then(|arg| Some(arg.as_object()?))
+        .and_then(|arg| arg.as_object())
     {
         // validate header arg
         let http_headers_arg = http_arg
@@ -737,7 +737,7 @@ fn parse_url(value: &Node<Value>, coordinate: &str, sources: &SourceMap) -> Resu
 
 fn validate_header_arg<'a>(
     directive_name: &Name,
-    argument_name: &String,
+    argument_name: &str,
     headers: &'a Node<Value>,
     source_map: &SourceMap,
     object: Option<&Name>,
