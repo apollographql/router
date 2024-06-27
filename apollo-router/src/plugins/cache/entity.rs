@@ -23,6 +23,7 @@ use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
+use super::invalidation::Invalidation;
 use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
@@ -58,6 +59,7 @@ pub(crate) struct EntityCache {
     enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
+    invalidation: Invalidation,
 }
 
 /// Configuration for entity caching
@@ -153,12 +155,15 @@ impl Plugin for EntityCache {
                 .into());
         }
 
+        let invalidation = Invalidation::new(storage.clone()).await?;
+
         Ok(Self {
             storage,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
+            invalidation,
         })
     }
 
@@ -279,6 +284,7 @@ impl EntityCache {
     where
         Self: Sized,
     {
+        let invalidation = Invalidation::new(Some(storage.clone())).await?;
         Ok(Self {
             storage: Some(storage),
             enabled: true,
@@ -288,6 +294,7 @@ impl EntityCache {
             }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
+            invalidation,
         })
     }
 }

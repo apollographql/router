@@ -1,10 +1,17 @@
+use fred::types::Scanner;
 use futures::StreamExt;
 use tower::BoxError;
+use tracing::Instrument;
 
-use crate::{cache::redis::RedisCacheStorage, notification::HandleStream, Notify};
+use crate::{
+    cache::redis::{RedisCacheStorage, RedisKey},
+    notification::HandleStream,
+    Notify,
+};
 
+#[derive(Clone)]
 pub(crate) struct Invalidation {
-    storage: RedisCacheStorage,
+    enabled: bool,
     notify: Notify<InvalidationTopic, Vec<InvalidationRequest>>,
 }
 
@@ -15,12 +22,14 @@ pub(crate) struct InvalidationTopic;
 pub(crate) struct InvalidationRequest {}
 
 impl Invalidation {
-    pub(crate) async fn new(storage: RedisCacheStorage) -> Result<Self, BoxError> {
+    pub(crate) async fn new(storage: Option<RedisCacheStorage>) -> Result<Self, BoxError> {
         let mut notify = Notify::new(None, None, None);
         let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
-        let s = storage.clone();
-        tokio::task::spawn(async move { start(s, handle.into_stream()).await });
-        Ok(Self { storage, notify })
+        let enabled = storage.is_some();
+        if let Some(storage) = storage {
+            tokio::task::spawn(async move { start(storage, handle.into_stream()).await });
+        }
+        Ok(Self { enabled, notify })
     }
 }
 
@@ -35,22 +44,57 @@ async fn start(
     mut handle: HandleStream<InvalidationTopic, Vec<InvalidationRequest>>,
 ) {
     while let Some(requests) = handle.next().await {
-        // FIXME: span over the entire loop
-        for request in requests {
-            //FIXME: span over one invalidation request
-            handle_request(&storage, &request).await;
-        }
+        handle_request_batch(&storage, requests)
+            .instrument(tracing::info_span!("cache.invalidation.batch"))
+            .await
+    }
+}
+
+async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<InvalidationRequest>) {
+    for request in requests {
+        handle_request(&storage, &request)
+            .instrument(tracing::info_span!("cache.invalidation.request"))
+            .await;
     }
 }
 
 async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationRequest) {
-    let keys = get_keys_matching(&storage, &request.key_prefix()).await;
-    //FIXME: can we batch deletes with redis pipeline?
-    for key in keys {
-        storage.delete(key).await;
-    }
-}
+    // FIXME: configurable batch size
+    let mut stream = storage.scan(request.key_prefix(), Some(10));
 
-async fn get_keys_matching(storage: &RedisCacheStorage, prefix: &str) -> Vec<String> {
-    todo!()
+    while let Some(res) = stream.next().await {
+        match res {
+            Err(e) => {
+                tracing::error!(
+                    pattern = request.key_prefix(),
+                    error = %e,
+                    message = "error scanning for key",
+                );
+                break;
+            }
+            Ok(scan_res) => {
+                if let Some(keys) = scan_res.results() {
+                    let keys = keys
+                        .iter()
+                        .filter_map(|k| k.as_str())
+                        .map(|k| RedisKey(k.to_string()))
+                        .collect::<Vec<_>>();
+                    storage.delete(keys).await;
+                }
+
+                if !scan_res.has_more() {
+                    break;
+                } else {
+                    if let Err(e) = scan_res.next() {
+                        tracing::error!(
+                            pattern = request.key_prefix(),
+                            error = %e,
+                            message = "error scanning for key",
+                        );
+                        break;
+                    }
+                }
+            }
+        }
+    }
 }

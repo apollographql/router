@@ -17,9 +17,11 @@ use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use fred::types::ScanResult;
 use fred::types::TlsConfig;
 use fred::types::TlsHostMapping;
 use futures::FutureExt;
+use futures::Stream;
 use tower::BoxError;
 use url::Url;
 
@@ -556,6 +558,28 @@ impl RedisCacheStorage {
             }
         };
         tracing::trace!("insert result {:?}", r);
+    }
+
+    pub(crate) async fn delete<K: KeyType>(&self, keys: Vec<RedisKey<K>>) -> Option<u32> {
+        self.inner
+            .del(keys)
+            .await
+            .map_err(|e| {
+                if !e.is_not_found() {
+                    tracing::error!(error = %e, "redis del error");
+                }
+                e
+            })
+            .ok()
+    }
+
+    pub(crate) fn scan(
+        &self,
+        pattern: String,
+        count: Option<u32>,
+    ) -> impl Stream<Item = Result<ScanResult, RedisError>> {
+        // FIXME: there is a specific method for cluster aware scanning, called scan_cluster
+        self.inner.scan(pattern, count, None)
     }
 }
 
