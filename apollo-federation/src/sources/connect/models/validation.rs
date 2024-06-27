@@ -770,7 +770,7 @@ fn validate_header_arg<'a>(
                     if let Some(s) = value.as_str() {
                         if !unique_header_set.insert(s) {
                             errors.push(Message {
-                                code: Code::HTTPHeaderNameClash,
+                                code: Code::HttpHeaderNameClash,
                                 message: format!("{pair_coordinate} must have unique values for `name` and `as` keys."),
                                 locations: Location::from_node(value.location(), source_map)
                                     .into_iter()
@@ -783,7 +783,7 @@ fn validate_header_arg<'a>(
                         if has_as_or_value {
                             // TODO: update this for correct error handling
                             errors.push(Message {
-                                code: Code::InvalidHTTPHeaderPair,
+                                code: Code::InvalidHttpHeaderPair,
                                 message: format!("{pair_coordinate} uses both `as` and `value` keys together. Please choose only one."),
                                 locations: Location::from_node(value.location(), source_map)
                                     .into_iter()
@@ -802,7 +802,7 @@ fn validate_header_arg<'a>(
                     if has_as_or_value {
                         // TODO: update this for correct error handling
                         errors.push(Message {
-                            code: Code::InvalidHTTPHeaderPair,
+                            code: Code::InvalidHttpHeaderPair,
                             message: format!("{pair_coordinate} uses both `as` and `value` keys together. Please choose only one."),
                             locations: Location::from_node(value.location(), source_map)
                                 .into_iter()
@@ -848,7 +848,7 @@ fn validate_header_name<'a>(
     match HeaderName::try_from(s) {
         Ok(_) => Ok(s),
         Err(_) => Err(Message {
-            code: Code::InvalidHTTPHeaderName,
+            code: Code::InvalidHttpHeaderName,
             message: format!(
                 "The value '{}' for '{}' at '{}' must be a valid HTTP header name.",
                 s, key, coordinate
@@ -878,7 +878,7 @@ fn validate_header_value<'a>(
     for v in &values {
         if http::HeaderValue::try_from(*v).is_err() {
             errors.push(Message {
-                code: Code::InvalidHTTPHeaderValue,
+                code: Code::InvalidHttpHeaderValue,
                 message: format!(
                     "The value '{}' at '{}' must be a valid HTTP header value.",
                     v, coordinate
@@ -1211,13 +1211,13 @@ pub enum Code {
     /// A group selection (`a { b }`) was used, but the field is not an object
     GroupSelectionIsNotObject,
     /// Invalid header name
-    InvalidHTTPHeaderName,
+    InvalidHttpHeaderName,
     /// Invalid header value
-    InvalidHTTPHeaderValue,
+    InvalidHttpHeaderValue,
     ///
-    HTTPHeaderNameClash,
+    HttpHeaderNameClash,
     ///
-    InvalidHTTPHeaderPair,
+    InvalidHttpHeaderPair,
 }
 
 impl Code {
