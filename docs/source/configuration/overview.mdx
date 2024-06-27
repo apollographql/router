@@ -770,7 +770,7 @@ Once you configure extended reference reporting, you can view enum value and inp
 Configuring extended reference reporting automatically turns on [enhanced operation checks](#enhanced-operation-checks), though you won't see an immediate change in your operations check behavior.
 
 This delay is because operation checks rely on historical operation data.
-To ensure sufficient data to distinguish between genuinely unused values and those simply not reported in legacy data, enhanced checks require some historical operations with extended reference reporting turned on.
+To ensure sufficient data to distinguish between genuinely unused values and those simply not reported in legacy data, enhanced checks require some operations with extended reference reporting turned on.
 
 #### Enhanced operation checks
 
@@ -805,7 +805,12 @@ Enhanced Check Behavior<br/>
 </td>
 
 <td>Changing or removing a default argument is generally considered a breaking change, but changing or removing default values for input object fields isn't.</td>
-<td>Changing or removing default values for input object fields is considered a breaking change.</td>
+<td>
+
+Changing or removing default values for input object fields is considered a breaking change.
+You can [configure checks to ignore default values changes](/graphos/delivery/schema-checks/#ignored-conditions-settings).
+
+</td>
 </tr>
 <tr>
 <td>
