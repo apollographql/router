@@ -5,6 +5,5 @@ extend schema
 )
 
 type Query {
-    resources: [String!]!
-    @connect(http: {GET: "file://data.json"}, selection: "")
+    something: String @connect(http: {GET: "http://127.0.0.1/something"}, selection: "&how")
 }

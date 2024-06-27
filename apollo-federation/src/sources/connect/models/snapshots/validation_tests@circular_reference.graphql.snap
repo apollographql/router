@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/circular_reference.graphql
+---
+[Message { code: CircularReference, message: "`@connect(selection:)` on `Query.me` path `me` contains a circular reference to `User`.", locations: [Location { line: 8, column: 60 }..Location { line: 8, column: 77 }, Location { line: 13, column: 4 }..Location { line: 13, column: 21 }] }]

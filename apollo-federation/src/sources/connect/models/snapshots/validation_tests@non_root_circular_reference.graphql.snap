@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/non_root_circular_reference.graphql
+---
+[Message { code: CircularReference, message: "`@connect(selection:)` on `Query.user` path `user.favoriteBooks.author` contains a circular reference to `Book`.", locations: [Location { line: 11, column: 19 }..Location { line: 23, column: 11 }, Location { line: 30, column: 4 }..Location { line: 30, column: 25 }, Location { line: 40, column: 4 }..Location { line: 40, column: 17 }] }]

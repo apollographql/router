@@ -5,11 +5,9 @@ extend schema
 )
 
 type Query {
-    user: User
-    @connect(http: {GET: "http://127.0.0.1:8000/resources"}, entity: true, selection: "")
+    me: User @connect(http: {GET: "http://127.0.0.1/something"}, selection: "id {blah}")
 }
 
 type User {
     id: ID!
-    name: String!
 }
