@@ -30,10 +30,6 @@
 ## HTTPHeaderMapping
 
 - name: is unique
-- name: is a valid header name
-- as: is a valid header name
-- value: is a list of valid header values
-- as: and value: cannot both be present
 
 ## Output selection
 
@@ -48,12 +44,14 @@
 */
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::iter::once;
 use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
@@ -63,12 +61,14 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
+use http::HeaderName;
 use itertools::Itertools;
 use url::Url;
 
 use crate::link::Link;
 use crate::sources::connect::json_selection::JSONSelectionVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
@@ -79,6 +79,7 @@ use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
+use crate::sources::connect::spec::schema::SOURCE_HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
@@ -183,25 +184,62 @@ const DEFAULT_CONNECT_DIRECTIVE_NAME: &str = "connect__connect";
 
 fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> SourceDirective {
     let name = SourceName::from_directive(directive);
-    let url_error = directive
-        .arguments
-        .iter()
-        .find(|arg| arg.name == SOURCE_HTTP_ARGUMENT_NAME)
-        .and_then(|arg| {
-            let value = arg.value.as_object()?.iter().find_map(|(name, value)| {
-                (*name == SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value)
-            })?;
-            parse_url(
-                value,
+    let mut errors = Vec::new();
+
+    if let Some(http_arg) = directive
+        .argument_by_name(&SOURCE_HTTP_ARGUMENT_NAME)
+        .and_then(|arg| arg.as_object())
+    {
+        // Validate URL argument
+        if let Some(url_value) = http_arg
+            .iter()
+            .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
+        {
+            if let Some(url_error) = parse_url(
+                url_value,
                 &source_base_url_argument_coordinate(&directive.name),
                 sources,
             )
             .err()
-        });
-    let mut errors = Vec::new();
-    if let Some(url_error) = url_error {
-        errors.push(url_error);
+            {
+                errors.push(url_error);
+            }
+        }
+
+        // Validate headers argument
+        if let Some(headers) = http_arg
+            .iter()
+            .find_map(|(key, value)| (key == &SOURCE_HEADERS_ARGUMENT_NAME).then_some(value))
+        {
+            let header_errors = validate_header_arg(
+                &directive.name,
+                &format!(
+                    "{}.{}",
+                    SOURCE_HTTP_ARGUMENT_NAME, SOURCE_HEADERS_ARGUMENT_NAME
+                ),
+                headers,
+                sources,
+                None,
+                None,
+            );
+
+            if !header_errors.is_empty() {
+                errors.extend(header_errors);
+            }
+        }
+    } else {
+        errors.push(Message {
+            code: Code::GraphQLError,
+            message: format!(
+                "{coordinate} must have a `{SOURCE_HTTP_ARGUMENT_NAME}` argument.",
+                coordinate = source_http_argument_coordinate(&directive.name),
+            ),
+            locations: Location::from_node(directive.location(), sources)
+                .into_iter()
+                .collect(),
+        })
     }
+
     SourceDirective {
         name,
         errors,
@@ -331,6 +369,7 @@ fn validate_field(
             .contains(method)
         })
         .collect();
+
     if http_methods.len() > 1 {
         errors.push(Message {
             code: Code::MultipleHttpMethods,
@@ -368,49 +407,6 @@ fn validate_field(
             ),
         )
     });
-
-    if let Some(entity_arg) = connect_directive
-        .arguments
-        .iter()
-        .find(|arg| arg.name == CONNECT_ENTITY_ARGUMENT_NAME)
-    {
-        let entity_arg_value = &entity_arg.value;
-        if entity_arg_value
-            .to_bool()
-            .is_some_and(|entity_arg_value| entity_arg_value)
-        {
-            if category != ObjectCategory::Query {
-                errors.push(Message {
-                    code: Code::EntityNotOnRootQuery,
-                    message: format!(
-                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
-                        coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
-                    ),
-                    locations: Location::from_node(entity_arg.location(), source_map)
-                        .into_iter()
-                        .collect(),
-                })
-                // TODO: Allow interfaces
-            } else if field.ty.is_list() || schema.get_object(field.ty.inner_named_type()).is_none()
-            {
-                errors.push(Message {
-                    code: Code::EntityTypeInvalid,
-                    message: format!(
-                        "{coordinate} is invalid. Entities can only be non-list, object types.",
-                        coordinate = connect_directive_entity_argument_coordinate(
-                            connect_directive_name,
-                            entity_arg_value.as_ref(),
-                            object,
-                            &field.name
-                        )
-                    ),
-                    locations: Location::from_node(entity_arg.location(), source_map)
-                        .into_iter()
-                        .collect(),
-                })
-            }
-        }
-    }
 
     if let Some(source_name) = connect_directive
         .arguments
@@ -479,6 +475,71 @@ fn validate_field(
             }
         }
     }
+
+    // validate header arg
+    let http_headers_arg = http_arg
+        .iter()
+        .find(|(key, _)| key == &CONNECT_HEADERS_ARGUMENT_NAME)
+        .map(|(_, value)| value);
+
+    if let Some(headers) = http_headers_arg {
+        let header_errors = validate_header_arg(
+            connect_directive_name,
+            &format!("{CONNECT_HTTP_ARGUMENT_NAME}.{CONNECT_HEADERS_ARGUMENT_NAME}"),
+            headers,
+            source_map,
+            Some(&object.name),
+            Some(&field.name),
+        );
+
+        if !header_errors.is_empty() {
+            errors.extend(header_errors)
+        }
+    }
+
+    if let Some(entity_arg) = connect_directive
+        .arguments
+        .iter()
+        .find(|arg| arg.name == CONNECT_ENTITY_ARGUMENT_NAME)
+    {
+        let entity_arg_value = &entity_arg.value;
+        if entity_arg_value
+            .to_bool()
+            .is_some_and(|entity_arg_value| entity_arg_value)
+        {
+            if category != ObjectCategory::Query {
+                errors.push(Message {
+                    code: Code::EntityNotOnRootQuery,
+                    message: format!(
+                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
+                        coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
+                    ),
+                    locations: Location::from_node(entity_arg.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                })
+                // TODO: Allow interfaces
+            } else if field.ty.is_list() || schema.get_object(field.ty.inner_named_type()).is_none()
+            {
+                errors.push(Message {
+                    code: Code::EntityTypeInvalid,
+                    message: format!(
+                        "{coordinate} is invalid. Entities can only be non-list, object types.",
+                        coordinate = connect_directive_entity_argument_coordinate(
+                            connect_directive_name,
+                            entity_arg_value.as_ref(),
+                            object,
+                            &field.name
+                        )
+                    ),
+                    locations: Location::from_node(entity_arg.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                })
+            }
+        }
+    }
+
     errors
 }
 
@@ -680,6 +741,199 @@ fn parse_url(value: &Node<Value>, coordinate: &str, sources: &SourceMap) -> Resu
     Ok(url)
 }
 
+fn validate_header_arg(
+    directive_name: &Name,
+    argument_name: &str,
+    headers: &Node<Value>,
+    source_map: &SourceMap,
+    object: Option<&Name>,
+    field: Option<&Name>,
+) -> Vec<Message> {
+    let mut errors = Vec::new();
+    let mut unique_header_set = HashSet::new();
+
+    headers
+        .as_list()
+        .map(|l| l.iter().filter_map(|o| o.as_object()).collect_vec())
+        .unwrap_or_else(|| headers.as_object().map(|o| vec![o]).unwrap_or_default())
+        .into_iter()
+        .for_each(|arg_pairs| {
+            let pair_coordinate = &directive_http_header_coordinate(
+                directive_name,
+                argument_name,
+                object,
+                field,
+            );
+
+            let name_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("name")).then_some(value));
+            let as_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("as")).then_some(value));
+            let value_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("value")).then_some(value));
+            let from_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("from")).then_some(value));
+
+            // validate `name`
+            if let Some(name_value) = name_arg {
+                if let Some(err) = validate_header_name(&name!("name"), name_value, pair_coordinate, source_map).err() {
+                    errors.push(err);
+                } else if let Some(s) = name_value.as_str() {
+                    if !unique_header_set.insert(s) {
+                        errors.push(Message {
+                            code: Code::HttpHeaderNameCollision,
+                            message: format!("{pair_coordinate} must have a unique value for `name`."),
+                            locations: Location::from_node(name_value.location(), source_map)
+                                .into_iter()
+                                .collect(),
+                        });
+                    }
+                }
+            } else {
+                // `name` must be provided
+                errors.push(Message {
+                    code: Code::HttpHeaderNameCollision,
+                    message: format!("{pair_coordinate} must include a `name` value."),
+                    // TODO: get this closer to the pair
+                    locations: Location::from_node(headers.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+
+            // validate `from`
+            if let Some(from_value) = from_arg {
+                if let Some(err) = validate_header_name(&name!("from"), from_value, pair_coordinate, source_map).err() {
+                    errors.push(err);
+                }
+            }
+
+            if let (Some(from_arg), Some(name_arg)) = (from_arg, name_arg) {
+                if let (Some(from_value), Some(name_value)) = (from_arg.as_str(), name_arg.as_str()) {
+                    if from_value == name_value {
+                        errors.push(Message {
+                            code: Code::HttpHeaderNameCollision,
+                            message: format!("{pair_coordinate} must have unique values for `name` and `from` keys."),
+                            locations: Location::from_node(from_arg.location(), source_map)
+                                .into_iter()
+                                .collect(),
+                        });
+                    }
+                }
+            }
+
+            // validate `as`
+            if let Some(as_value) = as_arg {
+                if let Some(err) = validate_header_name(&name!("as"), as_value, pair_coordinate, source_map).err() {
+                    errors.push(err);
+                }
+            }
+
+            if let (Some(as_arg), Some(name_arg)) = (as_arg, name_arg) {
+                if let (Some(as_value), Some(name_value)) = (as_arg.as_str(), name_arg.as_str()) {
+                    if as_value == name_value {
+                        errors.push(Message {
+                            code: Code::HttpHeaderNameCollision,
+                            message: format!("{pair_coordinate} must have unique values for `name` and `as` keys."),
+                            locations: Location::from_node(as_arg.location(), source_map)
+                                .into_iter()
+                                .collect(),
+                        });
+                    }
+                }
+            }
+
+            // validate `value`
+            if let Some(value_arg) = value_arg {
+                let header_value_errors = validate_header_value(value_arg, pair_coordinate, source_map);
+                if !header_value_errors.is_empty() {
+                    errors.extend(header_value_errors);
+                }
+            }
+
+            // `as` and `value` cannot be used together
+            if let (Some(as_arg), Some(_value_arg)) = (as_arg, value_arg) {
+                errors.push(Message {
+                    code: Code::InvalidHttpHeaderMapping,
+                    message: format!("{pair_coordinate} uses both `as` and `value` keys together. Please choose only one."),
+                    locations: Location::from_node(as_arg.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+
+            // `from`` and `value` cannot be used together
+            if let (Some(from_arg), Some(_value_arg)) = (from_arg, value_arg) {
+                errors.push(Message {
+                    code: Code::InvalidHttpHeaderMapping,
+                    message: format!("{pair_coordinate} uses both `from` and `value` keys together. Please choose only one."),
+                    locations: Location::from_node(from_arg.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+        });
+
+    errors
+}
+
+fn validate_header_name<'a>(
+    key: &Name,
+    value: &'a Node<Value>,
+    coordinate: &String,
+    source_map: &SourceMap,
+) -> Result<&'a str, Message> {
+    let s = value.as_str().ok_or_else(|| Message {
+        code: Code::GraphQLError,
+        message: format!("{coordinate} contains an invalid header name type."),
+        locations: Location::from_node(value.location(), source_map)
+            .into_iter()
+            .collect(),
+    })?;
+
+    HeaderName::try_from(s).map_err(|_| Message {
+        code: Code::InvalidHttpHeaderName,
+        message: format!(
+            "The value '{}' for '{}' at '{}' must be a valid HTTP header name.",
+            s, key, coordinate
+        ),
+        locations: Location::from_node(value.location(), source_map)
+            .into_iter()
+            .collect(),
+    })?;
+
+    Ok(s)
+}
+
+fn validate_header_value(
+    value: &Node<Value>,
+    coordinate: &String,
+    source_map: &SourceMap,
+) -> Vec<Message> {
+    let mut errors = Vec::new();
+
+    // Extract values from the node
+    let values: Vec<&str> = if let Some(list) = value.as_list() {
+        list.iter().filter_map(|v| v.as_str()).collect_vec()
+    } else {
+        value.as_str().map(|s| vec![s]).unwrap_or_default()
+    };
+
+    // Validate each value
+    for v in &values {
+        if http::HeaderValue::try_from(*v).is_err() {
+            errors.push(Message {
+                code: Code::InvalidHttpHeaderValue,
+                message: format!(
+                    "The value '{}' at '{}' must be a valid HTTP header value.",
+                    v, coordinate
+                ),
+                locations: Location::from_node(value.location(), source_map)
+                    .into_iter()
+                    .collect(),
+            });
+        }
+    }
+
+    errors
+}
+
 fn require_value_is_str<'a>(
     value: &'a Node<Value>,
     coordinate: &str,
@@ -749,6 +1003,29 @@ fn connect_directive_selection_coordinate(
     field: &Name,
 ) -> String {
     format!("`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on `{object_name}.{field}`", object_name = object.name)
+}
+
+fn directive_http_header_coordinate(
+    directive_name: &Name,
+    argument_name: &str,
+    object: Option<&Name>,
+    field: Option<&Name>,
+) -> String {
+    match (object, field) {
+        (Some(object), Some(field)) => {
+            format!(
+                "`@{directive_name}({argument_name}:)` on `{}.{}`",
+                object, field
+            )
+        }
+        _ => {
+            format!("`@{directive_name}({argument_name}:)`")
+        }
+    }
+}
+
+fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {
+    format!("`@{source_directive_name}({SOURCE_HTTP_ARGUMENT_NAME}:)`")
 }
 
 fn source_name_argument_coordinate(source_directive_name: &DirectiveName) -> String {
@@ -964,9 +1241,9 @@ pub enum Code {
     MultipleHttpMethods,
     /// The `@connect` directive is missing an HTTP method.
     MissingHttpMethod,
-    /// The `entity` argument should only be used on the root `Query` field
+    /// The `entity` argument should only be used on the root `Query` field.
     EntityNotOnRootQuery,
-    /// The `entity` argument should only be used with non-list, object types
+    /// The `entity` argument should only be used with non-list, object types.
     EntityTypeInvalid,
     /// A syntax error in `selection`
     InvalidJsonSelection,
@@ -976,6 +1253,15 @@ pub enum Code {
     SelectedFieldNotFound,
     /// A group selection (`a { b }`) was used, but the field is not an object
     GroupSelectionIsNotObject,
+    /// Invalid header name
+    /// The `name` and `as` mappings should be valid, HTTP header names.
+    InvalidHttpHeaderName,
+    /// The `value` mapping should be either a valid HTTP header value or list of valid HTTP header values.
+    InvalidHttpHeaderValue,
+    /// The `name` mapping must be unique for all headers.
+    HttpHeaderNameCollision,
+    /// Header mappings cannot include both `as` and `value` properties.
+    InvalidHttpHeaderMapping,
 }
 
 impl Code {
