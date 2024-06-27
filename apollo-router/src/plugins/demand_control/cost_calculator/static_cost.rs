@@ -477,7 +477,7 @@ mod tests {
             .await
             .unwrap();
         let query_plan = match planner_res.content.unwrap() {
-            QueryPlannerContent::Plan { plan, .. } => plan,
+            QueryPlannerContent::Plan { plan } => plan,
             _ => panic!("Query planner returned unexpected non-plan content"),
         };
 

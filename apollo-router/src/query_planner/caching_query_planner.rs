@@ -84,7 +84,7 @@ fn init_query_plan_from_redis(
     subgraph_schemas: &SubgraphSchemas,
     cache_entry: &mut Result<QueryPlannerContent, Arc<QueryPlannerError>>,
 ) -> Result<(), String> {
-    if let Ok(QueryPlannerContent::Plan { plan, .. }) = cache_entry {
+    if let Ok(QueryPlannerContent::Plan { plan }) = cache_entry {
         // Arc freshly deserialized from Redis should be unique, so this doesn’t clone:
         let plan = Arc::make_mut(plan);
         let root = Arc::make_mut(&mut plan.root);

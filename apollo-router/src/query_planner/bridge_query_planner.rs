@@ -21,7 +21,6 @@ use router_bridge::planner::PlanSuccess;
 use router_bridge::planner::Planner;
 use router_bridge::planner::UsageReporting;
 use serde::Deserialize;
-use serde::Serialize;
 use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use tower::Service;
@@ -405,7 +404,7 @@ impl BridgeQueryPlanner {
 
         let schema = Arc::new(schema.with_api_schema(api_schema));
 
-        let subgraph_schemas = planner.subgraphs().await?;
+        let subgraph_schemas = Arc::new(planner.subgraphs().await?);
 
         let introspection = if configuration.supergraph.introspection {
             Some(Arc::new(
@@ -429,7 +428,7 @@ impl BridgeQueryPlanner {
         Ok(Self {
             planner,
             schema,
-            subgraph_schemas: Arc::new(subgraph_schemas),
+            subgraph_schemas,
             introspection,
             enable_authorization_directives,
             configuration,
@@ -953,6 +952,7 @@ impl BridgeQueryPlanner {
 }
 
 /// Data coming from the `plan` method on the router_bridge
+// Note: Reexported under `apollo_compiler::_private`
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryPlanResult {
@@ -960,7 +960,7 @@ pub struct QueryPlanResult {
     pub(super) query_plan: QueryPlan,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 /// The root query plan container.
 pub(super) struct QueryPlan {

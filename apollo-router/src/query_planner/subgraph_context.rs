@@ -24,7 +24,7 @@ use crate::json_ext::Value;
 use crate::json_ext::ValueExt;
 use crate::spec::Schema;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct ContextualArguments {
     pub(crate) arguments: HashSet<String>, // a set of all argument names that will be passed to the subgraph. This is the unmodified name from the query plan
     pub(crate) count: usize, // the number of different sets of arguments that exist. This will either be 1 or the number of entities

@@ -144,30 +144,6 @@ pub(crate) struct FetchNode {
     pub(crate) authorization: Arc<CacheKeyMetadata>,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum Protocol {
-    #[default]
-    GraphQL,
-    RestWrapper(RestProtocolWrapper),
-    RestFetch(RestFetchNode),
-}
-
-#[derive(Debug, Default, Clone, PartialEq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct RestProtocolWrapper {
-    pub(crate) connector_service_name: String,
-    pub(crate) connector_graph_key: Option<Arc<String>>,
-    pub(crate) magic_finder_field: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
-pub(crate) struct RestFetchNode {
-    pub(crate) connector_service_name: String,
-    pub(crate) connector_graph_key: Arc<String>,
-    pub(crate) parent_service_name: String,
-}
-
 #[derive(Clone)]
 pub(crate) struct SubgraphOperation {
     serialized: String,
@@ -290,7 +266,7 @@ impl Display for QueryHash {
     }
 }
 
-#[derive(Default, Clone)]
+#[derive(Default)]
 pub(crate) struct Variables {
     pub(crate) variables: Object,
     pub(crate) inverted_paths: Vec<Vec<Path>>,
