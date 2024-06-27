@@ -179,6 +179,7 @@ fn inject_typename(data: &mut Value, typename: &str) {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
@@ -219,7 +220,10 @@ mod tests {
             .extension(ResponseKey::RootField {
                 name: "hello".to_string(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .expect("response builder");
@@ -228,7 +232,10 @@ mod tests {
             .extension(ResponseKey::RootField {
                 name: "hello2".to_string(),
                 typename: ResponseTypeName::Concrete("String".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .body(hyper::Body::from(r#"{"data":"world"}"#).into())
             .expect("response builder");
@@ -285,7 +292,10 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 0,
                 typename: ResponseTypeName::Concrete("User".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
             .expect("response builder");
@@ -294,7 +304,10 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 1,
                 typename: ResponseTypeName::Concrete("User".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#).into())
             .expect("response builder");
@@ -369,7 +382,10 @@ mod tests {
                 index: 0,
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .body(hyper::Body::from(r#"{"data":"value1"}"#).into())
             .expect("response builder");
@@ -379,7 +395,10 @@ mod tests {
                 index: 1,
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .body(hyper::Body::from(r#"{"data":"value2"}"#).into())
             .expect("response builder");
@@ -453,7 +472,10 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 0,
                 typename: ResponseTypeName::Concrete("User".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .status(404)
             .body(hyper::Body::from(r#"{"error":"not found"}"#).into())
@@ -463,7 +485,10 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 1,
                 typename: ResponseTypeName::Concrete("User".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .body(hyper::Body::from(r#"{"data":{"id":"2"}}"#).into())
             .expect("response builder");
@@ -472,7 +497,10 @@ mod tests {
             .extension(ResponseKey::Entity {
                 index: 2,
                 typename: ResponseTypeName::Concrete("User".to_string()),
-                selection_set: Default::default(), // TODO
+                selection_set: SelectionSet {
+                    ty: name!(Todo), // TODO
+                    selections: Default::default(),
+                },
             })
             .status(500)
             .body(hyper::Body::from(r#"{"error":"whoops"}"#).into())

@@ -85,6 +85,8 @@ impl FetchService {
             ..
         } = fetch_node;
 
+        let operation = operation.as_parsed().cloned();
+
         Box::pin(async move {
             connector_service_factory
                 .create()
@@ -92,7 +94,7 @@ impl FetchService {
                     ConnectRequest::builder()
                         .service_name(service_name)
                         .context(context)
-                        .operation_str(operation.to_string())
+                        .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .build(),
