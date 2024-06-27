@@ -98,6 +98,7 @@ mod tests {
     async fn coprocessor_returning_the_wrong_version_should_fail() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -157,6 +158,7 @@ mod tests {
     async fn coprocessor_returning_the_wrong_stage_should_fail() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -216,6 +218,7 @@ mod tests {
     async fn coprocessor_missing_request_control_should_fail() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -274,6 +277,7 @@ mod tests {
     async fn coprocessor_subgraph_with_invalid_response_body_should_fail() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -336,6 +340,7 @@ mod tests {
     async fn external_plugin_subgraph_request() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -465,6 +470,7 @@ mod tests {
     async fn external_plugin_subgraph_request_controlflow_break() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -533,6 +539,7 @@ mod tests {
     async fn external_plugin_subgraph_request_controlflow_break_with_message_string() {
         let subgraph_stage = SubgraphStage {
             request: SubgraphRequestConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -597,6 +604,7 @@ mod tests {
         let subgraph_stage = SubgraphStage {
             request: Default::default(),
             response: SubgraphResponseConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -708,6 +716,7 @@ mod tests {
         let supergraph_stage = SupergraphStage {
             request: Default::default(),
             response: SupergraphResponseConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -768,6 +777,7 @@ mod tests {
     async fn external_plugin_router_request() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -886,6 +896,7 @@ mod tests {
     async fn external_plugin_router_request_http_get() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -1014,6 +1025,7 @@ mod tests {
     async fn external_plugin_router_request_controlflow_break() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -1102,6 +1114,7 @@ mod tests {
     async fn external_plugin_router_request_controlflow_break_with_message_string() {
         let router_stage = RouterStage {
             request: RouterRequestConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -1181,6 +1194,7 @@ mod tests {
     async fn external_plugin_router_response() {
         let router_stage = RouterStage {
             response: RouterResponseConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,

@@ -16,12 +16,17 @@ use crate::graphql;
 use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugins::coprocessor::EXTERNAL_SPAN_NAME;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
 use crate::services::supergraph;
 
 /// What information is passed to a router request/response stage
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SupergraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -38,6 +43,9 @@ pub(super) struct SupergraphRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SupergraphResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SupergraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -183,7 +191,7 @@ async fn process_supergraph_request_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut request: supergraph::Request,
-    request_config: SupergraphRequestConf,
+    mut request_config: SupergraphRequestConf,
 ) -> Result<ControlFlow<supergraph::Response, supergraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -193,6 +201,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -331,6 +347,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // split the response into parts + body
     let (mut parts, body) = response.response.into_parts();
 
@@ -419,8 +443,16 @@ where
             let generator_map_context = map_context.clone();
             let generator_sdl_to_send = sdl_to_send.clone();
             let generator_id = map_context.id.clone();
+            let should_be_executed = response_config
+                .condition
+                .as_ref()
+                .map(|c| c.evaluate_event_response(&deferred_response, &map_context))
+                .unwrap_or(true);
 
             async move {
+                if !should_be_executed {
+                    return Ok(deferred_response);
+                }
                 let body_to_send = response_config.body.then(|| {
                     serde_json::to_value(&deferred_response).expect("serialization will not fail")
                 });
@@ -564,6 +596,7 @@ mod tests {
     async fn external_plugin_supergraph_request() {
         let supergraph_stage = SupergraphStage {
             request: SupergraphRequestConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -697,6 +730,7 @@ mod tests {
     async fn external_plugin_supergraph_request_controlflow_break() {
         let supergraph_stage = SupergraphStage {
             request: SupergraphRequestConf {
+                condition: Default::default(),
                 headers: false,
                 context: false,
                 body: true,
@@ -768,6 +802,7 @@ mod tests {
     async fn external_plugin_supergraph_response() {
         let supergraph_stage = SupergraphStage {
             response: SupergraphResponseConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,
@@ -899,6 +934,7 @@ mod tests {
     async fn multi_part() {
         let supergraph_stage = SupergraphStage {
             response: SupergraphResponseConf {
+                condition: Default::default(),
                 headers: true,
                 context: true,
                 body: true,

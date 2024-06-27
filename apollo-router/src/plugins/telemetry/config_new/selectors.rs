@@ -27,11 +27,11 @@ use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::FIRST_EVENT_CONTEXT_KEY;
 use crate::spec::operation_limits::OperationLimits;
 use crate::Context;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum TraceIdFormat {
     /// Open Telemetry trace ID, a hex string.
@@ -40,8 +40,7 @@ pub(crate) enum TraceIdFormat {
     Datadog,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -51,8 +50,7 @@ pub(crate) enum OperationName {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ErrorRepr {
     // /// The error code if available
@@ -61,8 +59,7 @@ pub(crate) enum ErrorRepr {
     Reason,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
@@ -77,16 +74,14 @@ pub(crate) enum Query {
     RootFields,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum SubgraphQuery {
     /// The raw query kind.
     String,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ResponseStatus {
     /// The http status code.
@@ -95,8 +90,7 @@ pub(crate) enum ResponseStatus {
     Reason,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -119,8 +113,7 @@ impl From<&RouterValue> for InstrumentValue<RouterSelector> {
     }
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
     /// A header from the request
@@ -251,9 +244,8 @@ impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
-#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
-#[derivative(Debug)]
+#[derivative(Debug, PartialEq)]
 pub(crate) enum SupergraphSelector {
     OperationName {
         /// The operation name from the query.
@@ -402,6 +394,11 @@ pub(crate) enum SupergraphSelector {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,
     },
+    /// Boolean returning true if it's the primary response and not events like subscription events or deferred responses
+    IsPrimaryResponse {
+        /// Boolean returning true if it's the primary response and not events like subscription events or deferred responses
+        is_primary_response: bool,
+    },
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -421,9 +418,8 @@ impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
-#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-#[derivative(Debug)]
+#[derivative(Debug, PartialEq)]
 pub(crate) enum SubgraphSelector {
     SubgraphOperationName {
         /// The operation name from the subgraph query.
@@ -934,6 +930,32 @@ impl Selector for SupergraphSelector {
                     None
                 }
             }
+            SupergraphSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = response.context.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SupergraphSelector::OperationKind { .. } => response
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SupergraphSelector::IsPrimaryResponse {
+                is_primary_response: is_primary,
+            } if *is_primary => Some(true.into()),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
@@ -987,6 +1009,34 @@ impl Selector for SupergraphSelector {
                     None
                 }
             }
+            SupergraphSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SupergraphSelector::OperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SupergraphSelector::IsPrimaryResponse {
+                is_primary_response: is_primary,
+            } if *is_primary => Some(opentelemetry::Value::Bool(
+                ctx.get_json_value(FIRST_EVENT_CONTEXT_KEY)
+                    == Some(serde_json_bytes::Value::Bool(true)),
+            )),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
@@ -995,6 +1045,28 @@ impl Selector for SupergraphSelector {
 
     fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
+            SupergraphSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SupergraphSelector::OperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
             SupergraphSelector::Query { query, .. } => {
                 let limits_opt = ctx
                     .extensions()
@@ -1026,6 +1098,12 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::IsPrimaryResponse {
+                is_primary_response: is_primary,
+            } if *is_primary => Some(opentelemetry::Value::Bool(
+                ctx.get_json_value(FIRST_EVENT_CONTEXT_KEY)
+                    == Some(serde_json_bytes::Value::Bool(true)),
+            )),
             _ => None,
         }
     }
