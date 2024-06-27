@@ -29,7 +29,6 @@ pub struct Request {
     pub query_plan: Arc<QueryPlan>,
 
     pub context: Context,
-
     /// Initial data coming from subscription event if it's a subscription
     pub(crate) source_stream_value: Option<Value>,
     /// Channel to send all parameters needed for the subscription

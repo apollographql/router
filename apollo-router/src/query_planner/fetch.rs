@@ -600,6 +600,11 @@ impl FetchNode {
         }
     }
 
+    #[cfg(test)]
+    pub(crate) fn service_name(&self) -> &str {
+        &self.service_name
+    }
+
     pub(crate) fn operation_kind(&self) -> &OperationKind {
         &self.operation_kind
     }
