@@ -203,8 +203,15 @@ impl Merger {
                         type_name.clone(),
                         value,
                     ),
-                    ExtendedType::Scalar(_value) => {
-                        // DO NOTHING
+                    ExtendedType::Scalar(value) => {
+                        if !value.is_built_in() {
+                            self.merge_scalar_type(
+                                &mut supergraph.types,
+                                subgraph_name.clone(),
+                                type_name.clone(),
+                                value,
+                            );
+                        }
                     }
                 }
             }
@@ -576,6 +583,25 @@ impl Merger {
             }
         }
     }
+
+    fn merge_scalar_type(
+        &self,
+        types: &mut IndexMap<Name, ExtendedType>,
+        subgraph_name: Name,
+        scalar_name: NamedType,
+        ty: &Node<ScalarType>,
+    ) {
+        let existing_type = types
+            .entry(scalar_name.clone())
+            .or_insert(copy_scalar_type(scalar_name, ty));
+        if let ExtendedType::Scalar(e) = existing_type {
+            let join_type_directives =
+                join_type_applied_directive(subgraph_name.clone(), iter::empty(), false);
+            e.make_mut().directives.extend(join_type_directives);
+        } else {
+            // conflict?
+        }
+    }
 }
 
 const EXECUTABLE_DIRECTIVE_LOCATIONS: [DirectiveLocation; 8] = [
@@ -603,6 +629,14 @@ fn is_mergeable_type(type_name: &str) -> bool {
         return false;
     }
     !FEDERATION_TYPES.contains(&type_name)
+}
+
+fn copy_scalar_type(scalar_name: Name, scalar_type: &Node<ScalarType>) -> ExtendedType {
+    ExtendedType::Scalar(Node::new(ScalarType {
+        description: scalar_type.description.clone(),
+        name: scalar_name,
+        directives: Default::default(),
+    }))
 }
 
 fn copy_enum_type(enum_name: Name, enum_type: &Node<EnumType>) -> ExtendedType {

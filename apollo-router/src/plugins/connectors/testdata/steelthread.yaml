@@ -31,6 +31,7 @@ subgraphs:
               id
               name
               username
+              rest: *
               """
               entity: true
             )
@@ -40,6 +41,7 @@ subgraphs:
           id: ID!
           name: String
           username: String
+          rest: JSON
           # c: String @external
           # d: String
           #   @requires(fields: "c")
@@ -49,6 +51,8 @@ subgraphs:
           #     selection: "$.phone"
           #   )
         }
+
+        scalar JSON
 
   graphql:
     routing_url: https://localhost:4001

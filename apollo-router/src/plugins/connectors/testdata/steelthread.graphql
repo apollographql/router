@@ -32,6 +32,9 @@ enum join__Graph {
   GRAPHQL @join__graph(name: "graphql", url: "https://localhost:4001")
 }
 
+scalar JSON
+  @join__type(graph: CONNECTORS)
+
 scalar link__Import
 
 enum link__Purpose {
@@ -51,7 +54,7 @@ type Query
   @join__type(graph: GRAPHQL)
 {
   users: [User] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id name"})
-  user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id\nname\nusername", entity: true})
+  user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$args.id}"}, selection: "id\nname\nusername\nrest: *", entity: true})
 }
 
 type User
@@ -61,5 +64,6 @@ type User
   id: ID!
   name: String @join__field(graph: CONNECTORS)
   username: String @join__field(graph: CONNECTORS)
+  rest: JSON @join__field(graph: CONNECTORS)
   c: String @join__field(graph: GRAPHQL)
 }

@@ -90,6 +90,25 @@ impl JSONSelection {
                     .iter()
                     .sorted_by(|a, b| Ord::cmp(b.name(), a.name()))
                     .for_each(|s| to_visit.push_front((current_depth, s)));
+                if let Some(star) = &sub.star {
+                    visitor.visit(
+                        star.0
+                            .as_ref()
+                            .expect("the initial star must have an alias")
+                            .name(),
+                    )?;
+                }
+            }
+        }
+
+        if let JSONSelection::Named(named) = &self {
+            if let Some(star) = &named.star {
+                visitor.visit(
+                    star.0
+                        .as_ref()
+                        .expect("the initial star must have an alias")
+                        .name(),
+                )?;
             }
         }
 
@@ -221,6 +240,21 @@ mod tests {
         |  |  c
         |  |  |  d
         |  |  |  |  e
+        "###);
+    }
+
+    #[test]
+    fn it_iterates_rest() {
+        let mut visited = Vec::new();
+        let visitor = TestVisitor::new(&mut visited);
+        let (unmatched, selection) = JSONSelection::parse("a b rest: *").unwrap();
+        assert!(unmatched.is_empty());
+
+        selection.visit(visitor).unwrap();
+        assert_snapshot!(print_visited(visited), @r###"
+        a
+        b
+        rest
         "###);
     }
 
