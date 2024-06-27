@@ -1,0 +1,19 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  resources: [String!]!
+    @connect(
+      http: {
+        GET: "http://127.0.0.1:8000/resources"
+        headers: [
+          { name: "Accept", value: "text/html" }
+          { name: "Accept", as: "Accept" }
+          { as: "Accept", value: "text/html" }
+          { name: "<Invalid-Header>", value: "my.host.name" }
+          { name: "Accept", as: "<Invalid-Header>" }
+          { name: "Host", value: "  Value with 😊 emoji and newline  \n " }
+        ]
+      }
+    )
+}

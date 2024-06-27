@@ -16,6 +16,7 @@ time = { version = "0.3.34", default-features = false, features = [
 ] }
 derive_more = "0.99.17"
 enum_dispatch = "0.3.13"
+http.workspace = true
 indexmap = "2.2.3"
 itertools = "0.13.0"
 lazy_static = "1.4.0"
