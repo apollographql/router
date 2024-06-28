@@ -44,6 +44,7 @@
 */
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 use std::fmt::Display;
 use std::iter::once;
 use std::ops::Range;
@@ -751,6 +752,7 @@ fn validate_header_arg(
     field: Option<&Name>,
 ) -> Vec<Message> {
     let mut errors = Vec::new();
+    let mut unique_header_set = HashSet::new();
 
     headers
         .as_list()
@@ -773,11 +775,21 @@ fn validate_header_arg(
             if let Some(name_value) = name_arg {
                 if let Some(err) = validate_header_name(&name!("name"), name_value, pair_coordinate, source_map).err() {
                     errors.push(err);
+                } else if let Some(s) = name_value.as_str() {
+                    if !unique_header_set.insert(s) {
+                        errors.push(Message {
+                            code: Code::HttpHeaderNameCollision,
+                            message: format!("{pair_coordinate} must have a unique value for `name`."),
+                            locations: Location::from_node(name_value.location(), source_map)
+                                .into_iter()
+                                .collect(),
+                        });
+                    }
                 }
             } else {
                 // `name` must be provided
                 errors.push(Message {
-                    code: Code::HttpHeaderNameClash,
+                    code: Code::HttpHeaderNameCollision,
                     message: format!("{pair_coordinate} must include a `name` value."),
                     // TODO: get this closer to the pair
                     locations: Location::from_node(headers.location(), source_map)
@@ -797,7 +809,7 @@ fn validate_header_arg(
                 if let (Some(as_value), Some(name_value)) = (as_arg.as_str(), name_arg.as_str()) {
                     if as_value == name_value {
                         errors.push(Message {
-                            code: Code::HttpHeaderNameClash,
+                            code: Code::HttpHeaderNameCollision,
                             message: format!("{pair_coordinate} must have unique values for `name` and `as` keys."),
                             locations: Location::from_node(as_arg.location(), source_map)
                                 .into_iter()
@@ -818,7 +830,7 @@ fn validate_header_arg(
             // `as` and `value` cannot be used together
             if let (Some(as_arg), Some(_value_arg)) = (as_arg, value_arg) {
                 errors.push(Message {
-                    code: Code::InvalidHttpHeaderPair,
+                    code: Code::InvalidHttpHeaderMapping,
                     message: format!("{pair_coordinate} uses both `as` and `value` keys together. Please choose only one."),
                     locations: Location::from_node(as_arg.location(), source_map)
                         .into_iter()
@@ -1200,9 +1212,9 @@ pub enum Code {
     MultipleHttpMethods,
     /// The `@connect` directive is missing an HTTP method.
     MissingHttpMethod,
-    /// The `entity` argument should only be used on the root `Query` field
+    /// The `entity` argument should only be used on the root `Query` field.
     EntityNotOnRootQuery,
-    /// The `entity` argument should only be used with non-list, object types
+    /// The `entity` argument should only be used with non-list, object types.
     EntityTypeInvalid,
     /// A syntax error in `selection`
     InvalidJsonSelection,
@@ -1213,13 +1225,14 @@ pub enum Code {
     /// A group selection (`a { b }`) was used, but the field is not an object
     GroupSelectionIsNotObject,
     /// Invalid header name
+    /// The `name` and `as` mappings should be valid, HTTP header names.
     InvalidHttpHeaderName,
-    /// Invalid header value
+    /// The `value` mapping should be either a valid HTTP header value or list of valid HTTP header values.
     InvalidHttpHeaderValue,
-    ///
-    HttpHeaderNameClash,
-    ///
-    InvalidHttpHeaderPair,
+    /// The `name` mapping must be unique for all headers.
+    HttpHeaderNameCollision,
+    /// Header mappings cannot include both `as` and `value` properties.
+    InvalidHttpHeaderMapping,
 }
 
 impl Code {
