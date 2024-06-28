@@ -34,6 +34,7 @@ use crate::graphql;
 use crate::graphql::IntoGraphQLErrors;
 use crate::graphql::Response;
 use crate::plugin::DynPlugin;
+use crate::plugins::connectors::query_plans::store_connectors_context;
 use crate::plugins::subscription::Subscription;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
@@ -126,6 +127,10 @@ impl Service<SupergraphRequest> for SupergraphService {
     }
 
     fn call(&mut self, req: SupergraphRequest) -> Self::Future {
+        if let Some(connectors) = &self.schema.connectors_by_service_name {
+            store_connectors_context(&req.context, connectors);
+        }
+
         // Consume our cloned services and allow ownership to be transferred to the async block.
         let clone = self.query_planner_service.clone();
 
