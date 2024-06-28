@@ -28,7 +28,7 @@ pub(crate) struct ConnectorService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors_by_service_name: IndexMap<NodeStr, Connector>,
+    pub(crate) connectors_by_service_name: Arc<IndexMap<NodeStr, Connector>>,
 }
 
 impl tower::Service<ConnectRequest> for ConnectorService {
@@ -111,7 +111,7 @@ pub(crate) struct ConnectorServiceFactory {
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors_by_service_name: IndexMap<NodeStr, Connector>,
+    pub(crate) connectors_by_service_name: Arc<IndexMap<NodeStr, Connector>>,
 }
 
 impl ConnectorServiceFactory {
@@ -120,7 +120,7 @@ impl ConnectorServiceFactory {
         subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
         http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         subscription_config: Option<SubscriptionConfig>,
-        connectors_by_service_name: IndexMap<NodeStr, Connector>,
+        connectors_by_service_name: Arc<IndexMap<NodeStr, Connector>>,
     ) -> Self {
         Self {
             http_service_factory,

@@ -10,10 +10,9 @@ use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::NodeStr;
 use apollo_federation::sources::connect::expand::expand_connectors;
+use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
-use apollo_federation::sources::connect::Connector;
 use http::Uri;
-use indexmap::IndexMap;
 use semver::Version;
 use semver::VersionReq;
 use sha2::Digest;
@@ -35,7 +34,7 @@ pub(crate) struct Schema {
     pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
     api_schema: Option<ApiSchema>,
     pub(crate) schema_id: Arc<String>,
-    pub(crate) connectors_by_service_name: Option<IndexMap<NodeStr, Connector>>,
+    pub(crate) connectors: Option<Connectors>,
 }
 
 /// TODO: remove and use apollo_federation::Supergraph unconditionally
@@ -83,18 +82,21 @@ impl Schema {
     pub(crate) fn parse(sdl: &str, config: &Configuration) -> Result<Self, SchemaError> {
         let start = Instant::now();
 
-        let mut api_schema: Option<ApiSchema> = None;
-        let mut connectors_by_service_name: Option<IndexMap<NodeStr, Connector>> = None;
+        let mut api_schema: Option<_> = None;
+        let mut connectors: Option<_> = None;
         let expansion = expand_connectors(sdl).map_err(SchemaError::Connector)?;
         let sdl = match expansion {
             ExpansionResult::Expanded {
                 ref raw_sdl,
                 api_schema: api,
-                connectors_by_service_name: mut connectors,
+                connectors: mut connectors_,
             } => {
-                override_connector_base_urls(config, connectors.values_mut());
+                override_connector_base_urls(
+                    config,
+                    Arc::make_mut(&mut connectors_.by_service_name).values_mut(),
+                );
                 api_schema = Some(ApiSchema(api));
-                connectors_by_service_name = Some(connectors);
+                connectors = Some(connectors_);
                 raw_sdl
             }
             ExpansionResult::Unchanged => sdl,
@@ -115,9 +117,13 @@ impl Schema {
                 let url = join_directive.argument_by_name("url")?.as_str()?;
                 Some((name, url))
             }) {
-                let is_connector = connectors_by_service_name
+                let is_connector = connectors
                     .as_ref()
-                    .map(|connectors| connectors.contains_key(&NodeStr::from(name)))
+                    .map(|connectors| {
+                        connectors
+                            .by_service_name
+                            .contains_key(&NodeStr::from(name))
+                    })
                     .unwrap_or_default();
 
                 let url = if is_connector {
@@ -177,7 +183,7 @@ impl Schema {
             implementers_map,
             api_schema,
             schema_id,
-            connectors_by_service_name,
+            connectors,
         })
     }
 

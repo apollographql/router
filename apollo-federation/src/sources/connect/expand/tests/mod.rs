@@ -18,14 +18,14 @@ fn it_expands_a_supergraph() {
     let ExpansionResult::Expanded {
         raw_sdl,
         api_schema,
-        connectors_by_service_name,
+        connectors,
     } = expand_connectors(to_expand).unwrap()
     else {
         panic!("expected expansion to actually expand subgraphs");
     };
 
     assert_snapshot!(api_schema);
-    assert_debug_snapshot!(connectors_by_service_name);
+    assert_debug_snapshot!(connectors.by_service_name);
     assert_snapshot!(raw_sdl);
 }
 
@@ -35,14 +35,14 @@ fn it_expands_a_realistic_supergraph() {
     let ExpansionResult::Expanded {
         raw_sdl,
         api_schema,
-        connectors_by_service_name,
+        connectors,
     } = expand_connectors(to_expand).unwrap()
     else {
         panic!("expected expansion to actually expand subgraphs");
     };
 
     assert_snapshot!(api_schema);
-    assert_debug_snapshot!(connectors_by_service_name);
+    assert_debug_snapshot!(connectors.by_service_name);
     assert_snapshot!(raw_sdl);
 }
 
@@ -52,13 +52,13 @@ fn it_expands_steelthread_supergraph() {
     let ExpansionResult::Expanded {
         raw_sdl,
         api_schema,
-        connectors_by_service_name,
+        connectors,
     } = expand_connectors(to_expand).unwrap()
     else {
         panic!("expected expansion to actually expand subgraphs");
     };
 
     assert_snapshot!(api_schema);
-    assert_debug_snapshot!(connectors_by_service_name);
+    assert_debug_snapshot!(connectors.by_service_name);
     assert_snapshot!(raw_sdl);
 }
