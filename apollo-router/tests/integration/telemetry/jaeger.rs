@@ -295,6 +295,41 @@ async fn test_span_customization() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[tokio::test(flavor = "multi_thread")]
+async fn test_decimal_trace_id() -> Result<(), BoxError> {
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Jaeger)
+        .config(include_str!("fixtures/jaeger_decimal_trace_id.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+    let query = json!({"query":"query ExampleQuery1 {topProducts{name}}","variables":{}});
+
+    let (id, result) = router.execute_query(&query).await;
+    let id_from_router: u128 = result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .to_str()
+        .unwrap_or_default()
+        .parse()
+        .expect("expected decimal trace ID");
+    assert_eq!(format!("{:x}", id_from_router), id.to_string());
+
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery1"),
+        &["client", "router", "subgraph"],
+        false,
+    )
+    .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
 async fn validate_trace(
     id: TraceId,
     query: &Value,

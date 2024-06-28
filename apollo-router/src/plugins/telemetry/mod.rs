@@ -561,7 +561,7 @@ impl Plugin for Telemetry {
                 let format_id = |trace_id: TraceId| {
                     let id = match config.exporters.tracing.response_trace_id.format {
                         TraceIdFormat::Hexadecimal => format!("{:032x}", trace_id),
-                        TraceIdFormat::Decimal => format!("{}", trace_id),
+                        TraceIdFormat::Decimal => format!("{}", u128::from_be_bytes(trace_id.to_bytes())),
                         TraceIdFormat::Datadog => trace_id.to_datadog()
                     };
 
