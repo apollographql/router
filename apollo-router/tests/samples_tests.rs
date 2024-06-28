@@ -446,6 +446,8 @@ impl TestExecution {
             {
                 writeln!(out, "subgraphs received requests:").unwrap();
                 for request in requests {
+                    writeln!(out, "\tmethod: {}", request.method).unwrap();
+                    writeln!(out, "\tpath: {}", request.url).unwrap();
                     writeln!(out, "\t{}\n", std::str::from_utf8(&request.body).unwrap()).unwrap();
                 }
             } else {
