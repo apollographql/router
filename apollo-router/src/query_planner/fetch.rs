@@ -12,6 +12,7 @@ use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
 use tokio::sync::broadcast;
+use tokio::sync::broadcast::Sender;
 use tower::ServiceExt;
 use tracing::instrument;
 use tracing::Instrument;
@@ -436,15 +437,25 @@ impl FetchNode {
             output_rewrites,
             service_name,
         );
+        Self::deferred_fetches(current_dir, id, deferred_fetches, &value, &errors);
+        (value, errors)
+    }
+
+    pub(crate) fn deferred_fetches(
+        current_dir: &Path,
+        id: Option<NodeStr>,
+        deferred_fetches: &HashMap<NodeStr, Sender<(Value, Vec<Error>)>>,
+        value: &Value,
+        errors: &[Error],
+    ) {
         if let Some(id) = id {
             if let Some(sender) = deferred_fetches.get(id.as_str()) {
                 tracing::info!(monotonic_counter.apollo.router.operations.defer.fetch = 1u64);
-                if let Err(e) = sender.clone().send((value.clone(), errors.clone())) {
+                if let Err(e) = sender.clone().send((value.clone(), Vec::from(errors))) {
                     tracing::error!("error sending fetch result at path {} and id {:?} for deferred response building: {}", current_dir, id, e);
                 }
             }
         }
-        (value, errors)
     }
 
     #[instrument(skip_all, level = "debug", name = "response_insert")]

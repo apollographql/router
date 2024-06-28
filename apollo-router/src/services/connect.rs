@@ -5,10 +5,10 @@ use std::sync::Arc;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::NodeStr;
-use serde_json_bytes::Value;
+use static_assertions::assert_impl_all;
 use tower::BoxError;
 
-use crate::error::Error;
+use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::query_planner::fetch::Variables;
 use crate::Context;
@@ -24,7 +24,12 @@ pub(crate) struct Request {
     pub(crate) variables: Variables,
 }
 
-pub(crate) type Response = (Value, Vec<Error>);
+assert_impl_all!(Response: Send);
+#[derive(Debug)]
+#[non_exhaustive]
+pub(crate) struct Response {
+    pub(crate) response: http::Response<graphql::Response>,
+}
 
 #[buildstructor::buildstructor]
 impl Request {

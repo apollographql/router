@@ -5,9 +5,10 @@ use apollo_federation::sources::connect::Connector;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 
+use crate::graphql;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
-use crate::services::connect;
+use crate::services::connect::Response;
 use crate::services::router::body::RouterBody;
 
 const ENTITIES: &str = "_entities";
@@ -34,7 +35,7 @@ pub(crate) async fn handle_responses(
     connector: &Connector,
     _schema: &Valid<Schema>,   // TODO for future apply_with_selection
     _document: Option<String>, // TODO pass in relevant selection set, not the whole operation
-) -> Result<connect::Response, HandleResponseError> {
+) -> Result<Response, HandleResponseError> {
     use HandleResponseError::*;
 
     let mut data = serde_json_bytes::Map::new();
@@ -142,7 +143,7 @@ pub(crate) async fn handle_responses(
             };
 
             errors.push(
-                crate::graphql::Error::builder()
+                graphql::Error::builder()
                     .message(format!("http error: {}", parts.status))
                     // todo path: ["_entities", i, "???"]
                     .extension_code(format!("{}", parts.status.as_u16()))
@@ -157,7 +158,17 @@ pub(crate) async fn handle_responses(
     } else {
         Value::Object(data)
     };
-    Ok((data, errors))
+
+    Ok(Response {
+        response: http::Response::builder()
+            .body(
+                graphql::Response::builder()
+                    .data(data)
+                    .errors(errors)
+                    .build(),
+            )
+            .unwrap(),
+    })
 }
 
 fn inject_typename(data: &mut Value, typename: &str) {
@@ -253,17 +264,33 @@ mod tests {
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
-        (
-            Object({
-                "hello": String(
-                    "world",
-                ),
-                "hello2": String(
-                    "world",
-                ),
-            }),
-            [],
-        )
+        Response {
+            response: Response {
+                status: 200,
+                version: HTTP/1.1,
+                headers: {},
+                body: Response {
+                    label: None,
+                    data: Some(
+                        Object({
+                            "hello": String(
+                                "world",
+                            ),
+                            "hello2": String(
+                                "world",
+                            ),
+                        }),
+                    ),
+                    path: None,
+                    errors: [],
+                    extensions: {},
+                    has_next: None,
+                    subscribed: None,
+                    created_at: None,
+                    incremental: [],
+                },
+            },
+        }
         "###);
     }
 
@@ -331,29 +358,45 @@ mod tests {
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
-        (
-            Object({
-                "_entities": Array([
-                    Object({
-                        "id": String(
-                            "1",
-                        ),
-                        "__typename": String(
-                            "User",
-                        ),
-                    }),
-                    Object({
-                        "id": String(
-                            "2",
-                        ),
-                        "__typename": String(
-                            "User",
-                        ),
-                    }),
-                ]),
-            }),
-            [],
-        )
+        Response {
+            response: Response {
+                status: 200,
+                version: HTTP/1.1,
+                headers: {},
+                body: Response {
+                    label: None,
+                    data: Some(
+                        Object({
+                            "_entities": Array([
+                                Object({
+                                    "id": String(
+                                        "1",
+                                    ),
+                                    "__typename": String(
+                                        "User",
+                                    ),
+                                }),
+                                Object({
+                                    "id": String(
+                                        "2",
+                                    ),
+                                    "__typename": String(
+                                        "User",
+                                    ),
+                                }),
+                            ]),
+                        }),
+                    ),
+                    path: None,
+                    errors: [],
+                    extensions: {},
+                    has_next: None,
+                    subscribed: None,
+                    created_at: None,
+                    incremental: [],
+                },
+            },
+        }
         "###);
     }
 
@@ -423,29 +466,45 @@ mod tests {
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
-        (
-            Object({
-                "_entities": Array([
-                    Object({
-                        "__typename": String(
-                            "User",
-                        ),
-                        "field": String(
-                            "value1",
-                        ),
-                    }),
-                    Object({
-                        "__typename": String(
-                            "User",
-                        ),
-                        "field": String(
-                            "value2",
-                        ),
-                    }),
-                ]),
-            }),
-            [],
-        )
+        Response {
+            response: Response {
+                status: 200,
+                version: HTTP/1.1,
+                headers: {},
+                body: Response {
+                    label: None,
+                    data: Some(
+                        Object({
+                            "_entities": Array([
+                                Object({
+                                    "__typename": String(
+                                        "User",
+                                    ),
+                                    "field": String(
+                                        "value1",
+                                    ),
+                                }),
+                                Object({
+                                    "__typename": String(
+                                        "User",
+                                    ),
+                                    "field": String(
+                                        "value2",
+                                    ),
+                                }),
+                            ]),
+                        }),
+                    ),
+                    path: None,
+                    errors: [],
+                    extensions: {},
+                    has_next: None,
+                    subscribed: None,
+                    created_at: None,
+                    incremental: [],
+                },
+            },
+        }
         "###);
     }
 
@@ -527,50 +586,66 @@ mod tests {
         .unwrap();
 
         assert_debug_snapshot!(res, @r###"
-        (
-            Object({
-                "_entities": Array([
-                    Null,
-                    Object({
-                        "id": String(
-                            "2",
-                        ),
-                        "__typename": String(
-                            "User",
-                        ),
-                    }),
-                    Null,
-                ]),
-            }),
-            [
-                Error {
-                    message: "http error: 404 Not Found",
-                    locations: [],
+        Response {
+            response: Response {
+                status: 200,
+                version: HTTP/1.1,
+                headers: {},
+                body: Response {
+                    label: None,
+                    data: Some(
+                        Object({
+                            "_entities": Array([
+                                Null,
+                                Object({
+                                    "id": String(
+                                        "2",
+                                    ),
+                                    "__typename": String(
+                                        "User",
+                                    ),
+                                }),
+                                Null,
+                            ]),
+                        }),
+                    ),
                     path: None,
-                    extensions: {
-                        "connector": String(
-                            "test label",
-                        ),
-                        "code": String(
-                            "404",
-                        ),
-                    },
+                    errors: [
+                        Error {
+                            message: "http error: 404 Not Found",
+                            locations: [],
+                            path: None,
+                            extensions: {
+                                "connector": String(
+                                    "test label",
+                                ),
+                                "code": String(
+                                    "404",
+                                ),
+                            },
+                        },
+                        Error {
+                            message: "http error: 500 Internal Server Error",
+                            locations: [],
+                            path: None,
+                            extensions: {
+                                "connector": String(
+                                    "test label",
+                                ),
+                                "code": String(
+                                    "500",
+                                ),
+                            },
+                        },
+                    ],
+                    extensions: {},
+                    has_next: None,
+                    subscribed: None,
+                    created_at: None,
+                    incremental: [],
                 },
-                Error {
-                    message: "http error: 500 Internal Server Error",
-                    locations: [],
-                    path: None,
-                    extensions: {
-                        "connector": String(
-                            "test label",
-                        ),
-                        "code": String(
-                            "500",
-                        ),
-                    },
-                },
-            ],
-        )
+            },
+        }
         "###);
     }
 }

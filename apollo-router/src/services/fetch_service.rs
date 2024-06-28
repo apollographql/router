@@ -14,7 +14,6 @@ use super::fetch::BoxService;
 use super::new_service::ServiceFactory;
 use super::ConnectRequest;
 use super::SubgraphRequest;
-use crate::graphql;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
 use crate::plugins::subscription::SubscriptionConfig;
@@ -80,6 +79,7 @@ impl FetchService {
         let FetchRequest {
             fetch_node,
             supergraph_request,
+            deferred_fetches,
             variables,
             context,
             current_dir,
@@ -91,6 +91,7 @@ impl FetchService {
             service_name,
             requires,
             output_rewrites,
+            id,
             ..
         } = fetch_node;
 
@@ -98,7 +99,7 @@ impl FetchService {
         let operation = operation.as_parsed().cloned();
 
         Box::pin(async move {
-            let (data, errors) = connector_service_factory
+            let (_parts, response) = connector_service_factory
                 .create()
                 .oneshot(
                     ConnectRequest::builder()
@@ -109,14 +110,11 @@ impl FetchService {
                         .variables(variables)
                         .build(),
                 )
-                .await?;
+                .await?
+                .response
+                .into_parts();
 
-            let response = graphql::Response::builder()
-                .data(data)
-                .errors(errors)
-                .build();
-
-            Ok(FetchNode::response_at_path(
+            let (value, errors) = FetchNode::response_at_path(
                 &schema,
                 &current_dir,
                 paths,
@@ -124,7 +122,9 @@ impl FetchService {
                 &requires,
                 &output_rewrites,
                 &service_name,
-            ))
+            );
+            FetchNode::deferred_fetches(&current_dir, id, &deferred_fetches, &value, &errors);
+            Ok((value, errors))
         })
     }
 
