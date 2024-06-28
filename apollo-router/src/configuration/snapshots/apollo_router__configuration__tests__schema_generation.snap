@@ -1430,6 +1430,14 @@ expression: "&schema"
         "endpoint": {
           "$ref": "#/definitions/UriEndpoint",
           "description": "#/definitions/UriEndpoint"
+        },
+        "resource_mappings": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name subgraph_request -> subgraph.name http_request -> http.route",
+          "type": "object"
         }
       },
       "required": [
@@ -6793,6 +6801,13 @@ expression: "&schema"
           "description": "Format the Trace ID as a decimal number\n\n(e.g. Trace ID 16 -> 16)",
           "enum": [
             "decimal"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Datadog",
+          "enum": [
+            "datadog"
           ],
           "type": "string"
         }
