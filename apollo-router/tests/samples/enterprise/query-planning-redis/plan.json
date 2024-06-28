@@ -9,12 +9,20 @@
                 "accounts": {
                     "requests": [
                         {
-                            "request": {"query":"{me{name}}"},
-                            "response": {"data": { "me": { "name": "test" } } }
+                            "request": {
+                                "body": {"query":"{me{name}}"}
+                            },
+                            "response": {
+                                "body": {"data": { "me": { "name": "test" } } }
+                            }
                         },
                         {
-                            "request": {"query":"{me{nom:name}}"},
-                            "response": {"data": { "me": { "nom": "test" } } }
+                            "request": {
+                                "body": {"query":"{me{nom:name}}"}
+                            },
+                            "response": {
+                                "body": {"data": { "me": { "nom": "test" } } }
+                            }
                         }
                     ]
                 }

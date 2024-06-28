@@ -18,6 +18,8 @@ use serde::Deserialize;
 use serde_json::Value;
 use tokio::runtime::Runtime;
 use wiremock::matchers::body_partial_json;
+use wiremock::matchers::header;
+use wiremock::matchers::method;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
@@ -69,7 +71,11 @@ fn lookup_dir(
                 let plan: Plan = match serde_json::from_str(&s) {
                     Ok(data) => data,
                     Err(e) => {
-                        return Err(format!("could not deserialize test plan: {e}").into());
+                        return Err(format!(
+                            "could not deserialize test plan at {}: {e}",
+                            path.display()
+                        )
+                        .into());
                     }
                 };
 
@@ -186,9 +192,27 @@ impl TestExecution {
         let mut subgraph_overrides = HashMap::new();
 
         for (name, subgraph) in subgraphs {
-            for SubgraphRequest { request, response } in &subgraph.requests {
-                Mock::given(body_partial_json(request))
-                    .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            for SubgraphRequestMock { request, response } in &subgraph.requests {
+                let mut builder = Mock::given(body_partial_json(&request.body));
+
+                if let Some(s) = request.method.as_deref() {
+                    builder = builder.and(method(s));
+                }
+
+                if let Some(s) = request.path.as_deref() {
+                    builder = builder.and(wiremock::matchers::path(s));
+                }
+
+                for (header_name, header_value) in &request.headers {
+                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
+                }
+
+                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
+                for (header_name, header_value) in &response.headers {
+                    res = res.append_header(header_name.as_str(), header_value.as_str());
+                }
+                builder
+                    .respond_with(res.set_body_json(&response.body))
                     .mount(&subgraphs_server)
                     .await;
             }
@@ -251,9 +275,27 @@ impl TestExecution {
         let mut subgraph_overrides = HashMap::new();
 
         for (name, subgraph) in &self.subgraphs {
-            for SubgraphRequest { request, response } in &subgraph.requests {
-                Mock::given(body_partial_json(request))
-                    .respond_with(ResponseTemplate::new(200).set_body_json(response))
+            for SubgraphRequestMock { request, response } in &subgraph.requests {
+                let mut builder = Mock::given(body_partial_json(&request.body));
+
+                if let Some(s) = request.method.as_deref() {
+                    builder = builder.and(method(s));
+                }
+
+                if let Some(s) = request.path.as_deref() {
+                    builder = builder.and(wiremock::matchers::path(s));
+                }
+
+                for (header_name, header_value) in &request.headers {
+                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
+                }
+
+                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
+                for (header_name, header_value) in &response.headers {
+                    res = res.append_header(header_name.as_str(), header_value.as_str());
+                }
+                builder
+                    .respond_with(res.set_body_json(&response.body))
                     .mount(&subgraphs_server)
                     .await;
             }
@@ -439,11 +481,28 @@ enum Action {
 
 #[derive(Clone, Deserialize)]
 struct Subgraph {
-    requests: Vec<SubgraphRequest>,
+    requests: Vec<SubgraphRequestMock>,
+}
+
+#[derive(Clone, Deserialize)]
+struct SubgraphRequestMock {
+    request: SubgraphRequest,
+    response: SubgraphResponse,
 }
 
 #[derive(Clone, Deserialize)]
 struct SubgraphRequest {
-    request: Value,
-    response: Value,
+    method: Option<String>,
+    path: Option<String>,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+    body: Value,
+}
+
+#[derive(Clone, Deserialize)]
+struct SubgraphResponse {
+    status: Option<u16>,
+    #[serde(default)]
+    headers: HashMap<String, String>,
+    body: Value,
 }
