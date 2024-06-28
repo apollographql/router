@@ -770,6 +770,7 @@ fn validate_header_arg(
             let name_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("name")).then_some(value));
             let as_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("as")).then_some(value));
             let value_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("value")).then_some(value));
+            let from_arg = arg_pairs.iter().find_map(|(key, value)| (key == &name!("from")).then_some(value));
 
             // validate `name`
             if let Some(name_value) = name_arg {
@@ -797,6 +798,27 @@ fn validate_header_arg(
                         .collect(),
                 });
             }
+
+            // validate `from`
+            if let Some(from_value) = from_arg {
+                if let Some(err) = validate_header_name(&name!("from"), from_value, pair_coordinate, source_map).err() {
+                    errors.push(err);
+                }
+            }
+
+            if let (Some(from_arg), Some(name_arg)) = (from_arg, name_arg) {
+                if let (Some(from_value), Some(name_value)) = (from_arg.as_str(), name_arg.as_str()) {
+                    if from_value == name_value {
+                        errors.push(Message {
+                            code: Code::HttpHeaderNameCollision,
+                            message: format!("{pair_coordinate} must have unique values for `name` and `from` keys."),
+                            locations: Location::from_node(from_arg.location(), source_map)
+                                .into_iter()
+                                .collect(),
+                        });
+                    }
+                }
+            } 
 
             // validate `as`
             if let Some(as_value) = as_arg {
@@ -833,6 +855,17 @@ fn validate_header_arg(
                     code: Code::InvalidHttpHeaderMapping,
                     message: format!("{pair_coordinate} uses both `as` and `value` keys together. Please choose only one."),
                     locations: Location::from_node(as_arg.location(), source_map)
+                        .into_iter()
+                        .collect(),
+                });
+            }
+
+            // `from`` and `value` cannot be used together
+            if let (Some(from_arg), Some(_value_arg)) = (from_arg, value_arg) {
+                errors.push(Message {
+                    code: Code::InvalidHttpHeaderMapping,
+                    message: format!("{pair_coordinate} uses both `from` and `value` keys together. Please choose only one."),
+                    locations: Location::from_node(from_arg.location(), source_map)
                         .into_iter()
                         .collect(),
                 });
