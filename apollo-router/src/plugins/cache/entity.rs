@@ -59,7 +59,7 @@ pub(crate) struct EntityCache {
     enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
-    invalidation: Invalidation,
+    pub(crate) invalidation: Invalidation,
 }
 
 /// Configuration for entity caching

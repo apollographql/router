@@ -1,6 +1,9 @@
 use fred::types::Scanner;
 use futures::SinkExt;
 use futures::StreamExt;
+use serde::Deserialize;
+use serde::Serialize;
+use serde_json_bytes::Value;
 use tower::BoxError;
 use tracing::Instrument;
 
@@ -18,9 +21,6 @@ pub(crate) struct Invalidation {
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
-
-#[derive(Clone, Debug)]
-pub(crate) struct InvalidationRequest {}
 
 impl Invalidation {
     pub(crate) async fn new(storage: Option<RedisCacheStorage>) -> Result<Self, BoxError> {
@@ -45,12 +45,6 @@ impl Invalidation {
         }
 
         Ok(())
-    }
-}
-
-impl InvalidationRequest {
-    fn key_prefix(&self) -> String {
-        todo!()
     }
 }
 
@@ -109,6 +103,38 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
                         break;
                     }
                 }
+            }
+        }
+    }
+
+    println!("handle_request end");
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(tag = "kind")]
+pub(crate) enum InvalidationRequest {
+    Subgraph {
+        subgraph: String,
+    },
+    Type {
+        subgraph: String,
+        r#type: String,
+    },
+    Entity {
+        subgraph: String,
+        r#type: String,
+        key: Value,
+    },
+}
+
+impl InvalidationRequest {
+    fn key_prefix(&self) -> String {
+        match self {
+            InvalidationRequest::Subgraph { subgraph } => {
+                format!("subgraph:{subgraph}",)
+            }
+            _ => {
+                todo!()
             }
         }
     }
