@@ -91,7 +91,10 @@ impl Schema {
                 api_schema: api,
                 connectors: mut connectors_,
             } => {
-                override_connector_base_urls(config, connectors_.by_service_name.values_mut());
+                override_connector_base_urls(
+                    config,
+                    Arc::make_mut(&mut connectors_.by_service_name).values_mut(),
+                );
                 api_schema = Some(ApiSchema(api));
                 connectors = Some(connectors_);
                 raw_sdl

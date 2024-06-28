@@ -27,7 +27,7 @@ mod visitor;
 use visitor::ToSchemaVisitor;
 
 pub struct Connectors {
-    pub by_service_name: IndexMap<NodeStr, Connector>,
+    pub by_service_name: Arc<IndexMap<NodeStr, Connector>>,
     pub labels_by_service_name: Arc<IndexMap<String, String>>,
 }
 
@@ -114,7 +114,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         raw_sdl: new_supergraph.schema().serialize().to_string(),
         api_schema: api_schema.schema().clone(),
         connectors: Connectors {
-            by_service_name: connectors_by_service_name,
+            by_service_name: Arc::new(connectors_by_service_name),
             labels_by_service_name: Arc::new(labels_by_service_name),
         },
     })
