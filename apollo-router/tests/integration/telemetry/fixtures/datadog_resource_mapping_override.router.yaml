@@ -12,7 +12,7 @@ telemetry:
         enable_span_mapping: true
         batch_processor:
           scheduled_delay: 100ms
-        resource_mappings:
+        resource_mapping:
           router: graphql.operation.name
           supergraph: override.name
 

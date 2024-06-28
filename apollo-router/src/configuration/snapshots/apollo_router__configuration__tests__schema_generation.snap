@@ -1431,7 +1431,7 @@ expression: "&schema"
           "$ref": "#/definitions/UriEndpoint",
           "description": "#/definitions/UriEndpoint"
         },
-        "resource_mappings": {
+        "resource_mapping": {
           "additionalProperties": {
             "type": "string"
           },

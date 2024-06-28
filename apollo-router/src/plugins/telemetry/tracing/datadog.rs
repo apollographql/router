@@ -65,7 +65,7 @@ pub(crate) struct Config {
     /// subgraph_request -> subgraph.name
     /// http_request -> http.route
     #[serde(default)]
-    resource_mappings: HashMap<String, String>,
+    resource_mapping: HashMap<String, String>,
 }
 
 impl TracingConfigurator for Config {
@@ -85,7 +85,7 @@ impl TracingConfigurator for Config {
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
         let resource_mappings = self.enable_span_mapping.then(|| {
             let mut resource_mappings = default_resource_mappings();
-            resource_mappings.extend(self.resource_mappings.clone());
+            resource_mappings.extend(self.resource_mapping.clone());
             resource_mappings
                 .iter()
                 .map(|(k, v)| (k.clone(), opentelemetry::Key::from(v.clone())))
