@@ -3,9 +3,6 @@ extern crate core;
 use std::collections::HashSet;
 use std::time::Duration;
 
-use crate::integration::common::Telemetry;
-use crate::integration::common::ValueExt;
-use crate::integration::IntegrationTest;
 use anyhow::anyhow;
 use itertools::Itertools;
 use opentelemetry_api::trace::TraceId;
@@ -20,6 +17,10 @@ use wiremock::matchers::path;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
+
+use crate::integration::common::Telemetry;
+use crate::integration::common::ValueExt;
+use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {

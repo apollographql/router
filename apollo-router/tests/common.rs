@@ -602,16 +602,15 @@ impl IntegrationTest {
             match client.execute(request).await {
                 Ok(response) => (
                     TraceId::from_hex(
-                        &response
+                        response
                             .headers()
                             .get("apollo-custom-trace-id")
                             .cloned()
                             .unwrap_or(HeaderValue::from_static("no-trace-id"))
                             .to_str()
-                            .unwrap_or_default()
-                            .to_string(),
+                            .unwrap_or_default(),
                     )
-                    .unwrap_or_else(|_| TraceId::INVALID),
+                    .unwrap_or(TraceId::INVALID),
                     response,
                 ),
                 Err(err) => {
