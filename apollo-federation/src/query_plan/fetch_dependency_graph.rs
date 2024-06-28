@@ -1817,16 +1817,25 @@ impl FetchDependencyGraph {
         sibling_id: NodeIndex,
     ) -> Result<bool, FederationError> {
         let node = self.node_weight(node_id)?;
-        let own_parents: Vec<ParentRelation> = self.parents_relations_of(node_id).collect();
+
+        let mut own_parents_iter = self.graph
+            .edges_directed(node_id, petgraph::Direction::Incoming);
+        let own_parent_id = own_parents_iter.next().unwrap().source();
+        let own_parent_has_more = own_parents_iter.next().is_some();
 
         let sibling = self.node_weight(sibling_id)?;
-        let sibling_parents: Vec<ParentRelation> = self.parents_relations_of(sibling_id).collect();
+
+        let mut sibling_parents_iter = self.graph
+            .edges_directed(sibling_id, petgraph::Direction::Incoming);
+        let sibling_parent_id = sibling_parents_iter.next().unwrap().source();
+        let sibling_parent_has_more = sibling_parents_iter.next().is_some();
+
         Ok(node.defer_ref == sibling.defer_ref
             && node.subgraph_name == sibling.subgraph_name
             && node.merge_at == sibling.merge_at
-            && own_parents.len() == 1
-            && sibling_parents.len() == 1
-            && own_parents[0].parent_node_id == sibling_parents[0].parent_node_id)
+            && !sibling_parent_has_more
+            && !own_parent_has_more
+            && own_parent_id == sibling_parent_id)
     }
 
     fn can_merge_grand_child_in(
