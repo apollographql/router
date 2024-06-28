@@ -97,6 +97,7 @@ common_job_environment: &common_job_environment
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   RUST_BACKTRACE: full
   CARGO_INCREMENTAL: 0
+  JEMALLOC_SYS_WITH_LG_PAGE: 16
 commands:
 
   setup_environment:
