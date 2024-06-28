@@ -54,7 +54,11 @@ impl tower::Service<FetchRequest> for FetchService {
             .connectors_by_service_name
             .contains_key(service_name.to_string().as_str())
         {
-            Self::fetch_with_connector_service(self.connector_service_factory.clone(), request)
+            Self::fetch_with_connector_service(
+                self.schema.clone(),
+                self.connector_service_factory.clone(),
+                request,
+            )
         } else {
             Self::fetch_with_subgraph_service(
                 self.schema.clone(),
@@ -68,38 +72,59 @@ impl tower::Service<FetchRequest> for FetchService {
 
 impl FetchService {
     fn fetch_with_connector_service(
+        schema: Arc<Schema>,
         connector_service_factory: Arc<ConnectorServiceFactory>,
         request: FetchRequest,
     ) -> BoxFuture<'static, Result<FetchResponse, BoxError>> {
         let FetchRequest {
             fetch_node,
             supergraph_request,
+            deferred_fetches,
             variables,
             context,
+            current_dir,
             ..
         } = request;
 
         let FetchNode {
             operation,
             service_name,
+            requires,
+            output_rewrites,
+            id,
             ..
         } = fetch_node;
 
+        let paths = variables.inverted_paths.clone();
         let operation = operation.as_parsed().cloned();
 
         Box::pin(async move {
-            connector_service_factory
+            let (_parts, response) = connector_service_factory
                 .create()
                 .oneshot(
                     ConnectRequest::builder()
-                        .service_name(service_name)
+                        .service_name(service_name.clone())
                         .context(context)
                         .operation(operation?.clone())
                         .supergraph_request(supergraph_request)
                         .variables(variables)
                         .build(),
                 )
-                .await
+                .await?
+                .response
+                .into_parts();
+
+            let (value, errors) = FetchNode::response_at_path(
+                &schema,
+                &current_dir,
+                paths,
+                response,
+                &requires,
+                &output_rewrites,
+                &service_name,
+            );
+            FetchNode::deferred_fetches(&current_dir, id, &deferred_fetches, &value, &errors);
+            Ok((value, errors))
         })
     }
 
