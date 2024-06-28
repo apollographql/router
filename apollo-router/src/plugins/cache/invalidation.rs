@@ -41,7 +41,7 @@ impl Invalidation {
     ) -> Result<(), BoxError> {
         if self.enabled {
             let mut sink = self.handle.clone().into_sink();
-            sink.send(requests).await;
+            sink.send(requests).await.unwrap();
         }
 
         Ok(())
@@ -68,10 +68,16 @@ async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<Invalid
 }
 
 async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationRequest) {
+    println!(
+        "got invalidation request: {request:?}, will scan for: {}",
+        request.key_prefix()
+    );
+
     // FIXME: configurable batch size
     let mut stream = storage.scan(request.key_prefix(), Some(10));
 
     while let Some(res) = stream.next().await {
+        println!("scan returned a result");
         match res {
             Err(e) => {
                 tracing::error!(
@@ -79,19 +85,25 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
                     error = %e,
                     message = "error scanning for key",
                 );
+                println!("error: {e}");
                 break;
             }
             Ok(scan_res) => {
+                println!("got scan result");
                 if let Some(keys) = scan_res.results() {
                     let keys = keys
                         .iter()
                         .filter_map(|k| k.as_str())
                         .map(|k| RedisKey(k.to_string()))
                         .collect::<Vec<_>>();
-                    storage.delete(keys).await;
+                    println!("scanned keys: {keys:?}");
+                    if !keys.is_empty() {
+                        storage.delete(keys).await;
+                    }
                 }
 
                 if !scan_res.has_more() {
+                    println!("no more results in scan_res");
                     break;
                 } else {
                     if let Err(e) = scan_res.next() {
@@ -131,7 +143,7 @@ impl InvalidationRequest {
     fn key_prefix(&self) -> String {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
-                format!("subgraph:{subgraph}",)
+                format!("subgraph:{subgraph}*",)
             }
             _ => {
                 todo!()

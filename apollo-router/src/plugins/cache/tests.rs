@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 
 use bytes::Bytes;
 use fred::error::RedisErrorKind;
@@ -11,14 +10,12 @@ use fred::prelude::RedisValue;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use parking_lot::Mutex;
-use regex::bytes::Regex;
 use tower::ServiceExt;
 
 use super::entity::EntityCache;
 use crate::cache::redis::RedisCacheStorage;
 use crate::plugin::test::MockSubgraph;
 use crate::plugins::cache::entity::Subgraph;
-use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::services::supergraph;
 use crate::Context;
 use crate::MockedSubgraphs;

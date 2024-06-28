@@ -8,11 +8,10 @@ preview_entity_cache:
   redis:
     urls:
       ["redis://localhost:6379",]
-      # [
-      #   "redis-cluster://127.0.0.1:7000",
-      # ]
-  
-  subgraphs:
-    reviews:
-      ttl: 120s
+  subgraph:
+    all:
       enabled: true
+    subgraphs:
+      reviews:
+        ttl: 120s
+        enabled: true
