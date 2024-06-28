@@ -405,7 +405,6 @@ impl InnerCacheService {
                             .extensions
                             .remove("invalidation")
                         {
-                            println!("extracted extensions: {invalidation_extensions:?}");
                             self.handle_invalidation(invalidation_extensions).await;
                         }
 
@@ -425,15 +424,12 @@ impl InnerCacheService {
                 }
             } else {
                 let mut response = self.service.call(request).await?;
-                println!("extensions: {:?}", response.response.body_mut().extensions);
                 if let Some(invalidation_extensions) = response
                     .response
                     .body_mut()
                     .extensions
                     .remove("invalidation")
                 {
-                    println!("extracted extensions: {invalidation_extensions:?}");
-
                     self.handle_invalidation(invalidation_extensions).await;
                 }
 
