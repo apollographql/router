@@ -9,12 +9,15 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
-use crate::integration::common::Telemetry;
 use crate::integration::common::ValueExt;
+use crate::integration::common::{graph_os_enabled, Telemetry};
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!("fixtures/datadog.router.yaml"))
@@ -67,6 +70,9 @@ async fn test_basic() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_resource_mapping_default() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!(
@@ -114,6 +120,9 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_resource_mapping_override() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
         .config(include_str!(
