@@ -8,9 +8,11 @@ extend schema
     http: {
       baseURL: "http://127.0.0.1"
       headers: [
+        { name: "Host" }
         { name: "Accept", value: "text/html" }
         { name: "Accept", as: "Accept" }
         { as: "Accept", value: "text/html" }
+        { name: "text/html", as: "Accept", value: "text/html" }
         { name: "<Invalid-Header>", value: "my.host.name" }
         { name: "Accept", as: "<Invalid-Header>" }
         { name: "Host", value: "  Value with 😊 emoji and newline  \n " }
