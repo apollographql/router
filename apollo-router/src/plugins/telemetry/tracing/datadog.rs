@@ -39,6 +39,8 @@ fn default_resource_mappings() -> HashMap<String, String> {
 
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
+const BUILT_IN_SPAN_NAMES: [&str; 3] = ["router", "supergraph", "subgraph"];
+
 #[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
@@ -113,6 +115,21 @@ impl TracingConfigurator for Config {
                     }
                     return span.name.as_ref();
                 })
+            })
+            .with_name_mapping(|span, _model_config| {
+                if let Some(original) = span
+                    .attributes
+                    .get(&Key::from_static_str(ORIGINAL_SPAN_NAME_FIELD))
+                {
+                    // Datadog expects static span names, not the ones in the otel spec.
+                    // Remap the span name to the original name if it was remapped.
+                    for name in BUILT_IN_SPAN_NAMES {
+                        if name == original.as_str() {
+                            return name;
+                        }
+                    }
+                }
+                return &span.name;
             })
             .with(
                 &common.resource.get(SERVICE_NAME),
