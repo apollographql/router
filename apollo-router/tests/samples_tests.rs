@@ -119,6 +119,7 @@ struct TestExecution {
     router: Option<IntegrationTest>,
     subgraphs_server: Option<MockServer>,
     subgraphs: HashMap<String, Subgraph>,
+    configuration_path: Option<String>,
 }
 
 impl TestExecution {
@@ -127,6 +128,7 @@ impl TestExecution {
             router: None,
             subgraphs_server: None,
             subgraphs: HashMap::new(),
+            configuration_path: None,
         }
     }
 
@@ -152,6 +154,7 @@ impl TestExecution {
             Action::ReloadSchema { schema_path } => {
                 self.reload_schema(schema_path, path, out).await
             }
+            Action::ReloadSubgraphs { subgraphs } => self.reload_subgraphs(subgraphs, out).await,
             Action::Request {
                 request,
                 query_path,
@@ -239,6 +242,7 @@ impl TestExecution {
         self.router = Some(router);
         self.subgraphs_server = Some(subgraphs_server);
         self.subgraphs = subgraphs.clone();
+        self.configuration_path = Some(configuration_path.to_string());
 
         Ok(())
     }
@@ -307,9 +311,51 @@ impl TestExecution {
         }
 
         let config = open_file(&path.join(configuration_path), out)?;
+        self.configuration_path = Some(configuration_path.to_string());
+        self.subgraphs_server = Some(subgraphs_server);
 
         router.update_config(&config).await;
         router.assert_reloaded().await;
+
+        Ok(())
+    }
+
+    async fn reload_subgraphs(
+        &mut self,
+        subgraphs: &HashMap<String, Subgraph>,
+        out: &mut String,
+    ) -> Result<(), Failed> {
+        writeln!(out, "reloading subgraphs with: {subgraphs:?}").unwrap();
+
+        let subgraphs_server = self.subgraphs_server.as_mut().unwrap();
+        subgraphs_server.reset().await;
+
+        for (_name, subgraph) in subgraphs {
+            for SubgraphRequestMock { request, response } in &subgraph.requests {
+                let mut builder = Mock::given(body_partial_json(&request.body));
+
+                if let Some(s) = request.method.as_deref() {
+                    builder = builder.and(method(s));
+                }
+
+                if let Some(s) = request.path.as_deref() {
+                    builder = builder.and(wiremock::matchers::path(s));
+                }
+
+                for (header_name, header_value) in &request.headers {
+                    builder = builder.and(header(header_name.as_str(), header_value.as_str()));
+                }
+
+                let mut res = ResponseTemplate::new(response.status.unwrap_or(200));
+                for (header_name, header_value) in &response.headers {
+                    res = res.append_header(header_name.as_str(), header_value.as_str());
+                }
+                builder
+                    .respond_with(res.set_body_json(&response.body))
+                    .mount(&subgraphs_server)
+                    .await;
+            }
+        }
 
         Ok(())
     }
@@ -471,6 +517,9 @@ enum Action {
     ReloadSchema {
         schema_path: String,
     },
+    ReloadSubgraphs {
+        subgraphs: HashMap<String, Subgraph>,
+    },
     Request {
         request: Value,
         query_path: Option<String>,
@@ -479,18 +528,18 @@ enum Action {
     Stop,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct Subgraph {
     requests: Vec<SubgraphRequestMock>,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct SubgraphRequestMock {
     request: SubgraphRequest,
     response: SubgraphResponse,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct SubgraphRequest {
     method: Option<String>,
     path: Option<String>,
@@ -499,7 +548,7 @@ struct SubgraphRequest {
     body: Value,
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 struct SubgraphResponse {
     status: Option<u16>,
     #[serde(default)]
