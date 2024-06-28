@@ -14,6 +14,7 @@ telemetry:
           scheduled_delay: 100ms
         resource_mappings:
           router: graphql.operation.name
+          supergraph: override.name
 
   instrumentation:
     spans:
@@ -21,10 +22,12 @@ telemetry:
       router:
         attributes:
           otel.name: router
+
           graphql.operation.name:
             operation_name: string
       supergraph:
         attributes:
+          override.name: overridden
           otel.name: supergraph
       subgraph:
         attributes:

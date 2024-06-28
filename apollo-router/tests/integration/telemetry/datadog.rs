@@ -81,7 +81,6 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
     for _ in 0..2 {
         let (id, result) = router.execute_query(&query).await;
-        println!("dd trace id: {}", id.to_datadog());
         assert!(!result
             .headers()
             .get("apollo-custom-trace-id")
@@ -129,7 +128,6 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
     for _ in 0..2 {
         let (id, result) = router.execute_query(&query).await;
-        println!("dd trace id: {}", id.to_datadog());
         assert!(!result
             .headers()
             .get("apollo-custom-trace-id")
@@ -150,6 +148,7 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
                 "products",
                 "fetch",
                 "subgraph server",
+                "overridden",
                 "ExampleQuery__products__0",
             ],
         )
