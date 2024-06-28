@@ -7,6 +7,7 @@ use std::time::Duration;
 
 use http::header;
 use http::header::CACHE_CONTROL;
+use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -23,6 +24,7 @@ use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
+use super::invalidation::InvalidationService;
 use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
@@ -44,6 +46,8 @@ use crate::services::subgraph;
 use crate::services::supergraph;
 use crate::spec::TYPENAME;
 use crate::Context;
+use crate::Endpoint;
+use crate::ListenAddr;
 
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
@@ -268,6 +272,28 @@ impl Plugin for EntityCache {
                 .boxed()
         }
     }
+
+    fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
+        let mut map = MultiMap::new();
+        dbg!("web endpoints");
+        if self.enabled {
+            // TODO make it dynamic
+            let path = String::from("/invalidation");
+            let path = path.trim_end_matches('/');
+            let endpoint = Endpoint::from_router_service(
+                format!("{path}/:invalidation"),
+                InvalidationService::new(path.to_string()).boxed(),
+            );
+            // TODO: make it dynamic
+            map.insert(default_listen_addr(), endpoint);
+        }
+
+        map
+    }
+}
+
+fn default_listen_addr() -> ListenAddr {
+    ListenAddr::SocketAddr("0.0.0.0:4000".parse().expect("valid ListenAddr"))
 }
 
 impl EntityCache {
