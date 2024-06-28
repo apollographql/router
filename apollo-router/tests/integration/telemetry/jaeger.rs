@@ -1,10 +1,10 @@
-#![cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 extern crate core;
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use opentelemetry_api::trace::TraceId;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
@@ -296,7 +296,7 @@ async fn test_span_customization() -> Result<(), BoxError> {
 }
 
 async fn validate_trace(
-    id: String,
+    id: TraceId,
     query: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],
@@ -306,6 +306,8 @@ async fn validate_trace(
         .append_pair("service", services.first().expect("expected root service"))
         .finish();
 
+    let id = id.to_string();
+    println!("trace id: {}", id);
     let url = format!("http://localhost:16686/api/traces/{id}?{params}");
     for _ in 0..10 {
         if find_valid_trace(
@@ -320,7 +322,7 @@ async fn validate_trace(
         {
             return Ok(());
         }
-        tokio::time::sleep(Duration::from_millis(100)).await;
+        tokio::time::sleep(Duration::from_millis(1000)).await;
     }
     find_valid_trace(
         &url,

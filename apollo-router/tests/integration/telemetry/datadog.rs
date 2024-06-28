@@ -1,4 +1,3 @@
-#![cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 extern crate core;
 
 use std::collections::HashSet;

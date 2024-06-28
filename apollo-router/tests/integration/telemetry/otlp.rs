@@ -1,11 +1,14 @@
-#![cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 extern crate core;
 
 use std::collections::HashSet;
 use std::time::Duration;
 
+use crate::integration::common::Telemetry;
+use crate::integration::common::ValueExt;
+use crate::integration::IntegrationTest;
 use anyhow::anyhow;
 use itertools::Itertools;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
@@ -17,10 +20,6 @@ use wiremock::matchers::path;
 use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
-
-use crate::integration::common::Telemetry;
-use crate::integration::common::ValueExt;
-use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_basic() -> Result<(), BoxError> {
@@ -83,7 +82,7 @@ async fn test_basic() -> Result<(), BoxError> {
 
 async fn validate_telemetry(
     mock_server: &MockServer,
-    _id: String,
+    _id: TraceId,
     query: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],

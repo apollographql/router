@@ -578,7 +578,7 @@ impl IntegrationTest {
     pub fn execute_untraced_query(
         &self,
         query: &Value,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -601,14 +601,17 @@ impl IntegrationTest {
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
                 Ok(response) => (
-                    response
-                        .headers()
-                        .get("apollo-custom-trace-id")
-                        .cloned()
-                        .unwrap_or(HeaderValue::from_static("no-trace-id"))
-                        .to_str()
-                        .unwrap_or_default()
-                        .to_string(),
+                    TraceId::from_hex(
+                        &response
+                            .headers()
+                            .get("apollo-custom-trace-id")
+                            .cloned()
+                            .unwrap_or(HeaderValue::from_static("no-trace-id"))
+                            .to_str()
+                            .unwrap_or_default()
+                            .to_string(),
+                    )
+                    .unwrap_or_else(|_| TraceId::INVALID),
                     response,
                 ),
                 Err(err) => {
