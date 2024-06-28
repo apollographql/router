@@ -9,8 +9,9 @@ use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
 
+use crate::integration::common::graph_os_enabled;
+use crate::integration::common::Telemetry;
 use crate::integration::common::ValueExt;
-use crate::integration::common::{graph_os_enabled, Telemetry};
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]

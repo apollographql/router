@@ -42,6 +42,7 @@ use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
 
 pub(crate) const SPAN_NAME_FIELD: &str = "otel.name";
+pub(crate) const ORIGINAL_SPAN_NAME_FIELD: &str = "otel.original_name";
 pub(crate) const SPAN_KIND_FIELD: &str = "otel.kind";
 pub(crate) const SPAN_STATUS_CODE_FIELD: &str = "otel.status_code";
 pub(crate) const SPAN_STATUS_MESSAGE_FIELD: &str = "otel.status_message";
@@ -1083,7 +1084,7 @@ where
 
                     let attributes = builder
                         .attributes
-                        .get_or_insert_with(|| OrderMap::with_capacity(2));
+                        .get_or_insert_with(|| OrderMap::with_capacity(3));
                     attributes.insert(busy_ns, timings.busy.into());
                     attributes.insert(idle_ns, timings.idle.into());
                 }
@@ -1092,6 +1093,11 @@ where
                 builder.status = forced_status;
             }
             if let Some(forced_span_name) = forced_span_name {
+                // Insert the original span name as an attribute so that we can map it later
+                let attributes = builder
+                    .attributes
+                    .get_or_insert_with(|| OrderMap::with_capacity(1));
+                attributes.insert(ORIGINAL_SPAN_NAME_FIELD.into(), builder.name.into());
                 builder.name = forced_span_name.into();
             }
 

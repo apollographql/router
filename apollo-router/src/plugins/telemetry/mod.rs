@@ -339,11 +339,17 @@ impl Plugin for Telemetry {
                             span.record("graphql.operation.name", operation_name);
                         }
                         match (&operation_kind, &operation_name) {
-                            (Ok(Some(kind)), Ok(Some(name))) => {
-                                span.record("otel.name", format!("{kind} {name}"))
+                            (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
+                                "otel.name".into(),
+                                format!("{kind} {name}").into(),
+                            ),
+                            (Ok(Some(kind)), _) => {
+                                span.set_span_dyn_attribute("otel.name".into(), kind.clone().into())
                             }
-                            (Ok(Some(kind)), _) => span.record("otel.name", kind),
-                            _ => span.record("otel.name", "GraphQL Operation"),
+                            _ => span.set_span_dyn_attribute(
+                                "otel.name".into(),
+                                "GraphQL Operation".into(),
+                            ),
                         };
                     }
                 }

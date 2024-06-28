@@ -18,6 +18,7 @@ use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
+use crate::plugins::telemetry::otel::layer::ORIGINAL_SPAN_NAME_FIELD;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -97,7 +98,15 @@ impl TracingConfigurator for Config {
             .with(&resource_mappings, |builder, resource_mappings| {
                 let resource_mappings = resource_mappings.clone();
                 builder.with_resource_mapping(move |span, _model_config| {
-                    if let Some(mapping) = resource_mappings.get(span.name.as_ref()) {
+                    let span_name = if let Some(original) = span
+                        .attributes
+                        .get(&Key::from_static_str(ORIGINAL_SPAN_NAME_FIELD))
+                    {
+                        original.as_str()
+                    } else {
+                        span.name.clone()
+                    };
+                    if let Some(mapping) = resource_mappings.get(span_name.as_ref()) {
                         if let Some(Value::String(value)) = span.attributes.get(mapping) {
                             return value.as_str();
                         }
