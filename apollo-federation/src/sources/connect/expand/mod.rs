@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
@@ -24,13 +26,18 @@ mod carryover;
 mod visitor;
 use visitor::ToSchemaVisitor;
 
+pub struct Connectors {
+    pub by_service_name: IndexMap<NodeStr, Connector>,
+    pub labels_by_service_name: Arc<IndexMap<String, String>>,
+}
+
 /// The result of a supergraph expansion of connect-aware subgraphs
 pub enum ExpansionResult {
     /// The supergraph had some subgraphs that were expanded
     Expanded {
         raw_sdl: String,
         api_schema: Valid<Schema>,
-        connectors_by_service_name: IndexMap<NodeStr, Connector>,
+        connectors: Connectors,
     },
 
     /// The supergraph contained no connect directives and was unchanged.
@@ -98,10 +105,18 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         .map(|(connector, sub)| (NodeStr::new(&sub.name), connector))
         .collect();
 
+    let labels_by_service_name = connectors_by_service_name
+        .iter()
+        .map(|(service_name, connector)| (service_name.to_string(), connector.id.label.clone()))
+        .collect();
+
     Ok(ExpansionResult::Expanded {
         raw_sdl: new_supergraph.schema().serialize().to_string(),
         api_schema: api_schema.schema().clone(),
-        connectors_by_service_name,
+        connectors: Connectors {
+            by_service_name: connectors_by_service_name,
+            labels_by_service_name: Arc::new(labels_by_service_name),
+        },
     })
 }
 

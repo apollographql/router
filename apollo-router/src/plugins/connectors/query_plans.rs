@@ -1,28 +1,19 @@
-use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::NodeStr;
-use apollo_federation::sources::connect::Connector;
 use indexmap::IndexMap;
 
 use crate::query_planner::PlanNode;
 use crate::Context;
 
-type ConnectorsContext = Arc<HashMap<String, String>>;
+type ConnectorsContext = Arc<IndexMap<String, String>>;
 
 pub(crate) fn store_connectors_context(
     context: &Context,
-    connectors_by_service_name: &IndexMap<NodeStr, Connector>,
+    labels_by_service_name: Arc<IndexMap<String, String>>,
 ) {
-    let map = Arc::new(
-        connectors_by_service_name
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.id.label.clone()))
-            .collect::<HashMap<_, _>>(),
-    );
     context
         .extensions()
-        .with_lock(|mut lock| lock.insert::<ConnectorsContext>(map));
+        .with_lock(|mut lock| lock.insert::<ConnectorsContext>(labels_by_service_name));
 }
 
 pub(crate) fn replace_connector_service_names_text(
@@ -61,7 +52,7 @@ pub(crate) fn replace_connector_service_names(
         plan
     };
 
-    fn recurse(plan: &mut PlanNode, replacements: &HashMap<String, String>) {
+    fn recurse(plan: &mut PlanNode, replacements: &IndexMap<String, String>) {
         match plan {
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
