@@ -12,10 +12,14 @@ extend schema
         { name: "Accept", value: "text/html" }
         { name: "Accept", as: "Accept" }
         { as: "Accept", value: "text/html" }
-        { name: "text/html", as: "Accept", value: "text/html" }
+        { name: "x-foo", as: "x-bar", value: ["baz"] }
         { name: "<Invalid-Header>", value: "my.host.name" }
         { name: "Accept", as: "<Invalid-Header>" }
         { name: "Host", value: "  Value with 😊 emoji and newline  \n " }
+        {
+          name: "Host"
+          value: ["  A list of values with 😊 emoji and newline  \n "]
+        }
       ]
     }
   )
