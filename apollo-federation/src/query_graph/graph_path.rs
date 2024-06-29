@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use petgraph::graph::EdgeIndex;
@@ -590,17 +589,19 @@ pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
 /// 2-3 max; even in completely unrealistic cases, it's hard bounded by the number of subgraphs), so
 /// a `Vec` is going to perform a lot better than `IndexSet` in practice.
 #[derive(Debug, Clone)]
-pub(crate) struct ExcludedDestinations(Arc<Vec<NodeStr>>);
+pub(crate) struct ExcludedDestinations(Arc<Vec<Arc<str>>>);
 
 impl ExcludedDestinations {
-    fn is_excluded(&self, destination: &NodeStr) -> bool {
-        self.0.contains(destination)
+    fn is_excluded(&self, destination: &str) -> bool {
+        self.0
+            .iter()
+            .any(|excluded| excluded.as_ref() == destination)
     }
 
-    fn add_excluded(&self, destination: NodeStr) -> Self {
-        if !self.is_excluded(&destination) {
+    fn add_excluded(&self, destination: &Arc<str>) -> Self {
+        if !self.is_excluded(destination) {
             let mut new = self.0.as_ref().clone();
-            new.push(destination);
+            new.push(destination.clone());
             Self(Arc::new(new))
         } else {
             self.clone()
@@ -746,8 +747,8 @@ impl Display for Unadvanceables {
 #[derive(Debug, Clone)]
 struct Unadvanceable {
     reason: UnadvanceableReason,
-    from_subgraph: NodeStr,
-    to_subgraph: NodeStr,
+    from_subgraph: Arc<str>,
+    to_subgraph: Arc<str>,
     details: String,
 }
 
@@ -1431,7 +1432,7 @@ where
         // be found).
         type BestPathInfo<TTrigger, TEdge> =
             Option<(Arc<GraphPath<TTrigger, TEdge>>, QueryPlanCost)>;
-        let mut best_path_by_source: IndexMap<NodeStr, BestPathInfo<TTrigger, TEdge>> =
+        let mut best_path_by_source: IndexMap<Arc<str>, BestPathInfo<TTrigger, TEdge>> =
             IndexMap::new();
         let dead_ends = vec![];
         // Note that through `excluded` we avoid taking the same edge from multiple options. But
@@ -1518,7 +1519,7 @@ where
                     edge,
                     condition_resolver,
                     context,
-                    &excluded_destinations.add_excluded(edge_tail_weight.source.clone()),
+                    &excluded_destinations.add_excluded(&edge_tail_weight.source),
                     excluded_conditions,
                 )?;
                 if let ConditionResolution::Satisfied { path_tree, cost } = condition_resolution {
@@ -2218,7 +2219,7 @@ impl OpGraphPath {
     // PORT_NOTE: In the JS code, this method was a free-standing function called "anImplementationIsEntityWithFieldShareable".
     fn has_an_entity_implementation_with_shareable_field(
         &self,
-        source: &NodeStr,
+        source: &Arc<str>,
         interface_field_pos: InterfaceFieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
         let fed_schema = self.graph.schema_by_source(source)?;
@@ -3050,7 +3051,7 @@ impl Display for OpGraphPath {
                 }
                 None => write!(f, " ({}) ", self.edge_triggers[i].as_ref()),
             })?;
-        if let Some(label) = self.defer_on_tail.as_ref().and_then(|d| d.label()) {
+        if let Some(label) = self.defer_on_tail.as_ref().and_then(|d| d.label.as_ref()) {
             write!(f, "<defer='{label}'>")?;
         }
         if !self.runtime_types_of_tail.is_empty() {
@@ -3715,8 +3716,7 @@ mod tests {
     use std::sync::Arc;
 
     use apollo_compiler::executable::DirectiveList;
-    use apollo_compiler::schema::Name;
-    use apollo_compiler::NodeStr;
+    use apollo_compiler::Name;
     use apollo_compiler::Schema;
     use petgraph::stable_graph::EdgeIndex;
     use petgraph::stable_graph::NodeIndex;
@@ -3748,7 +3748,7 @@ mod tests {
         "#;
         let schema = Schema::parse_and_validate(src, "./").unwrap();
         let schema = ValidFederationSchema::new(schema).unwrap();
-        let name = NodeStr::new("S1");
+        let name = "S1".into();
         let graph = build_query_graph(name, schema.clone()).unwrap();
         let path = OpGraphPath::new(Arc::new(graph), NodeIndex::new(0)).unwrap();
         // NOTE: in general GraphPath would be used against a federated supergraph which would have

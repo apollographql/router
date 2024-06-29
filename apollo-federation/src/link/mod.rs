@@ -4,12 +4,11 @@ use std::str;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::InvalidNameError;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
-use apollo_compiler::schema::Name;
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use thiserror::Error;
 
 use crate::error::FederationError;
@@ -130,23 +129,23 @@ impl Import {
                 if let Some(directive_name) = str.strip_prefix('@') {
                     Ok(Import { element: Name::new(directive_name)?, is_directive: true, alias: None })
                 } else {
-                    Ok(Import { element: Name::new(str.clone())?, is_directive: false, alias: None })
+                    Ok(Import { element: Name::new(str)?, is_directive: false, alias: None })
                 }
             },
             Value::Object(fields) => {
-                let mut name: Option<NodeStr> = None;
-                let mut alias: Option<NodeStr> = None;
+                let mut name: Option<&str> = None;
+                let mut alias: Option<&str> = None;
                 for (k, v) in fields {
                     match k.as_str() {
                         "name" => {
-                            name = Some(v.as_node_str().ok_or_else(|| {
+                            name = Some(v.as_str().ok_or_else(|| {
                                 LinkError::BootstrapError("invalid value for `name` field in @link(import:) argument: must be a string".to_string())
-                            })?.clone())
+                            })?)
                         },
                         "as" => {
-                            alias = Some(v.as_node_str().ok_or_else(|| {
+                            alias = Some(v.as_str().ok_or_else(|| {
                                 LinkError::BootstrapError("invalid value for `as` field in @link(import:) argument: must be a string".to_string())
-                            })?.clone())
+                            })?)
                         },
                         _ => Err(LinkError::BootstrapError(format!("unknown field `{k}` in @link(import:) argument")))?
                     }
@@ -157,7 +156,7 @@ impl Import {
                             let Some(alias_str) = alias_str.strip_prefix('@') else {
                                 return Err(LinkError::BootstrapError(format!("invalid alias '{}' for import name '{}': should start with '@' since the imported name does", alias_str, element)));
                             };
-                            alias = Some(alias_str.into());
+                            alias = Some(alias_str);
                         }
                         Ok(Import {
                             element: Name::new(directive_name)?,
@@ -257,7 +256,7 @@ impl Link {
             self.spec_name_in_schema().clone()
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
-            Name::new_unchecked(format!("{}__{}", self.spec_name_in_schema(), name).into())
+            Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
         }
     }
 
@@ -268,7 +267,7 @@ impl Link {
             import.alias.clone().unwrap_or_else(|| name.clone())
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
-            Name::new_unchecked(format!("{}__{}", self.spec_name_in_schema(), name).into())
+            Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
         }
     }
 
@@ -302,7 +301,7 @@ impl Link {
 
         let spec_alias = directive
             .argument_by_name("as")
-            .and_then(|arg| arg.as_node_str())
+            .and_then(|arg| arg.as_str())
             .map(Name::new)
             .transpose()?;
         let purpose = if let Some(value) = directive.argument_by_name("for") {

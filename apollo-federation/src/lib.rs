@@ -28,8 +28,8 @@ pub mod schema;
 pub mod sources;
 pub mod subgraph;
 
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use link::join_spec_definition::JOIN_VERSIONS;
 use schema::FederationSchema;
@@ -140,6 +140,6 @@ const _: () = {
 };
 
 /// Returns if the type of the node is a scalar or enum.
-pub(crate) fn is_leaf_type(schema: &Schema, ty: &NodeStr) -> bool {
+pub(crate) fn is_leaf_type(schema: &Schema, ty: &NamedType) -> bool {
     schema.get_scalar(ty).is_some() || schema.get_enum(ty).is_some()
 }

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::executable::Name;
 use apollo_compiler::executable::Value;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
