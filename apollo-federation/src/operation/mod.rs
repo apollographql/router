@@ -4901,6 +4901,7 @@ pub(crate) fn normalize_operation(
         schema,
         NormalizeSelectionOption::NormalizeRecursively,
     )?;
+    remove_introspection(&mut normalized_selection_set);
     normalized_selection_set.optimize_sibling_typenames(interface_types_with_interface_objects)?;
 
     let normalized_operation = Operation {
@@ -4913,6 +4914,21 @@ pub(crate) fn normalize_operation(
         named_fragments,
     };
     Ok(normalized_operation)
+}
+
+// PORT_NOTE: This is a port of `withoutIntrospection` from JS version.
+fn remove_introspection(selection_set: &mut SelectionSet) {
+    // Note that, because we only apply this to the top-level selections, we skip all
+    // introspection, including __typename. In general, we don't want to ignore __typename during
+    // query plans, but at top-level, we can let the gateway execution deal with it rather than
+    // querying some service for that.
+
+    Arc::make_mut(&mut selection_set.selections).retain(|_, selection| {
+        !matches!(selection,
+            Selection::Field(field_selection) if
+                field_selection.field.data().field_position.is_introspection_typename_field()
+        )
+    });
 }
 
 fn runtime_types_intersect(
