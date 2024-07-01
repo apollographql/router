@@ -101,12 +101,13 @@ preview_entity_cache:
         ttl: 120s # overrides the global TTL
       inventory:
         enabled: false # disable for a specific subgraph
+      accounts:
+        private_id: "user_id"
 ```
 
 ### Configure time to live (TTL)
 
-Besides configuring a global TTL for all the entries in Redis, the Apollo Router also honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. It generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts.
-A TTL has to be configured for all subgraphs using entity caching, either defined in the per subgraph configuration or inherited from the global configuration.
+To decide whether to cache an entity, the Apollo Router honors the [`Cache-Control` header](https://developer.mozilla.org/en-US/docs/Web/HTTP/Headers/Cache-Control) returned with the subgraph response. Since `Cache-Control` might not contain a `max-age` or `s-max-age` option, a default TTL must be configured, either defined in the per subgraph configuration or inherited from the global configuration. The Apollo Router also generates a `Cache-Control` header for the client response by aggregating the TTL information from all response parts. If a subgraph did not return the header, its response will be assumed to be `no-store`.
 
 ### Customize Redis cache key
 
@@ -124,6 +125,26 @@ This entry contains an object with the `all` field to affect all subgraph reques
 }
 
 ```
+
+### Private information caching
+
+A subgraph might return a response with the header `Cache-Control: private`, indicating that it contains user personalized data. usually, this would forbid intermediate servers from storing data, but the Apollo Router may actually be able to recognize different users, and store their data in different parts of the cache.
+
+To set up private information caching, the `private_id` option must be configured. It is a string pointing at a field in the request context, that contains data used to recognize users (user id, `sub` claim in JWT, etc). 
+
+Since the Router does not know in advance if a particular query will return private data, it implements the following sequence:
+- the first time it sees a query, it requests the cache as if it was a public only query
+- when the subgraph returns the response with private data, it recognizes it and stores the data in a user specific part of the cache
+- it stores the query in a list of know queries with private data
+- the next time the query comes in:
+  - if the private id is not provided, it does not interrogate the cache and instead, transmit the subgraph response directly
+  - if the private id is provided, it queries the part of the cache for the current user, and checks the subgraph if nothing is available
+
+### Observability
+
+## Spans
+
+## Metrics
 
 ## Implementation notes
 
