@@ -658,7 +658,7 @@ impl std::fmt::Display for CachingQueryKey {
 
         write!(
             f,
-            "plan:cache:{}:federation:{}:query_hash:{}:query:{}:metadata:{}",
+            "plan:cache:{}:federation:{}:{}:opname:{}:metadata:{}",
             CACHE_KEY_VERSION, FEDERATION_VERSION, self.hash, operation, metadata,
         )
     }
@@ -699,8 +699,8 @@ impl Hash for CachingQueryHash {
 impl std::fmt::Display for CachingQueryHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CachingQueryHash::Reuse(hash) => write!(f, "{}", hash),
-            CachingQueryHash::DoNotReuse { schema_hash, query_hash } => write!(f, "{}:{}", schema_hash, query_hash),
+            CachingQueryHash::Reuse(hash) => write!(f, "query:{}", hash),
+            CachingQueryHash::DoNotReuse { schema_hash, query_hash } => write!(f, "schema:{}:query:{}", schema_hash, query_hash),
         }
     }
 }
