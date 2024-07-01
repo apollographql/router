@@ -564,6 +564,17 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "Client": {
+      "additionalProperties": false,
+      "properties": {
+        "experimental_http2": {
+          "$ref": "#/definitions/Http2Config",
+          "description": "#/definitions/Http2Config",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
     "CollectorConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1228,6 +1239,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configures the externalization plugin",
       "properties": {
+        "client": {
+          "$ref": "#/definitions/Client",
+          "description": "#/definitions/Client",
+          "nullable": true
+        },
         "execution": {
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"

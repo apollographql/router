@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use apollo_compiler::executable;
-use apollo_compiler::executable::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 
 use crate::query_plan::query_planner::QueryPlanningStatistics;
 
@@ -58,7 +57,7 @@ pub enum PlanNode {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct FetchNode {
-    pub subgraph_name: NodeStr,
+    pub subgraph_name: Arc<str>,
     /// Optional identifier for the fetch for defer support. All fetches of a given plan will be
     /// guaranteed to have a unique `id`.
     pub id: Option<u64>,
@@ -73,7 +72,7 @@ pub struct FetchNode {
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.
     pub operation_document: Valid<ExecutableDocument>,
-    pub operation_name: Option<NodeStr>,
+    pub operation_name: Option<Name>,
     pub operation_kind: executable::OperationType,
     /// Optionally describe a number of "rewrites" that query plan executors should apply to the
     /// data that is sent as the input of this fetch. Note that such rewrites should only impact the
@@ -155,7 +154,7 @@ pub struct DeferredDeferBlock {
     /// this deferred part should not be started until all such fetches return.
     pub depends: Vec<DeferredDependency>,
     /// The optional defer label.
-    pub label: Option<NodeStr>,
+    pub label: Option<String>,
     /// Path, in the query, to the `@defer` application this corresponds to. The `sub_selection`
     /// starts at this `query_path`.
     pub query_path: Vec<QueryPathElement>,
@@ -174,7 +173,7 @@ pub struct DeferredDeferBlock {
 #[derive(Debug, Clone, PartialEq)]
 pub struct DeferredDependency {
     /// A `FetchNode` ID.
-    pub id: NodeStr,
+    pub id: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -210,7 +209,7 @@ pub struct FetchDataKeyRenamer {
     /// Path to the key that is renamed by this "rewrite".
     pub path: Vec<FetchDataPathElement>,
     /// The key to rename to at `path`.
-    pub rename_key_to: NodeStr,
+    pub rename_key_to: Name,
 }
 
 /// Vectors of this element match path(s) to a value in fetch data. Each element is (1) a key in
@@ -230,9 +229,9 @@ pub struct FetchDataKeyRenamer {
 /// elements.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum FetchDataPathElement {
-    Key(NodeStr),
+    Key(Name),
     AnyIndex,
-    TypenameEquals(NodeStr),
+    TypenameEquals(Name),
 }
 
 /// Vectors of this element match a path in a query. Each element is (1) a field in a query, or (2)
