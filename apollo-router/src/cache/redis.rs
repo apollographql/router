@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -577,9 +578,12 @@ impl RedisCacheStorage {
         &self,
         pattern: String,
         count: Option<u32>,
-    ) -> impl Stream<Item = Result<ScanResult, RedisError>> {
-        // FIXME: there is a specific method for cluster aware scanning, called scan_cluster
-        self.inner.scan(pattern, count, None)
+    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+        if self.is_cluster {
+            Box::pin(self.inner.scan_cluster(pattern, count, None))
+        } else {
+            Box::pin(self.inner.scan(pattern, count, None))
+        }
     }
 }
 
