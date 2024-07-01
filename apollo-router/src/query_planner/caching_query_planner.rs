@@ -226,7 +226,7 @@ where
         };
 
         if capacity == 0 {
-            tracing::info!("no queries available to warm up the query plan cache",);
+            tracing::info!("no queries available to warm up the query plan cache");
             return;
         } else {
             tracing::info!(
