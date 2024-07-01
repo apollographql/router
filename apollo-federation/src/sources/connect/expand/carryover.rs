@@ -1,10 +1,9 @@
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 
 use crate::error::FederationError;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
@@ -227,7 +226,7 @@ impl Link {
             arguments.push(
                 Argument {
                     name: name!(as),
-                    value: Value::String(alias.clone().into()).into(),
+                    value: Value::String(alias.to_string()).into(),
                 }
                 .into(),
             );
@@ -242,17 +241,17 @@ impl Link {
                         self.imports
                             .iter()
                             .map(|i| {
-                                let name: NodeStr = if i.is_directive {
-                                    format!("@{}", i.element).into()
+                                let name = if i.is_directive {
+                                    format!("@{}", i.element)
                                 } else {
-                                    i.element.clone().into()
+                                    i.element.to_string()
                                 };
 
                                 if let Some(alias) = &i.alias {
-                                    let alias: NodeStr = if i.is_directive {
-                                        format!("@{}", alias).into()
+                                    let alias = if i.is_directive {
+                                        format!("@{}", alias)
                                     } else {
-                                        alias.clone().into()
+                                        alias.to_string()
                                     };
 
                                     Value::Object(vec![

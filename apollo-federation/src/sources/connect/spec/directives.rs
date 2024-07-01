@@ -1,7 +1,7 @@
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::map::Entry::Occupied;
 use indexmap::map::Entry::Vacant;
@@ -104,9 +104,8 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
             if arg_name == SOURCE_NAME_ARGUMENT_NAME.as_str() {
                 name = Some(
                     arg.value
-                        .as_node_str()
-                        .expect("`name` field in `@source` directive is not a string")
-                        .clone(),
+                        .as_str()
+                        .expect("`name` field in `@source` directive is not a string"),
                 );
             } else if arg_name == SOURCE_HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg
@@ -123,7 +122,9 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
 
         // TODO: The compiler should catch missing fields here, right?
         Ok(Self {
-            name: name.expect("missing `name` field in `@source` directive"),
+            name: name
+                .expect("missing `name` field in `@source` directive")
+                .to_string(),
             http: http.expect("missing `http` field in `@source` directive"),
         })
     }
@@ -141,11 +142,11 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
             let name = name.as_str();
 
             if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
-                let base_url_value = value.as_node_str().expect(
+                let base_url_value = value.as_str().expect(
                     "`baseURL` field in `@source` directive's `http` field is not a string",
                 );
 
-                base_url = Some(base_url_value.clone());
+                base_url = Some(base_url_value);
             } else if name == SOURCE_HEADERS_ARGUMENT_NAME.as_str() {
                 // TODO: handle a single object since the language spec allows it
                 headers = value
@@ -159,7 +160,8 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
 
         Ok(Self {
             base_url: base_url
-                .expect("missing `base_url` field in `@source` directive's `http` argument"),
+                .expect("missing `base_url` field in `@source` directive's `http` argument")
+                .to_string(),
             headers: headers.unwrap_or_default(),
         })
     }
@@ -186,41 +188,42 @@ impl TryFrom<&[Node<Value>]> for HTTPHeaderMappings {
 
                 if field == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.as_str() {
                     let name_value = mapping
-                        .as_node_str()
+                        .as_str()
                         .expect("`name` field in HTTP header mapping is not a string");
 
-                    name = Some(name_value.clone());
+                    name = Some(name_value);
                 } else if field == HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.as_str() {
                     let as_value = mapping
-                        .as_node_str()
+                        .as_str()
                         .expect("`as` field in HTTP header mapping is not a string");
 
-                    option = Some(HTTPHeaderOption::As(as_value.clone()));
+                    option = Some(HTTPHeaderOption::As(as_value.to_string()));
                 } else if field == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.as_str() {
                     let value_values = if let Some(list) = mapping.as_list() {
                         list.iter()
                             .map(|item| {
-                                item.as_node_str()
+                                item.as_str()
                                     .expect("`value` field in HTTP header mapping is not a string")
-                                    .clone()
                             })
                             .collect()
-                    } else if let Some(item) = mapping.as_node_str() {
-                        vec![item.clone()]
+                    } else if let Some(item) = mapping.as_str() {
+                        vec![item]
                     } else {
                         unreachable!(
                             "`value` field in HTTP header mapping is not a string or list of strings"
                         );
                     };
 
-                    option = Some(HTTPHeaderOption::Value(value_values));
+                    option = Some(HTTPHeaderOption::Value(
+                        value_values.into_iter().map(|s| s.to_string()).collect(),
+                    ));
                 } else {
                     unreachable!("unknown argument for HTTP header mapping: {field}")
                 }
             }
 
             let name = name.expect("missing `name` field in HTTP header mapping");
-            match map.entry(name.clone()) {
+            match map.entry(name.to_string()) {
                 Occupied(_) => {
                     return Err(FederationError::internal(format!(
                         "duplicate HTTP header mapping for `{}`",
@@ -255,10 +258,10 @@ impl ConnectDirectiveArguments {
             if arg_name == CONNECT_SOURCE_ARGUMENT_NAME.as_str() {
                 let source_value = arg
                     .value
-                    .as_node_str()
+                    .as_str()
                     .expect("`source` field in `@source` directive is not a string");
 
-                source = Some(source_value.clone());
+                source = Some(source_value);
             } else if arg_name == CONNECT_HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg
                     .value
@@ -268,10 +271,10 @@ impl ConnectDirectiveArguments {
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
                 let selection_value = arg
                     .value
-                    .as_node_str()
+                    .as_str()
                     .expect("`selection` field in `@connect` directive is not a string");
                 let (remainder, selection_value) =
-                    JSONSelection::parse(selection_value.as_str()).expect("invalid JSON selection");
+                    JSONSelection::parse(selection_value).expect("invalid JSON selection");
                 if !remainder.is_empty() {
                     panic!("`selection` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}");
                 }
@@ -291,7 +294,7 @@ impl ConnectDirectiveArguments {
 
         Ok(Self {
             position,
-            source,
+            source: source.map(|s| s.to_string()),
             http,
             selection: selection.expect("`@connect` directive is missing a selection"),
             entity: entity.unwrap_or_default(),
@@ -315,10 +318,10 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
 
             if name == CONNECT_BODY_ARGUMENT_NAME.as_str() {
                 let body_value = value
-                    .as_node_str()
+                    .as_str()
                     .expect("`body` field in `@connect` directive's `http` field is not a string");
                 let (remainder, body_value) =
-                    JSONSelection::parse(body_value.as_str()).expect("invalid JSON selection");
+                    JSONSelection::parse(body_value).expect("invalid JSON selection");
                 if !remainder.is_empty() {
                     panic!("`body` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}");
                 }

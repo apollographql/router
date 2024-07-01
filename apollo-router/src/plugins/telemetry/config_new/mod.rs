@@ -213,9 +213,9 @@ mod test {
     use std::sync::OnceLock;
 
     use apollo_compiler::ast::FieldDefinition;
-    use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::Field;
     use apollo_compiler::name;
+    use apollo_compiler::schema::NamedType;
     use apollo_compiler::Node;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;

@@ -9,7 +9,6 @@ use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
-use apollo_compiler::NodeStr;
 use apollo_federation::sources::connect::expand::expand_connectors;
 use apollo_federation::sources::connect::expand::Connectors;
 use apollo_federation::sources::connect::expand::ExpansionResult;
@@ -120,11 +119,7 @@ impl Schema {
             }) {
                 let is_connector = connectors
                     .as_ref()
-                    .map(|connectors| {
-                        connectors
-                            .by_service_name
-                            .contains_key(&NodeStr::from(name))
-                    })
+                    .map(|connectors| connectors.by_service_name.contains_key(name))
                     .unwrap_or_default();
 
                 let url = if is_connector {

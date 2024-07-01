@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::ExecutableDocument;
 use opentelemetry::metrics::MeterProvider;
 use parking_lot::Mutex;

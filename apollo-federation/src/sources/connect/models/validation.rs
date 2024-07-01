@@ -53,12 +53,12 @@ use std::fmt::Display;
 use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
@@ -385,7 +385,7 @@ fn validate_field(
                 errors.push(Message {
                     code: Code::EntityNotOnRootQuery,
                     message: format!(
-                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.", 
+                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
                         coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object_name, &field.name)
                     ),
                     locations: Location::from_node(entity_arg.location(), source_map)

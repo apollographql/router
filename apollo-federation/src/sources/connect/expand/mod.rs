@@ -1,9 +1,8 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use carryover::carryover_directives;
 use indexmap::IndexMap;
@@ -27,8 +26,8 @@ mod visitor;
 use visitor::ToSchemaVisitor;
 
 pub struct Connectors {
-    pub by_service_name: Arc<IndexMap<NodeStr, Connector>>,
-    pub labels_by_service_name: Arc<IndexMap<String, String>>,
+    pub by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
+    pub labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
 }
 
 /// The result of a supergraph expansion of connect-aware subgraphs
@@ -100,14 +99,14 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
     carryover_directives(&supergraph.schema, &mut new_supergraph)
         .map_err(|_e| FederationError::internal("could not carry over directives"))?;
 
-    let connectors_by_service_name: IndexMap<NodeStr, Connector> = connect_subgraphs
+    let connectors_by_service_name: IndexMap<Arc<str>, Connector> = connect_subgraphs
         .into_iter()
-        .map(|(connector, sub)| (NodeStr::new(&sub.name), connector))
+        .map(|(connector, sub)| (sub.name.into(), connector))
         .collect();
 
     let labels_by_service_name = connectors_by_service_name
         .iter()
-        .map(|(service_name, connector)| (service_name.to_string(), connector.id.label.clone()))
+        .map(|(service_name, connector)| (service_name.clone(), connector.id.label.clone()))
         .collect();
 
     Ok(ExpansionResult::Expanded {
@@ -139,8 +138,7 @@ fn split_subgraph(
     link: &Link,
     subgraph: ValidFederationSubgraph,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
-    let connector_map =
-        Connector::from_valid_schema(&subgraph.schema, NodeStr::new(&subgraph.name))?;
+    let connector_map = Connector::from_valid_schema(&subgraph.schema, &subgraph.name)?;
 
     let expander = helpers::Expander::new(link, &subgraph);
     connector_map
@@ -190,15 +188,14 @@ where
 mod helpers {
     use apollo_compiler::ast;
     use apollo_compiler::ast::FieldDefinition;
-    use apollo_compiler::ast::Name;
     use apollo_compiler::name;
     use apollo_compiler::schema::Component;
     use apollo_compiler::schema::ComponentName;
     use apollo_compiler::schema::ComponentOrigin;
     use apollo_compiler::schema::DirectiveList;
     use apollo_compiler::schema::ObjectType;
+    use apollo_compiler::Name;
     use apollo_compiler::Node;
-    use apollo_compiler::NodeStr;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
 
@@ -370,7 +367,7 @@ mod helpers {
                 description: None,
                 name: field_name.clone(),
                 arguments: Vec::new(),
-                ty: ast::Type::Named(ast::NamedType::new_unchecked(NodeStr::from_static(&"ID"))),
+                ty: ast::Type::Named(ast::NamedType::new_unchecked("ID")),
                 directives: ast::DirectiveList(
                     [
                         name!("federation__shareable"),

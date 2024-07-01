@@ -13,7 +13,6 @@
 // but may be easier to use for validating the selection against a GraphQL
 // schema, using existing code for validating GraphQL operations.
 
-use apollo_compiler::ast;
 use apollo_compiler::ast::Selection as GraphQLSelection;
 use apollo_compiler::Name;
 

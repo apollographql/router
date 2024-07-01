@@ -1,6 +1,5 @@
 use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::InputValueDefinition;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
@@ -58,21 +57,21 @@ pub(super) fn check_or_add(
     let http_header_mapping_field_list = vec![
         InputValueDefinition {
             description: None,
-            name: Name::new_unchecked(HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.into()),
+            name: HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.clone(),
             ty: ty!(String!).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: Name::new_unchecked(HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.into()),
+            name: HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.clone(),
             ty: ty!(String).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: Name::new_unchecked(HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.into()),
+            name: HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.clone(),
             ty: ty!([String!]).into(),
             default_value: None,
             directives: Default::default(),
@@ -140,14 +139,14 @@ pub(super) fn check_or_add(
         },
         InputValueDefinition {
             description: None,
-            name: Name::new_unchecked(CONNECT_BODY_ARGUMENT_NAME.into()),
+            name: CONNECT_BODY_ARGUMENT_NAME.clone(),
             ty: Type::Named(json_selection_spec.name.clone()).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: Name::new_unchecked(CONNECT_HEADERS_ARGUMENT_NAME.into()),
+            name: CONNECT_HEADERS_ARGUMENT_NAME.clone(),
             ty: Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
@@ -186,7 +185,7 @@ pub(super) fn check_or_add(
         &[
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: Name::new_unchecked(CONNECT_SOURCE_ARGUMENT_NAME.into()),
+                    name: CONNECT_SOURCE_ARGUMENT_NAME.clone(),
                     get_type: |_| Ok(ty!(String)),
                     default_value: None,
                 },
@@ -194,7 +193,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: Name::new_unchecked(CONNECT_HTTP_ARGUMENT_NAME.into()),
+                    name: CONNECT_HTTP_ARGUMENT_NAME.clone(),
                     get_type: |s| {
                         let name = s
                             .metadata()
@@ -210,7 +209,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: Name::new_unchecked(CONNECT_SELECTION_ARGUMENT_NAME.into()),
+                    name: CONNECT_SELECTION_ARGUMENT_NAME.clone(),
                     get_type: |s| {
                         let name = s
                             .metadata()
@@ -226,7 +225,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: Name::new_unchecked(CONNECT_ENTITY_ARGUMENT_NAME.into()),
+                    name: CONNECT_ENTITY_ARGUMENT_NAME.clone(),
                     get_type: |_| Ok(Type::Named(name!(Boolean))),
                     default_value: Some(Value::Boolean(false)),
                 },
@@ -244,14 +243,14 @@ pub(super) fn check_or_add(
     let source_http_field_list = vec![
         InputValueDefinition {
             description: None,
-            name: Name::new_unchecked(SOURCE_BASE_URL_ARGUMENT_NAME.into()),
+            name: SOURCE_BASE_URL_ARGUMENT_NAME.clone(),
             ty: ty!(String!).into(),
             default_value: None,
             directives: Default::default(),
         },
         InputValueDefinition {
             description: None,
-            name: Name::new_unchecked(SOURCE_HEADERS_ARGUMENT_NAME.into()),
+            name: SOURCE_HEADERS_ARGUMENT_NAME.clone(),
             ty: Type::List(Box::new(Type::NonNullNamed(
                 http_header_mapping.name.clone(),
             )))
@@ -292,7 +291,7 @@ pub(super) fn check_or_add(
         &[
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: Name::new_unchecked(SOURCE_NAME_ARGUMENT_NAME.into()),
+                    name: SOURCE_NAME_ARGUMENT_NAME.clone(),
                     get_type: |_| Ok(ty!(String!)),
                     default_value: None,
                 },
@@ -300,7 +299,7 @@ pub(super) fn check_or_add(
             },
             DirectiveArgumentSpecification {
                 base_spec: ArgumentSpecification {
-                    name: Name::new_unchecked(SOURCE_HTTP_ARGUMENT_NAME.into()),
+                    name: SOURCE_HTTP_ARGUMENT_NAME.clone(),
                     get_type: |s| {
                         let name = s
                             .metadata()

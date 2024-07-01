@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 
-use apollo_compiler::NodeStr;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::Transport;
 use schemars::JsonSchema;
@@ -49,7 +48,7 @@ where
             .and_then(|api_config| api_config.override_url.as_ref())
         {
             match &mut connector.transport {
-                Transport::HttpJson(transport) => transport.base_url = NodeStr::from(url.as_str()),
+                Transport::HttpJson(transport) => transport.base_url = url.to_string(),
             }
         }
     }

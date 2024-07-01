@@ -2114,7 +2114,7 @@ static JOIN_DIRECTIVE: &str = "join__directive";
 fn extract_join_directives(
     supergraph_schema: &FederationSchema,
     subgraphs: &mut FederationSubgraphs,
-    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, NodeStr>,
+    graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
 ) -> Result<(), FederationError> {
     let join_directives = match supergraph_schema
         .referencers()

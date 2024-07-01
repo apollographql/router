@@ -1,6 +1,5 @@
 use apollo_compiler::name;
-use apollo_compiler::schema::Name;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use indexmap::IndexMap;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
@@ -43,7 +42,7 @@ pub(crate) const URL_PATH_TEMPLATE_SCALAR_NAME: Name = name!("URLPathTemplate");
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceDirectiveArguments {
     /// The friendly name of this source for use in `@connect` directives
-    pub(crate) name: NodeStr,
+    pub(crate) name: String,
 
     /// Common HTTP options
     pub(crate) http: SourceHTTPArguments,
@@ -53,7 +52,7 @@ pub(crate) struct SourceDirectiveArguments {
 #[cfg_attr(test, derive(Debug))]
 pub(crate) struct SourceHTTPArguments {
     /// The base URL containing all sub API endpoints
-    pub(crate) base_url: NodeStr,
+    pub(crate) base_url: String,
 
     /// HTTP headers used when requesting resources from the upstream source.
     /// Can be overridden by name with headers in a @connect directive.
@@ -63,7 +62,7 @@ pub(crate) struct SourceHTTPArguments {
 /// Map of HTTP header names to configuration options
 #[cfg_attr(test, derive(Debug))]
 #[derive(derive_more::Deref, Default)]
-pub(crate) struct HTTPHeaderMappings(pub(crate) IndexMap<NodeStr, Option<HTTPHeaderOption>>);
+pub(crate) struct HTTPHeaderMappings(pub(crate) IndexMap<String, Option<HTTPHeaderOption>>);
 
 /// Configuration option for an HTTP header
 #[derive(Debug, Clone)]
@@ -72,10 +71,10 @@ pub enum HTTPHeaderOption {
     ///
     /// This assumes that a header exists in the original request, as it will be
     /// renamed to the supplied value.
-    As(NodeStr),
+    As(String),
 
     /// The raw values to use for the HTTP header
-    Value(Vec<NodeStr>),
+    Value(Vec<String>),
 }
 
 /// Arguments to the `@connect` directive
@@ -88,7 +87,7 @@ pub(crate) struct ConnectDirectiveArguments {
     /// The upstream source for shared connector configuration.
     ///
     /// Must match the `name` argument of a @source directive in this schema.
-    pub(crate) source: Option<NodeStr>,
+    pub(crate) source: Option<String>,
 
     /// HTTP options for this connector
     ///

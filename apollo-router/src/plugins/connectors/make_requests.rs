@@ -480,7 +480,6 @@ mod tests {
 
     use apollo_compiler::name;
     use apollo_compiler::ExecutableDocument;
-    use apollo_compiler::NodeStr;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::Connector;
@@ -501,7 +500,7 @@ mod tests {
         );
 
         let req = crate::services::connect::Request::builder()
-            .service_name(NodeStr::from("subgraph_Query_a_0"))
+            .service_name("subgraph_Query_a_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -564,7 +563,7 @@ mod tests {
         );
 
         let req = crate::services::connect::Request::builder()
-            .service_name(NodeStr::from("subgraph_Query_b_0"))
+            .service_name("subgraph_Query_b_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -644,7 +643,7 @@ mod tests {
         ).unwrap());
 
         let req = crate::services::connect::Request::builder()
-        .service_name(NodeStr::from("subgraph_Query_c_0"))
+        .service_name("subgraph_Query_c_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -788,7 +787,7 @@ mod tests {
         );
 
         let req = crate::services::connect::Request::builder()
-            .service_name(NodeStr::from("subgraph_Query_entity_0"))
+            .service_name("subgraph_Query_entity_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -893,7 +892,7 @@ mod tests {
         let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
 
         let req = crate::services::connect::Request::builder()
-            .service_name(NodeStr::from("subgraph_Query_entity_0"))
+            .service_name("subgraph_Query_entity_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -999,7 +998,7 @@ mod tests {
         );
 
         let req = crate::services::connect::Request::builder()
-            .service_name(NodeStr::from("subgraph_Entity_field_0"))
+            .service_name("subgraph_Entity_field_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -1179,7 +1178,7 @@ mod tests {
         );
 
         let req = crate::services::connect::Request::builder()
-            .service_name(NodeStr::from("subgraph_Entity_field_0"))
+            .service_name("subgraph_Entity_field_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(
@@ -1276,7 +1275,7 @@ mod tests {
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
 
         let req = crate::services::connect::Request::builder()
-            .service_name(NodeStr::from("subgraph_Query_a_0"))
+            .service_name("subgraph_Query_a_0".into())
             .context(Context::default())
             .operation(Arc::new(
                 ExecutableDocument::parse_and_validate(

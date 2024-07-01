@@ -1,5 +1,5 @@
-use apollo_compiler::ast::NamedType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::Schema;
 
 use crate::error::FederationError;

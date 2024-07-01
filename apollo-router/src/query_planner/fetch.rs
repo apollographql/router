@@ -378,8 +378,8 @@ impl FetchNode {
         output_rewrites: &Option<Vec<DataRewrite>>,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
-        id: Option<NodeStr>,
-        deferred_fetches: &HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+        id: Option<String>,
+        deferred_fetches: &HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
         operation_str: &str,
         variables: Map<ByteString, Value>,
     ) -> (Value, Vec<Error>) {
@@ -442,8 +442,8 @@ impl FetchNode {
 
     pub(crate) fn deferred_fetches(
         current_dir: &Path,
-        id: Option<NodeStr>,
-        deferred_fetches: &HashMap<NodeStr, Sender<(Value, Vec<Error>)>>,
+        id: Option<String>,
+        deferred_fetches: &HashMap<String, Sender<(Value, Vec<Error>)>>,
         value: &Value,
         errors: &[Error],
     ) {

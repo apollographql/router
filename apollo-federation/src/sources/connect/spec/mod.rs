@@ -5,8 +5,8 @@ mod type_and_directive_specifications;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
-use apollo_compiler::ast::Name;
 use apollo_compiler::name;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 pub(crate) use directives::extract_connect_directive_arguments;
 pub(crate) use directives::extract_source_directive_arguments;

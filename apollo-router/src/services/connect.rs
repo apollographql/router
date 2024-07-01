@@ -4,7 +4,6 @@ use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
 use static_assertions::assert_impl_all;
 use tower::BoxError;
 
@@ -17,7 +16,7 @@ pub(crate) type BoxService = tower::util::BoxService<Request, Response, BoxError
 
 #[non_exhaustive]
 pub(crate) struct Request {
-    pub(crate) service_name: NodeStr,
+    pub(crate) service_name: Arc<str>,
     pub(crate) context: Context,
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
     pub(crate) _supergraph_request: Arc<http::Request<GraphQLRequest>>,
@@ -38,7 +37,7 @@ impl Request {
     /// Required parameters are required in non-testing code to create a Request.
     #[builder(visibility = "pub")]
     fn new(
-        service_name: NodeStr,
+        service_name: Arc<str>,
         context: Context,
         operation: Arc<Valid<ExecutableDocument>>,
         supergraph_request: Arc<http::Request<GraphQLRequest>>,
