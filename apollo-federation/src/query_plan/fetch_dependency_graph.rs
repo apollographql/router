@@ -11,13 +11,12 @@ use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Type;
+use apollo_compiler::executable;
 use apollo_compiler::executable::VariableDefinition;
-use apollo_compiler::executable::{self};
 use apollo_compiler::name;
-use apollo_compiler::schema::Name;
-use apollo_compiler::schema::{self};
+use apollo_compiler::schema;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -76,7 +75,7 @@ use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
 
 /// Represents the value of a `@defer(label:)` argument.
-type DeferRef = NodeStr;
+type DeferRef = String;
 
 /// Map of defer labels to nodes of the fetch dependency graph.
 type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
@@ -90,7 +89,7 @@ type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
 #[derive(Debug, Clone)]
 pub(crate) struct FetchDependencyGraphNode {
     /// The subgraph this fetch is queried against.
-    pub(crate) subgraph_name: NodeStr,
+    pub(crate) subgraph_name: Arc<str>,
     /// Which root operation kind the fetch should have.
     root_kind: SchemaRootDefinitionKind,
     /// The parent type of the fetch's selection set. For fetches against the root, this is the
@@ -207,7 +206,7 @@ pub(crate) struct FetchDependencyGraph {
     graph: FetchDependencyGraphPetgraph,
     /// The root nodes by subgraph name, representing the fetches against root operation types of
     /// the subgraphs.
-    root_nodes_by_subgraph: IndexMap<NodeStr, NodeIndex>,
+    root_nodes_by_subgraph: IndexMap<Arc<str>, NodeIndex>,
     /// Tracks metadata about deferred blocks and their dependencies on one another.
     pub(crate) defer_tracking: DeferTracking,
     /// The initial fetch ID generation (used when handling `@defer`).
@@ -458,9 +457,7 @@ impl FetchDependencyGraphNodePath {
     ) -> Result<Vec<FetchDataPathElement>, FederationError> {
         let mut new_path = self.response_path.clone();
         if let OpPathElement::Field(field) = element {
-            new_path.push(FetchDataPathElement::Key(
-                field.data().response_name().into(),
-            ));
+            new_path.push(FetchDataPathElement::Key(field.data().response_name()));
             // TODO: is there a simpler we to find a field’s type from `&Field`?
             let mut type_ = &field
                 .data()
@@ -507,7 +504,7 @@ impl FetchDependencyGraph {
 
     pub(crate) fn root_node_by_subgraph_iter(
         &self,
-    ) -> impl Iterator<Item = (&NodeStr, &NodeIndex)> {
+    ) -> impl Iterator<Item = (&Arc<str>, &NodeIndex)> {
         self.root_nodes_by_subgraph.iter()
     }
 
@@ -520,7 +517,7 @@ impl FetchDependencyGraph {
 
     pub(crate) fn get_or_create_root_node(
         &mut self,
-        subgraph_name: &NodeStr,
+        subgraph_name: &Arc<str>,
         root_kind: SchemaRootDefinitionKind,
         parent_type: CompositeTypeDefinitionPosition,
     ) -> Result<NodeIndex, FederationError> {
@@ -542,7 +539,7 @@ impl FetchDependencyGraph {
 
     fn new_root_type_node(
         &mut self,
-        subgraph_name: NodeStr,
+        subgraph_name: Arc<str>,
         root_kind: SchemaRootDefinitionKind,
         parent_type: &ObjectTypeDefinitionPosition,
         merge_at: Option<Vec<FetchDataPathElement>>,
@@ -561,7 +558,7 @@ impl FetchDependencyGraph {
 
     pub(crate) fn new_node(
         &mut self,
-        subgraph_name: NodeStr,
+        subgraph_name: Arc<str>,
         parent_type: CompositeTypeDefinitionPosition,
         has_inputs: bool,
         root_kind: SchemaRootDefinitionKind,
@@ -631,7 +628,7 @@ impl FetchDependencyGraph {
 
     fn get_or_create_key_node(
         &mut self,
-        subgraph_name: &NodeStr,
+        subgraph_name: &Arc<str>,
         merge_at: &[FetchDataPathElement],
         type_: &CompositeTypeDefinitionPosition,
         parent: ParentRelation,
@@ -687,7 +684,7 @@ impl FetchDependencyGraph {
 
     fn new_key_node(
         &mut self,
-        subgraph_name: &NodeStr,
+        subgraph_name: &Arc<str>,
         merge_at: Vec<FetchDataPathElement>,
         defer_ref: Option<DeferRef>,
     ) -> Result<NodeIndex, FederationError> {
@@ -1150,7 +1147,7 @@ impl FetchDependencyGraph {
             _ => None,
         };
 
-        let get_subgraph_schema = |subgraph_name: &NodeStr| {
+        let get_subgraph_schema = |subgraph_name: &Arc<str>| {
             self.federated_query_graph
                 .schema_by_source(subgraph_name)
                 .map(|schema| schema.clone())
@@ -1503,7 +1500,7 @@ impl FetchDependencyGraph {
 
                 if !node.selection_set.selection_set.selections.is_empty() {
                     let id = *node.id.get_or_init(|| self.fetch_id_generation.next_id());
-                    defer_dependencies.push((child_defer_ref.clone(), format!("{id}").into()));
+                    defer_dependencies.push((child_defer_ref.clone(), format!("{id}")));
                 }
                 deferred_nodes.insert(child_defer_ref.clone(), child_index);
             }
@@ -2298,7 +2295,7 @@ impl FetchDependencyGraphNode {
         handled_conditions: &Conditions,
         variable_definitions: &[Node<VariableDefinition>],
         fragments: Option<&mut RebasedFragments>,
-        operation_name: Option<NodeStr>,
+        operation_name: Option<Name>,
     ) -> Result<Option<super::PlanNode>, FederationError> {
         if self.selection_set.selection_set.selections.is_empty() {
             return Ok(None);
@@ -2501,7 +2498,7 @@ fn operation_for_entities_fetch(
     subgraph_schema: &ValidFederationSchema,
     selection_set: SelectionSet,
     all_variable_definitions: &[Node<VariableDefinition>],
-    operation_name: &Option<NodeStr>,
+    operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     let mut variable_definitions: Vec<Node<VariableDefinition>> =
         Vec::with_capacity(all_variable_definitions.len() + 1);
@@ -2575,7 +2572,7 @@ fn operation_for_entities_fetch(
     Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind: SchemaRootDefinitionKind::Query,
-        name: operation_name.clone().map(|n| n.try_into()).transpose()?,
+        name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: Default::default(),
         selection_set,
@@ -2588,7 +2585,7 @@ fn operation_for_query_fetch(
     root_kind: SchemaRootDefinitionKind,
     selection_set: SelectionSet,
     variable_definitions: &[Node<VariableDefinition>],
-    operation_name: &Option<NodeStr>,
+    operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
     let mut used_variables = HashSet::new();
     selection_set.collect_variables(&mut used_variables)?;
@@ -2601,7 +2598,7 @@ fn operation_for_query_fetch(
     Ok(Operation {
         schema: subgraph_schema.clone(),
         root_kind,
-        name: operation_name.clone().map(|n| n.try_into()).transpose()?,
+        name: operation_name.clone(),
         variables: Arc::new(variable_definitions),
         directives: Default::default(),
         selection_set,
@@ -2829,7 +2826,8 @@ impl DeferTracking {
         };
 
         let label = defer_args
-            .label()
+            .label
+            .as_ref()
             .expect("All @defer should have been labeled at this point");
         let _deferred_block = self.deferred.entry(label.clone()).or_insert_with(|| {
             DeferredInfo::empty(
@@ -3566,7 +3564,7 @@ fn create_fetch_initial_path(
 }
 
 fn compute_input_rewrites_on_key_fetch(
-    input_type_name: &NodeStr,
+    input_type_name: &Name,
     dest_type: &CompositeTypeDefinitionPosition,
     dest_schema: &ValidFederationSchema,
 ) -> Result<Option<Vec<Arc<FetchDataRewrite>>>, FederationError> {
@@ -3581,7 +3579,7 @@ fn compute_input_rewrites_on_key_fetch(
     {
         // rewrite path: [ ... on <input_type_name>, __typename ]
         let type_cond = FetchDataPathElement::TypenameEquals(input_type_name.clone());
-        let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD.into());
+        let typename_field_elem = FetchDataPathElement::Key(TYPENAME_FIELD);
         let rewrite = FetchDataRewrite::ValueSetter(FetchDataValueSetter {
             path: vec![type_cond, typename_field_elem],
             set_value_to: dest_type.type_name().to_string().into(),
@@ -3615,7 +3613,7 @@ fn extract_defer_from_operation(
         return Ok((Some(operation.clone()), updated_context));
     };
 
-    let updated_defer_ref = defer_args.label().ok_or_else(||
+    let updated_defer_ref = defer_args.label.as_ref().ok_or_else(||
         // PORT_NOTE: The original TypeScript code has an assertion here.
         FederationError::internal(
                     "All defers should have a label at this point",

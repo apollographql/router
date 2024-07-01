@@ -3,9 +3,8 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::NamedType;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use petgraph::graph::DiGraph;
@@ -53,7 +52,7 @@ pub(crate) struct QueryGraphNode {
     pub(crate) type_: QueryGraphNodeType,
     /// An identifier of the underlying schema containing the `type_` this node points to. This is
     /// mainly used in federated query graphs, where the `source` is a subgraph name.
-    pub(crate) source: NodeStr,
+    pub(crate) source: Arc<str>,
     /// True if there is a cross-subgraph edge that is reachable from this node.
     pub(crate) has_reachable_cross_subgraph_edges: bool,
     /// @provides works by creating duplicates of the node/type involved in the provides and adding
@@ -175,7 +174,7 @@ pub(crate) enum QueryGraphEdgeTransition {
     /// A field edge, going from (a node for) the field parent type to the field's (base) type.
     FieldCollection {
         /// The name of the schema containing the field.
-        source: NodeStr,
+        source: Arc<str>,
         /// The object/interface field being collected.
         field_definition_position: FieldDefinitionPosition,
         /// Whether this field is part of an @provides.
@@ -186,7 +185,7 @@ pub(crate) enum QueryGraphEdgeTransition {
     /// in common with it).
     Downcast {
         /// The name of the schema containing the from/to types.
-        source: NodeStr,
+        source: Arc<str>,
         /// The parent type of the type condition, i.e. the type of the selection set containing
         /// the type condition.
         from_type_position: CompositeTypeDefinitionPosition,
@@ -218,7 +217,7 @@ pub(crate) enum QueryGraphEdgeTransition {
     /// in which the corresponding edge will be found).
     InterfaceObjectFakeDownCast {
         /// The name of the schema containing the from type.
-        source: NodeStr,
+        source: Arc<str>,
         /// The parent type of the type condition, i.e. the type of the selection set containing
         /// the type condition.
         from_type_position: CompositeTypeDefinitionPosition,
@@ -276,24 +275,25 @@ pub struct QueryGraph {
     /// graph, this will only ever be one value, but it will change for "federated" query graphs
     /// while they're being built (and after construction, will become FEDERATED_GRAPH_ROOT_SOURCE,
     /// which is a reserved placeholder value).
-    current_source: NodeStr,
+    current_source: Arc<str>,
     /// The nodes/edges of the query graph. Note that nodes/edges should never be removed, so
     /// indexes are immutable when a node/edge is created.
     graph: DiGraph<QueryGraphNode, QueryGraphEdge>,
     /// The sources on which the query graph was built, which is a set (potentially of size 1) of
     /// GraphQL schema keyed by the name identifying them. Note that the `source` strings in the
     /// nodes/edges of a query graph are guaranteed to be valid key in this map.
-    sources: IndexMap<NodeStr, ValidFederationSchema>,
+    sources: IndexMap<Arc<str>, ValidFederationSchema>,
     /// For federated query graphs, this is a map from subgraph names to their schemas. This is the
     /// same as `sources`, but is missing the dummy source FEDERATED_GRAPH_ROOT_SOURCE which isn't
     /// really a subgraph.
-    subgraphs_by_name: IndexMap<NodeStr, ValidFederationSchema>,
+    subgraphs_by_name: IndexMap<Arc<str>, ValidFederationSchema>,
     /// A map (keyed by source) that associates type names of the underlying schema on which this
     /// query graph was built to each of the nodes that points to a type of that name. Note that for
     /// a "federated" query graph source, each type name will only map to a single node.
-    types_to_nodes_by_source: IndexMap<NodeStr, IndexMap<NamedType, IndexSet<NodeIndex>>>,
+    types_to_nodes_by_source: IndexMap<Arc<str>, IndexMap<NamedType, IndexSet<NodeIndex>>>,
     /// A map (keyed by source) that associates schema root kinds to root nodes.
-    root_kinds_to_nodes_by_source: IndexMap<NodeStr, IndexMap<SchemaRootDefinitionKind, NodeIndex>>,
+    root_kinds_to_nodes_by_source:
+        IndexMap<Arc<str>, IndexMap<SchemaRootDefinitionKind, NodeIndex>>,
     /// Maps an edge to the possible edges that can follow it "productively", that is without
     /// creating a trivially inefficient path.
     ///
@@ -320,7 +320,7 @@ pub struct QueryGraph {
 }
 
 impl QueryGraph {
-    pub(crate) fn name(&self) -> &str {
+    pub(crate) fn name(&self) -> &Arc<str> {
         &self.current_source
     }
 
@@ -400,11 +400,11 @@ impl QueryGraph {
         })
     }
 
-    pub(crate) fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
+    pub(crate) fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
         &self.subgraphs_by_name
     }
 
-    pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&NodeStr, &ValidFederationSchema)> {
+    pub(crate) fn subgraphs(&self) -> impl Iterator<Item = (&Arc<str>, &ValidFederationSchema)> {
         self.subgraphs_by_name.iter()
     }
 
@@ -572,7 +572,7 @@ impl QueryGraph {
 
             let tail = edge_ref.target();
             let tail_weight = self.node_weight(tail)?;
-            if tail_weight.source != to_subgraph {
+            if tail_weight.source.as_ref() != to_subgraph {
                 continue;
             }
 
@@ -628,7 +628,7 @@ impl QueryGraph {
             let selection = parse_field_set(
                 subgraph_schema,
                 composite_type_position.type_name().clone(),
-                &key_value.fields,
+                key_value.fields,
             )?;
             if !external_metadata.selects_any_external_field(&selection)? {
                 return Ok(Some(selection));
@@ -851,14 +851,10 @@ impl QueryGraph {
         let ty = type_name.get(schema.schema())?;
 
         for key in ty.directives().get_all(&key_directive_definition.name) {
-            let Some(value) = key
-                .argument_by_name("fields")
-                .and_then(|arg| arg.as_node_str())
-                .cloned()
-            else {
+            let Some(value) = key.argument_by_name("fields").and_then(|arg| arg.as_str()) else {
                 continue;
             };
-            let selection = parse_field_set(schema, ty.name().clone(), &value)?;
+            let selection = parse_field_set(schema, ty.name().clone(), value)?;
             let has_external = metadata
                 .external_metadata()
                 .selects_any_external_field(&selection)?;
@@ -891,7 +887,7 @@ impl QueryGraph {
 
     pub(crate) fn has_an_implementation_with_provides(
         &self,
-        source: &NodeStr,
+        source: &Arc<str>,
         interface_field_definition_position: InterfaceFieldDefinitionPosition,
     ) -> Result<bool, FederationError> {
         let schema = self.schema_by_source(source)?;

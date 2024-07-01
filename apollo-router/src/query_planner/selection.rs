@@ -1,5 +1,5 @@
-use apollo_compiler::ast::Name;
 use apollo_compiler::schema::ExtendedType;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::ByteString;

@@ -3,6 +3,7 @@
 
 use apollo_compiler::ast;
 use apollo_compiler::name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use tower::BoxError;
@@ -12,7 +13,7 @@ use crate::spec::query::transform;
 use crate::spec::query::transform::document;
 use crate::spec::query::transform::Visitor;
 
-const LABEL_NAME: ast::Name = name!("label");
+const LABEL_NAME: Name = name!("label");
 
 /// go through the query and adds labels to defer fragments that do not have any
 ///
@@ -81,7 +82,7 @@ fn directives(
                 has_label = true;
                 if let ast::Value::String(label) = arg.make_mut().value.make_mut() {
                     // Add a prefix to existing labels
-                    *label = format!("_{label}").into();
+                    *label = format!("_{label}");
                 } else {
                     return Err("@defer with a non-string label".into());
                 }
