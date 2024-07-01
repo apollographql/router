@@ -474,6 +474,16 @@ impl FetchDependencyGraphNodePath {
     }
 }
 
+/// If the `iter` yields a single element, return it. Else return `None`.
+fn iter_into_single_item<T>(mut iter: impl Iterator<Item = T>) -> Option<T> {
+    let item = iter.next()?;
+    if iter.next().is_none() {
+        Some(item)
+    } else {
+        None
+    }
+}
+
 impl FetchDependencyGraph {
     pub(crate) fn new(
         supergraph_schema: ValidFederationSchema,
@@ -1811,16 +1821,29 @@ impl FetchDependencyGraph {
         sibling_id: NodeIndex,
     ) -> Result<bool, FederationError> {
         let node = self.node_weight(node_id)?;
-        let own_parents: Vec<ParentRelation> = self.parents_relations_of(node_id).collect();
-
         let sibling = self.node_weight(sibling_id)?;
-        let sibling_parents: Vec<ParentRelation> = self.parents_relations_of(sibling_id).collect();
+
+        let own_parents_iter = self
+            .graph
+            .edges_directed(node_id, petgraph::Direction::Incoming);
+        let Some(own_parent_id) = iter_into_single_item(own_parents_iter).map(|node| node.source())
+        else {
+            return Ok(false);
+        };
+
+        let sibling_parents_iter = self
+            .graph
+            .edges_directed(sibling_id, petgraph::Direction::Incoming);
+        let Some(sibling_parent_id) =
+            iter_into_single_item(sibling_parents_iter).map(|node| node.source())
+        else {
+            return Ok(false);
+        };
+
         Ok(node.defer_ref == sibling.defer_ref
             && node.subgraph_name == sibling.subgraph_name
             && node.merge_at == sibling.merge_at
-            && own_parents.len() == 1
-            && sibling_parents.len() == 1
-            && own_parents[0].parent_node_id == sibling_parents[0].parent_node_id)
+            && own_parent_id == sibling_parent_id)
     }
 
     fn can_merge_grand_child_in(
@@ -3671,9 +3694,7 @@ fn handle_requires(
     // the edge `0 --- 2` is removed (since the dependency of 2 on 0 is already provide transitively through 1).
     dependency_graph.reduce();
 
-    let parents: Vec<ParentRelation> = dependency_graph
-        .parents_relations_of(fetch_node_id)
-        .collect();
+    let single_parent = iter_into_single_item(dependency_graph.parents_relations_of(fetch_node_id));
     // In general, we should do like for an edge, and create a new node _for the current subgraph_
     // that depends on the created_nodes and have the created nodes depend on the current one.
     // However, we can be more efficient in general (and this is expected by the user) because
@@ -3683,8 +3704,9 @@ fn handle_requires(
     // node we're coming from is our "direct parent", we can merge it to said direct parent (which
     // effectively means that the parent node will collect the provides before taking the edge
     // to our current node).
-    if parents.len() == 1 && fetch_node_path.path_in_node.has_only_fragments() {
-        let parent = &parents[0];
+    if single_parent.is_some() && fetch_node_path.path_in_node.has_only_fragments() {
+        // Should do `if let` but it requires extra indentation.
+        let parent = single_parent.unwrap();
 
         // We start by computing the nodes for the conditions. We do this using a copy of the current
         // node (with only the inputs) as that allows to modify this copy without modifying `node`.
@@ -3738,7 +3760,7 @@ fn handle_requires(
         // Note: it is to be sure this test is not polluted by other things in `node` that we created `new_node`.
         dependency_graph.remove_inputs_from_selection(new_node_id)?;
 
-        let new_node_is_not_needed = dependency_graph.is_node_unneeded(new_node_id, parent)?;
+        let new_node_is_not_needed = dependency_graph.is_node_unneeded(new_node_id, &parent)?;
         let mut unmerged_node_ids: Vec<NodeIndex> = Vec::new();
         if new_node_is_not_needed {
             // Up to this point, `new_node` had no parent, so let's first merge `new_node` to the parent, thus "rooting"
