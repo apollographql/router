@@ -84,6 +84,7 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
 
     // FIXME: configurable batch size
     let mut stream = storage.scan(key_prefix.clone(), Some(10));
+    let mut count = 0u64;
 
     while let Some(res) = stream.next().await {
         match res {
@@ -104,12 +105,19 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
                         .collect::<Vec<_>>();
                     if !keys.is_empty() {
                         tracing::debug!("deleting keys: {keys:?}");
+                        count += keys.len() as u64;
                         storage.delete(keys).await;
                     }
                 }
             }
         }
     }
+
+    u64_histogram!(
+        "apollo.router.cache.invalidation.keys",
+        "Number of invalidated keys.",
+        count
+    );
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
