@@ -1,14 +1,7 @@
-### fix(metrics) make query_planning.plan.duration more accurate ([PR #5](https://github.com/apollographql/router/pull/5530))
+### Improve accuracy of `query_planning.plan.duration` ([PR #5](https://github.com/apollographql/router/pull/5530))
+Previously, the `apollo.router.query_planning.plan.duration` metric inaccurately included additional processing time beyond query planning. The additional time included pooling time, which is already accounted for in the metric. After this update, apollo.router.query_planning.plan.duration now accurately reflects only the query planning duration without additional processing time.
 
-`apollo.router.query_planning.plan.duration` was previously recording additional
-processing duration aside from just query planning duration data. This was an
-inaccurate representation of the actual query planning time, and is now fixed.
-The additional processing data included pooling time, which is already
-represented as part of `apollo.router.query_planning.total.duration` metric.
-
-Here is an example of what `apollo.router.query_planning.plan.duration` and
-`apollo.router.query_planning.total.duration` would be reporting before this
-change:
+For example, before the change, metrics reported: 
 ```bash
 2024-06-21T13:37:27.744592Z WARN  apollo.router.query_planning.plan.duration 0.002475708
 2024-06-21T13:37:27.744651Z WARN  apollo.router.query_planning.total.duration 0.002553958
