@@ -62,6 +62,7 @@ pub(crate) struct Config {
     /// Custom mapping to be used as the resource field in spans, defaults to:
     /// router -> http.route
     /// supergraph -> graphql.operation.name
+    /// subgraph -> subgraph.name
     /// subgraph_request -> subgraph.name
     /// http_request -> http.route
     #[serde(default)]
@@ -129,7 +130,7 @@ impl TracingConfigurator for Config {
                         }
                     }
                 }
-                return &span.name;
+                &span.name
             })
             .with(
                 &common.resource.get(SERVICE_NAME),
