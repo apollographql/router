@@ -2,8 +2,7 @@ use std::fmt::Display;
 use std::hash::Hash;
 use std::hash::Hasher;
 
-use apollo_compiler::ast::Name;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 
 pub mod expand;
 mod json_selection;
@@ -36,8 +35,8 @@ use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
 #[derive(Debug, Clone)]
 pub struct ConnectId {
     pub label: String,
-    pub subgraph_name: NodeStr,
-    pub source_name: Option<NodeStr>,
+    pub subgraph_name: String,
+    pub source_name: Option<String>,
     pub directive: ObjectOrInterfaceFieldDirectivePosition,
 }
 
@@ -82,8 +81,8 @@ impl Display for ConnectId {
 impl ConnectId {
     /// Mostly intended for tests in apollo-router
     pub fn new(
-        subgraph_name: NodeStr,
-        source_name: Option<NodeStr>,
+        subgraph_name: String,
+        source_name: Option<String>,
         type_name: Name,
         field_name: Name,
         index: usize,

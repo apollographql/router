@@ -4,7 +4,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use apollo_federation::sources::connect::Connector;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
@@ -28,7 +27,7 @@ pub(crate) struct ConnectorService {
     pub(crate) schema: Arc<Schema>,
     pub(crate) _subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) _subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors_by_service_name: Arc<IndexMap<NodeStr, Connector>>,
+    pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
 }
 
 impl tower::Service<ConnectRequest> for ConnectorService {
@@ -111,7 +110,7 @@ pub(crate) struct ConnectorServiceFactory {
     pub(crate) subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
     pub(crate) subscription_config: Option<SubscriptionConfig>,
-    pub(crate) connectors_by_service_name: Arc<IndexMap<NodeStr, Connector>>,
+    pub(crate) connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
 }
 
 impl ConnectorServiceFactory {
@@ -120,7 +119,7 @@ impl ConnectorServiceFactory {
         subgraph_schemas: Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
         http_service_factory: Arc<IndexMap<String, HttpClientServiceFactory>>,
         subscription_config: Option<SubscriptionConfig>,
-        connectors_by_service_name: Arc<IndexMap<NodeStr, Connector>>,
+        connectors_by_service_name: Arc<IndexMap<Arc<str>, Connector>>,
     ) -> Self {
         Self {
             http_service_factory,

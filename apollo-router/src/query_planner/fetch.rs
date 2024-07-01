@@ -5,7 +5,6 @@ use std::sync::Arc;
 use apollo_compiler::ast;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
 use indexmap::IndexSet;
 use serde::Deserialize;
 use serde::Serialize;
@@ -104,7 +103,7 @@ pub(crate) type SubgraphSchemas = HashMap<String, Arc<Valid<apollo_compiler::Sch
 #[serde(rename_all = "camelCase")]
 pub(crate) struct FetchNode {
     /// The name of the service or subgraph that the fetch is querying.
-    pub(crate) service_name: NodeStr,
+    pub(crate) service_name: Arc<str>,
 
     /// The data that is required for the subgraph fetch.
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -112,19 +111,19 @@ pub(crate) struct FetchNode {
     pub(crate) requires: Vec<Selection>,
 
     /// The variables that are used for the subgraph fetch.
-    pub(crate) variable_usages: Vec<NodeStr>,
+    pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the fetch.
     pub(crate) operation: SubgraphOperation,
 
     /// The GraphQL subquery operation name.
-    pub(crate) operation_name: Option<NodeStr>,
+    pub(crate) operation_name: Option<Arc<str>>,
 
     /// The GraphQL operation kind that is used for the fetch.
     pub(crate) operation_kind: OperationKind,
 
     /// Optional id used by Deferred nodes
-    pub(crate) id: Option<NodeStr>,
+    pub(crate) id: Option<String>,
 
     // Optionally describes a number of "rewrites" that query plan executors should apply to the data that is sent as input of this fetch.
     pub(crate) input_rewrites: Option<Vec<rewrites::DataRewrite>>,
@@ -279,7 +278,7 @@ impl Variables {
     #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         requires: &[Selection],
-        variable_usages: &[NodeStr],
+        variable_usages: &[Arc<str>],
         data: &Value,
         current_dir: &Path,
         body: &Request,
@@ -293,7 +292,7 @@ impl Variables {
 
             variables.extend(variable_usages.iter().filter_map(|key| {
                 body.variables
-                    .get_key_value(key.as_str())
+                    .get_key_value(key.as_ref())
                     .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
             }));
 
@@ -357,7 +356,7 @@ impl Variables {
                     .iter()
                     .filter_map(|key| {
                         body.variables
-                            .get_key_value(key.as_str())
+                            .get_key_value(key.as_ref())
                             .map(|(variable_key, value)| (variable_key.clone(), value.clone()))
                     })
                     .collect::<Object>(),
@@ -379,8 +378,8 @@ impl FetchNode {
         output_rewrites: &Option<Vec<DataRewrite>>,
         schema: &Schema,
         paths: Vec<Vec<Path>>,
-        id: Option<NodeStr>,
-        deferred_fetches: &HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+        id: Option<String>,
+        deferred_fetches: &HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
         operation_str: &str,
         variables: Map<ByteString, Value>,
     ) -> (Value, Vec<Error>) {
@@ -443,8 +442,8 @@ impl FetchNode {
 
     pub(crate) fn deferred_fetches(
         current_dir: &Path,
-        id: Option<NodeStr>,
-        deferred_fetches: &HashMap<NodeStr, Sender<(Value, Vec<Error>)>>,
+        id: Option<String>,
+        deferred_fetches: &HashMap<String, Sender<(Value, Vec<Error>)>>,
         value: &Value,
         errors: &[Error],
     ) {
@@ -600,7 +599,7 @@ impl FetchNode {
         &mut self,
         subgraph_schemas: &SubgraphSchemas,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
         self.operation.init_parsed(schema)?;
         Ok(())
     }
@@ -610,7 +609,7 @@ impl FetchNode {
         subgraph_schemas: &SubgraphSchemas,
         supergraph_schema_hash: &str,
     ) -> Result<(), ValidationErrors> {
-        let schema = &subgraph_schemas[self.service_name.as_str()];
+        let schema = &subgraph_schemas[self.service_name.as_ref()];
         let doc = self.operation.init_parsed(schema)?;
 
         if let Ok(hash) = QueryHashVisitor::hash_query(

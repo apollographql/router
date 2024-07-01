@@ -5,11 +5,11 @@ use indexmap::IndexMap;
 use crate::query_planner::PlanNode;
 use crate::Context;
 
-type ConnectorsContext = Arc<IndexMap<String, String>>;
+type ConnectorsContext = Arc<IndexMap<Arc<str>, String>>;
 
 pub(crate) fn store_connectors_context(
     context: &Context,
-    labels_by_service_name: Arc<IndexMap<String, String>>,
+    labels_by_service_name: Arc<IndexMap<Arc<str>, String>>,
 ) {
     context
         .extensions()
@@ -27,7 +27,7 @@ pub(crate) fn replace_connector_service_names_text(
         text.as_ref().map(|text| {
             let mut text = text.to_string();
             for (service_name, label) in replacements.iter() {
-                text = text.replace(service_name, label);
+                text = text.replace(&**service_name, label);
             }
             Arc::new(text)
         })
@@ -52,7 +52,7 @@ pub(crate) fn replace_connector_service_names(
         plan
     };
 
-    fn recurse(plan: &mut PlanNode, replacements: &IndexMap<String, String>) {
+    fn recurse(plan: &mut PlanNode, replacements: &IndexMap<Arc<str>, String>) {
         match plan {
             PlanNode::Sequence { nodes } => {
                 for node in nodes {
@@ -65,10 +65,9 @@ pub(crate) fn replace_connector_service_names(
                 }
             }
             PlanNode::Fetch(node) => {
-                node.service_name = replacements
-                    .get(&node.service_name.to_string())
-                    .map(|v| v.clone().into())
-                    .unwrap_or_else(|| node.service_name.clone());
+                if let Some(service_name) = replacements.get(&node.service_name) {
+                    node.service_name = service_name.clone().into();
+                }
             }
             PlanNode::Flatten(flatten) => {
                 recurse(&mut flatten.node, replacements);

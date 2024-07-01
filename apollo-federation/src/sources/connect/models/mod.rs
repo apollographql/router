@@ -1,6 +1,5 @@
 mod validation;
 
-use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 pub use validation::validate;
 pub use validation::Code as ValidationCode;
@@ -46,7 +45,7 @@ impl Transport {
 impl Connector {
     pub(crate) fn from_valid_schema(
         schema: &ValidFederationSchema,
-        subgraph_name: NodeStr,
+        subgraph_name: &str,
     ) -> Result<IndexMap<ConnectId, Self>, FederationError> {
         let Some(metadata) = schema.metadata() else {
             return Ok(IndexMap::new());
@@ -95,8 +94,8 @@ impl Connector {
                     .unwrap_or(false);
 
                 let id = ConnectId {
-                    label: make_label(&subgraph_name, source_name.clone(), &transport),
-                    subgraph_name: subgraph_name.clone(),
+                    label: make_label(subgraph_name, &source_name, &transport),
+                    subgraph_name: subgraph_name.to_string(),
                     source_name: source_name.clone(),
                     directive: args.position,
                 };
@@ -115,7 +114,7 @@ impl Connector {
     }
 }
 
-fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Transport) -> String {
+fn make_label(subgraph_name: &str, source: &Option<String>, transport: &Transport) -> String {
     let source = format!(".{}", source.as_deref().unwrap_or(""));
     format!("{}{} {}", subgraph_name, source, transport.label())
 }
@@ -124,10 +123,10 @@ fn make_label(subgraph_name: &NodeStr, source: Option<NodeStr>, transport: &Tran
 
 #[derive(Debug, Clone)]
 pub struct HttpJsonTransport {
-    pub base_url: NodeStr,
+    pub base_url: String,
     pub path_template: URLPathTemplate,
     pub method: HTTPMethod,
-    pub headers: IndexMap<NodeStr, Option<HTTPHeaderOption>>,
+    pub headers: IndexMap<String, Option<HTTPHeaderOption>>,
     pub body: Option<JSONSelection>,
 }
 
@@ -211,8 +210,7 @@ mod tests {
     fn test_from_schema() {
         let subgraphs = get_subgraphs(SIMPLE_SUPERGRAPH);
         let subgraph = subgraphs.get("connectors").unwrap();
-        let connectors =
-            Connector::from_valid_schema(&subgraph.schema, "connectors".into()).unwrap();
+        let connectors = Connector::from_valid_schema(&subgraph.schema, "connectors").unwrap();
         assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {

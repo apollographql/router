@@ -567,14 +567,8 @@ impl Query {
                         let typename = input_object
                             .get(TYPENAME)
                             .and_then(|val| val.as_str())
-                            .and_then(|s| {
-                                Some(apollo_compiler::ast::Type::Named(
-                                    apollo_compiler::ast::NamedType::new(
-                                        apollo_compiler::NodeStr::new(s),
-                                    )
-                                    .ok()?,
-                                ))
-                            });
+                            .and_then(|s| apollo_compiler::schema::NamedType::new(s).ok())
+                            .map(apollo_compiler::ast::Type::Named);
 
                         let current_type = if parameters
                             .schema

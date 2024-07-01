@@ -1,9 +1,9 @@
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::IndexMap;
 use indexmap::IndexSet;

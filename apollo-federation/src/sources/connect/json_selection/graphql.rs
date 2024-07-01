@@ -13,8 +13,8 @@
 // but may be easier to use for validating the selection against a GraphQL
 // schema, using existing code for validating GraphQL operations.
 
-use apollo_compiler::ast;
 use apollo_compiler::ast::Selection as GraphQLSelection;
+use apollo_compiler::Name;
 
 use super::parser::JSONSelection;
 use super::parser::NamedSelection;
@@ -52,7 +52,7 @@ fn new_field(name: String, selection: Option<GraphQLSelections>) -> GraphQLSelec
     GraphQLSelection::Field(
         apollo_compiler::ast::Field {
             alias: None,
-            name: ast::Name::new_unchecked(name.into()),
+            name: Name::new_unchecked(&name),
             arguments: Default::default(),
             directives: Default::default(),
             selection_set: selection

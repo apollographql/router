@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::ExecutableDocument;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::FragmentSpread;
@@ -8,6 +7,7 @@ use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use serde_json_bytes::Value;
