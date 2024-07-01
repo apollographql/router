@@ -49,22 +49,26 @@ const BUILT_IN_SPAN_NAMES: [&str; 7] = [
     "query_planning",
 ];
 
-#[derive(Debug, Clone, Deserialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// Enable datadog
     enabled: bool,
 
     /// The endpoint to send to
+    #[serde(default)]
     endpoint: UriEndpoint,
 
     /// batch processor configuration
+    #[serde(default)]
     batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
+    #[serde(default)]
     enable_span_mapping: bool,
 
     /// Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.
+    #[serde(default)]
     fixed_span_names: bool,
 
     /// Custom mapping to be used as the resource field in spans, defaults to:
@@ -74,20 +78,8 @@ pub(crate) struct Config {
     /// subgraph -> subgraph.name
     /// subgraph_request -> subgraph.name
     /// http_request -> http.route
+    #[serde(default)]
     resource_mapping: HashMap<String, String>,
-}
-
-impl Default for Config {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            endpoint: UriEndpoint::default(),
-            batch_processor: BatchProcessorConfig::default(),
-            enable_span_mapping: false,
-            fixed_span_names: true,
-            resource_mapping: HashMap::new(),
-        }
-    }
 }
 
 impl TracingConfigurator for Config {
