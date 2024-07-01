@@ -1,9 +1,8 @@
-### Make `value` for custom instruments easier to use ([PR #5472](https://github.com/apollographql/router/pull/5472))
+### Restrict custom instrument `value`s to relevant stages ([PR #5472](https://github.com/apollographql/router/pull/5472))
 
-Previously every custom instrument at every stage had the ability to specify values that were not related to that stage. e.g. event_unit for a router instrument.
+Previously, custom instruments at each [request lifecycle stage](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/instruments/#router-request-lifecycle-services) could specify unrelated values, like using `event_unit` for a router instrument. Now, only relevant values for each stage are allowed.
 
-With this change only the relevant values for the stage are allowed. In addition, graphql instruments no longer need to specify field_event:
-There is no automatic migration for this as graphql instruments are still experimental.
+Additionally, GraphQL instruments no longer need to specify `field_event`. There is no automatic migration for this change since GraphQL instruments are still experimental.
 
 ```yaml
 telemetry:
