@@ -688,7 +688,10 @@ impl Hash for CachingQueryHash {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         match self {
             CachingQueryHash::Reuse(hash) => hash.hash(state),
-            CachingQueryHash::DoNotReuse { schema_hash, query_hash } => {
+            CachingQueryHash::DoNotReuse {
+                schema_hash,
+                query_hash,
+            } => {
                 schema_hash.hash(state);
                 query_hash.hash(state);
             }
@@ -700,7 +703,10 @@ impl std::fmt::Display for CachingQueryHash {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             CachingQueryHash::Reuse(hash) => write!(f, "query:{}", hash),
-            CachingQueryHash::DoNotReuse { schema_hash, query_hash } => write!(f, "schema:{}:query:{}", schema_hash, query_hash),
+            CachingQueryHash::DoNotReuse {
+                schema_hash,
+                query_hash,
+            } => write!(f, "schema:{}:query:{}", schema_hash, query_hash),
         }
     }
 }
