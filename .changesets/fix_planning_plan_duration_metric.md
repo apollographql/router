@@ -9,7 +9,8 @@ For example, before the change, metrics reported:
 2024-06-21T13:37:27.748831Z WARN  apollo.router.query_planning.plan.duration 0.001635833
 2024-06-21T13:37:27.748860Z WARN  apollo.router.query_planning.total.duration 0.001677167
 ```
-And here is what this is reporting after this change:
+
+Post-change metrics now accurately reflect:
 ```bash
 2024-06-21T13:37:27.743465Z WARN  apollo.router.query_planning.plan.duration 0.00107725
 2024-06-21T13:37:27.744651Z WARN  apollo.router.query_planning.total.duration 0.002553958
