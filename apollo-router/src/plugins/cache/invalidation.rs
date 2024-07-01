@@ -61,7 +61,7 @@ async fn start(
 
 async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<InvalidationRequest>) {
     for request in requests {
-        handle_request(&storage, &request)
+        handle_request(storage, &request)
             .instrument(tracing::info_span!("cache.invalidation.request"))
             .await;
     }

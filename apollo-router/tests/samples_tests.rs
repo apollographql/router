@@ -330,7 +330,7 @@ impl TestExecution {
         let subgraphs_server = self.subgraphs_server.as_mut().unwrap();
         subgraphs_server.reset().await;
 
-        for (_name, subgraph) in subgraphs {
+        for subgraph in subgraphs.values() {
             for SubgraphRequestMock { request, response } in &subgraph.requests {
                 let mut builder = Mock::given(body_partial_json(&request.body));
 
@@ -352,7 +352,7 @@ impl TestExecution {
                 }
                 builder
                     .respond_with(res.set_body_json(&response.body))
-                    .mount(&subgraphs_server)
+                    .mount(subgraphs_server)
                     .await;
             }
         }

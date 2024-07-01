@@ -506,11 +506,10 @@ impl InnerCacheService {
     }
 
     async fn handle_invalidation(&mut self, invalidation_extensions: Value) {
-        if let Some(requests) = from_value(invalidation_extensions).ok() {
+        if let Ok(requests) = from_value(invalidation_extensions) {
             if let Err(e) = self.invalidation.invalidate(requests).await {
-                tracing::error!(                    error = %e,
-
-                   message= "could not invalidate entity cache entries",
+                tracing::error!(error = %e,
+                   message = "could not invalidate entity cache entries",
                 );
             }
         }
