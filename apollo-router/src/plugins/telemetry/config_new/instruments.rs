@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::marker::PhantomData;
 use std::sync::Arc;
 
 use opentelemetry::metrics::Unit;
@@ -23,6 +22,7 @@ use tower::BoxError;
 use super::attributes::HttpServerAttributes;
 use super::DefaultForLevel;
 use super::Selector;
+use super::Stage;
 use crate::metrics;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::attributes::RouterAttributes;
@@ -34,14 +34,10 @@ use crate::plugins::telemetry::config_new::cost::CostInstrumentsConfig;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
 use crate::plugins::telemetry::config_new::graphql::GraphQLInstrumentsConfig;
 use crate::plugins::telemetry::config_new::selectors::RouterSelector;
-use crate::plugins::telemetry::config_new::selectors::RouterValue;
 use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
-use crate::plugins::telemetry::config_new::selectors::SubgraphValue;
 use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
-use crate::plugins::telemetry::config_new::selectors::SupergraphValue;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::router;
@@ -58,25 +54,19 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) default_requirement_level: DefaultAttributeRequirementLevel,
 
     /// Router service instruments. For more information see documentation on Router lifecycle.
-    pub(crate) router: Extendable<
-        RouterInstrumentsConfig,
-        Instrument<RouterAttributes, RouterSelector, RouterValue>,
-    >,
+    pub(crate) router:
+        Extendable<RouterInstrumentsConfig, Instrument<RouterAttributes, RouterSelector>>,
     /// Supergraph service instruments. For more information see documentation on Router lifecycle.
     pub(crate) supergraph: Extendable<
         SupergraphInstrumentsConfig,
-        Instrument<SupergraphAttributes, SupergraphSelector, SupergraphValue>,
+        Instrument<SupergraphAttributes, SupergraphSelector>,
     >,
     /// Subgraph service instruments. For more information see documentation on Router lifecycle.
-    pub(crate) subgraph: Extendable<
-        SubgraphInstrumentsConfig,
-        Instrument<SubgraphAttributes, SubgraphSelector, SubgraphValue>,
-    >,
+    pub(crate) subgraph:
+        Extendable<SubgraphInstrumentsConfig, Instrument<SubgraphAttributes, SubgraphSelector>>,
     /// GraphQL response field instruments.
-    pub(crate) graphql: Extendable<
-        GraphQLInstrumentsConfig,
-        Instrument<GraphQLAttributes, GraphQLSelector, GraphQLValue>,
-    >,
+    pub(crate) graphql:
+        Extendable<GraphQLInstrumentsConfig, Instrument<GraphQLAttributes, GraphQLSelector>>,
 }
 
 impl InstrumentsConfig {
@@ -580,18 +570,17 @@ impl DefaultForLevel for SubgraphInstrumentsConfig {
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
 #[serde(deny_unknown_fields)]
-pub(crate) struct Instrument<A, E, V>
+pub(crate) struct Instrument<A, E>
 where
     A: Default + Debug,
     E: Debug,
-    for<'a> &'a V: Into<InstrumentValue<E>>,
 {
     /// The type of instrument.
     #[serde(rename = "type")]
     ty: InstrumentType,
 
     /// The value of the instrument.
-    value: V,
+    value: InstrumentValue<E>,
 
     /// The description of the instrument.
     description: String,
@@ -608,14 +597,12 @@ where
     condition: Condition<E>,
 }
 
-impl<A, E, Request, Response, EventResponse, SelectorValue> Selectors
-    for Instrument<A, E, SelectorValue>
+impl<A, E, Request, Response, EventResponse> Selectors for Instrument<A, E>
 where
     A: Debug
         + Default
         + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
-    for<'a> &'a SelectorValue: Into<InstrumentValue<E>>,
 {
     type Request = Request;
     type Response = Response;
@@ -657,12 +644,55 @@ pub(crate) enum InstrumentType {
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum InstrumentValue<T> {
-    Standard(Standard),
-    Chunked(Event<T>),
-    Field(Field<T>),
+    Duration,
+    Unit,
     Custom(T),
+}
+
+impl<T> InstrumentValue<T>
+where
+    T: Clone,
+{
+    fn into_increment(&self, stage: Stage) -> (Option<Arc<T>>, Increment) {
+        match self {
+            InstrumentValue::Duration => match stage {
+                Stage::ResponseEvent => (None, Increment::EventDuration(Instant::now())),
+                // FIXME: not supported
+                Stage::ResponseField => (None, Increment::Duration(Instant::now())),
+                Stage::Request
+                | Stage::ResponsePrimary
+                | Stage::AllResponse
+                | Stage::Error
+                | Stage::All => (None, Increment::Duration(Instant::now())),
+            },
+            InstrumentValue::Unit => match stage {
+                Stage::ResponseEvent => (None, Increment::EventUnit),
+
+                Stage::ResponseField => (None, Increment::FieldUnit),
+
+                Stage::Request
+                | Stage::ResponsePrimary
+                | Stage::AllResponse
+                | Stage::Error
+                | Stage::All => (None, Increment::Unit),
+            },
+            InstrumentValue::Custom(selector) => match stage {
+                Stage::ResponseEvent | Stage::AllResponse => (
+                    Some(Arc::new(selector.clone())),
+                    Increment::EventCustom(None),
+                ),
+                Stage::ResponseField => (
+                    Some(Arc::new(selector.clone())),
+                    Increment::FieldCustom(None),
+                ),
+                Stage::Request | Stage::ResponsePrimary | Stage::Error | Stage::All => {
+                    (Some(Arc::new(selector.clone())), Increment::Custom(None))
+                }
+            },
+        }
+    }
 }
 
 #[derive(Clone, Deserialize, JsonSchema, Debug)]
@@ -679,29 +709,29 @@ pub(crate) enum Standard {
     // Active,
 }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Event<T> {
-    /// For every supergraph response payload (including subscription events and defer events)
-    #[serde(rename = "event_duration")]
-    Duration,
-    /// For every supergraph response payload (including subscription events and defer events)
-    #[serde(rename = "event_unit")]
-    Unit,
-    /// For every supergraph response payload (including subscription events and defer events)
-    #[serde(rename = "event_custom")]
-    Custom(T),
-}
+// #[derive(Clone, Deserialize, JsonSchema, Debug)]
+// #[serde(deny_unknown_fields, rename_all = "snake_case")]
+// pub(crate) enum Event<T> {
+//     /// For every supergraph response payload (including subscription events and defer events)
+//     #[serde(rename = "event_duration")]
+//     Duration,
+//     /// For every supergraph response payload (including subscription events and defer events)
+//     #[serde(rename = "event_unit")]
+//     Unit,
+//     /// For every supergraph response payload (including subscription events and defer events)
+//     #[serde(rename = "event_custom")]
+//     Custom(T),
+// }
 
-#[derive(Clone, Deserialize, JsonSchema, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum Field<T> {
-    #[serde(rename = "field_unit")]
-    Unit,
-    /// For every field
-    #[serde(rename = "field_custom")]
-    Custom(T),
-}
+// #[derive(Clone, Deserialize, JsonSchema, Debug)]
+// #[serde(deny_unknown_fields, rename_all = "snake_case")]
+// pub(crate) enum Field<T> {
+//     #[serde(rename = "field_unit")]
+//     Unit,
+//     /// For every field
+//     #[serde(rename = "field_custom")]
+//     Custom(T),
+// }
 
 pub(crate) trait Instrumented {
     type Request;
@@ -722,8 +752,7 @@ pub(crate) trait Instrumented {
     fn on_error(&self, error: &BoxError, ctx: &Context);
 }
 
-impl<A, B, E, Request, Response, EventResponse, SelectorValue> Instrumented
-    for Extendable<A, Instrument<B, E, SelectorValue>>
+impl<A, B, E, Request, Response, EventResponse> Instrumented for Extendable<A, Instrument<B, E>>
 where
     A: Default
         + Instrumented<Request = Request, Response = Response, EventResponse = EventResponse>,
@@ -731,7 +760,6 @@ where
         + Debug
         + Selectors<Request = Request, Response = Response, EventResponse = EventResponse>,
     E: Debug + Selector<Request = Request, Response = Response, EventResponse = EventResponse>,
-    for<'a> InstrumentValue<E>: From<&'a SelectorValue>,
 {
     type Request = Request;
     type Response = Response;
@@ -794,18 +822,16 @@ impl Selectors for SubgraphInstrumentsConfig {
     }
 }
 
-pub(crate) struct CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
+pub(crate) struct CustomInstruments<Request, Response, Attributes, Select>
 where
     Attributes: Selectors<Request = Request, Response = Response> + Default,
     Select: Selector<Request = Request, Response = Response> + Debug,
 {
-    _phantom: PhantomData<SelectorValue>,
     counters: Vec<CustomCounter<Request, Response, Attributes, Select>>,
     histograms: Vec<CustomHistogram<Request, Response, Attributes, Select>>,
 }
 
-impl<Request, Response, Attributes, Select, SelectorValue>
-    CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
+impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
 where
     Attributes: Selectors<Request = Request, Response = Response> + Default,
     Select: Selector<Request = Request, Response = Response> + Debug,
@@ -815,16 +841,12 @@ where
     }
 }
 
-impl<Request, Response, Attributes, Select, SelectorValue>
-    CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
+impl<Request, Response, Attributes, Select> CustomInstruments<Request, Response, Attributes, Select>
 where
     Attributes: Selectors<Request = Request, Response = Response> + Default + Debug + Clone,
     Select: Selector<Request = Request, Response = Response> + Debug + Clone,
-    for<'a> &'a SelectorValue: Into<InstrumentValue<Select>>,
 {
-    pub(crate) fn new(
-        config: &HashMap<String, Instrument<Attributes, Select, SelectorValue>>,
-    ) -> Self {
+    pub(crate) fn new(config: &HashMap<String, Instrument<Attributes, Select>>) -> Self {
         let mut counters = Vec::new();
         let mut histograms = Vec::new();
         let meter = metrics::meter_provider().meter(METER_NAME);
@@ -832,31 +854,10 @@ where
         for (instrument_name, instrument) in config {
             match instrument.ty {
                 InstrumentType::Counter => {
-                    let (selector, increment) = match (&instrument.value).into() {
-                        InstrumentValue::Standard(incr) => {
-                            let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now()),
-                                Standard::Unit => Increment::Unit,
-                            };
-                            (None, incr)
-                        }
-                        InstrumentValue::Custom(selector) => {
-                            (Some(Arc::new(selector)), Increment::Custom(None))
-                        }
-                        InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
-                            Event::Unit => (None, Increment::EventUnit),
-                            Event::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::EventCustom(None))
-                            }
-                        },
-                        InstrumentValue::Field(incr) => match incr {
-                            Field::Unit => (None, Increment::FieldUnit),
-                            Field::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::FieldCustom(None))
-                            }
-                        },
-                    };
+                    dbg!(instrument_name);
+                    let (selector, increment) = instrument
+                        .value
+                        .into_increment(dbg!(instrument.condition.selector_stage()));
                     let counter = CustomCounterInner {
                         increment,
                         condition: instrument.condition.clone(),
@@ -878,31 +879,9 @@ where
                     })
                 }
                 InstrumentType::Histogram => {
-                    let (selector, increment) = match (&instrument.value).into() {
-                        InstrumentValue::Standard(incr) => {
-                            let incr = match incr {
-                                Standard::Duration => Increment::Duration(Instant::now()),
-                                Standard::Unit => Increment::Unit,
-                            };
-                            (None, incr)
-                        }
-                        InstrumentValue::Custom(selector) => {
-                            (Some(Arc::new(selector)), Increment::Custom(None))
-                        }
-                        InstrumentValue::Chunked(incr) => match incr {
-                            Event::Duration => (None, Increment::EventDuration(Instant::now())),
-                            Event::Unit => (None, Increment::EventUnit),
-                            Event::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::EventCustom(None))
-                            }
-                        },
-                        InstrumentValue::Field(incr) => match incr {
-                            Field::Unit => (None, Increment::FieldUnit),
-                            Field::Custom(selector) => {
-                                (Some(Arc::new(selector)), Increment::FieldCustom(None))
-                            }
-                        },
-                    };
+                    let (selector, increment) = instrument
+                        .value
+                        .into_increment(instrument.condition.selector_stage());
                     let histogram = CustomHistogramInner {
                         increment,
                         condition: instrument.condition.clone(),
@@ -927,15 +906,14 @@ where
         }
 
         Self {
-            _phantom: Default::default(),
             counters,
             histograms,
         }
     }
 }
 
-impl<Request, Response, EventResponse, Attributes, Select, SelectorValue> Instrumented
-    for CustomInstruments<Request, Response, Attributes, Select, SelectorValue>
+impl<Request, Response, EventResponse, Attributes, Select> Instrumented
+    for CustomInstruments<Request, Response, Attributes, Select>
 where
     Attributes:
         Selectors<Request = Request, Response = Response, EventResponse = EventResponse> + Default,
@@ -1169,29 +1147,18 @@ impl Instrumented for SubgraphInstruments {
     }
 }
 
-pub(crate) type RouterCustomInstruments = CustomInstruments<
-    router::Request,
-    router::Response,
-    RouterAttributes,
-    RouterSelector,
-    RouterValue,
->;
+pub(crate) type RouterCustomInstruments =
+    CustomInstruments<router::Request, router::Response, RouterAttributes, RouterSelector>;
 
 pub(crate) type SupergraphCustomInstruments = CustomInstruments<
     supergraph::Request,
     supergraph::Response,
     SupergraphAttributes,
     SupergraphSelector,
-    SupergraphValue,
 >;
 
-pub(crate) type SubgraphCustomInstruments = CustomInstruments<
-    subgraph::Request,
-    subgraph::Response,
-    SubgraphAttributes,
-    SubgraphSelector,
-    SubgraphValue,
->;
+pub(crate) type SubgraphCustomInstruments =
+    CustomInstruments<subgraph::Request, subgraph::Response, SubgraphAttributes, SubgraphSelector>;
 
 // ---------------- Counter -----------------------
 #[derive(Debug)]

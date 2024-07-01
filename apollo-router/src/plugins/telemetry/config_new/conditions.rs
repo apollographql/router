@@ -3,6 +3,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
 
+use super::Stage;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
@@ -57,6 +58,25 @@ impl<T> Condition<T>
 where
     T: Selector,
 {
+    #[inline]
+    pub(crate) fn selector_stage(&self) -> Stage {
+        match self {
+            Condition::Eq(arr) | Condition::Gt(arr) | Condition::Lt(arr) => arr
+                .iter()
+                .max_by(|a, b| a.stage().cmp(&b.stage()))
+                .map(|s| s.stage())
+                .unwrap_or_default(),
+            Condition::Exists(ex) => ex.stage(),
+            Condition::All(c) | Condition::Any(c) => c
+                .iter()
+                .max_by(|a, b| a.selector_stage().cmp(&b.selector_stage()))
+                .map(|s| s.selector_stage())
+                .unwrap_or_default(),
+            Condition::Not(c) => c.selector_stage(),
+            Condition::True | Condition::False => Stage::default(),
+        }
+    }
+
     pub(crate) fn evaluate_request(&mut self, request: &T::Request) -> Option<bool> {
         match self {
             Condition::Eq(eq) => match (eq[0].on_request(request), eq[1].on_request(request)) {
@@ -458,6 +478,13 @@ where
             SelectorOrValue::Selector(selector) => selector.on_drop(),
         }
     }
+
+    fn stage(&self) -> super::Stage {
+        match self {
+            SelectorOrValue::Value(_) => super::Stage::All,
+            SelectorOrValue::Selector(s) => s.stage(),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -474,6 +501,7 @@ mod test {
     use crate::plugins::telemetry::config_new::test::field;
     use crate::plugins::telemetry::config_new::test::ty;
     use crate::plugins::telemetry::config_new::Selector;
+    use crate::plugins::telemetry::config_new::Stage;
     use crate::Context;
 
     enum TestSelector {
@@ -546,6 +574,10 @@ mod test {
                 Static(v) => Some((*v).into()),
                 _ => None,
             }
+        }
+
+        fn stage(&self) -> Stage {
+            Stage::All
         }
     }
 

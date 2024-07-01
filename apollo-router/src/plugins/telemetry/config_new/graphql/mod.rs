@@ -23,7 +23,6 @@ use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
 use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
@@ -75,7 +74,6 @@ pub(crate) type GraphQLCustomInstruments = CustomInstruments<
     supergraph::Response,
     GraphQLAttributes,
     GraphQLSelector,
-    GraphQLValue,
 >;
 
 pub(crate) struct GraphQLInstruments {

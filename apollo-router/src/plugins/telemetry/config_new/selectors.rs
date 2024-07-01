@@ -7,6 +7,7 @@ use serde_json_bytes::path::JsonPathInst;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
+use super::Stage;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -16,9 +17,6 @@ use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
-use crate::plugins::telemetry::config_new::instruments::Event;
-use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
-use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
@@ -101,22 +99,6 @@ pub(crate) enum ResponseStatus {
 pub(crate) enum OperationKind {
     /// The raw operation kind.
     String,
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum RouterValue {
-    Standard(Standard),
-    Custom(RouterSelector),
-}
-
-impl From<&RouterValue> for InstrumentValue<RouterSelector> {
-    fn from(value: &RouterValue) -> Self {
-        match value {
-            RouterValue::Standard(standard) => InstrumentValue::Standard(standard.clone()),
-            RouterValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -226,13 +208,13 @@ pub(crate) enum RouterSelector {
     },
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum SupergraphValue {
-    Standard(Standard),
-    Event(Event<SupergraphSelector>),
-    Custom(SupergraphSelector),
-}
+// #[derive(Deserialize, JsonSchema, Clone, Debug)]
+// #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+// pub(crate) enum SupergraphValue {
+//     Standard(Standard),
+//     Event(Event<SupergraphSelector>),
+//     Custom(SupergraphSelector),
+// }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
@@ -240,15 +222,15 @@ pub(crate) enum EventHolder {
     EventCustom(SupergraphSelector),
 }
 
-impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
-    fn from(value: &SupergraphValue) -> Self {
-        match value {
-            SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
-            SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
-            SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
-        }
-    }
-}
+// impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
+//     fn from(value: &SupergraphValue) -> Self {
+//         match value {
+//             SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+//             SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+//             SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
+//         }
+//     }
+// }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
 #[cfg_attr(test, derivative(PartialEq))]
@@ -402,22 +384,6 @@ pub(crate) enum SupergraphSelector {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,
     },
-}
-
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-pub(crate) enum SubgraphValue {
-    Standard(Standard),
-    Custom(SubgraphSelector),
-}
-
-impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
-    fn from(value: &SubgraphValue) -> Self {
-        match value {
-            SubgraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
-            SubgraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
-        }
-    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
@@ -783,6 +749,28 @@ impl Selector for RouterSelector {
             _ => None,
         }
     }
+
+    fn stage(&self) -> Stage {
+        match self {
+            RouterSelector::ResponseHeader { .. } | RouterSelector::ResponseStatus { .. } => {
+                Stage::ResponsePrimary
+            }
+            RouterSelector::OnGraphQLError { .. } => Stage::ResponseEvent,
+
+            RouterSelector::RequestHeader { .. } | RouterSelector::RequestMethod { .. } => {
+                Stage::Request
+            }
+            RouterSelector::ResponseContext { .. } => Stage::AllResponse,
+            RouterSelector::StudioOperationId { .. }
+            | RouterSelector::TraceId { .. }
+            | RouterSelector::OperationName { .. }
+            | RouterSelector::Baggage { .. }
+            | RouterSelector::Env { .. }
+            | RouterSelector::Static(_)
+            | RouterSelector::StaticField { .. } => Stage::All,
+            RouterSelector::Error { .. } => Stage::Error,
+        }
+    }
 }
 
 impl Selector for SupergraphSelector {
@@ -1035,6 +1023,34 @@ impl Selector for SupergraphSelector {
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
+        }
+    }
+
+    fn stage(&self) -> Stage {
+        match self {
+            SupergraphSelector::ResponseHeader { .. }
+            | SupergraphSelector::ResponseStatus { .. } => Stage::ResponsePrimary,
+
+            SupergraphSelector::OnGraphQLError { .. }
+            | SupergraphSelector::ResponseData { .. }
+            | SupergraphSelector::ResponseErrors { .. }
+            | SupergraphSelector::Cost { .. } => Stage::ResponseEvent,
+
+            SupergraphSelector::RequestHeader { .. }
+            | SupergraphSelector::RequestContext { .. }
+            | SupergraphSelector::Query { .. }
+            | SupergraphSelector::QueryVariable { .. } => Stage::Request,
+
+            SupergraphSelector::ResponseContext { .. } => Stage::AllResponse,
+
+            SupergraphSelector::OperationName { .. }
+            | SupergraphSelector::Baggage { .. }
+            | SupergraphSelector::Env { .. }
+            | SupergraphSelector::Static(_)
+            | SupergraphSelector::OperationKind { .. }
+            | SupergraphSelector::StaticField { .. } => Stage::All,
+
+            SupergraphSelector::Error { .. } => Stage::Error,
         }
     }
 }
@@ -1306,6 +1322,36 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
+        }
+    }
+
+    fn stage(&self) -> Stage {
+        match self {
+            SubgraphSelector::SubgraphRequestHeader { .. }
+            | SubgraphSelector::SupergraphRequestHeader { .. }
+            | SubgraphSelector::RequestContext { .. }
+            | SubgraphSelector::SupergraphQuery { .. }
+            | SubgraphSelector::SubgraphQuery { .. }
+            | SubgraphSelector::SupergraphQueryVariable { .. }
+            | SubgraphSelector::SubgraphOperationName { .. }
+            | SubgraphSelector::SubgraphOperationKind { .. }
+            | SubgraphSelector::SubgraphQueryVariable { .. } => Stage::Request,
+
+            SubgraphSelector::ResponseContext { .. }
+            | SubgraphSelector::SubgraphResponseBody { .. }
+            | SubgraphSelector::SubgraphResponseData { .. }
+            | SubgraphSelector::SubgraphResponseErrors { .. }
+            | SubgraphSelector::SubgraphResponseHeader { .. }
+            | SubgraphSelector::SubgraphResponseStatus { .. } => Stage::ResponsePrimary,
+
+            SubgraphSelector::SupergraphOperationName { .. }
+            | SubgraphSelector::Baggage { .. }
+            | SubgraphSelector::Env { .. }
+            | SubgraphSelector::Static(_)
+            | SubgraphSelector::SupergraphOperationKind { .. }
+            | SubgraphSelector::StaticField { .. } => Stage::All,
+
+            SubgraphSelector::Error { .. } => Stage::Error,
         }
     }
 }

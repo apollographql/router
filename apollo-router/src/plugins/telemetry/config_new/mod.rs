@@ -1,3 +1,5 @@
+use std::cmp::Ordering;
+
 use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
@@ -50,6 +52,51 @@ pub(crate) trait Selectors {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Default)]
+pub(crate) enum Stage {
+    Request,
+    ResponsePrimary,
+    ResponseEvent,
+    ResponseField,
+    AllResponse,
+    Error,
+    #[default]
+    All,
+}
+
+// Take most granual ones like field and event
+impl Ord for Stage {
+    fn cmp(&self, other: &Self) -> Ordering {
+        let res = match self {
+            Stage::Request
+            | Stage::ResponsePrimary
+            | Stage::AllResponse
+            | Stage::Error
+            | Stage::All => None,
+
+            Stage::ResponseEvent | Stage::ResponseField => Some(Ordering::Greater),
+        };
+        match res {
+            Some(res) => res,
+            None => match other {
+                Stage::Request
+                | Stage::ResponsePrimary
+                | Stage::AllResponse
+                | Stage::Error
+                | Stage::All => Ordering::Greater,
+
+                Stage::ResponseEvent | Stage::ResponseField => Ordering::Less,
+            },
+        }
+    }
+}
+
+impl PartialOrd for Stage {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
 pub(crate) trait Selector {
     type Request;
     type Response;
@@ -78,6 +125,8 @@ pub(crate) trait Selector {
     fn on_drop(&self) -> Option<Value> {
         None
     }
+
+    fn stage(&self) -> Stage;
 }
 
 pub(crate) trait DefaultForLevel {

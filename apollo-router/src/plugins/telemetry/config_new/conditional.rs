@@ -334,6 +334,10 @@ where
             _ => None,
         }
     }
+
+    fn stage(&self) -> super::Stage {
+        self.selector.stage()
+    }
 }
 
 /// Custom Deserializer for attributes that will deserialize into a custom field if possible, but otherwise into one of the pre-defined attributes.
