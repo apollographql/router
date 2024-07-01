@@ -1,6 +1,8 @@
-### Rhai: `status_code` is available at the `router_service` ([Issue #5357](https://github.com/apollographql/router/issues/5357))
+### Make `status_code` available for `router_service` responses in Rhai scripts ([Issue #5357](https://github.com/apollographql/router/issues/5357))
 
-Following up on the introduction of [`status_code`](https://www.apollographql.com/docs/router/customizations/rhai-api/#responsestatus_codeto_string)  as an available property in Rhai's `subgraph_service` response, we've now introduced the availability of the property on the `router_service` response as well:
+Adds `response.status_code` on Rhai [`router_service`](https://www.apollographql.com/docs/router/customizations/rhai-api/#entry-point-hooks) responses. Previously, `status_code` was only available on `subgraph_service` responses. 
+
+For example:
 
 ```rust
 fn router_service(service) {
