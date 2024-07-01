@@ -60,7 +60,7 @@ APOLLO_KEY="..." APOLLO_GRAPH_REF="..." MY_CUSTOM_VAR="..." ./router
       
       </td>
       <td>
-      The initial size to use for query planner heaps in MB. For example, setting this variable to `4096` sets an initial heap size of ~4GB.
+      The initial size to use for the query planner heap in MB. For example, setting this variable to `4096` sets an initial heap size of ~4GB.
 
       The Apollo Router v1.x uses a JavaScript runtime internally to run the query planner. Large supergraphs tend to increase the amount of memory required in the router. The query planner heap dynamically expands as needed but increasing the initial size of the memory allocated to the heap can improve the performance of initial large operations against large supergraphs.
       </td>
