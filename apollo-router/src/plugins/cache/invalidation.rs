@@ -1,3 +1,5 @@
+use std::time::Instant;
+
 use fred::types::Scanner;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -61,9 +63,15 @@ async fn start(
 
 async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<InvalidationRequest>) {
     for request in requests {
+        let start = Instant::now();
         handle_request(storage, &request)
             .instrument(tracing::info_span!("cache.invalidation.request"))
             .await;
+        f64_histogram!(
+            "apollo.router.cache.invalidation.duration",
+            "Duration of the invalidation event execution.",
+            start.elapsed().as_secs_f64()
+        );
     }
 }
 
