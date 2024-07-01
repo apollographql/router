@@ -117,7 +117,6 @@ where
         match configuration.experimental_query_planner_mode {
             crate::configuration::QueryPlannerMode::New => {
                 configuration.rust_query_planner_config().hash(&mut hasher);
-                //hasher.update(&configuration.rust_query_planner_config());
             }
             crate::configuration::QueryPlannerMode::Legacy => {
                 configuration.js_query_planner_config().hash(&mut hasher);
