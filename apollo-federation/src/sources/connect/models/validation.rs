@@ -192,7 +192,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
     {
         // Validate URL argument
         if let Some(url_value) = http_arg
-            .into_iter()
+            .iter()
             .find_map(|(key, value)| (key == &SOURCE_BASE_URL_ARGUMENT_NAME).then_some(value))
         {
             if let Some(url_error) = parse_url(
@@ -208,7 +208,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
 
         // Validate headers argument
         if let Some(headers) = http_arg
-            .into_iter()
+            .iter()
             .find_map(|(key, value)| (key == &SOURCE_HEADERS_ARGUMENT_NAME).then_some(value))
         {
             let header_errors = validate_header_arg(
@@ -223,9 +223,8 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
                 None,
             );
 
-            if !header_errors.is_empty()
-            {
-                    errors.extend(header_errors);
+            if !header_errors.is_empty() {
+                errors.extend(header_errors);
             }
         }
     } else {
@@ -484,7 +483,7 @@ fn validate_field(
         .map(|(_, value)| value);
 
     if let Some(headers) = http_headers_arg {
-        let header_errors =  validate_header_arg(
+        let header_errors = validate_header_arg(
             connect_directive_name,
             &format!("{CONNECT_HTTP_ARGUMENT_NAME}.{CONNECT_HEADERS_ARGUMENT_NAME}"),
             headers,
@@ -493,8 +492,7 @@ fn validate_field(
             Some(&field.name),
         );
 
-        if !header_errors.is_empty() 
-        {
+        if !header_errors.is_empty() {
             errors.extend(header_errors)
         }
     }
@@ -513,7 +511,7 @@ fn validate_field(
                 errors.push(Message {
                     code: Code::EntityNotOnRootQuery,
                     message: format!(
-                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.", 
+                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
                         coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
                     ),
                     locations: Location::from_node(entity_arg.location(), source_map)
@@ -818,7 +816,7 @@ fn validate_header_arg(
                         });
                     }
                 }
-            } 
+            }
 
             // validate `as`
             if let Some(as_value) = as_arg {
@@ -839,7 +837,7 @@ fn validate_header_arg(
                         });
                     }
                 }
-            }           
+            }
 
             // validate `value`
             if let Some(value_arg) = value_arg {
@@ -881,15 +879,13 @@ fn validate_header_name<'a>(
     coordinate: &String,
     source_map: &SourceMap,
 ) -> Result<&'a str, Message> {
-    let s = value.as_str().ok_or_else(|| 
-        Message {
+    let s = value.as_str().ok_or_else(|| Message {
         code: Code::GraphQLError,
         message: format!("{coordinate} contains an invalid header name type."),
         locations: Location::from_node(value.location(), source_map)
             .into_iter()
             .collect(),
-        }
-    )?;
+    })?;
 
     HeaderName::try_from(s).map_err(|_| Message {
         code: Code::InvalidHttpHeaderName,
