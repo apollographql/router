@@ -41,7 +41,7 @@ impl Invalidation {
     ) -> Result<(), BoxError> {
         if self.enabled {
             let mut sink = self.handle.clone().into_sink();
-            sink.send(requests).await.unwrap();
+            sink.send(requests).await.map_err(|e| e.message)?;
         }
 
         Ok(())
