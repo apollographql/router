@@ -868,7 +868,7 @@ impl Telemetry {
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
         }
-        if propagation.datadog || tracing.datadog.enabled {
+        if propagation.datadog || tracing.datadog.enabled() {
             propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
         }
         if propagation.aws_xray {

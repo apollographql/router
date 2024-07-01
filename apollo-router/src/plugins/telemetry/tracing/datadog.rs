@@ -53,20 +53,19 @@ const BUILT_IN_SPAN_NAMES: [&str; 7] = [
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// Enable datadog
-    pub(crate) enabled: bool,
+    enabled: bool,
 
     /// The endpoint to send to
-    pub(crate) endpoint: UriEndpoint,
+    endpoint: UriEndpoint,
 
     /// batch processor configuration
-    pub(crate) batch_processor: BatchProcessorConfig,
+    batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
-    pub(crate) enable_span_mapping: bool,
+    enable_span_mapping: bool,
 
-    /// Fixes the span names. (default true)
-    /// Datadog APM view behaves better when the span names are fixed.
-    pub(crate) fixed_span_names: bool,
+    /// Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.
+    fixed_span_names: bool,
 
     /// Custom mapping to be used as the resource field in spans, defaults to:
     /// router -> http.route
