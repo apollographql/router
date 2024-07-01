@@ -135,6 +135,7 @@ service:
   type: ClusterIP
   port: 80
   annotations: {}
+  targetport: http
 
 serviceMonitor:
   enabled: false
