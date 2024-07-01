@@ -7,5 +7,5 @@ extend schema
 
 type Query {
     resources: [String!]!
-    @connect(source: "u$ers", http: {GET: "/resources"})
+    @connect(source: "u$ers", http: {GET: "/resources"}, selection: "")
 }

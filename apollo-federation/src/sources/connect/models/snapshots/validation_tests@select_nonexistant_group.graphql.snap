@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/models/validation.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/models/test_data/validation/select_nonexistant_group.graphql
+---
+[Message { code: SelectedFieldNotFound, message: "`@connect(selection:)` on `Query.me` contains field `group`, which does not exist on `User`.", locations: [Location { line: 7, column: 76 }..Location { line: 7, column: 93 }] }]

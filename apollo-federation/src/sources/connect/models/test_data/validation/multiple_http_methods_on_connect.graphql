@@ -10,5 +10,5 @@ type Query {
     @connect(source: "v2", http: {
         GET: "/resources"
         DELETE: "/resource"
-    })
+    }, selection: "")
 }

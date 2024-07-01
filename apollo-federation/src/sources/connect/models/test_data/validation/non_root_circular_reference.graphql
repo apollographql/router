@@ -1,0 +1,42 @@
+extend schema
+@link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+)
+@source(name: "v2", http: {baseURL: "http://127.0.0.1"})
+
+type Query {
+    user(id: ID!): User
+    @connect(
+        http: { GET: "https://api.example.com/users/{$args.id}" }
+        selection: """
+        id
+        name
+        favoriteBooks {
+            id
+            author {
+                id
+                books {
+                    id
+                }
+            }
+        }
+        """
+    )
+}
+
+type User {
+    id: ID!
+    name: String
+    favoriteBooks: [Book]
+}
+
+type Book {
+    id: ID!
+    author: Author
+}
+
+type Author {
+    id: ID!
+    books: [Book]
+}

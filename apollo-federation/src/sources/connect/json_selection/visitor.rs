@@ -9,7 +9,6 @@ use std::collections::VecDeque;
 use itertools::Itertools;
 
 use super::JSONSelection;
-use crate::error::FederationError;
 
 /// A visitor for JSONSelection output keys.
 ///
@@ -36,27 +35,30 @@ use crate::error::FederationError;
 ///   exit_group("b")
 /// finish()
 /// ```
-pub trait JSONSelectionVisitor {
+pub trait JSONSelectionVisitor: Sized {
+    type Error;
+
     /// Visit an output key
-    fn visit(&mut self, name: &str) -> Result<(), FederationError>;
+    fn visit(&mut self, name: &str) -> Result<(), Self::Error>;
 
     /// Enter a subselection group
     /// Note: You can assume that the named selection corresponding to this
     /// group will be visited first.
-    fn enter_group(&mut self, group: &str) -> Result<(), FederationError>;
+    fn enter_group(&mut self, group: &str) -> Result<(), Self::Error>;
 
     /// Exit a subselection group
     /// Note: You can assume that the named selection corresponding to this
     /// group will be visited and entered first.
-    fn exit_group(&mut self) -> Result<(), FederationError>;
+    fn exit_group(&mut self) -> Result<(), Self::Error>;
 
     /// Finish visiting the output keys.
-    fn finish(self) -> Result<(), FederationError>;
-}
+    fn finish(self) -> Result<(), Self::Error>;
 
-impl JSONSelection {
-    pub fn visit(&self, mut visitor: impl JSONSelectionVisitor) -> Result<(), FederationError> {
-        let primed = match &self {
+    /// Walk through a [`JSONSelection`], visiting each output key. If at any point, one of the
+    /// visitor methods returns an error, then the walk will be stopped and the error will be
+    /// returned.
+    fn walk(mut self, selection: &JSONSelection) -> Result<(), Self::Error> {
+        let primed = match &selection {
             JSONSelection::Named(named) => named.selections.iter(),
             JSONSelection::Path(path) => path
                 .next_subselection()
@@ -73,11 +75,11 @@ impl JSONSelection {
         let mut current_depth = 0;
         while let Some((depth, next)) = to_visit.pop_front() {
             if depth < current_depth {
-                visitor.exit_group()?;
+                self.exit_group()?;
                 current_depth = depth;
             }
 
-            visitor.visit(next.name())?;
+            self.visit(next.name())?;
 
             // If we have a named selection that has a subselection, then we want to
             // make sure that we visit the children before all other siblings.
@@ -85,7 +87,7 @@ impl JSONSelection {
             // Note: We sort by the reverse order here since we always push to the front.
             if let Some(sub) = next.next_subselection() {
                 current_depth += 1;
-                visitor.enter_group(next.name())?;
+                self.enter_group(next.name())?;
                 sub.selections
                     .iter()
                     .sorted_by(|a, b| Ord::cmp(b.name(), a.name()))
@@ -95,11 +97,11 @@ impl JSONSelection {
 
         // Make sure that we exit until we are no longer nested
         for _ in 0..current_depth {
-            visitor.exit_group()?;
+            self.exit_group()?;
         }
 
-        // Finish out the visitor
-        visitor.finish()
+        // Finish out the self
+        self.finish()
     }
 }
 
@@ -108,6 +110,7 @@ mod tests {
     use insta::assert_snapshot;
 
     use super::JSONSelectionVisitor;
+    use crate::error::FederationError;
     use crate::sources::connect::JSONSelection;
 
     /// Visitor for tests.
@@ -142,23 +145,25 @@ mod tests {
     }
 
     impl JSONSelectionVisitor for TestVisitor<'_> {
-        fn visit(&mut self, name: &str) -> Result<(), crate::error::FederationError> {
+        type Error = FederationError;
+
+        fn visit(&mut self, name: &str) -> Result<(), Self::Error> {
             self.visited.push((self.last_depth(), name.to_string()));
 
             Ok(())
         }
 
-        fn enter_group(&mut self, _: &str) -> Result<(), crate::error::FederationError> {
+        fn enter_group(&mut self, _: &str) -> Result<(), Self::Error> {
             self.depth_stack.push(self.last_depth() + 1);
             Ok(())
         }
 
-        fn exit_group(&mut self) -> Result<(), crate::error::FederationError> {
+        fn exit_group(&mut self) -> Result<(), Self::Error> {
             self.depth_stack.pop().unwrap();
             Ok(())
         }
 
-        fn finish(self) -> Result<(), crate::error::FederationError> {
+        fn finish(self) -> Result<(), Self::Error> {
             Ok(())
         }
     }
@@ -170,7 +175,7 @@ mod tests {
         let (unmatched, selection) = JSONSelection::parse("").unwrap();
         assert!(unmatched.is_empty());
 
-        selection.visit(visitor).unwrap();
+        visitor.walk(&selection).unwrap();
         assert_snapshot!(print_visited(visited), @"");
     }
 
@@ -181,7 +186,7 @@ mod tests {
         let (unmatched, selection) = JSONSelection::parse("a b c d").unwrap();
         assert!(unmatched.is_empty());
 
-        selection.visit(visitor).unwrap();
+        visitor.walk(&selection).unwrap();
         assert_snapshot!(print_visited(visited), @r###"
         a
         b
@@ -198,7 +203,7 @@ mod tests {
             JSONSelection::parse("a: one b: two c: three d: four").unwrap();
         assert!(unmatched.is_empty());
 
-        selection.visit(visitor).unwrap();
+        visitor.walk(&selection).unwrap();
         assert_snapshot!(print_visited(visited), @r###"
         a
         b
@@ -214,7 +219,7 @@ mod tests {
         let (unmatched, selection) = JSONSelection::parse("a { b { c { d { e } } } }").unwrap();
         assert!(unmatched.is_empty());
 
-        selection.visit(visitor).unwrap();
+        visitor.walk(&selection).unwrap();
         assert_snapshot!(print_visited(visited), @r###"
         a
         |  b
@@ -254,7 +259,7 @@ mod tests {
         .unwrap();
         assert!(unmatched.is_empty());
 
-        selection.visit(visitor).unwrap();
+        visitor.walk(&selection).unwrap();
         assert_snapshot!(print_visited(visited), @r###"
         address
         |  city
