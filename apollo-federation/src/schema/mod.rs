@@ -4,8 +4,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use indexmap::IndexSet;
 use referencer::Referencers;

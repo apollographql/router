@@ -4,9 +4,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
-use apollo_compiler::ast::InvalidNameError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
+use apollo_compiler::InvalidNameError;
 use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
@@ -378,7 +378,7 @@ impl SingleFederationError {
 impl From<InvalidNameError> for SingleFederationError {
     fn from(err: InvalidNameError) -> Self {
         SingleFederationError::InvalidGraphQL {
-            message: format!("Invalid GraphQL name \"{}\"", err.0),
+            message: format!("Invalid GraphQL name \"{}\"", err.name),
         }
     }
 }
