@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
-use apollo_compiler::ast::Name;
 use apollo_compiler::executable;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use super::FieldSelection;

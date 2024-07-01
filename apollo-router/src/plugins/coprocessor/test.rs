@@ -14,6 +14,7 @@ mod tests {
     use mime::TEXT_HTML;
     use router::body::RouterBody;
     use serde_json::json;
+    use serde_json_bytes::Value;
     use tower::BoxError;
     use tower::ServiceExt;
 
@@ -21,6 +22,9 @@ mod tests {
     use crate::plugin::test::MockInternalHttpClientService;
     use crate::plugin::test::MockRouterService;
     use crate::plugin::test::MockSubgraphService;
+    use crate::plugin::test::MockSupergraphService;
+    use crate::plugins::coprocessor::supergraph::SupergraphResponseConf;
+    use crate::plugins::coprocessor::supergraph::SupergraphStage;
     use crate::services::external::Externalizable;
     use crate::services::external::PipelineStep;
     use crate::services::external::EXTERNALIZABLE_VERSION;
@@ -697,6 +701,67 @@ mod tests {
             serde_json_bytes::json!({ "test": 5678_u32 }),
             response.response.into_body().data.unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn external_plugin_supergraph_response() {
+        let supergraph_stage = SupergraphStage {
+            request: Default::default(),
+            response: SupergraphResponseConf {
+                headers: false,
+                context: false,
+                body: true,
+                status_code: false,
+                sdl: false,
+            },
+        };
+
+        // This will never be called because we will fail at the coprocessor.
+        let mut mock_supergraph_service = MockSupergraphService::new();
+
+        mock_supergraph_service
+            .expect_call()
+            .returning(|req: supergraph::Request| {
+                Ok(supergraph::Response::new_from_graphql_response(
+                    graphql::Response::builder()
+                        .data(Value::Null)
+                        .subscribed(true)
+                        .build(),
+                    req.context,
+                ))
+            });
+
+        let mock_http_client = mock_with_deferred_callback(move |_: http::Request<RouterBody>| {
+            Box::pin(async {
+                Ok(http::Response::builder()
+                    .body(RouterBody::from(
+                        r#"{
+                                "version": 1,
+                                "stage": "SupergraphResponse",
+                                  "body": {
+                                    "data": null
+                                  }
+                            }"#,
+                    ))
+                    .unwrap())
+            })
+        });
+
+        let service = supergraph_stage.as_service(
+            mock_http_client,
+            mock_supergraph_service.boxed(),
+            "http://test".to_string(),
+            Arc::default(),
+        );
+
+        let request = supergraph::Request::fake_builder().build().unwrap();
+
+        let mut response = service.oneshot(request).await.unwrap();
+
+        let gql_response = response.response.body_mut().next().await.unwrap();
+        // Let's assert that the supergraph response has been transformed as it should have.
+        assert_eq!(gql_response.subscribed, Some(true));
+        assert_eq!(gql_response.data, Some(Value::Null));
     }
 
     #[tokio::test]

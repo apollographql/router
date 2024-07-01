@@ -1,7 +1,7 @@
 use std::sync::atomic::AtomicUsize;
 use std::sync::atomic::Ordering;
+use std::sync::Arc;
 
-use apollo_compiler::NodeStr;
 use futures::future;
 use serde::Deserialize;
 use serde::Serialize;
@@ -57,16 +57,16 @@ impl SubscriptionHandle {
 #[serde(rename_all = "camelCase")]
 pub(crate) struct SubscriptionNode {
     /// The name of the service or subgraph that the subscription is querying.
-    pub(crate) service_name: NodeStr,
+    pub(crate) service_name: Arc<str>,
 
     /// The variables that are used for the subgraph subscription.
-    pub(crate) variable_usages: Vec<NodeStr>,
+    pub(crate) variable_usages: Vec<Arc<str>>,
 
     /// The GraphQL subquery that is used for the subscription.
     pub(crate) operation: super::fetch::SubgraphOperation,
 
     /// The GraphQL subquery operation name.
-    pub(crate) operation_name: Option<NodeStr>,
+    pub(crate) operation_name: Option<Arc<str>>,
 
     /// The GraphQL operation kind that is used for the fetch.
     pub(crate) operation_kind: OperationKind,

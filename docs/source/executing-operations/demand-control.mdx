@@ -188,7 +188,7 @@ In this example, just under half of the requests would be rejected with the curr
 
 3. To figure out what operations are being rejected, define a telemetry custom instrument that reports when an operation has been rejected because its cost exceeded the configured cost limit:
 
-```yaml title="Example custom instrument to show rejected operations"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
@@ -213,13 +213,19 @@ telemetry:
 
 This custom instrument may not be suitable when you have many operation names, such as a public internet-facing API. You can add conditions to reduce the number of returned operations. For example, use a condition that outputs results only when the cost delta is greater than a threshold:
 
-```yaml title="Example condition for cost delta threshold"
+```yaml title="router.yaml"
 telemetry:
   instrumentation:
     instruments:
       supergraph:
         # custom instrument
         cost.rejected.operations:
+          type: histogram
+          value:
+            # Estimated cost is used to populate the histogram
+            cost: estimated
+          description: "Estimated cost per rejected operation."
+          unit: delta
           condition:
             all:
               - eq: # Only show rejected operations
@@ -458,7 +464,7 @@ After gathering enough data, you can then configure your router with maximum cos
 
 To enable demand control in the router, configure the `preview_demand_control` option in `router.yaml`:
 
-```yaml title="Example demand control configuration"
+```yaml title="router.yaml"
 preview_demand_control:
   enabled: true
   mode: measure
@@ -529,23 +535,23 @@ Selectors for `cost` can be applied to instruments, spans, and events—anywhere
 
 Enable a `cost.estimated` instrument with the `cost.result` attribute:
 
-```yaml
-telemetry
+```yaml title="router.yaml"
+telemetry:
   instrumentation:
     instruments:
       supergraph:
         cost.estimated:
           attributes:
             cost.result: true
-            graphql.operation.name: string
+            graphql.operation.name: true
 ```
 
 #### Example span
 
 Enable the `cost.estimated` attribute on `supergraph` spans:
 
-```yaml
-telemetry
+```yaml title="router.yaml"
+telemetry:
   instrumentation:
     spans:
       supergraph:
@@ -557,14 +563,14 @@ telemetry
 
 Log an error when `cost.delta` is greater than 1000:
 
-```yaml
-telemetry
+```yaml title="router.yaml"
+telemetry:
   instrumentation:
     events:
       supergraph:
         COST_DELTA_TOO_HIGH:
           message: "cost delta high"
-          on: response
+          on: event_response
           level: error
           condition:
             gt:

@@ -61,6 +61,7 @@ mod experimental;
 pub(crate) mod metrics;
 mod persisted_queries;
 mod schema;
+pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]
 mod tests;
