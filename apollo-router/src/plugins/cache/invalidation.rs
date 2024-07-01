@@ -68,19 +68,20 @@ async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<Invalid
 }
 
 async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationRequest) {
+    let key_prefix = request.key_prefix();
     tracing::debug!(
         "got invalidation request: {request:?}, will scan for: {}",
-        request.key_prefix()
+        key_prefix
     );
 
     // FIXME: configurable batch size
-    let mut stream = storage.scan(request.key_prefix(), Some(10));
+    let mut stream = storage.scan(key_prefix.clone(), Some(10));
 
     while let Some(res) = stream.next().await {
         match res {
             Err(e) => {
                 tracing::error!(
-                    pattern = request.key_prefix(),
+                    pattern = key_prefix,
                     error = %e,
                     message = "error scanning for key",
                 );
@@ -104,7 +105,7 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
                 } else {
                     if let Err(e) = scan_res.next() {
                         tracing::error!(
-                            pattern = request.key_prefix(),
+                            pattern = key_prefix,
                             error = %e,
                             message = "error scanning for key",
                         );
@@ -114,8 +115,6 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
             }
         }
     }
-
-    println!("handle_request end");
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
