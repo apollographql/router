@@ -62,6 +62,7 @@ pub(crate) struct Config {
     /// Custom mapping to be used as the resource field in spans, defaults to:
     /// router -> http.route
     /// supergraph -> graphql.operation.name
+    /// query_planning -> graphql.operation.name
     /// subgraph -> subgraph.name
     /// subgraph_request -> subgraph.name
     /// http_request -> http.route
