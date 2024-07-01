@@ -39,25 +39,34 @@ fn default_resource_mappings() -> HashMap<String, String> {
 
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
-const BUILT_IN_SPAN_NAMES: [&str; 3] = ["router", "supergraph", "subgraph"];
+const BUILT_IN_SPAN_NAMES: [&str; 7] = [
+    "request",
+    "router",
+    "supergraph",
+    "subgraph",
+    "subgraph_request",
+    "http_request",
+    "query_planning",
+];
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// Enable datadog
     pub(crate) enabled: bool,
 
     /// The endpoint to send to
-    #[serde(default)]
     pub(crate) endpoint: UriEndpoint,
 
     /// batch processor configuration
-    #[serde(default)]
     pub(crate) batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
-    #[serde(default)]
     pub(crate) enable_span_mapping: bool,
+
+    /// Fixes the span names. (default true)
+    /// Datadog APM view behaves better when the span names are fixed.
+    pub(crate) fixed_span_names: bool,
 
     /// Custom mapping to be used as the resource field in spans, defaults to:
     /// router -> http.route
@@ -66,8 +75,20 @@ pub(crate) struct Config {
     /// subgraph -> subgraph.name
     /// subgraph_request -> subgraph.name
     /// http_request -> http.route
-    #[serde(default)]
     resource_mapping: HashMap<String, String>,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            endpoint: UriEndpoint::default(),
+            batch_processor: BatchProcessorConfig::default(),
+            enable_span_mapping: false,
+            fixed_span_names: true,
+            resource_mapping: HashMap::new(),
+        }
+    }
 }
 
 impl TracingConfigurator for Config {
@@ -94,6 +115,8 @@ impl TracingConfigurator for Config {
                 .collect::<HashMap<String, Key>>()
         });
 
+        let fixed_span_names = self.fixed_span_names;
+
         let exporter = opentelemetry_datadog::new_pipeline()
             .with(
                 &self.endpoint.to_uri(&Uri::from_static(DEFAULT_ENDPOINT)),
@@ -118,16 +141,18 @@ impl TracingConfigurator for Config {
                     return span.name.as_ref();
                 })
             })
-            .with_name_mapping(|span, _model_config| {
-                if let Some(original) = span
-                    .attributes
-                    .get(&Key::from_static_str(ORIGINAL_SPAN_NAME_FIELD))
-                {
-                    // Datadog expects static span names, not the ones in the otel spec.
-                    // Remap the span name to the original name if it was remapped.
-                    for name in BUILT_IN_SPAN_NAMES {
-                        if name == original.as_str() {
-                            return name;
+            .with_name_mapping(move |span, _model_config| {
+                if fixed_span_names {
+                    if let Some(original) = span
+                        .attributes
+                        .get(&Key::from_static_str(ORIGINAL_SPAN_NAME_FIELD))
+                    {
+                        // Datadog expects static span names, not the ones in the otel spec.
+                        // Remap the span name to the original name if it was remapped.
+                        for name in BUILT_IN_SPAN_NAMES {
+                            if name == original.as_str() {
+                                return name;
+                            }
                         }
                     }
                 }
