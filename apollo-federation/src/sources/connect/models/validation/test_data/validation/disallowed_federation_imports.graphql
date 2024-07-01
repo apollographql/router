@@ -1,0 +1,22 @@
+extend schema
+  @link(
+    url: "https://specs.apollo.dev/federation/v2.8"
+    import: [
+      "@key"
+      "@context"
+      "@fromContext"
+      "@interfaceObject"
+      "@external"
+      "@requires"
+      "@provides"
+    ]
+  )
+  @link(
+    url: "https://specs.apollo.dev/connect/v0.1"
+    import: ["@connect", "@source"]
+  )
+
+type Query {
+  resources: [String!]!
+    @connect(http: { GET: "http://127.0.0.1" }, selection: "")
+}

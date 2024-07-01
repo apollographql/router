@@ -42,6 +42,7 @@
 - Missing $this
 
 */
+mod entities;
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -68,7 +69,6 @@ use url::Url;
 use crate::link::Import;
 use crate::link::Link;
 use crate::sources::connect::json_selection::JSONSelectionVisitor;
-use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
@@ -89,6 +89,8 @@ use crate::subgraph::database::federation_link_identity;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
+
+use entities::validate_entity_arg;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
@@ -449,6 +451,15 @@ fn validate_field(
         )
     });
 
+    errors.extend(validate_entity_arg(
+        field,
+        connect_directive,
+        object,
+        schema,
+        source_map,
+        category,
+    ));
+
     if let Some(source_name) = connect_directive
         .arguments
         .iter()
@@ -535,49 +546,6 @@ fn validate_field(
 
         if !header_errors.is_empty() {
             errors.extend(header_errors)
-        }
-    }
-
-    if let Some(entity_arg) = connect_directive
-        .arguments
-        .iter()
-        .find(|arg| arg.name == CONNECT_ENTITY_ARGUMENT_NAME)
-    {
-        let entity_arg_value = &entity_arg.value;
-        if entity_arg_value
-            .to_bool()
-            .is_some_and(|entity_arg_value| entity_arg_value)
-        {
-            if category != ObjectCategory::Query {
-                errors.push(Message {
-                    code: Code::EntityNotOnRootQuery,
-                    message: format!(
-                        "{coordinate} is invalid. Entity resolvers can only be declared on root `Query` fields.",
-                        coordinate = connect_directive_entity_argument_coordinate(connect_directive_name, entity_arg_value.as_ref(), object, &field.name)
-                    ),
-                    locations: Location::from_node(entity_arg.location(), source_map)
-                        .into_iter()
-                        .collect(),
-                })
-                // TODO: Allow interfaces
-            } else if field.ty.is_list() || schema.get_object(field.ty.inner_named_type()).is_none()
-            {
-                errors.push(Message {
-                    code: Code::EntityTypeInvalid,
-                    message: format!(
-                        "{coordinate} is invalid. Entities can only be non-list, object types.",
-                        coordinate = connect_directive_entity_argument_coordinate(
-                            connect_directive_name,
-                            entity_arg_value.as_ref(),
-                            object,
-                            &field.name
-                        )
-                    ),
-                    locations: Location::from_node(entity_arg.location(), source_map)
-                        .into_iter()
-                        .collect(),
-                })
-            }
         }
     }
 
@@ -1007,15 +975,6 @@ fn connect_directive_name_coordinate(
     field: &Name,
 ) -> String {
     format!("`@{connect_directive_name}({CONNECT_SOURCE_ARGUMENT_NAME}: {source})` on `{object_name}.{field}`", object_name = object.name)
-}
-
-fn connect_directive_entity_argument_coordinate(
-    connect_directive_entity_argument: &Name,
-    value: &Value,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{object_name}.{field}`", object_name = object.name)
 }
 
 fn connect_directive_http_coordinate(
