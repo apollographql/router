@@ -99,19 +99,6 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
                         storage.delete(keys).await;
                     }
                 }
-
-                if !scan_res.has_more() {
-                    break;
-                } else {
-                    if let Err(e) = scan_res.next() {
-                        tracing::error!(
-                            pattern = key_prefix,
-                            error = %e,
-                            message = "error scanning for key",
-                        );
-                        break;
-                    }
-                }
             }
         }
     }
