@@ -120,11 +120,10 @@ where
             }
             crate::configuration::QueryPlannerMode::Legacy => {
                 configuration.js_query_planner_config().hash(&mut hasher);
-
-                configuration.rust_query_planner_config().hash(&mut hasher);
             }
             crate::configuration::QueryPlannerMode::Both => {
                 configuration.js_query_planner_config().hash(&mut hasher);
+                configuration.rust_query_planner_config().hash(&mut hasher);
             }
         };
         let config_mode = Arc::new(QueryHash(hasher.finalize()));
