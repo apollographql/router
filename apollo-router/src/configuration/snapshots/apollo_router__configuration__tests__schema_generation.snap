@@ -1419,7 +1419,7 @@ expression: "&schema"
           "description": "#/definitions/BatchProcessorConfig"
         },
         "enable_span_mapping": {
-          "default": false,
+          "default": true,
           "description": "Enable datadog span mapping for span name and resource name.",
           "type": "boolean"
         },
@@ -1431,12 +1431,17 @@ expression: "&schema"
           "$ref": "#/definitions/UriEndpoint",
           "description": "#/definitions/UriEndpoint"
         },
+        "fixed_span_names": {
+          "default": true,
+          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
+          "type": "boolean"
+        },
         "resource_mapping": {
           "additionalProperties": {
             "type": "string"
           },
           "default": {},
-          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name subgraph_request -> subgraph.name http_request -> http.route",
+          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
           "type": "object"
         }
       },

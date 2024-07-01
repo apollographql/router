@@ -64,11 +64,11 @@ pub(crate) struct Config {
     batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     enable_span_mapping: bool,
 
     /// Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     fixed_span_names: bool,
 
     /// Custom mapping to be used as the resource field in spans, defaults to:
@@ -80,6 +80,10 @@ pub(crate) struct Config {
     /// http_request -> http.route
     #[serde(default)]
     resource_mapping: HashMap<String, String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl TracingConfigurator for Config {
