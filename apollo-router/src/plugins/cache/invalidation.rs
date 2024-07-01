@@ -13,26 +13,44 @@ use tracing_futures::Instrument;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
-pub struct InvalidationPayload {
-    // TODO: make enum
-    pub kind: String,
-    pub subgraph: Option<String>,
-    // TODO: make enum
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct InvalidationPayload {
+    /// required, kind of invalidation event. Can be "Subgraph", "Type", "Key" or "Tag"
+    pub(crate) kind: InvalidationKind,
+    /// optional, invalidate entries from specific subgraph
+    pub(crate) subgraph: Option<String>,
     #[serde(rename = "type")]
-    pub type_field: Option<String>,
-    pub key: Option<Key>,
-    pub tag: Option<String>,
-    #[serde(rename = "mark-stale")]
-    pub mark_stale: bool,
+    pub(crate) type_field: Option<InvalidationType>,
+    /// optional, invalidate entries indexed by this key object
+    pub(crate) key: Option<InvalidationKey>,
+    /// optional, invalidate entries containing types or field marked with the tag
+    pub(crate) tag: Option<String>,
+    /// optional, used to mark an entry as stale if the router is configured with `stale-while-revalidate`
+    #[serde(rename = "mark-stale", default)]
+    pub(crate) mark_stale: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum InvalidationKind {
+    Type,
+    Subgraph,
+    Key,
+    Tag,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) enum InvalidationType {
+    EntityType,
 }
 
 #[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct Key {
-    pub id: String,
-    pub field: String,
+pub(crate) struct InvalidationKey {
+    pub(crate) id: String,
+    pub(crate) field: String,
 }
 
 #[derive(Clone)]
