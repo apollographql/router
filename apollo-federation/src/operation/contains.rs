@@ -276,12 +276,10 @@ impl Selection {
 
 impl FieldSelection {
     pub fn containment(&self, other: &FieldSelection, options: ContainmentOptions) -> Containment {
-        let self_field = self.field.data();
-        let other_field = other.field.data();
-        if self_field.name() != other_field.name()
-            || self_field.alias != other_field.alias
-            || !same_arguments(&self_field.arguments, &other_field.arguments)
-            || !same_directives(&self_field.directives, &other_field.directives)
+        if self.field.name() != other.field.name()
+            || self.field.alias != other.field.alias
+            || !same_arguments(&self.field.arguments, &other.field.arguments)
+            || !same_directives(&self.field.directives, &other.field.directives)
         {
             return Containment::NotContained;
         }

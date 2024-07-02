@@ -649,7 +649,7 @@ impl QueryGraph {
             };
             // We explicitly avoid comparing parent type's here, to allow interface object
             // fields to match operation fields with the same name but differing types.
-            if field.data().field_position.field_name() == field_definition_position.field_name() {
+            if field.field_position.field_name() == field_definition_position.field_name() {
                 Some(edge_ref.id())
             } else {
                 None
@@ -674,7 +674,7 @@ impl QueryGraph {
         node: NodeIndex,
         inline_fragment: &InlineFragment,
     ) -> Option<EdgeIndex> {
-        let Some(type_condition_pos) = &inline_fragment.data().type_condition_position else {
+        let Some(type_condition_pos) = &inline_fragment.type_condition_position else {
             // No type condition means the type hasn't changed, meaning there is no edge to take.
             return None;
         };
@@ -720,7 +720,7 @@ impl QueryGraph {
         match op_path_element {
             OpPathElement::Field(field) => self.edge_for_field(node, field).map(Some),
             OpPathElement::InlineFragment(inline_fragment) => {
-                if inline_fragment.data().type_condition_position.is_some() {
+                if inline_fragment.type_condition_position.is_some() {
                     self.edge_for_inline_fragment(node, inline_fragment)
                         .map(Some)
                 } else {
