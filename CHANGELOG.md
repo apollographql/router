@@ -161,12 +161,6 @@ Improves accuracy and performance of event telemetry by:
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5464
 
-### Update the query planner to Federation 2.8.1 ([PR #5483](https://github.com/apollographql/router/pull/5483))
-
-Updates the query planner to v2.8.1 to [fix a performance issue when looking up contexts](https://github.com/apollographql/federation/pull/3031). 
-
-By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5483
-
 ### Enable coprocessors for subscriptions ([PR #5542](https://github.com/apollographql/router/pull/5542))
 
 Ensures that coprocessors correctly handle subscriptions by preventing skipped data from being overwritten.
