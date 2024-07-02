@@ -18,7 +18,7 @@
 mod api_schema;
 mod compat;
 pub mod error;
-mod indented_display;
+mod display_helpers;
 pub mod link;
 pub mod merge;
 pub(crate) mod operation;

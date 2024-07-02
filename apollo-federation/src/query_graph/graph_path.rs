@@ -12,15 +12,18 @@ use apollo_compiler::ast::Value;
 use apollo_compiler::executable::DirectiveList;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use tracing::debug;
 use tracing::debug_span;
 
+use crate::display_helpers::write_indented_lines;
+use crate::display_helpers::DisplayOption;
+use crate::display_helpers::DisplaySlice;
+use crate::display_helpers::State as IndentedFormatter;
 use crate::error::FederationError;
-use crate::indented_display::write_indented_lines;
-use crate::indented_display::State as IndentedFormatter;
 use crate::is_leaf_type;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::graphql_definition::BooleanOrVariable;
@@ -2377,10 +2380,13 @@ impl OpGraphPath {
         context: &OpGraphPathContext,
         condition_resolver: &mut impl ConditionResolver,
     ) -> Result<(Option<Vec<SimultaneousPaths>>, Option<bool>), FederationError> {
+        let span = debug_span!("Trying to advance {self} directly with {operation_element}");
+        let _guard = span.enter();
         let tail_weight = self.graph.node_weight(self.tail)?;
         let QueryGraphNodeType::SchemaType(tail_type_pos) = &tail_weight.type_ else {
             // We cannot advance any operation from here. We need to take the initial non-collecting
             // edges first.
+            debug!("Cannot advance federated graph root with direct operations");
             return Ok((None, None));
         };
         match operation_element {
@@ -2390,6 +2396,9 @@ impl OpGraphPath {
                         // Just take the edge corresponding to the field, if it exists and can be
                         // used.
                         let Some(edge) = self.next_edge_for_field(operation_field) else {
+                            debug!(
+                                "No edge for field {operation_field} on object type {tail_weight}"
+                            );
                             return Ok((None, None));
                         };
 
@@ -2436,6 +2445,12 @@ impl OpGraphPath {
                             condition_resolver,
                             context,
                         )?;
+                        match &field_path {
+                            Some(_) => debug!("Collected field on object type {tail_weight}"),
+                            None => debug!(
+                                "Cannot satisfy @requires on field for object type {tail_weight}"
+                            ),
+                        }
                         Ok((field_path.map(|p| vec![p.into()]), None))
                     }
                     OutputTypeDefinitionPosition::Interface(tail_type_pos) => {
@@ -2552,8 +2567,10 @@ impl OpGraphPath {
                                         "Unexpectedly missing interface path",
                                     ));
                                 };
+                                debug!("Collecting (leaf) field on interface {tail_weight} without type-exploding");
                                 return Ok((Some(vec![interface_path.into()]), None));
                             }
+                            debug!("Collecting field on interface {tail_weight} as 1st option");
                         }
 
                         // There are 2 main cases to handle here:
@@ -2587,8 +2604,14 @@ impl OpGraphPath {
                                     )
                                 ));
                             }
+                            debug!("Casting into requested type {field_parent_pos}");
                             Arc::new(IndexSet::from([field_parent_pos.clone()]))
                         } else {
+                            if interface_path.is_some() {
+                                debug!("No direct edge: type exploding interface {tail_weight} into possible runtime types {:?}", self.runtime_types_of_tail);
+                            } else {
+                                debug!("Type exploding interface {tail_weight} into possible runtime types {:?} as 2nd option", self.runtime_types_of_tail);
+                            }
                             self.runtime_types_of_tail.clone()
                         };
 
@@ -2597,6 +2620,9 @@ impl OpGraphPath {
                         // any gives us empty options, we bail.
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in implementations.as_ref() {
+                            let span =
+                                debug_span!("Handling implementation {implementation_type_pos}");
+                            let guard = span.enter();
                             let implementation_inline_fragment =
                                 InlineFragment::new(InlineFragmentData {
                                     schema: self
@@ -2625,18 +2651,26 @@ impl OpGraphPath {
                             // If we find no options for that implementation, we bail (as we need to
                             // simultaneously advance all implementations).
                             let Some(mut implementation_options) = implementation_options else {
+                                drop(guard);
+                                debug!("Cannot collect field from {implementation_type_pos}: stopping with options [{interface_path:?}]");
                                 return Ok((interface_path.map(|p| vec![p.into()]), None));
                             };
                             // If the new inline fragment makes it so that we're on an unsatisfiable
                             // branch, we just ignore that implementation.
                             if implementation_options.is_empty() {
+                                debug!("Cannot ever get {implementation_type_pos} from this branch, ignoring it");
                                 continue;
                             }
                             // For each option, we call `advance_with_operation_element()` again on
                             // our own operation element (the field), which gives us some options
                             // (or not and we bail).
                             let mut field_options = vec![];
+                            debug!(
+                                "Trying to collect field from options {implementation_options:?}"
+                            );
                             for implementation_option in &mut implementation_options {
+                                let span = debug_span!("For {implementation_option}");
+                                let _guard = span.enter();
                                 let field_options_for_implementation = implementation_option
                                     .advance_with_operation_element(
                                         supergraph_schema.clone(),
@@ -2646,6 +2680,7 @@ impl OpGraphPath {
                                 let Some(field_options_for_implementation) =
                                     field_options_for_implementation
                                 else {
+                                    debug!("Cannot collect field");
                                     continue;
                                 };
                                 // Advancing a field should never get us into an unsatisfiable
@@ -2656,6 +2691,9 @@ impl OpGraphPath {
                                         operation_field
                                     )));
                                 }
+                                debug!(
+                                    "Collected field: adding {field_options_for_implementation:?}"
+                                );
                                 field_options.extend(
                                     field_options_for_implementation
                                         .into_iter()
@@ -2665,8 +2703,11 @@ impl OpGraphPath {
                             // If we find no options to advance that implementation, we bail (as we
                             // need to simultaneously advance all implementations).
                             if field_options.is_empty() {
+                                drop(guard);
+                                debug!("Cannot collect field from {implementation_type_pos}: stopping with options [{}]", DisplayOption::new(&interface_path));
                                 return Ok((interface_path.map(|p| vec![p.into()]), None));
                             };
+                            debug!("Collected field from {implementation_type_pos}");
                             options_for_each_implementation.push(field_options);
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
@@ -2679,16 +2720,14 @@ impl OpGraphPath {
                                 } else {
                                     (interface_path, all_options)
                                 };
-                            Ok((
-                                Some(
-                                    vec![interface_path.into()]
-                                        .into_iter()
-                                        .chain(all_options)
-                                        .collect(),
-                                ),
-                                None,
-                            ))
+                            let options = vec![interface_path.into()]
+                                .into_iter()
+                                .chain(all_options)
+                                .collect::<Vec<_>>();
+                            debug!("With type-exploded options: {}", DisplaySlice(&options));
+                            Ok((Some(options), None))
                         } else {
+                            debug!("With type-exploded options: {}", DisplaySlice(&all_options));
                             // TODO: This appears to be the only place returning non-None for the
                             // 2nd argument, so this could be Option<(Vec<SimultaneousPaths>, bool)>
                             // instead.
@@ -2707,6 +2746,7 @@ impl OpGraphPath {
                             condition_resolver,
                             context,
                         )?;
+                        debug!("Trivial collection of __typename for union");
                         Ok((field_path.map(|p| vec![p.into()]), None))
                     }
                     _ => {
@@ -2732,6 +2772,7 @@ impl OpGraphPath {
                     // on), it means we're essentially just applying some directives (could be a
                     // `@skip`/`@include` for instance). This doesn't make us take any edge, but if
                     // the operation element does has directives, we record it.
+                    debug!("No edge to take for condition {operation_inline_fragment} from current type");
                     let fragment_path = if operation_inline_fragment.directives.is_empty() {
                         self.clone()
                     } else {
@@ -2766,6 +2807,7 @@ impl OpGraphPath {
                                 ConditionResolution::no_conditions(),
                                 operation_inline_fragment.defer_directive_arguments()?,
                             )?;
+                            debug!("Using type-casting edge for {type_condition_name} from current type");
                             return Ok((Some(vec![fragment_path.into()]), None));
                         }
 
@@ -2779,8 +2821,11 @@ impl OpGraphPath {
                                 .try_into()?,
                         )?;
                         let intersection = from_types.intersection(&to_types);
+                        debug!("Trying to type-explode into intersection between current type and {type_condition_name} = [{}]", intersection.clone().format(","));
                         let mut options_for_each_implementation = vec![];
                         for implementation_type_pos in intersection {
+                            let span = debug_span!("Trying {implementation_type_pos}");
+                            let guard = span.enter();
                             let implementation_inline_fragment =
                                 InlineFragment::new(InlineFragmentData {
                                     schema: self
@@ -2807,11 +2852,14 @@ impl OpGraphPath {
                                     condition_resolver,
                                 )?;
                             let Some(implementation_options) = implementation_options else {
+                                drop(guard);
+                                debug!("Cannot advance into {implementation_type_pos} from current type: no options for operation.");
                                 return Ok((None, None));
                             };
                             // If the new inline fragment makes it so that we're on an unsatisfiable
                             // branch, we just ignore that implementation.
                             if implementation_options.is_empty() {
+                                debug!("Cannot ever get type name from this branch, ignoring it");
                                 continue;
                             }
                             options_for_each_implementation.push(
@@ -2819,11 +2867,13 @@ impl OpGraphPath {
                                     .into_iter()
                                     .map(|s| s.paths)
                                     .collect(),
-                            )
+                            );
+                            debug!("Advanced into type from current type: {options_for_each_implementation:?}");
                         }
                         let all_options = SimultaneousPaths::flat_cartesian_product(
                             options_for_each_implementation,
                         )?;
+                        debug!("Type-exploded options: {}", DisplaySlice(&all_options));
                         Ok((Some(all_options), None))
                     }
                     OutputTypeDefinitionPosition::Object(tail_type_pos) => {
@@ -2850,6 +2900,7 @@ impl OpGraphPath {
                                 .possible_runtime_types(type_condition_pos.clone().into())?
                                 .contains(tail_type_pos)
                             {
+                                debug!("Type is a super-type of the current type. No edge to take");
                                 // Type condition is applicable on the tail type, so the types are
                                 // already exploded but the condition can reference types from the
                                 // supergraph that are not present in the local subgraph.
@@ -2923,6 +2974,7 @@ impl OpGraphPath {
                             }
                         }
 
+                        debug!("Cannot ever get type from current type: returning empty branch");
                         // The operation element we're dealing with can never return results (the
                         // type conditions applied have no intersection). This means we can fulfill
                         // this operation element (by doing nothing and returning an empty result),
@@ -3273,7 +3325,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         operation_element: &OpPathElement,
         condition_resolver: &mut impl ConditionResolver,
     ) -> Result<Option<Vec<SimultaneousPathsWithLazyIndirectPaths>>, FederationError> {
-        let span = debug_span!("Trying to advance {} for {operation_element}", %self.paths);
+        let span = debug_span!("Trying to advance paths for operation", paths = %self.paths, operation = %operation_element);
         let _gaurd = span.enter();
         let updated_context = self.context.with_context_of(operation_element)?;
         let mut options_for_each_path = vec![];
@@ -3283,7 +3335,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         let paths = self.paths.0.clone();
         for (path_index, path) in paths.iter().enumerate() {
             let span = debug_span!("Computing options for {path}");
-            let _gaurd = span.enter();
+            let gaurd = span.enter();
             let mut options = None;
             let should_reenter_subgraph = path.defer_on_tail.is_some()
                 && matches!(operation_element, OpPathElement::Field(_));
@@ -3444,6 +3496,10 @@ impl SimultaneousPathsWithLazyIndirectPaths {
             // but could still find a direct path. If so, it means it's a corner case where we
             // cannot do query-planner-based-@defer and have to fall back on not deferring.
             if options.is_empty() && should_reenter_subgraph {
+                let span = debug_span!(
+                    "Cannot defer (no indirect options); falling back to direct options"
+                );
+                let _guard = span.enter();
                 let (advance_options, _) = path.advance_with_operation_element(
                     supergraph_schema.clone(),
                     operation_element,
@@ -3451,11 +3507,14 @@ impl SimultaneousPathsWithLazyIndirectPaths {
                     condition_resolver,
                 )?;
                 options = advance_options.unwrap_or_else(Vec::new);
+                debug!("{options:?}");
             }
 
             // At this point, if options is empty, it means we found no ways to advance the
             // operation element for this path, so we should return `None`.
             if options.is_empty() {
+                drop(gaurd);
+                debug!("No valid options for {operation_element}, aborting.");
                 return Ok(None);
             } else {
                 options_for_each_path.push(options);
@@ -3463,6 +3522,7 @@ impl SimultaneousPathsWithLazyIndirectPaths {
         }
 
         let all_options = SimultaneousPaths::flat_cartesian_product(options_for_each_path)?;
+        debug!("{all_options:?}");
         Ok(Some(self.create_lazy_options(all_options, updated_context)))
     }
 }

@@ -1,4 +1,4 @@
-use std::fmt;
+use std::fmt::{self, Display};
 
 pub(crate) struct State<'fmt, 'fmt2> {
     indent_level: usize,
@@ -62,4 +62,35 @@ pub(crate) fn write_indented_lines<T>(
         state.dedent()?;
     }
     Ok(())
+}
+
+pub(crate) struct DisplaySlice<'a, T>(pub(crate) &'a [T]);
+
+impl<'a, T: Display> Display for DisplaySlice<'a, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "[")?;
+        let mut iter = self.0.iter();
+        if let Some(item) = iter.next() {
+            write!(f, "{item}")?;
+        }
+        iter.try_for_each(|item| write!(f, ", {item}"))?;
+        write!(f, "]")
+    }
+}
+
+pub(crate) struct DisplayOption<T>(pub(crate) Option<T>);
+
+impl<T> DisplayOption<T> {
+    pub(crate) fn new(inner: &Option<T>) -> DisplayOption<&T> {
+        DisplayOption(inner.as_ref())
+    }
+}
+
+impl<T: Display> Display for DisplayOption<T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match &self.0 {
+            Some(item) => write!(f, "Some({item})"),
+            None => write!(f, "None"),
+        }
+    }
 }
