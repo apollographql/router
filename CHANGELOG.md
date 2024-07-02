@@ -327,8 +327,6 @@ By [@andrewmcgivery](https://github.com/andrewmcgivery) in https://github.com/ap
 
 ### Fix docs for 'exists' condition ([PR #5446](https://github.com/apollographql/router/pull/5446))
 
-### Fix docs for 'exists' condition ([PR #5446](https://github.com/apollographql/router/pull/5446))
-
 Fixes [documentation example](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/conditions/#exists) for the `exists` condition.
 The condition expects a single selector instead of an array.
 
@@ -391,9 +389,11 @@ Introduces a new `coprocessor.client` configuration. The first and currently onl
 - `http2only` - HTTP URLs use h2c, HTTPS URLs use TLS with HTTP/2
 - not set - defaults to `enable`
 
-ⓘ NOTE Configuring `experimental_http2: http2only` where the network doesn't support HTTP2 results in a failed coprocessor connection.
+> [!NOTE]
+>
+> Configuring `experimental_http2: http2only` where the network doesn't support HTTP2 results in a failed coprocessor connection!
 
-By [Jon Christiansen](https://github.com/theJC) in https://github.com/apollographql/router/pull/5300
+By [@theJC](https://github.com/theJC) in https://github.com/apollographql/router/pull/5300
 
 
 
