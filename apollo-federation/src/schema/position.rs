@@ -46,6 +46,38 @@ use crate::schema::FederationSchema;
 pub(crate) trait Captures<U> {}
 impl<T: ?Sized, U> Captures<U> for T {}
 
+/// A zero-allocation error representation for position lookups,
+/// because many of these errors are actually immediately discarded.
+///
+/// This type does still incur a few atomic refcount increments/decrements.
+/// Maybe that could be improved in the future by borrowing from the position values,
+/// if necessary.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum PositionLookupError {
+    #[error("Schema has no directive `{0}`")]
+    DirectiveMissing(DirectiveDefinitionPosition),
+    #[error("Schema has no type `{0}`")]
+    TypeMissing(Name),
+    #[error("Schema type `{0}` is not a(n) {1}")]
+    TypeWrongKind(Name, &'static str),
+    #[error("{0} type `{1}` has no field `{2}`")]
+    MissingField(&'static str, Name, Name),
+    #[error("Directive `{}` has no argument `{}`", .0.directive_name, .0.argument_name)]
+    MissingDirectiveArgument(DirectiveArgumentDefinitionPosition),
+    #[error("{0} `{1}.{2}` has no argument `{3}`")]
+    MissingFieldArgument(&'static str, Name, Name, Name),
+    #[error("Enum type `{}` has no value `{}`", .0.type_name, .0.value_name)]
+    MissingValue(EnumValueDefinitionPosition),
+    #[error("Cannot mutate reserved {0} `{1}.{2}`")]
+    MutateReservedField(&'static str, Name, Name),
+}
+
+impl From<PositionLookupError> for FederationError {
+    fn from(value: PositionLookupError) -> Self {
+        FederationError::internal(value.to_string())
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
@@ -81,14 +113,26 @@ impl TypeDefinitionPosition {
         }
     }
 
+    fn describe(&self) -> &'static str {
+        match self {
+            TypeDefinitionPosition::Scalar(_) => "scalar",
+            TypeDefinitionPosition::Object(_) => "object",
+            TypeDefinitionPosition::Interface(_) => "interface",
+            TypeDefinitionPosition::Union(_) => "union",
+            TypeDefinitionPosition::Enum(_) => "enum",
+            TypeDefinitionPosition::InputObject(_) => "input object",
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Scalar(_), TypeDefinitionPosition::Scalar(_))
             | (ExtendedType::Object(_), TypeDefinitionPosition::Object(_))
@@ -96,9 +140,10 @@ impl TypeDefinitionPosition {
             | (ExtendedType::Union(_), TypeDefinitionPosition::Union(_))
             | (ExtendedType::Enum(_), TypeDefinitionPosition::Enum(_))
             | (ExtendedType::InputObject(_), TypeDefinitionPosition::InputObject(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -260,23 +305,35 @@ impl OutputTypeDefinitionPosition {
         }
     }
 
+    fn describe(&self) -> &'static str {
+        match self {
+            OutputTypeDefinitionPosition::Scalar(_) => "scalar",
+            OutputTypeDefinitionPosition::Object(_) => "object",
+            OutputTypeDefinitionPosition::Interface(_) => "interface",
+            OutputTypeDefinitionPosition::Union(_) => "union",
+            OutputTypeDefinitionPosition::Enum(_) => "enum",
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Scalar(_), OutputTypeDefinitionPosition::Scalar(_))
             | (ExtendedType::Object(_), OutputTypeDefinitionPosition::Object(_))
             | (ExtendedType::Interface(_), OutputTypeDefinitionPosition::Interface(_))
             | (ExtendedType::Union(_), OutputTypeDefinitionPosition::Union(_))
             | (ExtendedType::Enum(_), OutputTypeDefinitionPosition::Enum(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -440,6 +497,14 @@ impl CompositeTypeDefinitionPosition {
         }
     }
 
+    fn describe(&self) -> &'static str {
+        match self {
+            CompositeTypeDefinitionPosition::Object(_) => "object",
+            CompositeTypeDefinitionPosition::Interface(_) => "interface",
+            CompositeTypeDefinitionPosition::Union(_) => "union",
+        }
+    }
+
     pub(crate) fn field(
         &self,
         field_name: Name,
@@ -479,18 +544,20 @@ impl CompositeTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Object(_), CompositeTypeDefinitionPosition::Object(_))
             | (ExtendedType::Interface(_), CompositeTypeDefinitionPosition::Interface(_))
             | (ExtendedType::Union(_), CompositeTypeDefinitionPosition::Union(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -612,6 +679,13 @@ impl AbstractTypeDefinitionPosition {
         }
     }
 
+    fn describe(&self) -> &'static str {
+        match self {
+            AbstractTypeDefinitionPosition::Interface(_) => "interface",
+            AbstractTypeDefinitionPosition::Union(_) => "union",
+        }
+    }
+
     pub(crate) fn field(
         &self,
         field_name: Name,
@@ -647,17 +721,19 @@ impl AbstractTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Interface(_), AbstractTypeDefinitionPosition::Interface(_))
             | (ExtendedType::Union(_), AbstractTypeDefinitionPosition::Union(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -773,6 +849,13 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
         }
     }
 
+    fn describe(&self) -> &'static str {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(_) => "object",
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(_) => "interface",
+        }
+    }
+
     pub(crate) fn field(&self, field_name: Name) -> ObjectOrInterfaceFieldDefinitionPosition {
         match self {
             ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => {
@@ -815,19 +898,21 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Object(_), ObjectOrInterfaceTypeDefinitionPosition::Object(_))
             | (ExtendedType::Interface(_), ObjectOrInterfaceTypeDefinitionPosition::Interface(_)) => {
                 Ok(ty)
             }
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -969,7 +1054,7 @@ impl FieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         match self {
             FieldDefinitionPosition::Object(field) => field.get(schema),
             FieldDefinitionPosition::Interface(field) => field.get(schema),
@@ -1038,7 +1123,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.get(schema),
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.get(schema),
@@ -1490,24 +1575,19 @@ impl ScalarTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<ScalarType>, FederationError> {
+    ) -> Result<&'schema Node<ScalarType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Scalar(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not a scalar", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "scalar",
+                    ))
                 }
             })
     }
@@ -1522,24 +1602,19 @@ impl ScalarTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<ScalarType>, FederationError> {
+    ) -> Result<&'schema mut Node<ScalarType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Scalar(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not a scalar", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "scalar",
+                    ))
                 }
             })
     }
@@ -1851,24 +1926,19 @@ impl ObjectTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<ObjectType>, FederationError> {
+    ) -> Result<&'schema Node<ObjectType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Object(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "object",
+                    ))
                 }
             })
     }
@@ -1883,24 +1953,19 @@ impl ObjectTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<ObjectType>, FederationError> {
+    ) -> Result<&'schema mut Node<ObjectType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Object(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "object",
+                    ))
                 }
             })
     }
@@ -2341,20 +2406,18 @@ impl ObjectFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
         schema
             .type_field(&self.type_name, &self.field_name)
             .map_err(|_| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object type \"{}\" has no field \"{}\"",
-                        parent, self.field_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingField(
+                    "Object",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                )
             })
     }
 
@@ -2368,24 +2431,23 @@ impl ObjectFieldDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
         if is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot mutate reserved object field \"{}\"", self),
-            }
-            .into());
+            return Err(PositionLookupError::MutateReservedField(
+                "object field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            ));
         }
         type_.fields.get_mut(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Object type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Object",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -2695,7 +2757,7 @@ impl ObjectFieldArgumentDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
@@ -2704,13 +2766,12 @@ impl ObjectFieldArgumentDefinitionPosition {
             .iter()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingFieldArgument(
+                    "Object field",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                    self.argument_name.clone(),
+                )
             })
     }
 
@@ -2724,7 +2785,7 @@ impl ObjectFieldArgumentDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -2733,13 +2794,12 @@ impl ObjectFieldArgumentDefinitionPosition {
             .iter_mut()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingFieldArgument(
+                    "Object field",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                    self.argument_name.clone(),
+                )
             })
     }
 
@@ -3042,24 +3102,19 @@ impl InterfaceTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InterfaceType>, FederationError> {
+    ) -> Result<&'schema Node<InterfaceType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Interface(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an interface", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "interface",
+                    ))
                 }
             })
     }
@@ -3074,24 +3129,19 @@ impl InterfaceTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InterfaceType>, FederationError> {
+    ) -> Result<&'schema mut Node<InterfaceType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Interface(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an interface", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "interface",
+                    ))
                 }
             })
     }
@@ -3462,20 +3512,18 @@ impl InterfaceFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
         schema
             .type_field(&self.type_name, &self.field_name)
             .map_err(|_| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface type \"{}\" has no field \"{}\"",
-                        parent, self.field_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingField(
+                    "Interface",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                )
             })
     }
 
@@ -3489,24 +3537,23 @@ impl InterfaceFieldDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
         if is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot mutate reserved interface field \"{}\"", self),
-            }
-            .into());
+            return Err(PositionLookupError::MutateReservedField(
+                "interface field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            ));
         }
         type_.fields.get_mut(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Interface type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Interface",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -3814,7 +3861,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
@@ -3823,13 +3870,12 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .iter()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingFieldArgument(
+                    "Interface field",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                    self.argument_name.clone(),
+                )
             })
     }
 
@@ -3843,7 +3889,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -3852,13 +3898,12 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .iter_mut()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingFieldArgument(
+                    "Interface field",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                    self.argument_name.clone(),
+                )
             })
     }
 
@@ -4144,24 +4189,19 @@ impl UnionTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<UnionType>, FederationError> {
+    ) -> Result<&'schema Node<UnionType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Union(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an union", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "union",
+                    ))
                 }
             })
     }
@@ -4176,24 +4216,19 @@ impl UnionTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<UnionType>, FederationError> {
+    ) -> Result<&'schema mut Node<UnionType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Union(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an union", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "union",
+                    ))
                 }
             })
     }
@@ -4515,21 +4550,18 @@ impl UnionTypenameFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
         schema
             .type_field(&self.type_name, self.field_name())
             .map_err(|_| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Union type \"{}\" has no field \"{}\"",
-                        parent,
-                        self.field_name()
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingField(
+                    "Union",
+                    self.type_name.clone(),
+                    name!("__typename"),
+                )
             })
     }
 
@@ -4596,24 +4628,19 @@ impl EnumTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<EnumType>, FederationError> {
+    ) -> Result<&'schema Node<EnumType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Enum(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an enum", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "enum",
+                    ))
                 }
             })
     }
@@ -4628,24 +4655,19 @@ impl EnumTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<EnumType>, FederationError> {
+    ) -> Result<&'schema mut Node<EnumType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Enum(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an enum", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "enum",
+                    ))
                 }
             })
     }
@@ -4929,19 +4951,14 @@ impl EnumValueDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<EnumValueDefinition>, FederationError> {
+    ) -> Result<&'schema Component<EnumValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
-        type_.values.get(&self.value_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Enum type \"{}\" has no value \"{}\"",
-                    parent, self.value_name
-                ),
-            }
-            .into()
-        })
+        type_
+            .values
+            .get(&self.value_name)
+            .ok_or_else(|| PositionLookupError::MissingValue(self.clone()))
     }
 
     pub(crate) fn try_get<'schema>(
@@ -4954,19 +4971,14 @@ impl EnumValueDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<EnumValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<EnumValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
-        type_.values.get_mut(&self.value_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Enum type \"{}\" has no value \"{}\"",
-                    parent, self.value_name
-                ),
-            }
-            .into()
-        })
+        type_
+            .values
+            .get_mut(&self.value_name)
+            .ok_or_else(|| PositionLookupError::MissingValue(self.clone()))
     }
 
     fn try_make_mut<'schema>(
@@ -5181,24 +5193,19 @@ impl InputObjectTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputObjectType>, FederationError> {
+    ) -> Result<&'schema Node<InputObjectType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::InputObject(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an input object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "input object",
+                    ))
                 }
             })
     }
@@ -5213,24 +5220,19 @@ impl InputObjectTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputObjectType>, FederationError> {
+    ) -> Result<&'schema mut Node<InputObjectType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::InputObject(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an input object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        "input object",
+                    ))
                 }
             })
     }
@@ -5512,18 +5514,16 @@ impl InputObjectFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema Component<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
         type_.fields.get(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Input object type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Input object",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -5537,18 +5537,16 @@ impl InputObjectFieldDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
         type_.fields.get_mut(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Input object type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Input object",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -5828,16 +5826,11 @@ impl DirectiveDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+    ) -> Result<&'schema Node<DirectiveDefinition>, PositionLookupError> {
         schema
             .directive_definitions
             .get(&self.directive_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no directive \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::DirectiveMissing(self.clone()))
     }
 
     pub(crate) fn try_get<'schema>(
@@ -5850,16 +5843,11 @@ impl DirectiveDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<DirectiveDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<DirectiveDefinition>, PositionLookupError> {
         schema
             .directive_definitions
             .get_mut(&self.directive_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no directive \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::DirectiveMissing(self.clone()))
     }
 
     fn try_make_mut<'schema>(
@@ -6058,7 +6046,7 @@ impl DirectiveArgumentDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
@@ -6066,15 +6054,7 @@ impl DirectiveArgumentDefinitionPosition {
             .arguments
             .iter()
             .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Directive \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::MissingDirectiveArgument(self.clone()))
     }
 
     pub(crate) fn try_get<'schema>(
@@ -6087,7 +6067,7 @@ impl DirectiveArgumentDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -6095,15 +6075,7 @@ impl DirectiveArgumentDefinitionPosition {
             .arguments
             .iter_mut()
             .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Directive \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::MissingDirectiveArgument(self.clone()))
     }
 
     fn try_make_mut<'schema>(
