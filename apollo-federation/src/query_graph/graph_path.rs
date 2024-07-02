@@ -434,7 +434,7 @@ impl OpPathElement {
         }
     }
 
-    pub(crate) fn rebase_on_or_error(
+    pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
