@@ -34,6 +34,7 @@ use super::*;
 use crate::assert_snapshot_subscriber;
 use crate::plugin::test;
 use crate::plugins::authentication::jwks::parse_jwks;
+use crate::services::router::body::get_body_bytes;
 use crate::services::supergraph;
 
 fn create_an_url(filename: &str) -> String {
@@ -1045,12 +1046,9 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+            let response: graphql::Response =
+                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
+                    .unwrap();
             assert_eq!(response, graphql::Response::builder()
         .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'hallo', but signed with a key from 'hello'").build()]).build());
         }
@@ -1085,12 +1083,9 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+            let response: graphql::Response =
+                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
+                    .unwrap();
             assert_eq!(response, graphql::Response::builder()
             .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
         }
@@ -1120,12 +1115,9 @@ async fn issuer_check() {
 
     match authenticate(&config, &manager, request.try_into().unwrap()) {
         ControlFlow::Break(res) => {
-            let response: graphql::Response = serde_json::from_slice(
-                &hyper::body::to_bytes(res.response.into_body())
-                    .await
-                    .unwrap(),
-            )
-            .unwrap();
+            let response: graphql::Response =
+                serde_json::from_slice(&get_body_bytes(res.response.into_body()).await.unwrap())
+                    .unwrap();
             assert_eq!(response, graphql::Response::builder()
         .errors(vec![graphql::Error::builder().extension_code("AUTH_ERROR").message("Invalid issuer: the token's `iss` was 'AAAA', but signed with a key from 'hello'").build()]).build());
         }
@@ -1341,7 +1333,9 @@ async fn jwks_send_headers() {
                             .header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
                             .status(StatusCode::OK)
                             .version(http::Version::HTTP_11)
-                            .body::<hyper::Body>(include_str!("testdata/jwks.json").into())
+                            .body::<crate::services::router::body::RouterBody>(
+                                include_str!("testdata/jwks.json").into(),
+                            )
                             .unwrap(),
                     )
                 }

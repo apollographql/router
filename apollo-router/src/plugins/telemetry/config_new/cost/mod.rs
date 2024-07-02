@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry_api::Key;
 use opentelemetry_api::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
@@ -10,6 +11,7 @@ use tower::BoxError;
 use super::instruments::Increment;
 use crate::metrics;
 use crate::plugins::demand_control::CostContext;
+use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::SupergraphAttributes;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
@@ -23,6 +25,15 @@ use crate::services::supergraph;
 use crate::services::supergraph::Request;
 use crate::services::supergraph::Response;
 use crate::Context;
+
+pub(crate) const APOLLO_PRIVATE_COST_ESTIMATED: Key =
+    Key::from_static_str("apollo_private.cost.estimated");
+pub(crate) const APOLLO_PRIVATE_COST_ACTUAL: Key =
+    Key::from_static_str("apollo_private.cost.actual");
+pub(crate) const APOLLO_PRIVATE_COST_STRATEGY: Key =
+    Key::from_static_str("apollo_private.cost.strategy");
+pub(crate) const APOLLO_PRIVATE_COST_RESULT: Key =
+    Key::from_static_str("apollo_private.cost.result");
 
 static COST_ESTIMATED: &str = "cost.estimated";
 static COST_ACTUAL: &str = "cost.actual";
@@ -269,6 +280,29 @@ pub(crate) enum CostValue {
     Delta,
     /// The result of the cost calculation. This is the error code returned by the cost calculation.
     Result,
+}
+
+pub(crate) fn add_cost_attributes(context: &Context, custom_attributes: &mut Vec<KeyValue>) {
+    context.extensions().with_lock(|c| {
+        if let Some(cost) = c.get::<CostContext>() {
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ESTIMATED.clone(),
+                AttributeValue::F64(cost.estimated),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_ACTUAL.clone(),
+                AttributeValue::F64(cost.actual),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_RESULT.clone(),
+                AttributeValue::String(cost.result.into()),
+            ));
+            custom_attributes.push(KeyValue::new(
+                APOLLO_PRIVATE_COST_STRATEGY.clone(),
+                AttributeValue::String(cost.strategy.into()),
+            ));
+        }
+    });
 }
 
 #[cfg(test)]
