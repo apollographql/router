@@ -114,9 +114,6 @@ impl FieldSelection {
             }
             Ok(Some(SelectionOrSet::Selection(Selection::from(selection))))
         } else {
-            // JS PORT NOTE: In JS implementation field selection stores field definition information,
-            // in RS version we only store the field position reference so we don't need to update the
-            // underlying elements
             Ok(Some(SelectionOrSet::Selection(Selection::from(
                 self.with_updated_element(field_element),
             ))))
@@ -226,8 +223,6 @@ impl InlineFragmentSelection {
             }
         }
 
-        // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
-        // (note that even if we're not recursive, we may still have some "lifting" to do)
         // Note: This selection_set is not rebased here yet. It will be rebased later as necessary.
         let selection_set = self.selection_set.flatten_unnecessary_fragments(
             &self.selection_set.type_position,
