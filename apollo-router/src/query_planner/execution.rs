@@ -33,7 +33,6 @@ use crate::query_planner::CONDITION_SPAN_NAME;
 use crate::query_planner::DEFER_DEFERRED_SPAN_NAME;
 use crate::query_planner::DEFER_PRIMARY_SPAN_NAME;
 use crate::query_planner::DEFER_SPAN_NAME;
-use crate::query_planner::FETCH_SPAN_NAME;
 use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
@@ -225,9 +224,6 @@ impl PlanNode {
                     value = Value::default();
                 }
                 PlanNode::Fetch(fetch_node) => {
-                    let fetch_time_offset =
-                        parameters.context.created_at.elapsed().as_nanos() as i64;
-
                     // The client closed the connection, we are still executing the request pipeline,
                     // but we won't send unused trafic to subgraph
                     if parameters
@@ -258,16 +254,7 @@ impl PlanNode {
                                     .current_dir(current_dir.clone())
                                     .deferred_fetches(parameters.deferred_fetches.clone())
                                     .build();
-                                let (v, e) = match service
-                                    .oneshot(request)
-                                    .instrument(tracing::info_span!(
-                                        FETCH_SPAN_NAME,
-                                        "otel.kind" = "INTERNAL",
-                                        "apollo.subgraph.name" = fetch_node.service_name.as_ref(),
-                                        "apollo_private.sent_time_offset" = fetch_time_offset
-                                    ))
-                                    .await
-                                {
+                                (value, errors) = match service.oneshot(request).await {
                                     Ok(r) => r,
                                     Err(e) => (
                                         Value::Null,
@@ -277,8 +264,6 @@ impl PlanNode {
                                             .build()],
                                     ),
                                 };
-                                value = v;
-                                errors = e;
                             }
                             None => {
                                 value = Value::Object(Object::default());

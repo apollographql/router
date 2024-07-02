@@ -330,6 +330,7 @@ tower-test = "0.4.0"
 
 # See note above in this file about `^tracing` packages which also applies to
 # these dev dependencies.
+tracing-fluent-assertions = "0.3.0"
 tracing-subscriber = { version = "0.3", default-features = false, features = [
     "env-filter",
     "fmt",

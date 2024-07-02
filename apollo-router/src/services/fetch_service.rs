@@ -5,9 +5,12 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
+use apollo_federation::sources::connect::Transport;
 use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
+use tracing::instrument::Instrumented;
+use tracing::Instrument;
 
 use super::connector_service::ConnectorServiceFactory;
 use super::fetch::BoxService;
@@ -16,9 +19,12 @@ use super::ConnectRequest;
 use super::SubgraphRequest;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
+use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
+use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
+use crate::query_planner::FETCH_SPAN_NAME;
 use crate::services::FetchRequest;
 use crate::services::FetchResponse;
 use crate::services::SubgraphServiceFactory;
@@ -36,7 +42,7 @@ pub(crate) struct FetchService {
 impl tower::Service<FetchRequest> for FetchService {
     type Response = FetchResponse;
     type Error = BoxError;
-    type Future = BoxFuture<'static, Result<Self::Response, Self::Error>>;
+    type Future = Instrumented<BoxFuture<'static, Result<Self::Response, Self::Error>>>;
 
     fn poll_ready(&mut self, _cx: &mut std::task::Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -44,21 +50,54 @@ impl tower::Service<FetchRequest> for FetchService {
 
     fn call(&mut self, request: FetchRequest) -> Self::Future {
         let FetchRequest {
+            ref context,
             fetch_node: FetchNode {
                 ref service_name, ..
             },
             ..
         } = request;
-        if self
+        let service_name = service_name.clone();
+        let fetch_time_offset = context.created_at.elapsed().as_nanos() as i64;
+
+        if let Some(connector) = self
             .connector_service_factory
             .connectors_by_service_name
-            .contains_key(service_name.to_string().as_str())
+            .get(service_name.as_ref())
         {
+            let span = tracing::info_span!(
+                CONNECT_SPAN_NAME,
+                "otel.kind" = "INTERNAL",
+                "apollo.connector.type" = CONNECTOR_TYPE_HTTP,
+                "apollo.connector.detail" = tracing::field::Empty,
+                "apollo.connector.field.name" = connector.id.directive.field.to_string(),
+                "apollo.connector.selection" = connector.selection.to_string(),
+                "apollo.connector.source.name" = tracing::field::Empty,
+                "apollo.connector.source.detail" = tracing::field::Empty,
+                "apollo_private.sent_time_offset" = fetch_time_offset,
+            );
+            // TODO: apollo.connector.field.alias
+            // TODO: apollo.connector.field.return_type
+            // TODO: apollo.connector.field.selection_set
+            let Transport::HttpJson(ref http_json) = connector.transport;
+            if let Ok(detail) = serde_json::to_string(
+                &serde_json::json!({ http_json.method.as_str(): http_json.path_template.to_string() }),
+            ) {
+                span.record("apollo.connector.detail", detail);
+            }
+            if let Some(source_name) = connector.id.source_name.as_ref() {
+                span.record("apollo.connector.source.name", source_name);
+                if let Ok(detail) =
+                    serde_json::to_string(&serde_json::json!({ "baseURL": http_json.base_url }))
+                {
+                    span.record("apollo.connector.source.detail", detail);
+                }
+            }
             Self::fetch_with_connector_service(
                 self.schema.clone(),
                 self.connector_service_factory.clone(),
                 request,
             )
+            .instrument(span)
         } else {
             Self::fetch_with_subgraph_service(
                 self.schema.clone(),
@@ -66,6 +105,12 @@ impl tower::Service<FetchRequest> for FetchService {
                 self.subgraph_schemas.clone(),
                 request,
             )
+            .instrument(tracing::info_span!(
+                FETCH_SPAN_NAME,
+                "otel.kind" = "INTERNAL",
+                "apollo.subgraph.name" = service_name.as_ref(),
+                "apollo_private.sent_time_offset" = fetch_time_offset
+            ))
         }
     }
 }

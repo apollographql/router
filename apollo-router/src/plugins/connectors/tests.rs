@@ -8,6 +8,10 @@ use itertools::Itertools;
 use mime::APPLICATION_JSON;
 use req_asserts::Matcher;
 use tower::ServiceExt;
+use tracing_fluent_assertions::AssertionRegistry;
+use tracing_fluent_assertions::AssertionsLayer;
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::Registry;
 use wiremock::http::HeaderName;
 use wiremock::http::HeaderValue;
 use wiremock::matchers::body_json;
@@ -17,6 +21,7 @@ use wiremock::Mock;
 use wiremock::MockServer;
 use wiremock::ResponseTemplate;
 
+use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
@@ -312,6 +317,42 @@ async fn test_header_propagation() {
             .path("/users")
             .build()],
     );
+}
+
+#[tokio::test]
+async fn test_tracing_connect_span() {
+    let assertion_registry = AssertionRegistry::default();
+    let base_subscriber = Registry::default();
+    let subscriber = base_subscriber.with(AssertionsLayer::new(&assertion_registry));
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let found_connector_span = assertion_registry
+        .build()
+        .with_name(CONNECT_SPAN_NAME)
+        .with_span_field("apollo.connector.type")
+        .with_span_field("apollo.connector.detail")
+        .with_span_field("apollo.connector.field.name")
+        .with_span_field("apollo.connector.selection")
+        .with_span_field("apollo.connector.source.name")
+        .with_span_field("apollo.connector.source.detail")
+        .was_entered()
+        .was_exited()
+        .finalize();
+
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { users { id } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    found_connector_span.assert();
 }
 
 #[tokio::test]
