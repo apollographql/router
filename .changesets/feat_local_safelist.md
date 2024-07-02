@@ -1,10 +1,10 @@
-### Allow use of a local persisted query manifest for use with offline licenses ([Issue #4587](https://github.com/apollographql/router/issues/4587))
+### Support local persisted query manifests for use with offline licenses ([Issue #4587](https://github.com/apollographql/router/issues/4587))
 
-This adds support to be able to pass [Persisted Query](https://www.apollographql.com/docs/graphos/operations/persisted-queries/) manifests to be used in place of the hosted Uplink version. 
+Adds experimental support for passing [persisted query manifests](https://www.apollographql.com/docs/graphos/operations/persisted-queries/#31-generate-persisted-query-manifests) to use instead of the hosted Uplink version. 
 
-An example configuration would look like:
+For example:
 
-```yml
+```router.yaml
 persisted_queries:
   enabled: true
   log_unknown: true

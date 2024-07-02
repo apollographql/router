@@ -1,8 +1,7 @@
-### isolate uses of hyper 0.14 types ([PR #5175](https://github.com/apollographql/router/pull/5175))
+### Isolate usage of hyper v0.14 types for future compatibility ([PR #5175](https://github.com/apollographql/router/pull/5175))
 
-[Hyper](https://hyper.rs/), the HTTP client and server used in the Router, recently reached version 1.0, with various improvements that we need in the Router, but also some API breaking changes.
-To reduce the future impact of these breaking changes we have isolated uses of hyper's types. This will make future upgrades simpler.
+Isolates usage of [hyper](https://hyper.rs/) types in response to the recent release of hyper v1.0. The new major version introduced improvements along with breaking changes. The goal is to reduce the impact of these breaking changes, and ensure that future upgrades are straightforward.
 
-This will have no impact on the current public API of the Router, it mainly affects internal code and will not affect the Router's normal execution.
+This change only affects internal code and doesn't affect the router's public API or execution.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5175

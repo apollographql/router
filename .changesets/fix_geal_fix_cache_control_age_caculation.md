@@ -1,5 +1,9 @@
-### Entity cache: fix Cache-Control aggregation and age calculation ([PR #5463](https://github.com/apollographql/router/pull/5463))
+### Fix Cache-Control aggregation and age calculation in entity caching ([PR #5463](https://github.com/apollographql/router/pull/5463))
 
-This ensures the `max-age` or `s-max-age` fields of the `Cache-Control` header returned to the client are calculated properly, and proper default values are set if a subgraph does not send back a `Cache-Control` header. This also makes sure the header is always aggregated, even if the plugin is disabled entirely or for a specific subgraph.
+Enhances the reliability of caching behaviors in the entity cache feature by:
+
+- Ensuring the proper calculation of `max-age` and `s-max-age` fields in the `Cache-Control` header sent to clients.
+- Setting appropriate default values if a subgraph does not provide a `Cache-Control` header.
+- Guaranteeing that the `Cache-Control` header is aggregated consistently, even if the plugins is disabled entirely or on specific subgraphs.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5463
