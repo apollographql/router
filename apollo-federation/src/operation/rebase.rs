@@ -83,7 +83,7 @@ impl Selection {
         }
     }
 
-    pub fn rebase_on(
+    pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -160,7 +160,7 @@ impl From<RebaseError> for FederationError {
 }
 
 impl Field {
-    pub fn rebase_on(
+    pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
@@ -337,7 +337,7 @@ impl FieldSelection {
     ///
     /// Obviously, this operation will only succeed if this selection (both the field itself and its subselections)
     /// make sense from the provided parent type. If this is not the case, this method will throw.
-    pub fn rebase_on(
+    pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -551,7 +551,7 @@ impl InlineFragmentData {
 }
 
 impl InlineFragment {
-    pub fn rebase_on(
+    pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
