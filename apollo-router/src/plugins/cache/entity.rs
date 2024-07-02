@@ -24,7 +24,9 @@ use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
-use super::invalidation::InvalidationService;
+use super::invalidation_endpoint::InvalidationConfig;
+use super::invalidation_endpoint::InvalidationEndpointConfig;
+use super::invalidation_endpoint::InvalidationService;
 use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
@@ -58,6 +60,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 #[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
+    endpoint_config: Arc<Option<InvalidationEndpointConfig>>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
     enabled: bool,
     metrics: Metrics,
@@ -88,10 +91,18 @@ pub(crate) struct Subgraph {
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    pub(crate) enabled: Option<bool>,
+    #[serde(default = "default_true")]
+    pub(crate) enabled: bool,
 
     /// Context key used to separate cache sections per user
     pub(crate) private_id: Option<String>,
+
+    /// Invalidation configuration
+    pub(crate) invalidation: Option<InvalidationConfig>,
+}
+
+const fn default_true() -> bool {
+    true
 }
 
 /// Per subgraph configuration for entity caching
@@ -160,6 +171,10 @@ impl Plugin for EntityCache {
         Ok(Self {
             storage,
             enabled: init.config.enabled,
+            endpoint_config: Arc::new(match &init.config.subgraph.all.invalidation {
+                Some(invalidation_cfg) => Some(invalidation_cfg.clone().try_into()?),
+                None => None,
+            }),
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
@@ -214,13 +229,8 @@ impl Plugin for EntityCache {
             .clone()
             .map(|t| t.0)
             .or_else(|| storage.ttl());
-        let subgraph_enabled = self.enabled
-            && self
-                .subgraphs
-                .get(name)
-                .enabled
-                // if the top level `enabled` is true but there is no other configuration, caching is enabled for this plugin
-                .unwrap_or(true);
+        let subgraph_enabled =
+            self.enabled && (self.subgraphs.all.enabled || self.subgraphs.get(name).enabled);
         let private_id = self.subgraphs.get(name).private_id.clone();
 
         let name = name.to_string();
@@ -275,25 +285,26 @@ impl Plugin for EntityCache {
 
     fn web_endpoints(&self) -> MultiMap<ListenAddr, Endpoint> {
         let mut map = MultiMap::new();
-        dbg!("web endpoints");
-        if self.enabled {
-            // TODO make it dynamic
-            let path = String::from("/invalidation");
-            let path = path.trim_end_matches('/');
-            let endpoint = Endpoint::from_router_service(
-                format!("{path}/:invalidation"),
-                InvalidationService::new(path.to_string()).boxed(),
-            );
-            // TODO: make it dynamic
-            map.insert(default_listen_addr(), endpoint);
+        if self.enabled
+            && self
+                .subgraphs
+                .all
+                .invalidation
+                .as_ref()
+                .map(|i| i.enabled)
+                .unwrap_or_default()
+        {
+            if let Some(invalidation) = self.endpoint_config.as_ref() {
+                let endpoint = Endpoint::from_router_service(
+                    invalidation.path.clone(),
+                    InvalidationService::new(self.subgraphs.clone()).boxed(),
+                );
+                map.insert(invalidation.listen.clone(), endpoint);
+            }
         }
 
         map
     }
-}
-
-fn default_listen_addr() -> ListenAddr {
-    ListenAddr::SocketAddr("0.0.0.0:4000".parse().expect("valid ListenAddr"))
 }
 
 impl EntityCache {
@@ -312,8 +323,10 @@ impl EntityCache {
                 all: Subgraph::default(),
                 subgraphs,
             }),
+
             metrics: Metrics::default(),
             private_queries: Default::default(),
+            endpoint_config: Arc::default(),
         })
     }
 }

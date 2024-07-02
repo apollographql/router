@@ -1,19 +1,64 @@
+use std::sync::Arc;
 use std::task::Poll;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
 use http::Method;
 use http::StatusCode;
+use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use tower::BoxError;
 use tower::Service;
 use tracing_futures::Instrument;
 
+use super::entity::Subgraph;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
+use crate::ListenAddr;
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case", deny_unknown_fields, default)]
+pub(crate) struct InvalidationConfig {
+    pub(crate) enabled: bool,
+    /// This one will be skipped if used in specific subgraph entry
+    #[schemars(with = "Option<String>")]
+    pub(crate) endpoint: Option<url::Url>,
+    pub(crate) shared_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct InvalidationEndpointConfig {
+    /// This one will be skipped if used in specific subgraph entry
+    pub(crate) path: String,
+    pub(crate) listen: ListenAddr,
+}
+
+impl TryFrom<InvalidationConfig> for InvalidationEndpointConfig {
+    type Error = BoxError;
+
+    fn try_from(value: InvalidationConfig) -> Result<Self, Self::Error> {
+        let endpoint = match value.endpoint {
+            Some(e) => e,
+            None => {
+                return Err(BoxError::from(
+                    "endpoint value must be set for invalidation cache",
+                ))
+            }
+        };
+
+        let cfg = Self {
+            path: endpoint.path().to_string(),
+            listen: ListenAddr::SocketAddr(endpoint.authority().parse()?),
+        };
+
+        dbg!(&cfg);
+        Ok(cfg)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InvalidationPayload {
     /// required, kind of invalidation event. Can be "Subgraph", "Type", "Key" or "Tag"
@@ -31,7 +76,7 @@ pub(crate) struct InvalidationPayload {
     pub(crate) mark_stale: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum InvalidationKind {
     Type,
@@ -40,13 +85,13 @@ pub(crate) enum InvalidationKind {
     Tag,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum InvalidationType {
     EntityType,
 }
 
-#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Default, Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct InvalidationKey {
     pub(crate) id: String,
@@ -55,12 +100,12 @@ pub(crate) struct InvalidationKey {
 
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
-    path: String,
+    config: Arc<SubgraphConfiguration<Subgraph>>,
 }
 
 impl InvalidationService {
-    pub(crate) fn new(path: String) -> Self {
-        Self { path }
+    pub(crate) fn new(config: Arc<SubgraphConfiguration<Subgraph>>) -> Self {
+        Self { config }
     }
 }
 
@@ -74,7 +119,6 @@ impl Service<router::Request> for InvalidationService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        let path = self.path.clone();
         Box::pin(
             async move {
                 let (parts, body) = req.router_request.into_parts();
