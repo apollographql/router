@@ -238,9 +238,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             r#"The following errors occurred:
-
   - Cannot use alias "r1" in "r1: r s q1: q": aliases are not currently supported in the used directive
-
   - Cannot use alias "q1" in "r1: r s q1: q": aliases are not currently supported in the used directive"#
         );
         Ok(())

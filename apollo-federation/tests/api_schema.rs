@@ -74,13 +74,9 @@ fn inaccessible_types_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Type `Query` is @inaccessible but is the query root type, which must be in the API schema.
-
       - Type `Object` is @inaccessible but is referenced by `Referencer1.someField`, which is in the API schema.
-
       - Type `Object` is @inaccessible but is referenced by `Referencer2.someField`, which is in the API schema.
-
       - Type `Referencer3` is in the API schema but all of its members are @inaccessible.
     "###);
 }
@@ -202,9 +198,7 @@ fn inaccessible_interface_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Type `Interface` is @inaccessible but is referenced by `Referencer1.someField`, which is in the API schema.
-
       - Type `Interface` is @inaccessible but is referenced by `Referencer2.someField`, which is in the API schema.
     "###);
 }
@@ -319,9 +313,7 @@ fn inaccessible_union_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Type `Union` is @inaccessible but is referenced by `Referencer1.someField`, which is in the API schema.
-
       - Type `Union` is @inaccessible but is referenced by `Referencer2.someField`, which is in the API schema.
     "###);
 }
@@ -422,13 +414,9 @@ fn inaccessible_input_object_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Type `InputObject` is @inaccessible but is referenced by `Referencer3.someField`, which is in the API schema.
-
       - Type `InputObject` is @inaccessible but is referenced by `Referencer1.someField(someArg:)`, which is in the API schema.
-
       - Type `InputObject` is @inaccessible but is referenced by `Referencer2.someField(someArg:)`, which is in the API schema.
-
       - Type `InputObject` is @inaccessible but is referenced by `@referencer4(someArg:)`, which is in the API schema.
     "###);
 }
@@ -597,17 +585,11 @@ fn inaccessible_enum_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Type `Enum` is @inaccessible but is referenced by `Referencer1.somefield`, which is in the API schema.
-
       - Type `Enum` is @inaccessible but is referenced by `Referencer2.somefield`, which is in the API schema.
-
       - Type `Enum` is @inaccessible but is referenced by `Referencer5.someField`, which is in the API schema.
-
       - Type `Enum` is @inaccessible but is referenced by `Referencer3.someField(someArg:)`, which is in the API schema.
-
       - Type `Enum` is @inaccessible but is referenced by `Referencer4.someField(someArg:)`, which is in the API schema.
-
       - Type `Enum` is @inaccessible but is referenced by `@referencer6(someArg:)`, which is in the API schema.
     "###);
 }
@@ -805,17 +787,11 @@ fn inaccessible_scalar_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Type `Scalar` is @inaccessible but is referenced by `Referencer1.somefield`, which is in the API schema.
-
       - Type `Scalar` is @inaccessible but is referenced by `Referencer2.somefield`, which is in the API schema.
-
       - Type `Scalar` is @inaccessible but is referenced by `Referencer5.someField`, which is in the API schema.
-
       - Type `Scalar` is @inaccessible but is referenced by `Referencer3.someField(someArg:)`, which is in the API schema.
-
       - Type `Scalar` is @inaccessible but is referenced by `Referencer4.someField(someArg:)`, which is in the API schema.
-
       - Type `Scalar` is @inaccessible but is referenced by `@referencer6(someArg:)`, which is in the API schema.
     "###);
 }
@@ -1010,15 +986,10 @@ fn inaccessible_object_field_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Type `Query` is in the API schema but all of its members are @inaccessible.
-
       - Type `Mutation` is in the API schema but all of its members are @inaccessible.
-
       - Type `Subscription` is in the API schema but all of its members are @inaccessible.
-
       - Field `Object.privateField` is @inaccessible but implements the interface field `Referencer1.privateField`, which is in the API schema.
-
       - Type `Referencer2` is in the API schema but all of its members are @inaccessible.
     "###);
 }
@@ -1133,9 +1104,7 @@ fn inaccessible_interface_field_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Field `Interface.privateField` is @inaccessible but implements the interface field `Referencer1.privateField`, which is in the API schema.
-
       - Type `Referencer2` is in the API schema but all of its members are @inaccessible.
     "###);
 }
@@ -1220,9 +1189,7 @@ fn inaccessible_object_field_arguments_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Argument `Object.someField(privateArg:)` is @inaccessible but implements the interface argument `Referencer1.someField(privateArg:)` which is in the API schema.
-
       - Argument `ObjectRequired.someField(privateArg:)` is @inaccessible but is a required argument of its field.
     "###);
 }
@@ -1369,13 +1336,9 @@ fn inaccessible_interface_field_arguments_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Argument `Interface.someField(privateArg:)` is @inaccessible but implements the interface argument `Referencer1.someField(privateArg:)` which is in the API schema.
-
       - Argument `InterfaceRequired.someField(privateArg:)` is @inaccessible but is a required argument of its field.
-
       - Argument `Interface.someField(privateArg:)` is @inaccessible but is implemented by the argument `Referencer2.someField(privateArg:)` which is in the API schema.
-
       - Argument `Interface.someField(privateArg:)` is @inaccessible but is implemented by the argument `Referencer3.someField(privateArg:)` which is in the API schema.
     "###);
 }
@@ -1547,17 +1510,11 @@ fn inaccessible_input_object_fields_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `Referencer1.someField(someArg:)`, which is in the API schema.
-
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `Referencer2.someField(someArg:)`, which is in the API schema.
-
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `Referencer3.someField`, which is in the API schema.
-
       - Type `Referencer5` is in the API schema but all of its input fields are @inaccessible.
-
       - Input field `InputObjectRequired` is @inaccessible but is a required input field of its type.
-
       - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `@referencer4(someArg:)`, which is in the API schema.
     "###);
 }
@@ -1756,15 +1713,10 @@ fn inaccessible_enum_values_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Referencer1.someField(someArg:)`, which is in the API schema.
-
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Referencer2.someField(someArg:)`, which is in the API schema.
-
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Referencer3.someField`, which is in the API schema.
-
       - Type `Referencer5` is in the API schema but all of its members are @inaccessible.
-
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `@referencer4(someArg:)`, which is in the API schema.
     "###);
 }
@@ -1953,11 +1905,8 @@ fn inaccessible_complex_default_values() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Input field `NestedInputObject.privateField` is @inaccessible but is used in the default value of `Query.someField(arg1:)`, which is in the API schema.
-
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Query.someField(arg1:)`, which is in the API schema.
-
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Query.someField(arg1:)`, which is in the API schema.
     "###);
 }
@@ -1983,7 +1932,6 @@ fn inaccessible_enum_value_as_string() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Enum value `Enum.PRIVATE_VALUE` is @inaccessible but is used in the default value of `Query.someField(arg1:)`, which is in the API schema.
     "###);
 }
@@ -2010,7 +1958,6 @@ fn inaccessible_directive_arguments_with_accessible_references() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Argument `@directiveRequired(privateArg:)` is @inaccessible but is a required argument of its directive.
     "###);
 }
@@ -2065,9 +2012,7 @@ fn inaccessible_directive_on_schema_elements() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Directive `@foo` cannot use @inaccessible because it may be applied to these type-system locations: OBJECT
-
       - Directive `@bar` cannot use @inaccessible because it may be applied to these type-system locations: SCHEMA
     "###);
 }
@@ -2094,7 +2039,6 @@ fn inaccessible_on_builtins() {
     // Note this is different from the JS implementation
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - built-in scalar definitions must be omitted
     "###);
 }
@@ -2197,35 +2141,20 @@ fn inaccessible_on_imported_elements() {
 
     insta::assert_snapshot!(errors, @r###"
     The following errors occurred:
-
       - Core feature type `link__Purpose` cannot use @inaccessible.
-
       - Core feature type `foo__Object1` cannot use @inaccessible.
-
       - Core feature type `foo__Object2` cannot use @inaccessible.
-
       - Core feature type `foo__Object3` cannot use @inaccessible.
-
       - Core feature type `foo__Interface1` cannot use @inaccessible.
-
       - Core feature type `foo__Interface2` cannot use @inaccessible.
-
       - Core feature type `foo__Interface3` cannot use @inaccessible.
-
       - Core feature type `foo__Union` cannot use @inaccessible.
-
       - Core feature type `foo__InputObject1` cannot use @inaccessible.
-
       - Core feature type `foo__InputObject2` cannot use @inaccessible.
-
       - Core feature type `foo__Enum1` cannot use @inaccessible.
-
       - Core feature type `foo__Enum2` cannot use @inaccessible.
-
       - Core feature type `foo__Scalar` cannot use @inaccessible.
-
       - Core feature directive `@link` cannot use @inaccessible.
-
       - Core feature directive `@foo` cannot use @inaccessible.
     "###);
 }
