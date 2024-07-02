@@ -23,6 +23,7 @@ use super::schema::SOURCE_NAME_ARGUMENT_NAME;
 use super::schema::URL_PATH_TEMPLATE_SCALAR_NAME;
 use super::ConnectSpecDefinition;
 use crate::error::FederationError;
+use crate::error::SingleFederationError;
 use crate::link::Link;
 use crate::schema::position::InputObjectTypeDefinitionPosition;
 use crate::schema::type_and_directive_specification::ArgumentSpecification;
@@ -43,6 +44,16 @@ pub(super) fn check_or_add(
     link: &Link,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
+    // the `get_type` closure expects a SingleFederationError, so we can't
+    // use FederationError::internal()
+    macro_rules! internal {
+        ($s:expr) => {
+            SingleFederationError::Internal {
+                message: $s.to_string(),
+            }
+        };
+    }
+
     // scalar JSONSelection
     let json_selection_spec = ScalarTypeSpecification {
         name: link.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME),
@@ -197,9 +208,9 @@ pub(super) fn check_or_add(
                     get_type: |s| {
                         let name = s
                             .metadata()
-                            .unwrap()
+                            .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpecDefinition::identity())
-                            .unwrap()
+                            .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&CONNECT_HTTP_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },
@@ -213,9 +224,9 @@ pub(super) fn check_or_add(
                     get_type: |s| {
                         let name = s
                             .metadata()
-                            .unwrap()
+                            .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpecDefinition::identity())
-                            .unwrap()
+                            .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
                         Ok(Type::NonNullNamed(name))
                     },
@@ -303,9 +314,9 @@ pub(super) fn check_or_add(
                     get_type: |s| {
                         let name = s
                             .metadata()
-                            .unwrap()
+                            .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpecDefinition::identity())
-                            .unwrap()
+                            .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&SOURCE_HTTP_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },

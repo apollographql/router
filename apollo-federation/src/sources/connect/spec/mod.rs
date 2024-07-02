@@ -1,3 +1,19 @@
+// No panics allowed in this module
+// The expansion code is called with potentially invalid schemas during the
+// authoring process and we can't panic in the language server.
+#![cfg_attr(
+    not(test),
+    deny(
+        clippy::exit,
+        clippy::panic,
+        clippy::unwrap_used,
+        clippy::expect_used,
+        clippy::indexing_slicing,
+        clippy::unimplemented,
+        clippy::todo
+    )
+)]
+
 mod directives;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
