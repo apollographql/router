@@ -1,8 +1,11 @@
 ### Fix docs for 'exists' condition ([PR #5446](https://github.com/apollographql/router/pull/5446))
 
-The example given for the condition `exists` in docs was wrong, it doesn't take an array but just a single selector instead.
+### Fix docs for 'exists' condition ([PR #5446](https://github.com/apollographql/router/pull/5446))
 
-Example of a good configuration
+Fixes [documentation example](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/conditions/#exists) for the `exists` condition.
+The condition expects a single selector instead of an array.
+
+For example:
 
 ```yaml
 telemetry:
