@@ -37,6 +37,7 @@ fn default_resource_mappings() -> HashMap<String, String> {
         .collect()
 }
 
+const ENV_KEY: Key = Key::from_static_str("env");
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
 
 const BUILT_IN_SPAN_NAMES: [&str; 7] = [
@@ -161,6 +162,9 @@ impl TracingConfigurator for Config {
                     builder.with_service_name(service_name.as_str())
                 },
             )
+            .with(&common.resource.get(ENV_KEY), |builder, env| {
+                builder.with_env(env.as_str())
+            })
             .with_version(
                 common
                     .resource
