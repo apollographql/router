@@ -188,6 +188,19 @@ pub enum HTTPMethod {
     Delete,
 }
 
+impl HTTPMethod {
+    #[inline]
+    pub fn as_str(&self) -> &str {
+        match self {
+            HTTPMethod::Get => "GET",
+            HTTPMethod::Post => "POST",
+            HTTPMethod::Patch => "PATCH",
+            HTTPMethod::Put => "PUT",
+            HTTPMethod::Delete => "DELETE",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum HTTPHeader {
     Propagate {

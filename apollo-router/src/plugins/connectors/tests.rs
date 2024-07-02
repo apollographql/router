@@ -1,3 +1,4 @@
+use std::str::FromStr;
 use std::sync::Arc;
 
 use http::header::CONTENT_TYPE;
@@ -6,6 +7,8 @@ use itertools::Itertools;
 use mime::APPLICATION_JSON;
 use req_asserts::Matcher;
 use tower::ServiceExt;
+use wiremock::http::HeaderName;
+use wiremock::http::HeaderValue;
 use wiremock::matchers::body_json;
 use wiremock::matchers::method;
 use wiremock::matchers::path;
@@ -16,6 +19,7 @@ use wiremock::ResponseTemplate;
 use crate::router_factory::RouterSuperServiceFactory;
 use crate::router_factory::YamlRouterFactory;
 use crate::services::new_service::ServiceFactory;
+use crate::services::router::Request;
 use crate::services::supergraph;
 
 pub(crate) mod mock_api {
@@ -126,6 +130,7 @@ async fn test_root_field_plus_entity() {
         &mock_server.uri(),
         "query { users { id name username } }",
         None,
+        |_| {},
     )
     .await;
 
@@ -171,6 +176,7 @@ async fn test_root_field_plus_entity_plus_requires() {
         &mock_server.uri(),
         "query { users { id name username d } }",
         None,
+        |_| {},
     )
     .await;
 
@@ -219,7 +225,7 @@ async fn basic_errors() {
         .mount(&mock_server)
         .await;
 
-    let response = execute(&mock_server.uri(), "{ users { id } }", None).await;
+    let response = execute(&mock_server.uri(), "{ users { id } }", None, |_| {}).await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -242,9 +248,52 @@ async fn basic_errors() {
     "###);
 }
 
+#[tokio::test]
+async fn test_header_propagation() {
+    let mock_server = MockServer::start().await;
+    mock_api::users().mount(&mock_server).await;
+
+    execute(
+        &mock_server.uri(),
+        "query { users { id } }",
+        None,
+        |request| {
+            let headers = request.router_request.headers_mut();
+            headers.insert("x-propagate", "propagated".parse().unwrap());
+            headers.insert("x-rename", "renamed".parse().unwrap());
+        },
+    )
+    .await;
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("GET")
+            .header(
+                HeaderName::from_str("x-propagate").unwrap(),
+                HeaderValue::from_str("propagated").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-new-name").unwrap(),
+                HeaderValue::from_str("renamed").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-insert").unwrap(),
+                HeaderValue::from_str("inserted").unwrap(),
+            )
+            .path("/users")
+            .build()],
+    );
+}
+
 const SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 
-async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> serde_json::Value {
+async fn execute(
+    uri: &str,
+    query: &str,
+    config: Option<serde_json::Value>,
+    mut request_mutator: impl FnMut(&mut Request),
+) -> serde_json::Value {
     let connector_uri = format!("{}/", uri);
     let subgraph_uri = format!("{}/graphql", uri);
 
@@ -288,13 +337,15 @@ async fn execute(uri: &str, query: &str, config: Option<serde_json::Value>) -> s
         .unwrap();
     let service = router_creator.create();
 
-    let request = supergraph::Request::fake_builder()
+    let mut request = supergraph::Request::fake_builder()
         .query(query)
         .header("x-client-header", "client-header-value")
         .build()
         .unwrap()
         .try_into()
         .unwrap();
+
+    request_mutator(&mut request);
 
     let response = service
         .oneshot(request)

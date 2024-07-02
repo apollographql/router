@@ -66,10 +66,8 @@ pub(crate) fn make_request(
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
     let body = hyper::Body::empty();
 
-    // TODO: why is apollo_federation HTTPMethod Ucfirst?
-    let method = transport.method.to_string().to_uppercase();
     let mut request = http::Request::builder()
-        .method(method.as_bytes())
+        .method(transport.method.as_str())
         .uri(
             make_uri(transport, &inputs)
                 .map_err(HttpJsonTransportError::ConnectorDirectiveError)?
