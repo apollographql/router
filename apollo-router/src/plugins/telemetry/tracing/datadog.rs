@@ -24,7 +24,7 @@ use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 fn default_resource_mappings() -> HashMap<String, String> {
-    let mut map = HashMap::new();
+    let mut map = HashMap::with_capacity(7);
     map.insert("request", "http.route");
     map.insert("router", "http.route");
     map.insert("supergraph", "graphql.operation.name");
