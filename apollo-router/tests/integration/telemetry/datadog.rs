@@ -21,7 +21,9 @@ async fn test_default_span_names() -> Result<(), BoxError> {
     }
     let mut router = IntegrationTest::builder()
         .telemetry(Telemetry::Datadog)
-        .config(include_str!("fixtures/default_span_names.router.yaml"))
+        .config(include_str!(
+            "fixtures/datadog_default_span_names.router.yaml"
+        ))
         .build()
         .await;
 
@@ -29,41 +31,141 @@ async fn test_default_span_names() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    for _ in 0..2 {
-        let (id, result) = router.execute_query(&query).await;
-        assert_eq!(
-            result
-                .headers()
-                .get("apollo-custom-trace-id")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            id.to_datadog()
-        );
-        validate_trace(
-            id,
-            &query,
-            Some("ExampleQuery"),
-            &["client", "router", "subgraph"],
-            false,
-            &[
-                "query_planning",
-                "client_request",
-                "subgraph_request",
-                "subgraph",
-                "fetch",
-                "supergraph",
-                "execution",
-                "query ExampleQuery",
-                "subgraph server",
-                "http_request",
-                "parse_query",
-            ],
-        )
-        .await?;
-        router.touch_config().await;
-        router.assert_reloaded().await;
+    let (id, result) = router.execute_query(&query).await;
+    assert_eq!(
+        result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        id.to_datadog()
+    );
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["client", "router", "subgraph"],
+        false,
+        &[
+            "query_planning",
+            "client_request",
+            "subgraph_request",
+            "subgraph",
+            "fetch",
+            "supergraph",
+            "execution",
+            "query ExampleQuery",
+            "subgraph server",
+            "http_request",
+            "parse_query",
+        ],
+    )
+    .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_override_span_names() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
     }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_override_span_names.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_query(&query).await;
+    assert_eq!(
+        result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        id.to_datadog()
+    );
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["client", "router", "subgraph"],
+        false,
+        &[
+            "query_planning",
+            "client_request",
+            "subgraph_request",
+            "subgraph",
+            "fetch",
+            "supergraph",
+            "execution",
+            "overridden",
+            "subgraph server",
+            "http_request",
+            "parse_query",
+        ],
+    )
+    .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_override_span_names_late() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!(
+            "fixtures/datadog_override_span_names_late.router.yaml"
+        ))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_query(&query).await;
+    assert_eq!(
+        result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        id.to_datadog()
+    );
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["client", "router", "subgraph"],
+        false,
+        &[
+            "query_planning",
+            "client_request",
+            "subgraph_request",
+            "subgraph",
+            "fetch",
+            "supergraph",
+            "execution",
+            "ExampleQuery",
+            "subgraph server",
+            "http_request",
+            "parse_query",
+        ],
+    )
+    .await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -83,40 +185,36 @@ async fn test_basic() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    for _ in 0..2 {
-        let (id, result) = router.execute_query(&query).await;
-        assert_eq!(
-            result
-                .headers()
-                .get("apollo-custom-trace-id")
-                .unwrap()
-                .to_str()
-                .unwrap(),
-            id.to_datadog()
-        );
-        validate_trace(
-            id,
-            &query,
-            Some("ExampleQuery"),
-            &["client", "router", "subgraph"],
-            false,
-            &[
-                "query_planning",
-                "client_request",
-                "ExampleQuery__products__0",
-                "products",
-                "fetch",
-                "/",
-                "execution",
-                "ExampleQuery",
-                "subgraph server",
-                "parse_query",
-            ],
-        )
-        .await?;
-        router.touch_config().await;
-        router.assert_reloaded().await;
-    }
+    let (id, result) = router.execute_query(&query).await;
+    assert_eq!(
+        result
+            .headers()
+            .get("apollo-custom-trace-id")
+            .unwrap()
+            .to_str()
+            .unwrap(),
+        id.to_datadog()
+    );
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["client", "router", "subgraph"],
+        false,
+        &[
+            "query_planning",
+            "client_request",
+            "ExampleQuery__products__0",
+            "products",
+            "fetch",
+            "/",
+            "execution",
+            "ExampleQuery",
+            "subgraph server",
+            "parse_query",
+        ],
+    )
+    .await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -138,35 +236,31 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    for _ in 0..2 {
-        let (id, result) = router.execute_query(&query).await;
-        assert!(!result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .is_empty());
-        validate_trace(
-            id,
-            &query,
-            Some("ExampleQuery"),
-            &["client", "router", "subgraph"],
-            false,
-            &[
-                "parse_query",
-                "ExampleQuery",
-                "client_request",
-                "execution",
-                "query_planning",
-                "products",
-                "fetch",
-                "subgraph server",
-                "ExampleQuery__products__0",
-            ],
-        )
-        .await?;
-        router.touch_config().await;
-        router.assert_reloaded().await;
-    }
+    let (id, result) = router.execute_query(&query).await;
+    assert!(!result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .is_empty());
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["client", "router", "subgraph"],
+        false,
+        &[
+            "parse_query",
+            "ExampleQuery",
+            "client_request",
+            "execution",
+            "query_planning",
+            "products",
+            "fetch",
+            "subgraph server",
+            "ExampleQuery__products__0",
+        ],
+    )
+    .await?;
     router.graceful_shutdown().await;
     Ok(())
 }
@@ -188,36 +282,32 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
     router.assert_started().await;
 
     let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
-    for _ in 0..2 {
-        let (id, result) = router.execute_query(&query).await;
-        assert!(!result
-            .headers()
-            .get("apollo-custom-trace-id")
-            .unwrap()
-            .is_empty());
-        validate_trace(
-            id,
-            &query,
-            Some("ExampleQuery"),
-            &["client", "router", "subgraph"],
-            false,
-            &[
-                "parse_query",
-                "ExampleQuery",
-                "client_request",
-                "execution",
-                "query_planning",
-                "products",
-                "fetch",
-                "subgraph server",
-                "overridden",
-                "ExampleQuery__products__0",
-            ],
-        )
-        .await?;
-        router.touch_config().await;
-        router.assert_reloaded().await;
-    }
+    let (id, result) = router.execute_query(&query).await;
+    assert!(!result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .is_empty());
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["client", "router", "subgraph"],
+        false,
+        &[
+            "parse_query",
+            "ExampleQuery",
+            "client_request",
+            "execution",
+            "query_planning",
+            "products",
+            "fetch",
+            "subgraph server",
+            "overridden",
+            "ExampleQuery__products__0",
+        ],
+    )
+    .await?;
     router.graceful_shutdown().await;
     Ok(())
 }

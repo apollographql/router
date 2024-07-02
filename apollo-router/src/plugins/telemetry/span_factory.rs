@@ -45,6 +45,7 @@ impl SpanMode {
                         "http.route" = %request.uri(),
                         "http.flavor" = ?request.version(),
                         "http.status" = 500, // This prevents setting later
+                        "otel.name" = ::tracing::field::Empty,
                         "otel.kind" = "SERVER",
                         "graphql.operation.name" = ::tracing::field::Empty,
                         "graphql.operation.type" = ::tracing::field::Empty,
@@ -58,6 +59,7 @@ impl SpanMode {
                         "http.request.method" = %request.method(),
                         "http.route" = %request.uri(),
                         "http.flavor" = ?request.version(),
+                        "otel.name" = ::tracing::field::Empty,
                         "otel.kind" = "SERVER",
                         "graphql.operation.name" = ::tracing::field::Empty,
                         "graphql.operation.type" = ::tracing::field::Empty,
@@ -98,6 +100,7 @@ impl SpanMode {
                     // Needed for apollo_telemetry and datadog span mapping
                     "http.route" = %request.uri(),
                     "http.request.method" = %request.method(),
+                    "otel.name" = ::tracing::field::Empty,
                     "otel.kind" = "SERVER",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_router.license" = ::tracing::field::Empty,
