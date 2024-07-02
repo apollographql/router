@@ -1,6 +1,5 @@
 use std::ops::Deref;
 
-use apollo_compiler::NodeStr;
 use apollo_federation::query_plan::FetchDataPathElement;
 use apollo_federation::query_plan::FetchDataRewrite;
 
@@ -358,7 +357,7 @@ fn can_use_a_key_on_an_interface_object_type_even_for_a_concrete_implementation(
             assert_eq!(v.path.len(), 1);
             match &v.path[0] {
                 FetchDataPathElement::TypenameEquals(typename) => {
-                    assert_eq!(typename, &NodeStr::new("A"))
+                    assert_eq!(*typename, apollo_compiler::name!("A"))
                 }
                 _ => unreachable!("Expected FetchDataPathElement::TypenameEquals path"),
             }

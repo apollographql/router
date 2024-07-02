@@ -53,10 +53,16 @@ plugins:
     enabled: true
 
 preview_entity_cache:
+  enabled: true
   redis:
     urls:
       - https://example.com
-  enabled: true
+  subgraph:
+    all:
+      enabled: false
+    subgraphs:
+      product:
+        enabled: false
 
 telemetry:
   apollo:

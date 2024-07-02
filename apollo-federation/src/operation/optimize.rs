@@ -41,7 +41,7 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use apollo_compiler::executable;
-use apollo_compiler::executable::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use super::CollectedFieldInSet;
@@ -379,7 +379,7 @@ impl FieldsConflictValidator {
         let mut at_level: HashMap<Name, HashMap<Field, Option<Vec<CollectedFieldInSet>>>> =
             HashMap::new();
         for collected_field in level {
-            let response_name = collected_field.field().field.data().response_name();
+            let response_name = collected_field.field().field.response_name();
             let at_response_name = at_level.entry(response_name).or_default();
             if let Some(ref field_selection_set) = collected_field.field().selection_set {
                 at_response_name
@@ -413,8 +413,7 @@ impl FieldsConflictValidator {
     }
 
     fn for_field(&self, field: &Field) -> Vec<Arc<Self>> {
-        let Some(by_response_name) = self.by_response_name.get(&field.data().response_name())
-        else {
+        let Some(by_response_name) = self.by_response_name.get(&field.response_name()) else {
             return Vec::new();
         };
         by_response_name.values().flatten().cloned().collect()
@@ -469,8 +468,8 @@ impl FieldsConflictValidator {
                     if p1 == p2 || !p1.is_object_type() || !p2.is_object_type() {
                         // Additional checks of `FieldsInSetCanMerge` when same parent type or one
                         // isn't object
-                        if self_field.data().name() != other_field.data().name()
-                            || self_field.data().arguments != other_field.data().arguments
+                        if self_field.name() != other_field.name()
+                            || self_field.arguments != other_field.arguments
                         {
                             return Ok(false);
                         }
@@ -960,15 +959,15 @@ impl Selection {
     ) -> Result<SelectionOrSet, FederationError> {
         match self {
             Selection::FragmentSpread(fragment) => {
-                if fragments_to_keep.contains(&fragment.spread.data().fragment_name) {
+                if fragments_to_keep.contains(&fragment.spread.fragment_name) {
                     // Keep this spread
                     Ok(self.clone().into())
                 } else {
                     // Expand the fragment
                     let expanded_sub_selections =
                         fragment.selection_set.retain_fragments(fragments_to_keep)?;
-                    if *parent_type == fragment.spread.data().type_condition_position
-                        && fragment.spread.data().directives.is_empty()
+                    if *parent_type == fragment.spread.type_condition_position
+                        && fragment.spread.directives.is_empty()
                     {
                         // The fragment is of the same type as the parent, so we can just use
                         // the expanded sub-selections directly.
@@ -978,7 +977,7 @@ impl Selection {
                         let inline = InlineFragmentSelection::from_selection_set(
                             parent_type.clone(),
                             expanded_sub_selections,
-                            fragment.spread.data().directives.clone(),
+                            fragment.spread.directives.clone(),
                         );
                         Ok(Selection::from(inline).into())
                     }
@@ -1225,7 +1224,7 @@ impl FieldSelection {
         validator: &mut FieldsConflictMultiBranchValidator,
     ) -> Result<Self, FederationError> {
         let Some(base_composite_type): Option<CompositeTypeDefinitionPosition> =
-            self.field.data().output_base_type()?.try_into().ok()
+            self.field.output_base_type()?.try_into().ok()
         else {
             return Ok(self.clone());
         };
@@ -1287,7 +1286,7 @@ impl InlineFragmentSelection {
     ) -> Result<InlineOrFragmentSelection, FederationError> {
         let mut optimized = self.selection_set.clone();
 
-        let type_condition_position = &self.inline_fragment.data().type_condition_position;
+        let type_condition_position = &self.inline_fragment.type_condition_position;
         if let Some(type_condition_position) = type_condition_position {
             let opt = self.selection_set.try_optimize_with_fragments(
                 type_condition_position,
@@ -1295,7 +1294,7 @@ impl InlineFragmentSelection {
                 validator,
                 FullMatchingFragmentCondition::ForInlineFragmentSelection {
                     type_condition_position,
-                    directives: &self.inline_fragment.data().directives,
+                    directives: &self.inline_fragment.directives,
                 },
             )?;
 
@@ -1316,7 +1315,6 @@ impl InlineFragmentSelection {
                         //            is handled differently in Rust version (see `FragmentSpreadData`).
                         let directives: executable::DirectiveList = self
                             .inline_fragment
-                            .data()
                             .directives
                             .iter()
                             .filter(|d1| !fragment.directives.iter().any(|d2| *d1 == d2))

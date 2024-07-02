@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use crate::error::FederationError;

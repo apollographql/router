@@ -1934,9 +1934,9 @@ mod tests {
     use std::path::PathBuf;
     use std::str::FromStr;
 
-    use apollo_compiler::ast::Name;
     use apollo_compiler::ast::NamedType;
     use apollo_compiler::executable::SelectionSet;
+    use apollo_compiler::Name;
     use http::HeaderMap;
     use http::HeaderName;
     use http::Method;
@@ -2194,26 +2194,26 @@ mod tests {
             apollo_compiler::executable::Field {
                 definition: apollo_compiler::schema::FieldDefinition {
                     description: None,
-                    name: NamedType::new(field_name.clone()).expect("valid field name"),
+                    name: NamedType::new(&field_name).expect("valid field name"),
                     arguments: vec![],
                     ty: apollo_compiler::schema::Type::Named(
-                        NamedType::new(field_type.clone()).expect("valid type name"),
+                        NamedType::new(&field_type).expect("valid type name"),
                     ),
                     directives: Default::default(),
                 }
                 .into(),
                 alias: None,
-                name: NamedType::new(field_name.clone()).expect("valid field name"),
+                name: NamedType::new(&field_name).expect("valid field name"),
                 arguments: vec![],
                 directives: Default::default(),
                 selection_set: SelectionSet::new(
-                    NamedType::new(field_name).expect("valid field name"),
+                    NamedType::new(&field_name).expect("valid field name"),
                 ),
             }
         }
 
         fn create_type_name(type_name: String) -> Name {
-            NamedType::new(type_name).expect("valid type name")
+            NamedType::new(&type_name).expect("valid type name")
         }
     }
 

@@ -7,9 +7,8 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
@@ -258,11 +257,11 @@ impl PlannerMode {
                 })
             }
             PlannerMode::Both { js, rust } => {
-                let operation_name = operation.as_deref().map(NodeStr::from);
-
                 let start = Instant::now();
 
-                let result = js.plan(filtered_query, operation, plan_options).await;
+                let result = js
+                    .plan(filtered_query, operation.clone(), plan_options)
+                    .await;
 
                 metric_query_planning_plan_duration(JS_QP_MODE, start);
 
@@ -282,7 +281,7 @@ impl PlannerMode {
                 BothModeComparisonJob {
                     rust_planner: rust.clone(),
                     document: doc.executable.clone(),
-                    operation_name,
+                    operation_name: operation,
                     // Exclude usage reporting from the Result sent for comparison
                     js_result: js_result
                         .as_ref()
@@ -952,9 +951,10 @@ impl BridgeQueryPlanner {
 }
 
 /// Data coming from the `plan` method on the router_bridge
+// Note: Reexported under `apollo_compiler::_private`
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct QueryPlanResult {
+pub struct QueryPlanResult {
     pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
 }
@@ -1504,7 +1504,7 @@ mod tests {
                         if let Some(node) = &deferred.node {
                             check_query_plan_coverage(
                                 node,
-                                deferred.label.as_ref().map(|l| l.as_str()),
+                                deferred.label.as_deref(),
                                 subselections,
                             )
                         }
