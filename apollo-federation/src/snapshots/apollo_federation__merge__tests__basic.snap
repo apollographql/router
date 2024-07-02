@@ -1,0 +1,81 @@
+---
+source: apollo-federation/src/merge.rs
+expression: schema.serialize()
+---
+schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
+  query: Query
+}
+
+directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+
+directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
+
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+
+directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
+
+directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+
+directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+
+enum link__Purpose {
+  """
+  SECURITY features provide metadata necessary to securely resolve fields.
+  """
+  SECURITY
+  """EXECUTION features provide metadata necessary for operation execution."""
+  EXECUTION
+}
+
+scalar link__Import
+
+scalar join__FieldSet
+
+enum join__Graph {
+  BASIC_1 @join__graph(name: "basic_1", url: "")
+  BASIC_2 @join__graph(name: "basic_2", url: "")
+}
+
+type Query @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  i: I @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  u: U @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  f(x: ID, y: YInput): T @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+}
+
+interface I @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  id: ID!
+}
+
+type A implements I @join__type(graph: BASIC_1) @join__implements(graph: BASIC_1, interface: "I") @join__type(graph: BASIC_2) @join__implements(graph: BASIC_2, interface: "I") {
+  id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  a: S @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+}
+
+type B implements I @join__type(graph: BASIC_1) @join__implements(graph: BASIC_1, interface: "I") @join__type(graph: BASIC_2) @join__implements(graph: BASIC_2, interface: "I") {
+  id: ID! @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  b: E @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+}
+
+union U @join__type(graph: BASIC_1) @join__unionMember(graph: BASIC_1, member: "A") @join__unionMember(graph: BASIC_1, member: "B") @join__type(graph: BASIC_2) @join__unionMember(graph: BASIC_2, member: "A") @join__unionMember(graph: BASIC_2, member: "B") = A | B
+
+scalar S @join__type(graph: BASIC_1) @join__type(graph: BASIC_2)
+
+enum E @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  A @join__enumValue(graph: BASIC_1) @join__enumValue(graph: BASIC_2)
+  B @join__enumValue(graph: BASIC_1) @join__enumValue(graph: BASIC_2)
+}
+
+type T @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  x: ID @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+  y: Y @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+}
+
+type Y @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  z: ID @join__field(graph: BASIC_1) @join__field(graph: BASIC_2)
+}
+
+input YInput @join__type(graph: BASIC_1) @join__type(graph: BASIC_2) {
+  z: ID
+}
