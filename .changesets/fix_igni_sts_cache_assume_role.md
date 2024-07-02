@@ -1,14 +1,11 @@
-### AWS Security Token Service: Implement a manual cache on top of assume_role and credentials provider ([PR #5508](https://github.com/apollographql/router/pull/5508))
+### Implement manual caching for AWS Security Token Service credentials ([PR #5508](https://github.com/apollographql/router/pull/5508))
 
-While the STS `CredentialsProvider` chain has a cache, it is not the case for `AssumeRoleProvider`.
+In the AWS Security Token Service (STS), the `CredentialsProvider` chain includes caching, but this functionality was missing for `AssumeRoleProvider`.
+This change introduces a custom `CredentialsProvider` that functions as a caching layer with these rules:
 
-This changeset introduces a custom `CredentialsProvider` that operates as a caching layer, with a couple of business rules related to it:
-
-1. When credentials are retrieved, they will be kept in cache for:
-     - `credentials.expiry()` if it is set
-     - `ever` if not
-2. 5 minutes before credentials get removed from cache, we will try to retrieve new ones.
-3. Failure to retrieve credentials will trigger a new attempt after `1 minute`
-4. `CredentialsProvider` exposes a `refresh_credentials()` function that could be used to manually trigger a refresh, say if the subgraph call yields a `401` (TODO as a followup, not part of this changeset)
+- **Cache Expiry**: Credentials retrieved are stored in the cache based on their `credentials.expiry()` time if specified, or indefinitely (`ever`) if not.
+- **Automatic Refresh**: Five minutes before cached credentials expire, an attempt is made to fetch updated credentials.
+- **Retry Mechanism**: If credential retrieval fails, another attempt is scheduled after a one-minute interval.
+- (Coming soon, not included in this change) **Manual Refresh**: The `CredentialsProvider` will expose a `refresh_credentials()` function. This can be manually invoked, for instance, upon receiving a `401` error during a subgraph call.
 
 By [@o0Ignition0o](https://github.com/o0Ignition0o) in https://github.com/apollographql/router/pull/5508
