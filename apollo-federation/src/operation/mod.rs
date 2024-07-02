@@ -54,8 +54,8 @@ mod rebase;
 #[cfg(test)]
 mod tests;
 
-pub use contains::*;
-pub use rebase::*;
+pub(crate) use contains::*;
+pub(crate) use rebase::*;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 

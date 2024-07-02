@@ -129,7 +129,7 @@ pub(crate) enum RebaseError {
         type_condition.as_ref().map_or_else(Default::default, |t| t.to_string()),
         type_condition.as_ref().map_or_else(
             || "undefined".to_string(),
-            |t| print_possible_runtimes(&t, schema),
+            |t| print_possible_runtimes(t, schema),
         ),
         parent_type,
         print_possible_runtimes(parent_type, schema)
@@ -744,23 +744,19 @@ impl SelectionSet {
                     on_non_rebaseable_selection,
                 )
             })
-            // Filter out selections with rebase errors if requested
+            // Remove selections with rebase errors if requested
             .filter(|result| {
-                if matches!(on_non_rebaseable_selection, OnNonRebaseableSelection::Drop)
-                    && result.as_ref().is_err_and(|err| err.is_rebase_error())
-                {
-                    false
-                } else {
-                    true
-                }
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                matches!(on_non_rebaseable_selection, OnNonRebaseableSelection::Error)
+                    || !result.as_ref().is_err_and(|err| err.is_rebase_error())
+            });
 
-        Ok(SelectionSet::from_raw_selections(
-            schema.clone(),
-            parent_type.clone(),
-            rebased_results,
-        ))
+        Ok(SelectionSet {
+            schema: schema.clone(),
+            type_position: parent_type.clone(),
+            selections: rebased_results
+                .collect::<Result<super::SelectionMap, _>>()?
+                .into(),
+        })
     }
 
     /// Rebase this selection set so it applies to the given schema and type.
