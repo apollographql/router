@@ -26,26 +26,28 @@ pub(crate) enum SelectionOrSet {
 }
 
 impl Selection {
-    fn normalize(
+    fn flatten_unnecessary_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
     ) -> Result<Option<SelectionOrSet>, FederationError> {
         match self {
-            Selection::Field(field) => field.normalize(parent_type, named_fragments, schema),
+            Selection::Field(field) => {
+                field.flatten_unnecessary_fragments(parent_type, named_fragments, schema)
+            }
             Selection::FragmentSpread(spread) => {
-                spread.normalize(parent_type, named_fragments, schema)
+                spread.flatten_unnecessary_fragments(parent_type, named_fragments, schema)
             }
             Selection::InlineFragment(inline) => {
-                inline.normalize(parent_type, named_fragments, schema)
+                inline.flatten_unnecessary_fragments(parent_type, named_fragments, schema)
             }
         }
     }
 }
 
 impl FieldSelection {
-    fn normalize(
+    fn flatten_unnecessary_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -69,8 +71,12 @@ impl FieldSelection {
         if let Some(selection_set) = &self.selection_set {
             let field_composite_type_position: CompositeTypeDefinitionPosition =
                 field_element.output_base_type()?.try_into()?;
-            let mut normalized_selection: SelectionSet =
-                selection_set.normalize(&field_composite_type_position, named_fragments, schema)?;
+            let mut normalized_selection: SelectionSet = selection_set
+                .flatten_unnecessary_fragments(
+                    &field_composite_type_position,
+                    named_fragments,
+                    schema,
+                )?;
 
             let mut selection = self.with_updated_element(field_element);
             if normalized_selection.is_empty() {
@@ -119,7 +125,7 @@ impl FieldSelection {
 }
 
 impl FragmentSpreadSelection {
-    fn normalize(
+    fn flatten_unnecessary_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -140,7 +146,7 @@ impl FragmentSpreadSelection {
         // or we'll be fundamentally losing context.
         if self.spread.schema != *schema {
             return Err(FederationError::internal(
-                "Should not try to normalize using a type from another schema",
+                "Should not try to flatten_unnecessary_fragments using a type from another schema",
             ));
         }
 
@@ -158,7 +164,7 @@ impl FragmentSpreadSelection {
 }
 
 impl InlineFragmentSelection {
-    fn normalize(
+    fn flatten_unnecessary_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -191,43 +197,45 @@ impl InlineFragmentSelection {
                 Some(ref c) => self.inline_fragment.schema == *schema && c == parent_type,
             };
             if useless_fragment || parent_type.is_object_type() {
-                // Try to skip this fragment and normalize self.selection_set with `parent_type`,
+                // Try to skip this fragment and flatten_unnecessary_fragments self.selection_set with `parent_type`,
                 // instead of its original type.
-                let normalized_selection_set =
-                    self.selection_set
-                        .normalize(parent_type, named_fragments, schema)?;
-                return if normalized_selection_set.is_empty() {
+                let selection_set = self.selection_set.flatten_unnecessary_fragments(
+                    parent_type,
+                    named_fragments,
+                    schema,
+                )?;
+                return if selection_set.is_empty() {
                     Ok(None)
                 } else {
                     // We need to rebase since the parent type for the selection set could be
                     // changed.
-                    // Note: Rebasing after normalization, since rebasing before that can error out.
-                    //       Or, `normalize` could `rebase` at the same time.
-                    let normalized_selection_set = if useless_fragment {
-                        normalized_selection_set.clone()
+                    // Note: Rebasing after flattening, since rebasing before that can error out.
+                    //       Or, `flatten_unnecessary_fragments` could `rebase` at the same time.
+                    let selection_set = if useless_fragment {
+                        selection_set.clone()
                     } else {
-                        normalized_selection_set.rebase_on(
+                        selection_set.rebase_on(
                             parent_type,
                             named_fragments,
                             schema,
                             RebaseErrorHandlingOption::ThrowError,
                         )?
                     };
-                    Ok(Some(SelectionOrSet::SelectionSet(normalized_selection_set)))
+                    Ok(Some(SelectionOrSet::SelectionSet(selection_set)))
                 };
             }
         }
 
         // We preserve the current fragment, so we only recurse within the sub-selection if we're asked to be recursive.
         // (note that even if we're not recursive, we may still have some "lifting" to do)
-        // Note: This normalized_selection_set is not rebased here yet. It will be rebased later as necessary.
-        let normalized_selection_set = self.selection_set.normalize(
+        // Note: This selection_set is not rebased here yet. It will be rebased later as necessary.
+        let selection_set = self.selection_set.flatten_unnecessary_fragments(
             &self.selection_set.type_position,
             named_fragments,
             &self.selection_set.schema,
         )?;
         // It could be that nothing was satisfiable.
-        if normalized_selection_set.is_empty() {
+        if selection_set.is_empty() {
             if self.inline_fragment.directives.is_empty() {
                 return Ok(None);
             } else if let Some(rebased_fragment) = self.inline_fragment.rebase_on(
@@ -283,7 +291,7 @@ impl InlineFragmentSelection {
             && this_condition.is_some_and(|c| c.is_abstract_type())
         {
             let mut liftable_selections = SelectionMap::new();
-            for (_, selection) in normalized_selection_set.selections.iter() {
+            for (_, selection) in selection_set.selections.iter() {
                 match selection {
                     Selection::FragmentSpread(spread_selection) => {
                         let type_condition =
@@ -315,9 +323,9 @@ impl InlineFragmentSelection {
             }
 
             // If we can lift all selections, then that just mean we can get rid of the current fragment altogether
-            if liftable_selections.len() == normalized_selection_set.selections.len() {
+            if liftable_selections.len() == selection_set.selections.len() {
                 // Rebasing is necessary since this normalized sub-selection set changed its parent.
-                let rebased_selection_set = normalized_selection_set.rebase_on(
+                let rebased_selection_set = selection_set.rebase_on(
                     parent_type,
                     named_fragments,
                     schema,
@@ -332,7 +340,8 @@ impl InlineFragmentSelection {
                 // Converting `... [on T] { <liftable_selections> <non-liftable_selections> }` into
                 // `{ ... [on T] { <non-liftable_selections> } <liftable_selections> }`.
                 // PORT_NOTE: It appears that this lifting could be repeatable (meaning lifted
-                // selection could be broken down further and lifted again), but normalize is not
+                // selection could be broken down further and lifted again), but
+                // flatten_unnecessary_fragments is not
                 // applied recursively. This could be worth investigating.
                 let Some(rebased_inline_fragment) = self.inline_fragment.rebase_on(
                     parent_type,
@@ -388,9 +397,10 @@ impl InlineFragmentSelection {
 
         if self.inline_fragment.schema == *schema
             && self.inline_fragment.parent_type_position == *parent_type
-            && self.selection_set == normalized_selection_set
+            && self.selection_set == selection_set
         {
-            // normalization did not change the fragment
+            // flattening did not change the fragment
+            // TODO(@goto-bus-stop): no change, but we still create a non-trivial clone here
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(self.clone()),
             ))))
@@ -400,7 +410,7 @@ impl InlineFragmentSelection {
             RebaseErrorHandlingOption::ThrowError,
         )? {
             let rebased_casted_type = rebased_inline_fragment.casted_type();
-            let rebased_selection_set = normalized_selection_set.rebase_on(
+            let rebased_selection_set = selection_set.rebase_on(
                 &rebased_casted_type,
                 named_fragments,
                 schema,
@@ -419,9 +429,9 @@ impl InlineFragmentSelection {
 }
 
 impl SelectionSet {
-    /// Applies some normalization rules to this selection set in the context of the provided `parent_type`.
+    /// Simplify this selection set in the context of the provided `parent_type`.
     ///
-    /// Normalization mostly removes unnecessary/redundant inline fragments, so that for instance, with a schema:
+    /// This removes unnecessary/redundant inline fragments, so that for instance, with a schema:
     /// ```graphql
     /// type Query {
     ///   t1: T1
@@ -442,9 +452,9 @@ impl SelectionSet {
     ///   v2: Int
     /// }
     /// ```
-    /// We can perform following normalization
+    /// We can perform following simplification:
     /// ```graphql
-    /// normalize({
+    /// flatten_unnecessary_fragments({
     ///   t1 {
     ///     ... on I {
     ///       id
@@ -485,15 +495,16 @@ impl SelectionSet {
     /// For this operation to be valid (to not throw), `parent_type` must be such that every field selection in
     /// this selection set is such that its type position intersects with passed `parent_type` (there is no limitation
     /// on the fragment selections, though any fragment selections whose condition do not intersects `parent_type`
-    /// will be discarded). Note that `self.normalize(self.type_condition)` is always valid and useful, but it is
+    /// will be discarded). Note that `self.flatten_unnecessary_fragments(self.type_condition)` is always valid and useful, but it is
     /// also possible to pass a `parent_type` that is more "restrictive" than the selection current type position
     /// (as long as the top-level fields of this selection set can be rebased on that type).
     ///
     // PORT_NOTE: this is now module-private, because it looks like it *can* be. If some place
     // outside this module *does* need it, feel free to mark it pub(crate).
+    // PORT_NOTE: in JS, this was called "normalize".
     // PORT_NOTE: in JS, this had a `recursive: false` flag, which would only apply the
     // simplification at the top level. This appears to be unused.
-    pub(super) fn normalize(
+    pub(super) fn flatten_unnecessary_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
@@ -504,9 +515,9 @@ impl SelectionSet {
             type_position: parent_type.clone(),
             selections: Default::default(), // start empty
         };
-        for (_, selection) in self.selections.iter() {
+        for selection in self.selections.values() {
             if let Some(selection_or_set) =
-                selection.normalize(parent_type, named_fragments, schema)?
+                selection.flatten_unnecessary_fragments(parent_type, named_fragments, schema)?
             {
                 match selection_or_set {
                     SelectionOrSet::Selection(normalized_selection) => {

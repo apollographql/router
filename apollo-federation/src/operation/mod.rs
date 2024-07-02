@@ -4370,11 +4370,11 @@ pub(crate) fn normalize_operation(
     normalized_selection_set = normalized_selection_set.expand_all_fragments()?;
     // We clear up the fragments since we've expanded all.
     // Also note that expanding fragment usually generate unnecessary fragments/inefficient
-    // selections, so it basically always make sense to normalize afterwards. Besides, fragment
-    // reuse (done by `optimize`) rely on the fact that its input is normalized to work properly,
+    // selections, so it basically always make sense to flatten afterwards. Besides, fragment
+    // reuse (done by `optimize`) relies on the fact that its input is normalized to work properly,
     // so all the more reason to do it here.
     // PORT_NOTE: This was done in `Operation.expandAllFragments`, but it's moved here.
-    normalized_selection_set = normalized_selection_set.normalize(
+    normalized_selection_set = normalized_selection_set.flatten_unnecessary_fragments(
         &normalized_selection_set.type_position,
         &named_fragments,
         schema,

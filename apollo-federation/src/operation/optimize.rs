@@ -77,11 +77,14 @@ impl NamedFragments {
         let mut result = NamedFragments::default();
         // Note: `self.fragments` has insertion order topologically sorted.
         for fragment in self.fragments.values() {
-            let expanded_selection_set = fragment.selection_set.expand_all_fragments()?.normalize(
-                &fragment.type_condition_position,
-                &Default::default(),
-                &fragment.schema,
-            )?;
+            let expanded_selection_set = fragment
+                .selection_set
+                .expand_all_fragments()?
+                .flatten_unnecessary_fragments(
+                    &fragment.type_condition_position,
+                    &Default::default(),
+                    &fragment.schema,
+                )?;
             let mut mapped_selection_set = mapper(&expanded_selection_set)?;
             // `mapped_selection_set` must be fragment-spread-free.
             mapped_selection_set.optimize_at_root(&result)?;
@@ -644,7 +647,7 @@ impl Fragment {
         ty: &CompositeTypeDefinitionPosition,
     ) -> Result<FragmentRestrictionAtType, FederationError> {
         let expanded_selection_set = self.selection_set.expand_all_fragments()?;
-        let normalized_selection_set = expanded_selection_set.normalize(
+        let normalized_selection_set = expanded_selection_set.flatten_unnecessary_fragments(
             ty,
             /*named_fragments*/ &Default::default(),
             &self.schema,
@@ -1082,11 +1085,11 @@ impl NamedFragments {
             // If we've expanded some fragments but kept others, then it's not 100% impossible that
             // some fragment was used multiple times in some expanded fragment(s), but that
             // post-expansion all of it's usages are "dead" branches that are removed by the final
-            // `normalize`. In that case though, we need to ensure we don't include the now-unused
+            // `flatten_unnecessary_fragments`. In that case though, we need to ensure we don't include the now-unused
             // fragment in the final list of fragments.
             // TODO: remark that the same reasoning could leave a single instance of a fragment
             // usage, so if we really really want to never have less than `minUsagesToOptimize`, we
-            // could do some loop of `expand then normalize` unless all fragments are provably used
+            // could do some loop of `expand then flatten` unless all fragments are provably used
             // enough. We don't bother, because leaving this is not a huge deal and it's not worth
             // the complexity, but it could be that we can refactor all this later to avoid this
             // case without additional complexity.
@@ -1158,7 +1161,7 @@ impl NamedFragments {
             Node::make_mut(fragment).selection_set = fragment
                 .selection_set
                 .retain_fragments(&fragments_to_keep)?
-                .normalize(
+                .flatten_unnecessary_fragments(
                     &fragment.selection_set.type_position,
                     &fragments_to_keep,
                     &fragment.schema,
@@ -1174,9 +1177,9 @@ impl NamedFragments {
         let reduced_selection_set = selection_set.retain_fragments(self)?;
 
         // Expanding fragments could create some "inefficiencies" that we wouldn't have if we
-        // hadn't re-optimized the fragments to de-optimize it later, so we do a final "normalize"
+        // hadn't re-optimized the fragments to de-optimize it later, so we do a final "flatten"
         // pass to remove those.
-        reduced_selection_set.normalize(
+        reduced_selection_set.flatten_unnecessary_fragments(
             &reduced_selection_set.type_position,
             self,
             &selection_set.schema,
@@ -1467,11 +1470,14 @@ impl Operation {
     // PORT_NOTE: This mirrors the JS version's `Operation.expandAllFragments`. But this method is
     // mainly for unit tests. The actual port of `expandAllFragments` is in `normalize_operation`.
     fn expand_all_fragments_and_normalize(&self) -> Result<Self, FederationError> {
-        let selection_set = self.selection_set.expand_all_fragments()?.normalize(
-            &self.selection_set.type_position,
-            &self.named_fragments,
-            &self.schema,
-        )?;
+        let selection_set = self
+            .selection_set
+            .expand_all_fragments()?
+            .flatten_unnecessary_fragments(
+                &self.selection_set.type_position,
+                &self.named_fragments,
+                &self.schema,
+            )?;
         Ok(Self {
             named_fragments: Default::default(),
             selection_set,
@@ -2665,7 +2671,7 @@ mod tests {
         //   }
         // }
         // and so `Inner` will not be expanded (it's used twice). Except that
-        // the `normalize` code is apply then and will _remove_ both instances
+        // the `flatten_unnecessary_fragments` code is apply then and will _remove_ both instances
         // of `.... Inner`. Which is ok, but we must make sure the fragment
         // itself is removed since it is not used now, which this test ensures.
         assert_optimized!(expanded, operation.named_fragments, @r###"
