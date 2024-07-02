@@ -17,21 +17,29 @@ use tower::BoxError;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
+use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
+use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::otel::layer::ORIGINAL_SPAN_NAME_FIELD;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
-    map.insert("request", "http.route");
-    map.insert("router", "http.route");
-    map.insert("supergraph", "graphql.operation.name");
-    map.insert("query_planning", "graphql.operation.name");
-    map.insert("subgraph", "subgraph.name");
-    map.insert("subgraph_request", "graphql.operation.name");
-    map.insert("http_request", "http.route");
+    map.insert(REQUEST_SPAN_NAME, "http.route");
+    map.insert(ROUTER_SPAN_NAME, "http.route");
+    map.insert(SUPERGRAPH_SPAN_NAME, "graphql.operation.name");
+    map.insert(QUERY_PLANNING_SPAN_NAME, "graphql.operation.name");
+    map.insert(SUBGRAPH_SPAN_NAME, "subgraph.name");
+    map.insert(SUBGRAPH_REQUEST_SPAN_NAME, "graphql.operation.name");
+    map.insert(HTTP_REQUEST_SPAN_NAME, "http.route");
     map.iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
@@ -39,16 +47,6 @@ fn default_resource_mappings() -> HashMap<String, String> {
 
 const ENV_KEY: Key = Key::from_static_str("env");
 const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
-
-const BUILT_IN_SPAN_NAMES: [&str; 7] = [
-    "request",
-    "router",
-    "supergraph",
-    "subgraph",
-    "subgraph_request",
-    "http_request",
-    "query_planning",
-];
 
 #[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
@@ -123,7 +121,7 @@ impl TracingConfigurator for Config {
                 builder.with_resource_mapping(move |span, _model_config| {
                     let span_name = if let Some(original) = span
                         .attributes
-                        .get(&Key::from_static_str(ORIGINAL_SPAN_NAME_FIELD))
+                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
                     {
                         original.as_str()
                     } else {
@@ -141,7 +139,7 @@ impl TracingConfigurator for Config {
                 if fixed_span_names {
                     if let Some(original) = span
                         .attributes
-                        .get(&Key::from_static_str(ORIGINAL_SPAN_NAME_FIELD))
+                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
                     {
                         // Datadog expects static span names, not the ones in the otel spec.
                         // Remap the span name to the original name if it was remapped.

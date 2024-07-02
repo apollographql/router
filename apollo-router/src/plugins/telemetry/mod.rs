@@ -79,7 +79,6 @@ use self::tracing::apollo_telemetry::CLIENT_NAME_KEY;
 use self::tracing::apollo_telemetry::CLIENT_VERSION_KEY;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::apollo_studio_interop::ReferencedEnums;
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
@@ -103,6 +102,13 @@ use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
 use crate::plugins::telemetry::config_new::instruments::SupergraphInstruments;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
+use crate::plugins::telemetry::consts::EXECUTION_SPAN_NAME;
+use crate::plugins::telemetry::consts::OTEL_NAME;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_ERROR;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE_OK;
+use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
 use crate::plugins::telemetry::fmt_layer::create_fmt_layer;
 use crate::plugins::telemetry::metrics::apollo::histogram::ListLengthHistogram;
@@ -145,6 +151,7 @@ pub(crate) mod apollo_exporter;
 pub(crate) mod apollo_otlp_exporter;
 pub(crate) mod config;
 pub(crate) mod config_new;
+pub(crate) mod consts;
 pub(crate) mod dynamic_attribute;
 mod endpoint;
 mod fmt_layer;
@@ -161,22 +168,12 @@ pub(crate) mod tracing;
 pub(crate) mod utils;
 
 // Tracing consts
-pub(crate) const SUPERGRAPH_SPAN_NAME: &str = "supergraph";
-pub(crate) const SUBGRAPH_SPAN_NAME: &str = "subgraph";
-pub(crate) const ROUTER_SPAN_NAME: &str = "router";
-pub(crate) const EXECUTION_SPAN_NAME: &str = "execution";
 const CLIENT_NAME: &str = "apollo_telemetry::client_name";
 const CLIENT_VERSION: &str = "apollo_telemetry::client_version";
 const SUBGRAPH_FTV1: &str = "apollo_telemetry::subgraph_ftv1";
 pub(crate) const STUDIO_EXCLUDE: &str = "apollo_telemetry::studio::exclude";
 pub(crate) const LOGGING_DISPLAY_HEADERS: &str = "apollo_telemetry::logging::display_headers";
 pub(crate) const LOGGING_DISPLAY_BODY: &str = "apollo_telemetry::logging::display_body";
-
-pub(crate) const OTEL_STATUS_CODE: &str = "otel.status_code";
-#[allow(dead_code)]
-pub(crate) const OTEL_STATUS_DESCRIPTION: &str = "otel.status_description";
-pub(crate) const OTEL_STATUS_CODE_OK: &str = "OK";
-pub(crate) const OTEL_STATUS_CODE_ERROR: &str = "ERROR";
 const GLOBAL_TRACER_NAME: &str = "apollo-router";
 const DEFAULT_EXPOSE_TRACE_ID_HEADER: &str = "apollo-trace-id";
 static DEFAULT_EXPOSE_TRACE_ID_HEADER_NAME: HeaderName =
@@ -340,14 +337,14 @@ impl Plugin for Telemetry {
                         }
                         match (&operation_kind, &operation_name) {
                             (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
-                                "otel.name".into(),
+                                OTEL_NAME.into(),
                                 format!("{kind} {name}").into(),
                             ),
                             (Ok(Some(kind)), _) => {
-                                span.set_span_dyn_attribute("otel.name".into(), kind.clone().into())
+                                span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
                             }
                             _ => span.set_span_dyn_attribute(
-                                "otel.name".into(),
+                                OTEL_NAME.into(),
                                 "GraphQL Operation".into(),
                             ),
                         };

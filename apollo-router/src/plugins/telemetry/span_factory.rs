@@ -3,12 +3,12 @@ use serde::Deserialize;
 use tracing::error_span;
 use tracing::info_span;
 
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::context::OPERATION_NAME;
+use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::Telemetry;
-use crate::plugins::telemetry::ROUTER_SPAN_NAME;
-use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
-use crate::plugins::telemetry::SUPERGRAPH_SPAN_NAME;
 use crate::services::SubgraphRequest;
 use crate::services::SupergraphRequest;
 use crate::tracer::TraceId;
@@ -45,7 +45,6 @@ impl SpanMode {
                         "http.route" = %request.uri(),
                         "http.flavor" = ?request.version(),
                         "http.status" = 500, // This prevents setting later
-                        "otel.name" = ::tracing::field::Empty,
                         "otel.kind" = "SERVER",
                         "graphql.operation.name" = ::tracing::field::Empty,
                         "graphql.operation.type" = ::tracing::field::Empty,
@@ -59,7 +58,6 @@ impl SpanMode {
                         "http.request.method" = %request.method(),
                         "http.route" = %request.uri(),
                         "http.flavor" = ?request.version(),
-                        "otel.name" = ::tracing::field::Empty,
                         "otel.kind" = "SERVER",
                         "graphql.operation.name" = ::tracing::field::Empty,
                         "graphql.operation.type" = ::tracing::field::Empty,
@@ -100,7 +98,6 @@ impl SpanMode {
                     // Needed for apollo_telemetry and datadog span mapping
                     "http.route" = %request.uri(),
                     "http.request.method" = %request.method(),
-                    "otel.name" = ::tracing::field::Empty,
                     "otel.kind" = "SERVER",
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_router.license" = ::tracing::field::Empty,
