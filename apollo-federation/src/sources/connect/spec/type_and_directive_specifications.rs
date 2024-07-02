@@ -44,10 +44,14 @@ pub(super) fn check_or_add(
     link: &Link,
     schema: &mut FederationSchema,
 ) -> Result<(), FederationError> {
-    fn internal(s: &str) -> SingleFederationError {
-        SingleFederationError::Internal {
-            message: s.to_string(),
-        }
+    // the `get_type` closure expects a SingleFederationError, so we can't
+    // use FederationError::internal()
+    macro_rules! internal {
+        ($s:expr) => {
+            SingleFederationError::Internal {
+                message: $s.to_string(),
+            }
+        };
     }
 
     // scalar JSONSelection
@@ -204,9 +208,9 @@ pub(super) fn check_or_add(
                     get_type: |s| {
                         let name = s
                             .metadata()
-                            .ok_or_else(|| internal("missing metadata"))?
+                            .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpecDefinition::identity())
-                            .ok_or_else(|| internal("missing connect spec"))?
+                            .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&CONNECT_HTTP_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },
@@ -220,9 +224,9 @@ pub(super) fn check_or_add(
                     get_type: |s| {
                         let name = s
                             .metadata()
-                            .ok_or_else(|| internal("missing metadata"))?
+                            .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpecDefinition::identity())
-                            .ok_or_else(|| internal("missing connect spec"))?
+                            .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&JSON_SELECTION_SCALAR_NAME);
                         Ok(Type::NonNullNamed(name))
                     },
@@ -310,9 +314,9 @@ pub(super) fn check_or_add(
                     get_type: |s| {
                         let name = s
                             .metadata()
-                            .ok_or_else(|| internal("missing metadata"))?
+                            .ok_or_else(|| internal!("missing metadata"))?
                             .for_identity(&ConnectSpecDefinition::identity())
-                            .ok_or_else(|| internal("missing connect spec"))?
+                            .ok_or_else(|| internal!("missing connect spec"))?
                             .type_name_in_schema(&SOURCE_HTTP_NAME_IN_SPEC);
                         Ok(Type::Named(name))
                     },

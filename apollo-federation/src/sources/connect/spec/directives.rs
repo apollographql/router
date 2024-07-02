@@ -114,7 +114,7 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
 
             if arg_name == SOURCE_NAME_ARGUMENT_NAME.as_str() {
                 name = Some(arg.value.as_str().ok_or_else(|| {
-                    FederationError::internal("missing `name` field in `@source` directive")
+                    FederationError::internal("`name` field in `@source` directive is not a string")
                 })?);
             } else if arg_name == SOURCE_HTTP_ARGUMENT_NAME.as_str() {
                 let http_value = arg.value.as_object().ok_or_else(|| {
@@ -149,7 +149,6 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
     type Error = FederationError;
 
     fn try_from(values: &ObjectNode) -> Result<Self, Self::Error> {
-        // Iterate over all of the argument pairs and fill in what we need
         let mut base_url = None;
         let mut headers = None;
         for (name, value) in values {
@@ -164,11 +163,16 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
 
                 base_url = Some(base_url_value);
             } else if name == SOURCE_HEADERS_ARGUMENT_NAME.as_str() {
-                // TODO: handle a single object since the language spec allows it
-                headers = value
-                    .as_list()
-                    .map(HTTPHeaderMappings::try_from)
-                    .transpose()?;
+                headers = if let Some(values) = value.as_list() {
+                    Some(HTTPHeaderMappings::try_from(values)?)
+                } else if let Some(_) = value.as_object() {
+                    let (name, option) = node_to_header_option(value)?;
+                    Some(HTTPHeaderMappings(IndexMap::from([(name, option)])))
+                } else {
+                    return Err(FederationError::internal(
+                        "`headers` field in `@source` directive's `http` field is not an object or list of objects",
+                    ));
+                }
             } else {
                 return Err(FederationError::internal(format!(
                     "unknown argument in `@source` directive's `http` field: {name}"
@@ -191,6 +195,8 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
 
 /// Converts a list of (name, value) pairs into a map of HTTP headers. Using
 /// the same name twice is an error.
+/// TODO using the `name` field as a key doesn't actually make sense until
+/// we switch from `as:` to `from:`
 impl TryFrom<&[Node<Value>]> for HTTPHeaderMappings {
     type Error = FederationError;
 
@@ -198,63 +204,8 @@ impl TryFrom<&[Node<Value>]> for HTTPHeaderMappings {
         let mut map = IndexMap::new();
 
         for value in values {
-            // The mapping should be an object
-            let mappings = value
-                .as_object()
-                .ok_or_else(|| FederationError::internal("HTTP header mapping is not an object"))?;
+            let (name, option) = node_to_header_option(value)?;
 
-            // Extract the known configuration options
-            let mut name = None;
-            let mut option = None;
-            for (field, mapping) in mappings {
-                let field = field.as_str();
-
-                if field == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.as_str() {
-                    let name_value = mapping.as_str().ok_or_else(|| {
-                        FederationError::internal("missing `name` field in HTTP header mapping")
-                    })?;
-
-                    name = Some(name_value);
-                } else if field == HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.as_str() {
-                    let as_value = mapping.as_str().ok_or_else(|| {
-                        FederationError::internal(
-                            "`as` field in HTTP header mapping is not a string",
-                        )
-                    })?;
-
-                    option = Some(HTTPHeaderOption::As(as_value.to_string()));
-                } else if field == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.as_str() {
-                    let value_values = if let Some(list) = mapping.as_list() {
-                        list.iter()
-                            .map(|item| {
-                                item.as_str().ok_or_else(|| {
-                                    FederationError::internal(
-                                        "`value` field in HTTP header mapping is not a string",
-                                    )
-                                })
-                            })
-                            .try_collect()?
-                    } else if let Some(item) = mapping.as_str() {
-                        vec![item]
-                    } else {
-                        return Err(FederationError::internal(
-                            "`value` field in HTTP header mapping is not a string or list of strings",
-                        ));
-                    };
-
-                    option = Some(HTTPHeaderOption::Value(
-                        value_values.into_iter().map(|s| s.to_string()).collect(),
-                    ));
-                } else {
-                    return Err(FederationError::internal(format!(
-                        "unknown argument for HTTP header mapping: {field}"
-                    )));
-                }
-            }
-
-            let name = name.ok_or_else(|| {
-                FederationError::internal("missing `name` field in HTTP header mapping")
-            })?;
             match map.entry(name.to_string()) {
                 Occupied(_) => {
                     return Err(FederationError::internal(format!(
@@ -270,6 +221,65 @@ impl TryFrom<&[Node<Value>]> for HTTPHeaderMappings {
 
         Ok(Self(map))
     }
+}
+
+fn node_to_header_option(
+    value: &Node<Value>,
+) -> Result<(String, Option<HTTPHeaderOption>), FederationError> {
+    let mappings = value
+        .as_object()
+        .ok_or_else(|| FederationError::internal("HTTP header mapping is not an object"))?;
+
+    let mut name = None;
+    let mut option = None;
+    for (field, mapping) in mappings {
+        let field = field.as_str();
+
+        if field == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.as_str() {
+            let name_value = mapping.as_str().ok_or_else(|| {
+                FederationError::internal("`name` field in HTTP header mapping is not a string")
+            })?;
+
+            name = Some(name_value.to_string());
+        } else if field == HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.as_str() {
+            let as_value = mapping.as_str().ok_or_else(|| {
+                FederationError::internal("`as` field in HTTP header mapping is not a string")
+            })?;
+
+            option = Some(HTTPHeaderOption::As(as_value.to_string()));
+        } else if field == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.as_str() {
+            let value_values = if let Some(list) = mapping.as_list() {
+                list.iter()
+                    .map(|item| {
+                        item.as_str().ok_or_else(|| {
+                            FederationError::internal(
+                                "`value` field in HTTP header mapping is not a string",
+                            )
+                        })
+                    })
+                    .try_collect()?
+            } else if let Some(item) = mapping.as_str() {
+                vec![item]
+            } else {
+                return Err(FederationError::internal(
+                    "`value` field in HTTP header mapping is not a string or list of strings",
+                ));
+            };
+
+            option = Some(HTTPHeaderOption::Value(
+                value_values.into_iter().map(|s| s.to_string()).collect(),
+            ));
+        } else {
+            return Err(FederationError::internal(format!(
+                "unknown argument for HTTP header mapping: {field}"
+            )));
+        }
+    }
+
+    let name = name
+        .ok_or_else(|| FederationError::internal("missing `name` field in HTTP header mapping"))?;
+
+    Ok((name, option))
 }
 
 impl ConnectDirectiveArguments {
