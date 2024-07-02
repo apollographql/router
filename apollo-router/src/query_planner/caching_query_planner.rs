@@ -78,6 +78,7 @@ pub(crate) struct CachingQueryPlanner<T: Clone> {
     enable_authorization_directives: bool,
     config_mode: ConfigMode,
     introspection: bool,
+    legacy_introspection_caching: bool,
 }
 
 fn init_query_plan_from_redis(
@@ -142,6 +143,10 @@ where
             enable_authorization_directives,
             config_mode,
             introspection: configuration.supergraph.introspection,
+            legacy_introspection_caching: configuration
+                .supergraph
+                .query_planning
+                .legacy_introspection_caching,
         })
     }
 
@@ -515,9 +520,16 @@ where
                             errors,
                         }) => {
                             if let Some(content) = content.clone() {
-                                tokio::spawn(async move {
-                                    entry.insert(Ok(content)).await;
-                                });
+                                let can_cache = match content {
+                                    QueryPlannerContent::Plan { plan } => true,
+                                    _ => self.legacy_introspection_caching,
+                                };
+
+                                if can_cache {
+                                    tokio::spawn(async move {
+                                        entry.insert(Ok(content)).await;
+                                    });
+                                }
                             }
 
                             // This will be overridden when running in ApolloMetricsGenerationMode::New mode

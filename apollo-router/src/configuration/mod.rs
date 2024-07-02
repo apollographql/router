@@ -1080,6 +1080,19 @@ pub(crate) struct QueryPlanning {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
     pub(crate) experimental_parallelism: AvailableParallelism,
+
+    /// Activates introspection response caching
+    /// Historically, the Router has executed introspection queries in the query planner, and cached their
+    /// response in its cache because they were expensive. This will change soon as introspection will be
+    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
+    /// the cache, this option can be used to deactivate it.
+    /// Default: true
+    #[serde(default = "legacy_introspection_caching")]
+    pub(crate) legacy_introspection_caching: bool,
+}
+
+fn legacy_introspection_caching() -> bool {
+    true
 }
 
 impl QueryPlanning {
