@@ -1,8 +1,9 @@
-### Add selector for router service in custom telemetry ([PR #5392](https://github.com/apollographql/router/pull/5392))
+### Add `operation_name` selector for router service in custom telemetry ([PR #5392](https://github.com/apollographql/router/pull/5392))
 
-Instead of having to access to the operation_name using the response_context at the router service, we now provide a selector for operation name at the router service in instrumentations.
+Adds an `operation_name` selector for the [router service](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/selectors#router).
+Previously, accessing `operation_name` was only possible through the `response_context` router service selector.
 
-example:
+For example:
 
 ```yaml
 telemetry:
