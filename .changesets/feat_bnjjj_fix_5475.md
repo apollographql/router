@@ -1,7 +1,6 @@
-### Telemetry: add support of condition on standard events ([Issue #5475](https://github.com/apollographql/router/issues/5475))
+### Support conditions on standard telemetry events ([Issue #5475](https://github.com/apollographql/router/issues/5475))
 
-Now, you can also enable these standard events based on conditions (not supported on batched requests).
-
+Enables setting [conditions](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/conditions) on [standard events](https://www.apollographql.com/docs/router/configuration/telemetry/instrumentation/events/#standard-events).
 For example:
 
 ```yaml title="router.yaml"
