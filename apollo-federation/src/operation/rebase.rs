@@ -42,31 +42,54 @@ fn print_possible_runtimes(
 }
 
 /// Options for handling rebasing errors.
-#[derive(Clone, Copy)]
-pub enum RebaseErrorHandlingOption {
-    IgnoreError,
-    ThrowError,
+#[derive(Clone, Copy, Default)]
+enum OnNonRebaseableSelection {
+    /// Drop the selection that can't be rebased and continue.
+    Drop,
+    /// Propagate the rebasing error.
+    #[default]
+    Error,
 }
 
 impl Selection {
+    fn rebase_inner(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        named_fragments: &NamedFragments,
+        schema: &ValidFederationSchema,
+        on_non_rebaseable_selection: OnNonRebaseableSelection,
+    ) -> Result<Selection, FederationError> {
+        match self {
+            Selection::Field(field) => field
+                .rebase_inner(
+                    parent_type,
+                    named_fragments,
+                    schema,
+                    on_non_rebaseable_selection,
+                )
+                .map(|field| field.into()),
+            Selection::FragmentSpread(spread) => spread.rebase_inner(
+                parent_type,
+                named_fragments,
+                schema,
+                on_non_rebaseable_selection,
+            ),
+            Selection::InlineFragment(inline) => inline.rebase_inner(
+                parent_type,
+                named_fragments,
+                schema,
+                on_non_rebaseable_selection,
+            ),
+        }
+    }
+
     pub fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
     ) -> Result<Selection, FederationError> {
-        match self {
-            Selection::Field(field) => field
-                .rebase_on(parent_type, named_fragments, schema, error_handling)
-                .map(|field| field.into()),
-            Selection::FragmentSpread(spread) => {
-                spread.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-            Selection::InlineFragment(inline) => {
-                inline.rebase_on(parent_type, named_fragments, schema, error_handling)
-            }
-        }
+        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
     }
 
     fn can_add_to(
@@ -255,17 +278,12 @@ impl Field {
 }
 
 impl FieldSelection {
-    /// Returns a field selection "equivalent" to the one represented by this object, but such that its parent type
-    /// is the one provided as argument.
-    ///
-    /// Obviously, this operation will only succeed if this selection (both the field itself and its subselections)
-    /// make sense from the provided parent type. If this is not the case, this method will throw.
-    pub fn rebase_on(
+    fn rebase_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
+        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<FieldSelection, FederationError> {
         if &self.field.schema == schema && &self.field.field_position.parent() == parent_type {
             // we are rebasing field on the same parent within the same schema - we can just return self
@@ -298,8 +316,12 @@ impl FieldSelection {
             });
         }
 
-        let rebased_selection_set =
-            selection_set.rebase_on(&rebased_base_type, named_fragments, schema, error_handling)?;
+        let rebased_selection_set = selection_set.rebase_inner(
+            &rebased_base_type,
+            named_fragments,
+            schema,
+            on_non_rebaseable_selection,
+        )?;
         if rebased_selection_set.selections.is_empty() {
             Err(RebaseError::EmptySelectionSet.into())
         } else {
@@ -308,6 +330,20 @@ impl FieldSelection {
                 selection_set: Some(rebased_selection_set),
             })
         }
+    }
+
+    /// Returns a field selection "equivalent" to the one represented by this object, but such that its parent type
+    /// is the one provided as argument.
+    ///
+    /// Obviously, this operation will only succeed if this selection (both the field itself and its subselections)
+    /// make sense from the provided parent type. If this is not the case, this method will throw.
+    pub fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        named_fragments: &NamedFragments,
+        schema: &ValidFederationSchema,
+    ) -> Result<FieldSelection, FederationError> {
+        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
     }
 
     fn can_add_to(
@@ -378,12 +414,12 @@ impl FragmentSpread {
 }
 
 impl FragmentSpreadSelection {
-    pub(crate) fn rebase_on(
+    fn rebase_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
+        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<Selection, FederationError> {
         // We preserve the parent type here, to make sure we don't lose context, but we actually don't
         // want to expand the spread as that would compromise the code that optimize subgraph fetches to re-use named
@@ -431,11 +467,11 @@ impl FragmentSpreadSelection {
             // important because the very logic we're hitting here may need to happen inside the rebase on the
             // fragment selection, but that logic would not be triggered if we used the rebased `named_fragment` since
             // `rebase_on_same_schema` would then be 'true'.
-            let expanded_selection_set = self.selection_set.rebase_on(
+            let expanded_selection_set = self.selection_set.rebase_inner(
                 parent_type,
                 named_fragments,
                 schema,
-                error_handling,
+                on_non_rebaseable_selection,
             )?;
             // In theory, we could return the selection set directly, but making `SelectionSet.rebase_on` sometimes
             // return a `SelectionSet` complicate things quite a bit. So instead, we encapsulate the selection set
@@ -468,6 +504,15 @@ impl FragmentSpreadSelection {
             selection_set: named_fragment.selection_set.clone(),
         }
         .into())
+    }
+
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        named_fragments: &NamedFragments,
+        schema: &ValidFederationSchema,
+    ) -> Result<Selection, FederationError> {
+        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
     }
 }
 
@@ -571,12 +616,12 @@ impl InlineFragment {
 }
 
 impl InlineFragmentSelection {
-    pub fn rebase_on(
+    fn rebase_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
+        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<Selection, FederationError> {
         if &self.inline_fragment.schema == schema
             && self.inline_fragment.parent_type_position == *parent_type
@@ -593,11 +638,11 @@ impl InlineFragmentSelection {
             // we are within the same schema - selection set does not have to be rebased
             Ok(InlineFragmentSelection::new(rebased_fragment, self.selection_set.clone()).into())
         } else {
-            let rebased_selection_set = self.selection_set.rebase_on(
+            let rebased_selection_set = self.selection_set.rebase_inner(
                 &rebased_casted_type,
                 named_fragments,
                 schema,
-                error_handling,
+                on_non_rebaseable_selection,
             )?;
             if rebased_selection_set.selections.is_empty() {
                 // empty selection set
@@ -606,6 +651,15 @@ impl InlineFragmentSelection {
                 Ok(InlineFragmentSelection::new(rebased_fragment, rebased_selection_set).into())
             }
         }
+    }
+
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        named_fragments: &NamedFragments,
+        schema: &ValidFederationSchema,
+    ) -> Result<Selection, FederationError> {
+        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
     }
 
     fn can_add_to(
@@ -672,25 +726,27 @@ impl OperationElement {
 }
 
 impl SelectionSet {
-    /// Rebase this selection set so it applies to the given schema and type.
-    ///
-    /// This can return an empty selection set.
-    pub fn rebase_on(
+    fn rebase_inner(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         named_fragments: &NamedFragments,
         schema: &ValidFederationSchema,
-        error_handling: RebaseErrorHandlingOption,
+        on_non_rebaseable_selection: OnNonRebaseableSelection,
     ) -> Result<SelectionSet, FederationError> {
         let rebased_results = self
             .selections
             .iter()
             .map(|(_, selection)| {
-                selection.rebase_on(parent_type, named_fragments, schema, error_handling)
+                selection.rebase_inner(
+                    parent_type,
+                    named_fragments,
+                    schema,
+                    on_non_rebaseable_selection,
+                )
             })
             // Filter out selections with rebase errors if requested
             .filter(|result| {
-                if matches!(error_handling, RebaseErrorHandlingOption::IgnoreError)
+                if matches!(on_non_rebaseable_selection, OnNonRebaseableSelection::Drop)
                     && result.as_ref().is_err_and(|err| err.is_rebase_error())
                 {
                     false
@@ -705,6 +761,18 @@ impl SelectionSet {
             parent_type.clone(),
             rebased_results,
         ))
+    }
+
+    /// Rebase this selection set so it applies to the given schema and type.
+    ///
+    /// This can return an empty selection set.
+    pub(crate) fn rebase_on(
+        &self,
+        parent_type: &CompositeTypeDefinitionPosition,
+        named_fragments: &NamedFragments,
+        schema: &ValidFederationSchema,
+    ) -> Result<SelectionSet, FederationError> {
+        self.rebase_inner(parent_type, named_fragments, schema, Default::default())
     }
 
     /// Returns true if the selection set would select cleanly from the given type in the given
@@ -734,11 +802,11 @@ impl NamedFragments {
                 .get_type(fragment.type_condition_position.type_name().clone())
                 .and_then(CompositeTypeDefinitionPosition::try_from)
             {
-                if let Ok(mut rebased_selection) = fragment.selection_set.rebase_on(
+                if let Ok(mut rebased_selection) = fragment.selection_set.rebase_inner(
                     &rebased_type,
                     &rebased_fragments,
                     schema,
-                    RebaseErrorHandlingOption::IgnoreError,
+                    OnNonRebaseableSelection::Drop,
                 ) {
                     // Rebasing can leave some inefficiencies in some case (particularly when a spread has to be "expanded", see `FragmentSpreadSelection.rebaseOn`),
                     // so we do a top-level normalization to keep things clean.

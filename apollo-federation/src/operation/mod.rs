@@ -1631,12 +1631,7 @@ impl FragmentSpreadSelection {
             ));
         }
 
-        let rebased_fragment_spread = self.rebase_on(
-            parent_type,
-            named_fragments,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
+        let rebased_fragment_spread = self.rebase_on(parent_type, named_fragments, schema)?;
         Ok(Some(SelectionOrSet::Selection(rebased_fragment_spread)))
     }
 
@@ -2585,12 +2580,7 @@ impl SelectionSet {
         let Some(second) = iter.next() else {
             // Optimize for the simple case of a single selection, as we don't have to do anything
             // complex to merge the sub-selections.
-            return first.rebase_on(
-                parent_type,
-                named_fragments,
-                schema,
-                RebaseErrorHandlingOption::ThrowError,
-            );
+            return first.rebase_on(parent_type, named_fragments, schema);
         };
 
         let element =
@@ -2853,12 +2843,8 @@ impl SelectionSet {
         selection_set: &SelectionSet,
         named_fragments: &NamedFragments,
     ) -> Result<(), FederationError> {
-        let rebased = selection_set.rebase_on(
-            &self.type_position,
-            named_fragments,
-            &self.schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
+        let rebased =
+            selection_set.rebase_on(&self.type_position, named_fragments, &self.schema)?;
         self.add_local_selection_set(&rebased)
     }
 
@@ -2952,7 +2938,6 @@ impl SelectionSet {
                                 })?,
                                 &NamedFragments::default(),
                                 &self.schema,
-                                RebaseErrorHandlingOption::ThrowError,
                             )
                         })
                         .transpose()?
@@ -4004,12 +3989,7 @@ impl InlineFragmentSelection {
                     let normalized_selection_set = if useless_fragment {
                         normalized_selection_set.clone()
                     } else {
-                        normalized_selection_set.rebase_on(
-                            parent_type,
-                            named_fragments,
-                            schema,
-                            RebaseErrorHandlingOption::ThrowError,
-                        )?
+                        normalized_selection_set.rebase_on(parent_type, named_fragments, schema)?
                     };
                     Ok(Some(SelectionOrSet::SelectionSet(normalized_selection_set)))
                 };
@@ -4121,12 +4101,8 @@ impl InlineFragmentSelection {
             // If we can lift all selections, then that just mean we can get rid of the current fragment altogether
             if liftable_selections.len() == normalized_selection_set.selections.len() {
                 // Rebasing is necessary since this normalized sub-selection set changed its parent.
-                let rebased_selection_set = normalized_selection_set.rebase_on(
-                    parent_type,
-                    named_fragments,
-                    schema,
-                    RebaseErrorHandlingOption::ThrowError,
-                )?;
+                let rebased_selection_set =
+                    normalized_selection_set.rebase_on(parent_type, named_fragments, schema)?;
                 return Ok(Some(SelectionOrSet::SelectionSet(rebased_selection_set)));
             }
 
@@ -4157,14 +4133,7 @@ impl InlineFragmentSelection {
                 // Since liftable_selections are changing their parent, we need to rebase them.
                 liftable_selections = liftable_selections
                     .into_iter()
-                    .map(|(_key, sel)| {
-                        sel.rebase_on(
-                            parent_type,
-                            named_fragments,
-                            schema,
-                            RebaseErrorHandlingOption::ThrowError,
-                        )
-                    })
+                    .map(|(_key, sel)| sel.rebase_on(parent_type, named_fragments, schema))
                     .collect::<Result<_, _>>()?;
 
                 let mut final_selection_map = SelectionMap::new();
@@ -4193,7 +4162,6 @@ impl InlineFragmentSelection {
                 &rebased_inline_fragment.casted_type(),
                 named_fragments,
                 schema,
-                RebaseErrorHandlingOption::ThrowError,
             )?;
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(InlineFragmentSelection::new(
