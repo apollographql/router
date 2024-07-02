@@ -29,8 +29,25 @@
         "JWT Authentication": ["/configuration/authn-jwt", ["enterprise"]],
         "Authorization": ["/configuration/authorization", ["enterprise"]],
         "Subgraph Authentication": "/configuration/authn-subgraph",
-        "Operation Limits": ["/configuration/operation-limits", ["enterprise"]],
-        "Safelisting with Persisted Queries": ["/configuration/persisted-queries", ["enterprise"]],
+        "Operation Limits": [
+          "/configuration/operation-limits",
+          [
+            "enterprise"
+          ]
+        ],
+        "Safelisting with Persisted Queries": [
+          "/configuration/persisted-queries",
+          [
+            "enterprise"
+          ]
+        ],
+        "Demand Control" : [
+          "/executing-operations/demand-control",
+          [
+            "enterprise",
+            "preview"
+          ]
+        ],
         "Privacy and Data Collection": "/privacy"
       }
     },
@@ -38,8 +55,12 @@
       "Build and Run Queries": "/executing-operations/build-run-queries",
       "@defer Support": "/executing-operations/defer-support",
       "Request Format": "/executing-operations/requests",
-      "Query Batching": ["/executing-operations/query-batching", ["enterprise"]],
-      "Demand Control": ["/executing-operations/demand-control", ["enterprise", "preview"]],
+      "Query Batching": [
+        "/executing-operations/query-batching",
+        [
+          "enterprise"
+        ]
+      ],
       "GraphQL Subscriptions": {
         "Subscriptions Setup": ["/executing-operations/subscription-support", ["enterprise"]],
         "Subgraph Protocol: HTTP Callback": [
