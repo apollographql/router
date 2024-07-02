@@ -20,4 +20,5 @@ telemetry:
         # ...
 ```
 
+Not supported for [batched requests](https://www.apollographql.com/docs/router/executing-operations/query-batching/).
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5476
