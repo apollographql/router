@@ -33,6 +33,12 @@ use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 
+macro_rules! internal {
+    ($s:expr) => {
+        FederationError::internal($s)
+    };
+}
+
 pub(crate) fn extract_source_directive_arguments(
     schema: &FederationSchema,
     name: &Name,
@@ -70,7 +76,7 @@ pub(crate) fn extract_connect_directive_arguments(
         .map(|pos| {
             let object_field = pos
                 .get(schema.schema())
-                .map_err(|_| FederationError::internal("failed to get object field from schema"))?;
+                .map_err(|_| internal!("failed to get object field from schema"))?;
 
             Ok::<_, FederationError>(
                 object_field
@@ -113,20 +119,18 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
             let arg_name = arg.name.as_str();
 
             if arg_name == SOURCE_NAME_ARGUMENT_NAME.as_str() {
-                name = Some(arg.value.as_str().ok_or_else(|| {
-                    FederationError::internal("`name` field in `@source` directive is not a string")
-                })?);
+                name = Some(arg.value.as_str().ok_or(internal!(
+                    "`name` field in `@source` directive is not a string"
+                ))?);
             } else if arg_name == SOURCE_HTTP_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or_else(|| {
-                    FederationError::internal(
-                        "`http` field in `@source` directive is not an object",
-                    )
-                })?;
+                let http_value = arg.value.as_object().ok_or(internal!(
+                    "`http` field in `@source` directive is not an object"
+                ))?;
                 let http_value = SourceHTTPArguments::try_from(http_value)?;
 
                 http = Some(http_value);
             } else {
-                return Err(FederationError::internal(format!(
+                return Err(internal!(format!(
                     "unknown argument in `@source` directive: {arg_name}"
                 )));
             }
@@ -134,13 +138,9 @@ impl TryFrom<&Component<Directive>> for SourceDirectiveArguments {
 
         Ok(Self {
             name: name
-                .ok_or_else(|| {
-                    FederationError::internal("missing `name` field in `@source` directive")
-                })?
+                .ok_or(internal!("missing `name` field in `@source` directive"))?
                 .to_string(),
-            http: http.ok_or_else(|| {
-                FederationError::internal("missing `http` field in `@source` directive")
-            })?,
+            http: http.ok_or(internal!("missing `http` field in `@source` directive"))?,
         })
     }
 }
@@ -155,11 +155,9 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
             let name = name.as_str();
 
             if name == SOURCE_BASE_URL_ARGUMENT_NAME.as_str() {
-                let base_url_value = value.as_str().ok_or_else(|| {
-                    FederationError::internal(
-                        "`baseURL` field in `@source` directive's `http` field is not a string",
-                    )
-                })?;
+                let base_url_value = value.as_str().ok_or(internal!(
+                    "`baseURL` field in `@source` directive's `http` field is not a string"
+                ))?;
 
                 base_url = Some(base_url_value);
             } else if name == SOURCE_HEADERS_ARGUMENT_NAME.as_str() {
@@ -169,12 +167,12 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
                     let (name, option) = node_to_header_option(value)?;
                     Some(HTTPHeaderMappings(IndexMap::from([(name, option)])))
                 } else {
-                    return Err(FederationError::internal(
-                        "`headers` field in `@source` directive's `http` field is not an object or list of objects",
+                    return Err(internal!(
+                        "`headers` field in `@source` directive's `http` field is not an object or list of objects"
                     ));
                 }
             } else {
-                return Err(FederationError::internal(format!(
+                return Err(internal!(format!(
                     "unknown argument in `@source` directive's `http` field: {name}"
                 )));
             }
@@ -182,11 +180,9 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
 
         Ok(Self {
             base_url: base_url
-                .ok_or_else(|| {
-                    FederationError::internal(
-                        "missing `base_url` field in `@source` directive's `http` argument",
-                    )
-                })?
+                .ok_or(internal!(
+                    "missing `base_url` field in `@source` directive's `http` argument"
+                ))?
                 .to_string(),
             headers: headers.unwrap_or_default(),
         })
@@ -208,7 +204,7 @@ impl TryFrom<&[Node<Value>]> for HTTPHeaderMappings {
 
             match map.entry(name.to_string()) {
                 Occupied(_) => {
-                    return Err(FederationError::internal(format!(
+                    return Err(internal!(format!(
                         "duplicate HTTP header mapping for `{}`",
                         &name
                     )));
@@ -228,7 +224,7 @@ fn node_to_header_option(
 ) -> Result<(String, Option<HTTPHeaderOption>), FederationError> {
     let mappings = value
         .as_object()
-        .ok_or_else(|| FederationError::internal("HTTP header mapping is not an object"))?;
+        .ok_or(internal!("HTTP header mapping is not an object"))?;
 
     let mut name = None;
     let mut option = None;
@@ -236,33 +232,31 @@ fn node_to_header_option(
         let field = field.as_str();
 
         if field == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.as_str() {
-            let name_value = mapping.as_str().ok_or_else(|| {
-                FederationError::internal("`name` field in HTTP header mapping is not a string")
-            })?;
+            let name_value = mapping.as_str().ok_or(internal!(
+                "`name` field in HTTP header mapping is not a string"
+            ))?;
 
             name = Some(name_value.to_string());
         } else if field == HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME.as_str() {
-            let as_value = mapping.as_str().ok_or_else(|| {
-                FederationError::internal("`as` field in HTTP header mapping is not a string")
-            })?;
+            let as_value = mapping.as_str().ok_or(internal!(
+                "`as` field in HTTP header mapping is not a string"
+            ))?;
 
             option = Some(HTTPHeaderOption::As(as_value.to_string()));
         } else if field == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.as_str() {
             let value_values = if let Some(list) = mapping.as_list() {
                 list.iter()
                     .map(|item| {
-                        item.as_str().ok_or_else(|| {
-                            FederationError::internal(
-                                "`value` field in HTTP header mapping is not a string",
-                            )
-                        })
+                        item.as_str().ok_or(internal!(
+                            "`value` field in HTTP header mapping is not a string"
+                        ))
                     })
                     .try_collect()?
             } else if let Some(item) = mapping.as_str() {
                 vec![item]
             } else {
-                return Err(FederationError::internal(
-                    "`value` field in HTTP header mapping is not a string or list of strings",
+                return Err(internal!(
+                    "`value` field in HTTP header mapping is not a string or list of strings"
                 ));
             };
 
@@ -270,14 +264,13 @@ fn node_to_header_option(
                 value_values.into_iter().map(|s| s.to_string()).collect(),
             ));
         } else {
-            return Err(FederationError::internal(format!(
+            return Err(internal!(format!(
                 "unknown argument for HTTP header mapping: {field}"
             )));
         }
     }
 
-    let name = name
-        .ok_or_else(|| FederationError::internal("missing `name` field in HTTP header mapping"))?;
+    let name = name.ok_or(internal!("missing `name` field in HTTP header mapping"))?;
 
     Ok((name, option))
 }
@@ -298,46 +291,40 @@ impl ConnectDirectiveArguments {
             let arg_name = arg.name.as_str();
 
             if arg_name == CONNECT_SOURCE_ARGUMENT_NAME.as_str() {
-                let source_value = arg.value.as_str().ok_or_else(|| {
-                    FederationError::internal(
-                        "`source` field in `@source` directive is not a string",
-                    )
-                })?;
+                let source_value = arg.value.as_str().ok_or(internal!(
+                    "`source` field in `@source` directive is not a string"
+                ))?;
 
                 source = Some(source_value);
             } else if arg_name == CONNECT_HTTP_ARGUMENT_NAME.as_str() {
-                let http_value = arg.value.as_object().ok_or_else(|| {
-                    FederationError::internal(
-                        "`http` field in `@connect` directive is not an object",
-                    )
-                })?;
+                let http_value = arg.value.as_object().ok_or(internal!(
+                    "`http` field in `@connect` directive is not an object"
+                ))?;
 
                 http = Some(ConnectHTTPArguments::try_from(http_value)?);
             } else if arg_name == CONNECT_SELECTION_ARGUMENT_NAME.as_str() {
-                let selection_value = arg.value.as_str().ok_or_else(|| {
-                    FederationError::internal(
-                        "`selection` field in `@connect` directive is not a string",
-                    )
-                })?;
+                let selection_value = arg.value.as_str().ok_or(internal!(
+                    "`selection` field in `@connect` directive is not a string"
+                ))?;
                 let (remainder, selection_value) = JSONSelection::parse(selection_value)
-                    .map_err(|_| FederationError::internal("invalid JSON selection"))?;
+                    .map_err(|_| internal!("invalid JSON selection"))?;
                 if !remainder.is_empty() {
-                    return Err(FederationError::internal(format!(
+                    return Err(internal!(format!(
                         "`selection` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}"
                     )));
                 }
 
                 selection = Some(selection_value);
             } else if arg_name == CONNECT_ENTITY_ARGUMENT_NAME.as_str() {
-                let entity_value = arg.value.to_bool().ok_or_else(|| {
-                    FederationError::internal(
-                        "`entity` field in `@connect` directive is not a boolean",
-                    )
-                })?;
+                let entity_value = arg.value.to_bool().ok_or(internal!(
+                    "`entity` field in `@connect` directive is not a boolean"
+                ))?;
 
                 entity = Some(entity_value);
             } else {
-                unreachable!("unknown argument in `@connect` directive: {arg_name}");
+                return Err(internal!(format!(
+                    "unknown argument in `@connect` directive: {arg_name}"
+                )));
             }
         }
 
@@ -345,9 +332,7 @@ impl ConnectDirectiveArguments {
             position,
             source: source.map(|s| s.to_string()),
             http,
-            selection: selection.ok_or_else(|| {
-                FederationError::internal("`@connect` directive is missing a selection")
-            })?,
+            selection: selection.ok_or(internal!("`@connect` directive is missing a selection"))?,
             entity: entity.unwrap_or_default(),
         })
     }
@@ -368,15 +353,13 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
             let name = name.as_str();
 
             if name == CONNECT_BODY_ARGUMENT_NAME.as_str() {
-                let body_value = value.as_str().ok_or_else(|| {
-                    FederationError::internal(
-                        "`body` field in `@connect` directive's `http` field is not a string",
-                    )
-                })?;
+                let body_value = value.as_str().ok_or(internal!(
+                    "`body` field in `@connect` directive's `http` field is not a string"
+                ))?;
                 let (remainder, body_value) = JSONSelection::parse(body_value)
-                    .map_err(|_| FederationError::internal("invalid JSON selection"))?;
+                    .map_err(|_| internal!("invalid JSON selection"))?;
                 if !remainder.is_empty() {
-                    return Err(FederationError::internal(format!(
+                    return Err(internal!(format!(
                         "`body` field in `@connect` directive could not be fully parsed: the following was left over: {remainder}"
                     )));
                 }
@@ -389,24 +372,24 @@ impl TryFrom<&ObjectNode> for ConnectHTTPArguments {
                     .map(HTTPHeaderMappings::try_from)
                     .transpose()?;
             } else if name == "GET" {
-                get = Some(value.as_str().ok_or_else(|| FederationError::internal(
-                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                get = Some(value.as_str().ok_or(internal!(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "POST" {
-                post = Some(value.as_str().ok_or_else(|| FederationError::internal(
-                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                post = Some(value.as_str().ok_or(internal!(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "PATCH" {
-                patch = Some(value.as_str().ok_or_else(|| FederationError::internal(
-                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                patch = Some(value.as_str().ok_or(internal!(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "PUT" {
-                put = Some(value.as_str().ok_or_else(|| FederationError::internal(
-                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                put = Some(value.as_str().ok_or(internal!(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             } else if name == "DELETE" {
-                delete = Some(value.as_str().ok_or_else(|| FederationError::internal(
-                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string",
+                delete = Some(value.as_str().ok_or(internal!(
+                    "supplied HTTP template URL in `@connect` directive's `http` field is not a string"
                 ))?.to_string());
             }
         }
