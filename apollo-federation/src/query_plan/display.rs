@@ -3,8 +3,8 @@ use std::fmt;
 use apollo_compiler::executable;
 
 use super::*;
-use crate::indented_display::write_indented_lines;
-use crate::indented_display::State;
+use crate::display_helpers::write_indented_lines;
+use crate::display_helpers::State;
 
 impl QueryPlan {
     fn write_indented(&self, state: &mut State<'_, '_>) -> fmt::Result {
