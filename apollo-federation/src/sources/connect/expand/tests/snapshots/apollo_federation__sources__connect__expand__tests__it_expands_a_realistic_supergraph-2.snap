@@ -155,7 +155,8 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
-        entity: false,
-        on_root_type: true,
+        entity_resolver: Some(
+            Explicit,
+        ),
     },
 }

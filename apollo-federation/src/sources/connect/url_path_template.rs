@@ -187,7 +187,7 @@ impl URLPathTemplate {
         Ok(JSON::Object(var_map))
     }
 
-    pub fn required_parameters(&self) -> Vec<String> {
+    pub fn required_parameters(&self) -> Vec<&str> {
         let mut parameters = HashSet::new();
         for param_value in &self.path {
             parameters.extend(param_value.required_parameters());
@@ -197,6 +197,20 @@ impl URLPathTemplate {
         }
         // sorted for a stable SDL
         parameters.into_iter().sorted().collect()
+    }
+
+    /// Return all parameters in the template by . delimited string
+    pub fn parameters(&self) -> Result<HashSet<Parameter<'_>>, String> {
+        let mut parameters = HashSet::new();
+        for param_value in &self.path {
+            parameters.extend(param_value.parameters()?);
+        }
+        for param_value in self.query.values() {
+            parameters.extend(param_value.parameters()?);
+        }
+
+        // sorted for a stable SDL
+        Ok(parameters.into_iter().sorted().collect())
     }
 }
 
@@ -411,20 +425,80 @@ impl ParameterValue {
         Ok(output)
     }
 
-    fn required_parameters(&self) -> Vec<String> {
+    fn required_parameters(&self) -> Vec<&str> {
         let mut parameters = vec![];
         for part in &self.parts {
             match part {
                 ValuePart::Text(_) => {}
                 ValuePart::Var(var) => {
                     if var.required {
-                        parameters.push(var.var_path.clone());
+                        parameters.push(var.var_path.as_str());
                     }
                 }
             }
         }
         parameters
     }
+
+    fn parameters(&self) -> Result<Vec<Parameter>, String> {
+        let mut parameters = Vec::new();
+        for part in &self.parts {
+            match part {
+                ValuePart::Text(_) => {}
+                ValuePart::Var(var) => {
+                    let mut parts = var.var_path.split('.');
+
+                    let var_type = parts
+                        .next()
+                        .ok_or("expecting variable parameter to not be empty".to_string())?;
+                    let name = parts.next().ok_or(
+                        "expecting variable parameter to have a named selection".to_string(),
+                    )?;
+
+                    parameters.push(match var_type {
+                        "$args" => Parameter::Argument {
+                            argument: name,
+                            paths: parts.collect(),
+                        },
+                        "$this" => Parameter::Sibling {
+                            field: name,
+                            paths: parts.collect(),
+                        },
+
+                        other => {
+                            return Err(format!("expected parameter variable to be either $args or $this, found: {other}"));
+                        }
+                    });
+                }
+            }
+        }
+
+        Ok(parameters)
+    }
+}
+
+/// A parameter to fill
+#[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Parameter<'a> {
+    /// Arguments get their value from a variable marked by `$args`, which is
+    /// passed to the GraphQL operation.
+    Argument {
+        /// The name of the argument
+        argument: &'a str,
+
+        /// Any optional nested selections on the argument
+        paths: Vec<&'a str>,
+    },
+
+    /// Siblings get their value from a variable marked by `$this`, which is
+    /// fetched from the parent container by name.
+    Sibling {
+        /// The field of the parent container
+        field: &'a str,
+
+        /// Any optional nexted selection on the field
+        paths: Vec<&'a str>,
+    },
 }
 
 impl Display for ParameterValue {

@@ -1,4 +1,4 @@
-federation_version: =2.8.0-connectors.5
+federation_version: =2.9.0-connectors.0
 subgraphs:
   connectors:
     routing_url: none
@@ -35,7 +35,7 @@ subgraphs:
                 name
                 catchPhrase
                 bs
-              }""") # entity: true
+              }""", entity: true)
         }
 
         type User @key(fields: "id") {

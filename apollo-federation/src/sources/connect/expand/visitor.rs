@@ -22,7 +22,7 @@ use crate::sources::connect::json_selection::JSONSelectionVisitor;
 /// from a reference schema.
 pub(super) struct ToSchemaVisitor<'a> {
     /// List of directives to not copy over into the target schema.
-    directive_deny_list: &'a IndexSet<&'a Name>,
+    directive_deny_list: &'a IndexSet<Name>,
 
     /// The original schema used for sourcing all types / fields / directives / etc.
     original_schema: &'a ValidFederationSchema,
@@ -42,7 +42,7 @@ impl<'a> ToSchemaVisitor<'a> {
         to_schema: &'a mut FederationSchema,
         initial_position: TypeDefinitionPosition,
         initial_type: &ExtendedType,
-        directive_deny_list: &'a IndexSet<&'a Name>,
+        directive_deny_list: &'a IndexSet<Name>,
     ) -> ToSchemaVisitor<'a> {
         // Get the type information for the initial position, making sure to strip
         // off any unwanted directives.

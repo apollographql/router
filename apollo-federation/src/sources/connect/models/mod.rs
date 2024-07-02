@@ -25,8 +25,9 @@ pub struct Connector {
     pub id: ConnectId,
     pub transport: Transport,
     pub selection: JSONSelection,
-    pub entity: bool,
-    pub on_root_type: bool,
+
+    /// The type of entity resolver to use for this connector
+    pub entity_resolver: Option<EntityResolver>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +41,20 @@ impl Transport {
             Transport::HttpJson(http) => http.label(),
         }
     }
+}
+
+/// Entity resolver type
+///
+/// A connector can be used as a potential entity resolver for a type, with
+/// extra validation rules based on the transport args and field position within
+/// a schema.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EntityResolver {
+    /// The user defined a connector on a field that acts as an entity resolver
+    Explicit,
+
+    /// The user defined a connector on a field of a type, so we need an entity resolver for that type
+    Implicit,
 }
 
 impl Connector {
@@ -100,12 +115,18 @@ impl Connector {
                     directive: args.position,
                 };
 
+                let entity_resolver = match (args.entity, on_root_type) {
+                    (true, _) => Some(EntityResolver::Explicit),
+                    (_, false) => Some(EntityResolver::Implicit),
+
+                    _ => None,
+                };
+
                 let connector = Connector {
                     id: id.clone(),
                     transport,
                     selection: args.selection,
-                    entity: args.entity,
-                    on_root_type,
+                    entity_resolver,
                 };
 
                 Ok((id, connector))
@@ -336,8 +357,7 @@ mod tests {
                         star: None,
                     },
                 ),
-                entity: false,
-                on_root_type: true,
+                entity_resolver: None,
             },
             ConnectId {
                 label: "connectors.json http: Get /posts",
@@ -417,8 +437,7 @@ mod tests {
                         star: None,
                     },
                 ),
-                entity: false,
-                on_root_type: true,
+                entity_resolver: None,
             },
         }
         "###);

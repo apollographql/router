@@ -1,4 +1,4 @@
-federation_version: =2.8.0-connectors.5
+federation_version: =2.9.0-connectors.0
 subgraphs:
   connectors:
     routing_url: none
@@ -16,7 +16,7 @@ subgraphs:
           users: [User] @connect(source: "example", http: { GET: "/" }, selection: "id a")
 
           user(id: ID!): User
-            @connect(source: "example", http: { GET: "/{$$args.id}" }, selection: "id a b") # entity: true
+            @connect(source: "example", http: { GET: "/{$$args.id}" }, selection: "id a b", entity: true)
         }
 
         type User @key(fields: "id") {

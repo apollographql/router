@@ -53,8 +53,7 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
-        entity: false,
-        on_root_type: true,
+        entity_resolver: None,
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
@@ -122,8 +121,9 @@ expression: connectors.by_service_name
                 star: None,
             },
         ),
-        entity: true,
-        on_root_type: true,
+        entity_resolver: Some(
+            Explicit,
+        ),
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
@@ -180,7 +180,8 @@ expression: connectors.by_service_name
                 ),
             ),
         ),
-        entity: false,
-        on_root_type: false,
+        entity_resolver: Some(
+            Implicit,
+        ),
     },
 }
