@@ -1,5 +1,6 @@
-### Entity cache preview: reorganize subgraph configuration override ([PR #5474](https://github.com/apollographql/router/pull/5474))
+### Align entity caching configuration structure for subgraph overrides ([PR #5474](https://github.com/apollographql/router/pull/5474))
 
-We align the entity cache configuration with the same all/subgraphs override pattern found in other parts of the Router configuration. We provide an automated configuration migration for this in the Router, so this should not affect existing uses.
+Aligns the entity cache configuration structure to the same `all`/`subgraphs` override pattern found in other parts of the router configuration. For example, see the [header propogation](https://www.apollographql.com/docs/router/configuration/header-propagation) configuration.
+An automated configuration migration is provided so existing usage is unaffected.
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5474
