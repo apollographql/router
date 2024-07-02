@@ -1,14 +1,12 @@
-### Fix events when trace is not sampled, and keep event attribute types ([PR #5464](https://github.com/apollographql/router/pull/5464))
+### Fix telemetry events when trace isn't sampled and preserve attribute types ([PR #5464](https://github.com/apollographql/router/pull/5464))
 
-Several fixes about events:
+Improves accuracy and performance of event telemetry by:
 
-+ Keep original attribute type and not convert it to string (also perf improvement)
-+ Use `http.response.body.size`  and `http.request.body.size` as a number and not a string
-+ Display custom event attributes even if the trace is not sampled 
+- Displaying custom event attributes even if the trace is not sampled 
+- Preserving original attribute type instead of converting it to string
+- Ensuring `http.response.body.size` and `http.request.body.size` attributes are treated as numbers, not strings
 
-
-
-> :warning: If you had some monitoring enabled on your logs please be cautious because with these changes, now instead of having for example an attribute like `http.response.status_code = "200"` it will be `http.response.status_code = 200` the 200 code will be a number and not a string anymore. That's an example. Same for `http.request|response.body.size` attribute
+> :warning: Exercise caution if you have monitoring enabled on your logs, as attribute types may have changed. For example, attributes like `http.response.status_code` are now numbers (`200`) instead of strings (`"200"`). 
 
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5464
