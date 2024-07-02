@@ -1,7 +1,8 @@
-### Field level metrics without FTV1 ([PR #5443](https://github.com/apollographql/router/pull/5443))
+### Add experimental field metric reporting configuration ([PR #5443](https://github.com/apollographql/router/pull/5443))
 
-If you are an Apollo GraphOS user, field usage and lengths can be sent to apollo studio without requiring subgraphs to support FTV1.
-This data is not currently displayable in GraphOS Studio.
+Adds an experimental configuration to report field usage metrics to GraphOS Studio without [requiring subgraphs to support federated tracing (`ftv1`)](https://www.apollographql.com/docs/federation/metrics/#how-tracing-data-is-exposed-from-a-subgraph).
+
+The reported field usage data doesn't currently appear in GraphOS Studio.
 
 ```yaml
 telemetry:
