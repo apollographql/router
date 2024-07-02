@@ -4920,13 +4920,13 @@ pub(crate) fn normalize_operation(
 fn remove_introspection(selection_set: &mut SelectionSet) {
     // Note that, because we only apply this to the top-level selections, we skip all
     // introspection, including __typename. In general, we don't want to ignore __typename during
-    // query plans, but at top-level, we can let the gateway execution deal with it rather than
+    // query plans, but at top-level, we can let the router execution deal with it rather than
     // querying some service for that.
 
     Arc::make_mut(&mut selection_set.selections).retain(|_, selection| {
         !matches!(selection,
             Selection::Field(field_selection) if
-                field_selection.field.data().field_position.is_introspection_typename_field()
+                field_selection.field.field_position.is_introspection_typename_field()
         )
     });
 }
