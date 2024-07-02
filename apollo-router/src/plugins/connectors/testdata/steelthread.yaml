@@ -16,7 +16,14 @@ subgraphs:
           )
           @source(
             name: "json"
-            http: { baseURL: "https://jsonplaceholder.typicode.com/" }
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+              headers: [
+                { name: "x-propagate" }
+                { name: "x-rename" as: "x-new-name" }
+                { name: "x-insert" value: "inserted" }
+              ]
+            }
           )
 
         type Query {

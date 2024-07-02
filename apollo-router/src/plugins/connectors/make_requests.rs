@@ -133,14 +133,14 @@ pub(crate) fn make_requests(
 fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<(ResponseKey, RequestInputs)>,
-    _original_request: &connect::Request, // TODO headers
+    original_request: &connect::Request,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     request_params
         .into_iter()
         .map(|(response_key, inputs)| {
             let request = match connector.transport {
                 apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
-                    make_request(transport, inputs.merge())?
+                    make_request(transport, inputs.merge(), original_request)?
                 }
             };
 

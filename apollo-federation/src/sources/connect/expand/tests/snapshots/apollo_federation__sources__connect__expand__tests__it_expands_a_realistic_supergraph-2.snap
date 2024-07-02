@@ -1,6 +1,6 @@
 ---
 source: apollo-federation/src/sources/connect/expand/tests/mod.rs
-expression: connectors_by_service_name
+expression: connectors.by_service_name
 ---
 {
     "connectors_Query_user_0": Connector {
@@ -36,7 +36,7 @@ expression: connectors_by_service_name
                     query: {},
                 },
                 method: Get,
-                headers: {},
+                headers: [],
                 body: None,
             },
         ),
