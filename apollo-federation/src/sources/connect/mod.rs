@@ -25,6 +25,7 @@ pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 
 pub use self::models::Connector;
+pub use self::models::HTTPHeader;
 pub use self::models::HTTPMethod;
 pub use self::models::HttpJsonTransport;
 pub use self::models::Transport;

@@ -126,7 +126,7 @@ pub struct HttpJsonTransport {
     pub base_url: String,
     pub path_template: URLPathTemplate,
     pub method: HTTPMethod,
-    pub headers: IndexMap<String, Option<HTTPHeaderOption>>,
+    pub headers: Vec<HTTPHeader>,
     pub body: Option<JSONSelection>,
 }
 
@@ -168,7 +168,7 @@ impl HttpJsonTransport {
                 FederationError::internal(format!("could not parse URL template: {e}"))
             })?,
             method,
-            headers,
+            headers: http_headers(headers),
             body: http.body.clone(),
         })
     }
@@ -186,6 +186,43 @@ pub enum HTTPMethod {
     Patch,
     Put,
     Delete,
+}
+
+#[derive(Clone, Debug)]
+pub enum HTTPHeader {
+    Propagate {
+        name: String,
+    },
+    Rename {
+        original_name: String,
+        new_name: String,
+    },
+    Inject {
+        name: String,
+        value: String,
+    },
+}
+
+fn http_headers(mappings: IndexMap<String, Option<HTTPHeaderOption>>) -> Vec<HTTPHeader> {
+    let mut headers = vec![];
+    for (name, value) in mappings {
+        match value {
+            Some(HTTPHeaderOption::As(new_name)) => headers.push(HTTPHeader::Rename {
+                original_name: name.clone(),
+                new_name,
+            }),
+            Some(HTTPHeaderOption::Value(values)) => {
+                for value in values {
+                    headers.push(HTTPHeader::Inject {
+                        name: name.clone(),
+                        value: value.clone(),
+                    });
+                }
+            }
+            None => headers.push(HTTPHeader::Propagate { name: name.clone() }),
+        };
+    }
+    headers
 }
 
 #[cfg(test)]
@@ -253,21 +290,19 @@ mod tests {
                             query: {},
                         },
                         method: Get,
-                        headers: {
-                            "X-Auth-Token": Some(
-                                As(
-                                    "AuthToken",
-                                ),
-                            ),
-                            "user-agent": Some(
-                                Value(
-                                    [
-                                        "Firefox",
-                                    ],
-                                ),
-                            ),
-                            "X-From-Env": None,
-                        },
+                        headers: [
+                            Rename {
+                                original_name: "X-Auth-Token",
+                                new_name: "AuthToken",
+                            },
+                            Inject {
+                                name: "user-agent",
+                                value: "Firefox",
+                            },
+                            Propagate {
+                                name: "X-From-Env",
+                            },
+                        ],
                         body: None,
                     },
                 ),
@@ -331,21 +366,19 @@ mod tests {
                             query: {},
                         },
                         method: Get,
-                        headers: {
-                            "X-Auth-Token": Some(
-                                As(
-                                    "AuthToken",
-                                ),
-                            ),
-                            "user-agent": Some(
-                                Value(
-                                    [
-                                        "Firefox",
-                                    ],
-                                ),
-                            ),
-                            "X-From-Env": None,
-                        },
+                        headers: [
+                            Rename {
+                                original_name: "X-Auth-Token",
+                                new_name: "AuthToken",
+                            },
+                            Inject {
+                                name: "user-agent",
+                                value: "Firefox",
+                            },
+                            Propagate {
+                                name: "X-From-Env",
+                            },
+                        ],
                         body: None,
                     },
                 ),

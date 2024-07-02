@@ -19,7 +19,7 @@ pub(crate) struct Request {
     pub(crate) service_name: Arc<str>,
     pub(crate) context: Context,
     pub(crate) operation: Arc<Valid<ExecutableDocument>>,
-    pub(crate) _supergraph_request: Arc<http::Request<GraphQLRequest>>,
+    pub(crate) supergraph_request: Arc<http::Request<GraphQLRequest>>,
     pub(crate) variables: Variables,
 }
 
@@ -47,7 +47,7 @@ impl Request {
             service_name,
             context,
             operation,
-            _supergraph_request: supergraph_request,
+            supergraph_request,
             variables,
         }
     }

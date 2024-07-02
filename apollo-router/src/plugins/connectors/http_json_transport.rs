@@ -1,6 +1,9 @@
 use std::collections::HashSet;
+use std::iter::Iterator;
+use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_federation::sources::connect::HTTPHeader;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use displaydoc::Display;
 use http::header::ACCEPT;
@@ -19,47 +22,53 @@ use http::header::UPGRADE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use lazy_static::lazy_static;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
 
 use crate::error::ConnectorDirectiveError;
+use crate::services::connect;
 use crate::services::router::body::RouterBody;
+
+static KEEP_ALIVE: HeaderName = HeaderName::from_static("keep-alive");
 
 // Copied from plugins::headers
 // Headers from https://datatracker.ietf.org/doc/html/rfc2616#section-13.5.1
 // These are not propagated by default using a regex match as they will not make sense for the
 // second hop.
-// In addition because our requests are not regular proxy requests content-type, content-length
+// In addition, because our requests are not regular proxy requests content-type, content-length
 // and host are also in the exclude list.
-#[allow(dead_code)]
-static RESERVED_HEADERS: [HeaderName; 14] = [
-    CONNECTION,
-    PROXY_AUTHENTICATE,
-    PROXY_AUTHORIZATION,
-    TE,
-    TRAILER,
-    TRANSFER_ENCODING,
-    UPGRADE,
-    CONTENT_LENGTH,
-    CONTENT_TYPE,
-    CONTENT_ENCODING,
-    HOST,
-    ACCEPT,
-    ACCEPT_ENCODING,
-    HeaderName::from_static("keep-alive"),
-];
+lazy_static! {
+    static ref RESERVED_HEADERS: Arc<HashSet<&'static HeaderName>> = Arc::new(HashSet::from([
+        &CONNECTION,
+        &PROXY_AUTHENTICATE,
+        &PROXY_AUTHORIZATION,
+        &TE,
+        &TRAILER,
+        &TRANSFER_ENCODING,
+        &UPGRADE,
+        &CONTENT_LENGTH,
+        &CONTENT_TYPE,
+        &CONTENT_ENCODING,
+        &HOST,
+        &ACCEPT,
+        &ACCEPT_ENCODING,
+        &KEEP_ALIVE,
+    ]));
+}
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
     inputs: Value,
+    original_request: &connect::Request,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
     let body = hyper::Body::empty();
 
     // TODO: why is apollo_federation HTTPMethod Ucfirst?
     let method = transport.method.to_string().to_uppercase();
-    let request = http::Request::builder()
+    let mut request = http::Request::builder()
         .method(method.as_bytes())
         .uri(
             make_uri(transport, &inputs)
@@ -70,13 +79,16 @@ pub(crate) fn make_request(
         .body(body.into())
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
 
+    add_headers(
+        &mut request,
+        original_request.supergraph_request.headers(),
+        &transport.headers,
+    );
+
     Ok(request)
 }
 
-fn make_uri(
-    transport: &HttpJsonTransport,
-    inputs: &Value,
-) -> Result<url::Url, ConnectorDirectiveError> {
+fn make_uri(transport: &HttpJsonTransport, inputs: &Value) -> Result<Url, ConnectorDirectiveError> {
     let flat_inputs = flatten_keys(inputs);
     let path = transport
         .path_template
@@ -175,70 +187,80 @@ fn flatten_keys_recursive(
     }
 }
 
-#[allow(dead_code)]
-fn headers_to_add(
+fn add_headers<T>(
+    request: &mut http::Request<T>,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
-    incoming_subgraph_headers: &HeaderMap<HeaderValue>,
-    reserved_headers: Arc<HashSet<&'static HeaderName>>,
-    config: &[HttpHeader],
-) -> Vec<(HeaderName, HeaderValue)> {
-    if config.is_empty() {
-        incoming_supergraph_headers
-            .iter()
-            .chain(incoming_subgraph_headers.iter())
-            .filter(|(name, _)| !reserved_headers.contains(name))
-            .map(|(n, v)| (n.clone(), v.clone()))
-            .collect()
-    } else {
-        config
-            .iter()
-            .flat_map(|rule| match rule {
-                HttpHeader::Propagate { name } => {
-                    #[allow(clippy::manual_map)]
-                    match incoming_supergraph_headers
-                        .get(name)
-                        .or(incoming_subgraph_headers.get(name))
-                    {
-                        Some(value) => Some((name.clone(), value.clone())),
-                        None => None, // TODO log?
+    config: &[HTTPHeader],
+) {
+    let headers = request.headers_mut();
+    for rule in config {
+        match rule {
+            HTTPHeader::Propagate { name } => {
+                match HeaderName::from_str(name) {
+                    Ok(name) => {
+                        if RESERVED_HEADERS.contains(&name) {
+                            tracing::warn!(
+                                "Header '{}' is reserved and will not be propagated",
+                                name
+                            );
+                        } else {
+                            let values = incoming_supergraph_headers.get_all(&name);
+                            let mut propagated = false;
+                            for value in values {
+                                headers.append(name.clone(), value.clone());
+                                propagated = true;
+                            }
+                            if !propagated {
+                                tracing::warn!("Header '{}' not found in incoming request", name);
+                            }
+                        }
+                    }
+                    Err(err) => {
+                        tracing::error!("Invalid header name '{}': {:?}", name, err);
+                    }
+                };
+            }
+            HTTPHeader::Rename {
+                original_name,
+                new_name,
+            } => match HeaderName::from_str(new_name) {
+                Ok(new_name) => {
+                    if RESERVED_HEADERS.contains(&new_name) {
+                        tracing::warn!(
+                            "Header '{}' is reserved and will not be propagated",
+                            new_name
+                        );
+                    } else {
+                        let values = incoming_supergraph_headers.get_all(original_name);
+                        let mut propagated = false;
+                        for value in values {
+                            headers.append(new_name.clone(), value.clone());
+                            propagated = true;
+                        }
+                        if !propagated {
+                            tracing::warn!("Header '{}' not found in incoming request", new_name);
+                        }
                     }
                 }
-
-                HttpHeader::Rename {
-                    original_name,
-                    new_name,
-                } => {
-                    #[allow(clippy::manual_map)]
-                    match incoming_supergraph_headers
-                        .get(original_name)
-                        .or(incoming_subgraph_headers.get(original_name))
-                    {
-                        Some(value) => Some((new_name.clone(), value.clone())),
-                        None => None, // TODO log?
-                    }
+                Err(err) => {
+                    tracing::error!("Invalid header name '{}': {:?}", new_name, err);
                 }
-
-                HttpHeader::Inject { name, value } => Some((name.clone(), value.clone())),
-            })
-            .filter(|(name, _)| !reserved_headers.contains(name))
-            .collect()
+            },
+            HTTPHeader::Inject { name, value } => match HeaderName::from_str(name) {
+                Ok(name) => match HeaderValue::from_str(value) {
+                    Ok(value) => {
+                        headers.append(name, value);
+                    }
+                    Err(err) => {
+                        tracing::error!("Invalid header value '{}': {:?}", value, err);
+                    }
+                },
+                Err(err) => {
+                    tracing::error!("Invalid header value '{}': {:?}", name, err);
+                }
+            },
+        }
     }
-}
-
-#[derive(Clone, Debug)]
-#[allow(dead_code)]
-pub(super) enum HttpHeader {
-    Propagate {
-        name: HeaderName,
-    },
-    Rename {
-        original_name: HeaderName,
-        new_name: HeaderName,
-    },
-    Inject {
-        name: HeaderName,
-        value: HeaderValue,
-    },
 }
 
 // These are runtime error only, configuration errors should be captured as ConnectorDirectiveError
@@ -257,15 +279,12 @@ pub(crate) enum HttpJsonTransportError {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
+    use apollo_federation::sources::connect::HTTPHeader;
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
 
-    use super::headers_to_add;
-    use super::HttpHeader;
-    use super::RESERVED_HEADERS;
+    use crate::plugins::connectors::http_json_transport::add_headers;
 
     #[test]
     fn append_path_test() {
@@ -335,25 +354,9 @@ mod tests {
         .into_iter()
         .collect();
 
-        let incoming_subgraph_headers: HeaderMap<HeaderValue> = vec![].into_iter().collect();
-
-        let results = headers_to_add(
-            &incoming_supergraph_headers,
-            &incoming_subgraph_headers,
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-            &[],
-        );
-        assert_eq!(
-            results,
-            vec![
-                (
-                    "x-propagate".parse().unwrap(),
-                    "propagated".parse().unwrap(),
-                ),
-                ("x-rename".parse().unwrap(), "renamed".parse().unwrap()),
-                ("x-ignore".parse().unwrap(), "ignored".parse().unwrap()),
-            ]
-        );
+        let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
+        add_headers(&mut request, &incoming_supergraph_headers, &[]);
+        assert!(request.headers().is_empty());
     }
 
     #[test]
@@ -370,38 +373,29 @@ mod tests {
         .into_iter()
         .collect();
 
-        let incoming_subgraph_headers: HeaderMap<HeaderValue> = vec![].into_iter().collect();
-
         let config = vec![
-            HttpHeader::Propagate {
+            HTTPHeader::Propagate {
                 name: "x-propagate".parse().unwrap(),
             },
-            HttpHeader::Rename {
+            HTTPHeader::Rename {
                 original_name: "x-rename".parse().unwrap(),
                 new_name: "x-new-name".parse().unwrap(),
             },
-            HttpHeader::Inject {
+            HTTPHeader::Inject {
                 name: "x-insert".parse().unwrap(),
                 value: "inserted".parse().unwrap(),
             },
         ];
 
-        let results = headers_to_add(
-            &incoming_supergraph_headers,
-            &incoming_subgraph_headers,
-            Arc::new(RESERVED_HEADERS.iter().collect()),
-            &config,
-        );
+        let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
+        add_headers(&mut request, &incoming_supergraph_headers, &config);
+        let result = request.headers();
+        assert_eq!(result.len(), 3);
+        assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
+        assert_eq!(result.get("x-insert"), Some(&"inserted".parse().unwrap()));
         assert_eq!(
-            results,
-            vec![
-                (
-                    "x-propagate".parse().unwrap(),
-                    "propagated".parse().unwrap(),
-                ),
-                ("x-new-name".parse().unwrap(), "renamed".parse().unwrap()),
-                ("x-insert".parse().unwrap(), "inserted".parse().unwrap()),
-            ]
+            result.get("x-propagate"),
+            Some(&"propagated".parse().unwrap())
         );
     }
 
