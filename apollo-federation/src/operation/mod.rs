@@ -4949,12 +4949,14 @@ fn runtime_types_intersect(
             .referencers()
             .get_interface_type(&interface.type_name)
             .is_ok_and(|referencers| referencers.object_types.contains(object)),
+        (Union(left), Union(right)) if left == right => true,
         (Union(left), Union(right)) => {
             match (left.get(schema.schema()), right.get(schema.schema())) {
                 (Ok(left), Ok(right)) => left.members.intersection(&right.members).next().is_some(),
                 _ => false,
             }
         }
+        (Interface(left), Interface(right)) if left == right => true,
         (Interface(left), Interface(right)) => {
             let r = schema.referencers();
             match (
