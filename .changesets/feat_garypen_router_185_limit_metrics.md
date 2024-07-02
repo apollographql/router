@@ -10,15 +10,17 @@ You can use this data to understand how your graph is used and to help determine
 
 For example:
 
-```
-instruments:
-  supergraph:
-    'query.depth':
-      description: 'The depth of the query'
-      value:
-        query: depth
-      unit: unit
-      type: histogram
+```router.yaml
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        'query.depth':
+          description: 'The depth of the query'
+          value:
+            query: depth
+          unit: unit
+          type: histogram
 ```
 
 By [@garypen](https://github.com/garypen) in https://github.com/apollographql/router/pull/5433
