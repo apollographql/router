@@ -163,7 +163,7 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
             } else if name == SOURCE_HEADERS_ARGUMENT_NAME.as_str() {
                 headers = if let Some(values) = value.as_list() {
                     Some(HTTPHeaderMappings::try_from(values)?)
-                } else if let Some(_) = value.as_object() {
+                } else if value.as_object().is_some() {
                     let (name, option) = node_to_header_option(value)?;
                     Some(HTTPHeaderMappings(IndexMap::from([(name, option)])))
                 } else {
