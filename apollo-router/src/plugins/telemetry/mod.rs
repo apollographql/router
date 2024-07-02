@@ -2998,6 +2998,22 @@ mod tests {
         .await;
     }
 
+    #[tokio::test(flavor = "multi_thread")]
+    async fn it_test_prometheus_metrics_custom_view_drop() {
+        async {
+            let plugin = create_plugin_with_config(include_str!(
+                "testdata/prometheus_custom_view_drop.router.yaml"
+            ))
+            .await;
+            make_supergraph_request(plugin.as_ref()).await;
+            let prometheus_metrics = get_prometheus_metrics(plugin.as_ref()).await;
+
+            assert!(prometheus_metrics.is_empty());
+        }
+        .with_metrics()
+        .await;
+    }
+
     #[test]
     fn it_test_send_headers_to_studio() {
         let fw_headers = ForwardHeaders::Only(vec![

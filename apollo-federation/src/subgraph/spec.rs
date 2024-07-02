@@ -7,8 +7,6 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::EnumValueDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::InputValueDefinition;
-use apollo_compiler::ast::InvalidNameError;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
@@ -20,8 +18,9 @@ use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
+use apollo_compiler::InvalidNameError;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use lazy_static::lazy_static;
@@ -142,7 +141,7 @@ pub enum FederationSpecError {
 
 impl From<InvalidNameError> for FederationSpecError {
     fn from(err: InvalidNameError) -> Self {
-        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", err.0))
+        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", err.name))
     }
 }
 
@@ -201,8 +200,7 @@ macro_rules! applied_specification {
                 if let Some(spec_alias) = &self.link.spec_alias {
                     applied_link_directive.arguments.push(Argument {
                         name: name!("as"),
-                        // TODO `spec_alias.into()` when https://github.com/apollographql/apollo-rs/pull/773 is released
-                        value: Value::String(<Name as AsRef::<NodeStr>>::as_ref(&spec_alias).clone()).into(),
+                        value: spec_alias.as_str().into(),
                     }.into())
                 }
                 if let Some(purpose) = &self.link.purpose {
@@ -276,7 +274,7 @@ impl FederationSpecDefinitions {
         name: &Name,
         alias: &Option<Name>,
     ) -> Result<DirectiveDefinition, FederationSpecError> {
-        // TODO: NodeStr is not annotated with #[derive(PartialEq, Eq)], so Clippy warns it should
+        // TODO: `Name` has custom `PartialEq` and `Eq` impl so Clippy warns it should
         // not be used in pattern matching (as some future Rust version will likely turn this into
         // a hard error). We resort instead to indexing into a static IndexMap to get an enum, which
         // can be used in a match.

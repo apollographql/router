@@ -564,6 +564,17 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "Client": {
+      "additionalProperties": false,
+      "properties": {
+        "experimental_http2": {
+          "$ref": "#/definitions/Http2Config",
+          "description": "#/definitions/Http2Config",
+          "nullable": true
+        }
+      },
+      "type": "object"
+    },
     "CollectorConfig": {
       "additionalProperties": false,
       "properties": {
@@ -1228,6 +1239,11 @@ expression: "&schema"
       "additionalProperties": false,
       "description": "Configures the externalization plugin",
       "properties": {
+        "client": {
+          "$ref": "#/definitions/Client",
+          "description": "#/definitions/Client",
+          "nullable": true
+        },
         "execution": {
           "$ref": "#/definitions/ExecutionStage",
           "description": "#/definitions/ExecutionStage"
@@ -1559,9 +1575,8 @@ expression: "&schema"
       "description": "Configuration for entity caching",
       "properties": {
         "enabled": {
-          "default": null,
-          "description": "activates caching for all subgraphs, unless overriden in subgraph specific configuration",
-          "nullable": true,
+          "default": false,
+          "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
         "metrics": {
@@ -1572,17 +1587,14 @@ expression: "&schema"
           "$ref": "#/definitions/RedisCache",
           "description": "#/definitions/RedisCache"
         },
-        "subgraphs": {
-          "additionalProperties": {
-            "$ref": "#/definitions/Subgraph",
-            "description": "#/definitions/Subgraph"
-          },
-          "description": "Per subgraph configuration",
-          "type": "object"
+        "subgraph": {
+          "$ref": "#/definitions/SubgraphConfiguration_for_Subgraph",
+          "description": "#/definitions/SubgraphConfiguration_for_Subgraph"
         }
       },
       "required": [
-        "redis"
+        "redis",
+        "subgraph"
       ],
       "type": "object"
     },
@@ -3654,6 +3666,13 @@ expression: "&schema"
             "histogram"
           ],
           "type": "object"
+        },
+        {
+          "description": "Simply drop the metrics matching this view",
+          "enum": [
+            "drop"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -4695,16 +4714,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         }
       },
       "type": "object"
@@ -5263,6 +5282,81 @@ expression: "&schema"
       ],
       "type": "string"
     },
+    "StandardEventConfig_for_RouterSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_RouterSelector",
+              "description": "#/definitions/Condition_for_RouterSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_SubgraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SubgraphSelector",
+              "description": "#/definitions/Condition_for_SubgraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "StandardEventConfig_for_SupergraphSelector": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/EventLevel",
+          "description": "#/definitions/EventLevel"
+        },
+        {
+          "properties": {
+            "condition": {
+              "$ref": "#/definitions/Condition_for_SupergraphSelector",
+              "description": "#/definitions/Condition_for_SupergraphSelector"
+            },
+            "level": {
+              "$ref": "#/definitions/EventLevel",
+              "description": "#/definitions/EventLevel"
+            }
+          },
+          "required": [
+            "condition",
+            "level"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "StandardUnit": {
       "enum": [
         "unit"
@@ -5361,13 +5455,11 @@ expression: "&schema"
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
-          "default": null,
           "description": "activates caching for this subgraph, overrides the global configuration",
           "nullable": true,
           "type": "boolean"
         },
         "private_id": {
-          "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
@@ -5460,6 +5552,25 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "SubgraphConfiguration_for_Subgraph": {
+      "description": "Configuration options pertaining to the subgraph server component.",
+      "properties": {
+        "all": {
+          "$ref": "#/definitions/Subgraph",
+          "description": "#/definitions/Subgraph"
+        },
+        "subgraphs": {
+          "additionalProperties": {
+            "$ref": "#/definitions/Subgraph",
+            "description": "#/definitions/Subgraph"
+          },
+          "default": {},
+          "description": "per subgraph options",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
     "SubgraphConfiguration_for_SubgraphApq": {
       "description": "Configuration options pertaining to the subgraph server component.",
       "properties": {
@@ -5520,16 +5631,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -6256,16 +6367,16 @@ expression: "&schema"
       "additionalProperties": false,
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         }
       },
       "type": "object"
@@ -7509,16 +7620,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_RouterSelector",
+          "description": "#/definitions/StandardEventConfig_for_RouterSelector"
         }
       },
       "type": "object"
@@ -7530,16 +7641,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SubgraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SubgraphSelector"
         }
       },
       "type": "object"
@@ -7551,16 +7662,16 @@ expression: "&schema"
       },
       "properties": {
         "error": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "request": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         },
         "response": {
-          "$ref": "#/definitions/EventLevel",
-          "description": "#/definitions/EventLevel"
+          "$ref": "#/definitions/StandardEventConfig_for_SupergraphSelector",
+          "description": "#/definitions/StandardEventConfig_for_SupergraphSelector"
         }
       },
       "type": "object"

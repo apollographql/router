@@ -64,8 +64,6 @@ fn it_preservers_aliased_typename() {
 }
 
 #[test]
-#[should_panic(expected = r#"snapshot assertion"#)]
-// TODO: investigate this failure (`__typename: __typename` is not expected)
 fn it_does_not_needlessly_consider_options_for_typename() {
     let planner = planner!(
         Subgraph1: r#"
@@ -209,4 +207,91 @@ fn it_does_not_needlessly_consider_options_for_typename() {
       "###
     );
     assert_eq!(plan.statistics.evaluated_plan_count.get(), 1);
+}
+
+#[test]
+fn add_back_sibling_typename_to_interface_object() {
+    let planner = planner!(
+        Subgraph1: r#"
+            interface Item @key(fields: "id") {
+                id: ID!
+                name: String!
+            }
+
+            type Book implements Item @key(fields: "id") {
+                id: ID!
+                name: String!
+            }
+
+            type Audio implements Item @key(fields: "id") {
+                id: ID!
+                name: String!
+            }
+        "#,
+        Subgraph2: r#"
+            type Query {
+                currentItem: Item
+            }
+
+            type Item @key(fields: "id") @interfaceObject {
+                id: ID!
+            }
+        "#,
+    );
+    // One of the inline fragments have `__typename`, which is removed at first and
+    // added back in the fetch query. We need to make sure that does not cause rebasing
+    // error (such as FED-251).
+    assert_plan!(
+        &planner,
+        r#"
+            {
+            currentItem {
+                ... on Book {
+                    __typename
+                    id
+                    name
+                }
+                ... on Audio {
+                    id
+                    name
+                }
+            }
+            }
+        "#,
+        @r###"
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph2") {
+          {
+            currentItem {
+              __typename
+              id
+            }
+          }
+        },
+        Flatten(path: "currentItem") {
+          Fetch(service: "Subgraph1") {
+            {
+              ... on Item {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on Item {
+                __typename
+                ... on Book {
+                  name
+                }
+                ... on Audio {
+                  name
+                }
+              }
+            }
+          },
+        },
+      },
+    }
+    "###
+    );
 }

@@ -160,14 +160,13 @@ impl TryInto<Box<dyn View>> for MetricView {
     type Error = MetricsError;
 
     fn try_into(self) -> Result<Box<dyn View>, Self::Error> {
-        let aggregation = self
-            .aggregation
-            .map(
-                |MetricAggregation::Histogram { buckets }| Aggregation::ExplicitBucketHistogram {
-                    boundaries: buckets,
-                    record_min_max: true,
-                },
-            );
+        let aggregation = self.aggregation.map(|aggregation| match aggregation {
+            MetricAggregation::Histogram { buckets } => Aggregation::ExplicitBucketHistogram {
+                boundaries: buckets,
+                record_min_max: true,
+            },
+            MetricAggregation::Drop => Aggregation::Drop,
+        });
         let instrument = Instrument::new().name(self.name);
         let mut mask = Stream::new();
         if let Some(desc) = self.description {
@@ -193,6 +192,8 @@ pub(crate) enum MetricAggregation {
     /// An aggregation that summarizes a set of measurements as an histogram with
     /// explicitly defined buckets.
     Histogram { buckets: Vec<f64> },
+    /// Simply drop the metrics matching this view
+    Drop,
 }
 
 /// Tracing configuration

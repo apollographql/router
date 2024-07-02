@@ -987,6 +987,15 @@ impl Selector for SupergraphSelector {
                     None
                 }
             }
+            SupergraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
             SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,

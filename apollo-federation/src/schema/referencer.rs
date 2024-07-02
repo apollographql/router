@@ -1,4 +1,4 @@
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 

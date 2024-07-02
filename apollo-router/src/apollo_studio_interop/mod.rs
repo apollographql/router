@@ -10,7 +10,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::ast::VariableDefinition;
@@ -24,6 +23,7 @@ use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;

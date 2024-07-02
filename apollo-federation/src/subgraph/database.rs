@@ -16,7 +16,7 @@ use std::sync::Arc;
 use apollo_compiler::executable::Directive;
 use apollo_compiler::executable::SelectionSet;
 use apollo_compiler::name;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 
 use crate::link::database::links_metadata;
