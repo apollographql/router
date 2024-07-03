@@ -3,6 +3,7 @@ telemetry:
     tracing:
       experimental_response_trace_id:
         enabled: true
+        format: decimal
         header_name: apollo-custom-trace-id
       propagation:
         jaeger: true
