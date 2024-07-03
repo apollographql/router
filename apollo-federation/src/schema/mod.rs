@@ -138,6 +138,12 @@ impl FederationSchema {
         self.get_type(type_name).ok()
     }
 
+    /// Return the possible runtime types for a definition.
+    ///
+    /// For a union, the possible runtime types are its members.
+    /// For an interface, the possible runtime types are its implementers.
+    ///
+    /// Note this always allocates a set for the result. Avoid calling it frequently.
     pub(crate) fn possible_runtime_types(
         &self,
         composite_type_definition_position: CompositeTypeDefinitionPosition,

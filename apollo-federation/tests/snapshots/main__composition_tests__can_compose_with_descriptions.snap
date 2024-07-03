@@ -12,7 +12,7 @@ directive @foo(url: String) on FIELD
 
 directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
@@ -31,6 +31,8 @@ enum E @join__type(graph: SUBGRAPH2) {
   """The B value"""
   B @join__enumValue(graph: SUBGRAPH2)
 }
+
+scalar Import @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2)
 
 """
 Available queries

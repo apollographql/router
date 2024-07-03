@@ -1313,4 +1313,51 @@ type User
         }
         "###);
     }
+
+    #[test]
+    fn drop_operation_root_level_typename() {
+        let subgraph1 = Subgraph::parse_and_expand(
+            "Subgraph1",
+            "https://Subgraph1",
+            r#"
+                type Query {
+                    t: T
+                }
+
+                type T @key(fields: "id") {
+                    id: ID!
+                    x: Int
+                }
+            "#,
+        )
+        .unwrap();
+        let subgraphs = vec![&subgraph1];
+        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+                query {
+                    __typename
+                    t {
+                        x
+                    }
+                }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              t {
+                x
+              }
+            }
+          },
+        }
+        "###);
+    }
 }

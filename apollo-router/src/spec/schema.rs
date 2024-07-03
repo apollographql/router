@@ -674,7 +674,6 @@ mod tests {
                 assert_eq!(
                     s,
                     r#"The supergraph schema failed to produce a valid API schema: The following errors occurred:
-
   - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `@foo(someArg:)`, which is in the API schema."#
                 );
             }
