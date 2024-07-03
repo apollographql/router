@@ -222,6 +222,7 @@ mod helpers {
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
     use crate::sources::connect::EntityResolver;
+    use crate::sources::connect::JSONSelection;
     use crate::sources::connect::Transport;
     use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
     use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
@@ -393,32 +394,113 @@ mod helpers {
                 )]),
             };
 
+            // The input arguments are independent of the actual output type in which they are used, but
+            // require access to the field of the output in order to process the inputs. The output type
+            // needs to be present in order to modify its keys and other directives, so we split up
+            // the processing so that each has what it needs before and after adding the field.
+            self.process_inputs(to_schema, connector, &field_def.arguments)?;
             parent.insert(to_schema, Node::new(connector_parent_type))?;
-
-            // Now we need to process any inputs that need to be carried over, making sure to keep track
-            // of how these inputs should influence the output types in terms of federation directives.
-            self.process_inputs(
-                to_schema,
-                connector,
-                &field_def.arguments,
-                self.key_name.clone(),
-                parent_type.name.clone(),
-                output_name,
-            )?;
+            self.process_outputs(to_schema, connector, parent_type.name.clone(), output_name)?;
 
             Ok(())
         }
 
+        /// Process all input types
+        ///
+        /// Inputs can include leaf types as well as custom inputs.
         fn process_inputs(
             &self,
             to_schema: &mut FederationSchema,
             connector: &Connector,
-            args: &[Node<InputValueDefinition>],
-            key_name: Name,
+            arguments: &[Node<InputValueDefinition>],
+        ) -> Result<(), FederationError> {
+            let parameters = match connector.transport {
+                Transport::HttpJson(ref http) => http.path_template.parameters().map_err(|e| {
+                    FederationError::internal(format!(
+                        "could not extract path template parameters: {e}"
+                    ))
+                })?,
+            };
+
+            for parameter in parameters {
+                match parameter {
+                    // Ensure that input arguments are carried over to the new schema, including
+                    // any types associated with them.
+                    Parameter::Argument { argument, .. } => {
+                        // Get the argument type
+                        let arg = arguments
+                            .iter()
+                            .find(|a| a.name.as_str() == argument)
+                            .ok_or(FederationError::internal("could not find argument"))?;
+                        let arg_type = self
+                            .original_schema
+                            .get_type(arg.ty.inner_named_type().clone())?;
+                        let extended_arg_type = arg_type.get(self.original_schema.schema())?;
+
+                        // If the input type isn't built in (and hasn't been copied over yet), then we
+                        // need to carry it over.
+                        //
+                        // TODO: We need to drill down the input type and make sure that all of its field
+                        // types are also carried over.
+                        if !extended_arg_type.is_built_in()
+                            && arg_type.try_get(to_schema.schema()).is_none()
+                        {
+                            match (arg_type, extended_arg_type) {
+                                // Input objects are special because it would be invalid to not carry
+                                // over the entire input type since intersection merging rules dictate
+                                // that subgraphs with different views of the same input type would
+                                // not carry over the union of those types, but rather the intersection.
+                                //
+                                // So we just copy it blindly.
+                                (
+                                    TypeDefinitionPosition::InputObject(pos),
+                                    apollo_compiler::schema::ExtendedType::InputObject(def),
+                                ) => {
+                                    pos.pre_insert(to_schema)?;
+                                    pos.insert(to_schema, def.clone())?;
+                                }
+
+                                // Leaf types are simple: just insert
+                                (
+                                    TypeDefinitionPosition::Scalar(pos),
+                                    apollo_compiler::schema::ExtendedType::Scalar(def),
+                                ) => {
+                                    pos.pre_insert(to_schema)?;
+                                    pos.insert(to_schema, def.clone())?;
+                                }
+                                (
+                                    TypeDefinitionPosition::Enum(pos),
+                                    apollo_compiler::schema::ExtendedType::Enum(def),
+                                ) => {
+                                    pos.pre_insert(to_schema)?;
+                                    pos.insert(to_schema, def.clone())?;
+                                }
+
+                                (pos, def) => {
+                                    return Err(FederationError::internal(format!(
+                                        "did not expect to process in input: {pos:?} {def:?}"
+                                    )));
+                                }
+                            };
+                        }
+                    }
+
+                    // Any other parameter type is not from an input
+                    _ => continue,
+                }
+            }
+
+            Ok(())
+        }
+
+        fn process_outputs(
+            &self,
+            to_schema: &mut FederationSchema,
+            connector: &Connector,
             parent_type_name: Name,
             output_type_name: Name,
         ) -> Result<(), FederationError> {
-            let parent_type = to_schema.get_type(parent_type_name)?;
+            let parent_type = self.original_schema.get_type(parent_type_name)?;
             let output_type = to_schema.get_type(output_type_name)?;
 
             let parameters = match connector.transport {
@@ -442,21 +524,6 @@ mod helpers {
                     // those should be allowed to fully resolve a type given the required arguments /
                     // synthesized keys.
                     Parameter::Argument { argument, paths } => {
-                        // Get the argument type
-                        let arg = args
-                            .iter()
-                            .find(|a| a.name.as_str() == argument)
-                            .ok_or(FederationError::internal("could not find argument"))?;
-                        let arg_type = self
-                            .original_schema
-                            .get_type(arg.ty.inner_named_type().clone())?;
-                        let extended_arg_type = arg_type.get(self.original_schema.schema())?;
-
-                        // TODO: Handle custom input types and their type expansion
-                        if !extended_arg_type.is_built_in() {
-                            todo!();
-                        }
-
                         // Synthesize the key based on the argument. Note that this is only relevant in the
                         // argument case when the connector is marked as being an entity resolved.
                         if matches!(connector.entity_resolver, Some(EntityResolver::Explicit)) {
@@ -483,28 +550,53 @@ mod helpers {
                     Parameter::Sibling { field, paths } => {
                         match parent_type {
                             TypeDefinitionPosition::Object(ref o) => {
+                                let field_name = Name::new(field)?;
+                                let field = o.field(field_name.clone());
+                                let field_def = field.get(self.original_schema.schema())?;
+
                                 // Mark it as a required key for the output type
-                                let mut key = field.to_string();
+                                let mut key = field_name.to_string();
                                 if !paths.is_empty() {
                                     // Slight hack to generate nested { a { b { c } } }
                                     let sub_selection = {
-                                        let mut s = format!("{{ {}", paths.join(" { "));
-                                        s.push_str(&" }".repeat(paths.len()));
+                                        let mut s = paths.join(" { ").to_string();
+                                        s.push_str(&" }".repeat(paths.len() - 1));
 
                                         s
                                     };
 
-                                    key.push(' ');
-                                    key.push_str(&sub_selection);
+                                    key.push_str(&format!("{{ {sub_selection} }}"));
+
+                                    // We'll also need to carry over the output type of this sibling if there is a sub
+                                    // selection.
+                                    let field_output = field_def.ty.inner_named_type();
+                                    if to_schema.try_get_type(field_output.clone()).is_none() {
+                                        let field_output =
+                                            self.original_schema.get_type(field_output.clone())?;
+                                        let field_type =
+                                            field_output.get(self.original_schema.schema())?;
+
+                                        // We use a fake JSONSelection here so that we can reuse the visitor
+                                        // when generating the output types and their required memebers.
+                                        let visitor = ToSchemaVisitor::new(
+                                            self.original_schema,
+                                            to_schema,
+                                            field_output,
+                                            field_type,
+                                            &self.directive_deny_list,
+                                        );
+                                        let (_, parsed) =
+                                            JSONSelection::parse(&sub_selection).map_err(|e| {
+                                                FederationError::internal(format!("could not parse fake selection for sibling field: {e}"))
+                                            })?;
+
+                                        visitor.walk(&parsed)?;
+                                    }
                                 }
 
                                 keys.push(key);
 
                                 // Add the field if not already present in the output schema
-                                let field_name = Name::new(field)?;
-                                let field = o.field(field_name.clone());
-                                let field_def = field.get(self.original_schema.schema())?;
-
                                 if field.try_get(to_schema.schema()).is_none() {
                                     field.insert(
                                         to_schema,
@@ -520,9 +612,6 @@ mod helpers {
                                         }),
                                     )?;
                                 }
-
-                                // Also add its type
-                                // TODO
                             }
                             TypeDefinitionPosition::Interface(_) => todo!(),
                             TypeDefinitionPosition::Union(_) => todo!(),
@@ -542,7 +631,7 @@ mod helpers {
             // directive now.
             if !keys.is_empty() {
                 let key_directive = Directive {
-                    name: key_name.clone(),
+                    name: self.key_name.clone(),
                     arguments: vec![Node::new(Argument {
                         name: name!("fields"),
                         value: Node::new(Value::String(keys.join(" "))),

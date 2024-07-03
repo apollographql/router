@@ -23,7 +23,13 @@ type CompanyInfo {
   bs: String
 }
 
+input CompanyInput {
+  name: String!
+  catchPhrase: String
+}
+
 type Query {
+  usersByCompany(company: CompanyInput!): [User]
   user(id: ID!): User
 }
 
