@@ -51,7 +51,7 @@ type Query
   @join__type(graph: GRAPHQL)
 {
   users: [User] @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/"}, selection: "id a"})
-  user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id a b"})
+  user(id: ID!): User @join__field(graph: CONNECTORS) @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "example", http: {GET: "/{$args.id}"}, selection: "id a b", entity: true})
 }
 
 type User

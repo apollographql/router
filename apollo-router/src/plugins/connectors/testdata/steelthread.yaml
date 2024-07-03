@@ -47,14 +47,14 @@ subgraphs:
           id: ID!
           name: String
           username: String
-          # c: String @external
-          # d: String
-          #   @requires(fields: "c")
-          #   @connect(
-          #     source: "json"
-          #     http: { GET: "/users/{$$this.c}" }
-          #     selection: "$.phone"
-          #   )
+          c: String @external
+          d: String
+            @requires(fields: "c")
+            @connect(
+              source: "json"
+              http: { GET: "/users/{$$this.c}" }
+              selection: "$.phone"
+            )
         }
 
   graphql:

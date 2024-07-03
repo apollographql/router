@@ -216,6 +216,7 @@ mod tests {
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::Connector;
+    use apollo_federation::sources::connect::EntityResolver;
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
@@ -245,8 +246,7 @@ mod tests {
                 body: Default::default(),
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
-            entity: false,
-            on_root_type: true,
+            entity_resolver: None,
         };
 
         let response1 = http::Response::builder()
@@ -330,8 +330,7 @@ mod tests {
                 body: Default::default(),
             }),
             selection: JSONSelection::parse(".data { id }").unwrap().1,
-            entity: true,
-            on_root_type: true,
+            entity_resolver: Some(EntityResolver::Explicit),
         };
 
         let response1 = http::Response::builder()
@@ -432,8 +431,7 @@ mod tests {
                 body: Default::default(),
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
-            entity: false,
-            on_root_type: false,
+            entity_resolver: Some(EntityResolver::Implicit),
         };
 
         let response1 = http::Response::builder()
@@ -536,8 +534,7 @@ mod tests {
                 body: Default::default(),
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
-            entity: true,
-            on_root_type: true,
+            entity_resolver: Some(EntityResolver::Explicit),
         };
 
         let response1 = http::Response::builder()

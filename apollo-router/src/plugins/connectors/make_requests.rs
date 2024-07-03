@@ -1,5 +1,6 @@
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::EntityResolver;
 use itertools::Itertools;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -118,12 +119,10 @@ pub(crate) fn make_requests(
     connector: &Connector,
     debug: &mut Option<ConnectorContext>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
-    let request_params = if connector.entity {
-        entities_from_request(&request)
-    } else if connector.on_root_type {
-        root_fields(&request)
-    } else {
-        entities_with_fields_from_request(&request)
+    let request_params = match connector.entity_resolver {
+        Some(EntityResolver::Explicit) => entities_from_request(&request),
+        Some(EntityResolver::Implicit) => entities_with_fields_from_request(&request),
+        None => root_fields(&request),
     }?;
 
     request_params_to_requests(connector, request_params, &request, debug)
@@ -1303,8 +1302,7 @@ mod tests {
                 },
             ),
             selection: JSONSelection::parse(".data").unwrap().1,
-            entity: false,
-            on_root_type: true,
+            entity_resolver: None,
         };
 
         let requests = super::make_requests(req, &connector, &mut None).unwrap();

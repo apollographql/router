@@ -172,11 +172,11 @@ fn split_subgraph(
 }
 
 /// Filter out directives from a directive list
-fn filter_directives<'a, D, I, U>(deny_list: &IndexSet<&Name>, directives: D) -> U
+fn filter_directives<'a, D, I, O>(deny_list: &IndexSet<Name>, directives: D) -> O
 where
     D: IntoIterator<Item = &'a I>,
     I: 'a + AsRef<Directive> + Clone,
-    U: FromIterator<I>,
+    O: FromIterator<I>,
 {
     directives
         .into_iter()
@@ -187,7 +187,11 @@ where
 
 mod helpers {
     use apollo_compiler::ast;
+    use apollo_compiler::ast::Argument;
+    use apollo_compiler::ast::Directive;
     use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::ast::InputValueDefinition;
+    use apollo_compiler::ast::Value;
     use apollo_compiler::name;
     use apollo_compiler::schema::Component;
     use apollo_compiler::schema::ComponentName;
@@ -202,18 +206,26 @@ mod helpers {
     use super::filter_directives;
     use super::ToSchemaVisitor;
     use crate::error::FederationError;
+    use crate::link::spec::Identity;
     use crate::link::Link;
     use crate::query_graph::extract_subgraphs_from_supergraph::new_empty_fed_2_subgraph_schema;
     use crate::schema::position::ObjectTypeDefinitionPosition;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::position::SchemaRootDefinitionPosition;
+    use crate::schema::position::TypeDefinitionPosition;
     use crate::schema::FederationSchema;
     use crate::schema::ObjectFieldDefinitionPosition;
     use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
     use crate::schema::ValidFederationSchema;
     use crate::sources::connect::json_selection::JSONSelectionVisitor;
+    use crate::sources::connect::url_path_template::Parameter;
     use crate::sources::connect::ConnectSpecDefinition;
     use crate::sources::connect::Connector;
+    use crate::sources::connect::EntityResolver;
+    use crate::sources::connect::Transport;
+    use crate::subgraph::spec::EXTERNAL_DIRECTIVE_NAME;
+    use crate::subgraph::spec::KEY_DIRECTIVE_NAME;
+    use crate::subgraph::spec::REQUIRES_DIRECTIVE_NAME;
     use crate::ValidFederationSubgraph;
 
     /// A helper struct for expanding a subgraph into one per connect directive.
@@ -224,8 +236,15 @@ mod helpers {
         /// The name of the connect directive, possibly aliased.
         source_name: Name,
 
+        /// The name of the @key directive, as known in the subgraph
+        key_name: Name,
+
         /// The original schema that contains connect directives
         original_schema: &'a ValidFederationSchema,
+
+        /// A list of directives to exclude when copying over types from the
+        /// original schema.
+        directive_deny_list: IndexSet<Name>,
     }
 
     impl<'a> Expander<'a> {
@@ -233,10 +252,45 @@ mod helpers {
             let connect_name = ConnectSpecDefinition::connect_directive_name(link);
             let source_name = ConnectSpecDefinition::source_directive_name(link);
 
+            // When we go to expand all output types, we'll need to make sure that we don't carry over
+            // any connect-related directives. The following directives are also special because they
+            // influence planning and satisfiability:
+            //
+            // - @key: derived based on the fields selected
+            // - @external: the current approach will only add external fields to the list of keys
+            //     if used in the transport. If not used at all, the field marked with this directive
+            //     won't even be included in the expanded subgraph, but if it _is_ used then leaving
+            //     this directive will result in planning failures.
+            // - @requires: the current approach will add required fields to the list of keys for
+            //     implicit entities, so it can't stay.
+            let key_name = subgraph
+                .schema
+                .metadata()
+                .and_then(|m| m.for_identity(&Identity::federation_identity()))
+                .map(|f| f.directive_name_in_schema(&KEY_DIRECTIVE_NAME))
+                .unwrap_or(KEY_DIRECTIVE_NAME);
+            let extra_excluded = [EXTERNAL_DIRECTIVE_NAME, REQUIRES_DIRECTIVE_NAME]
+                .into_iter()
+                .map(|d| {
+                    subgraph
+                        .schema
+                        .metadata()
+                        .and_then(|m| m.for_identity(&Identity::federation_identity()))
+                        .map(|f| f.directive_name_in_schema(&d))
+                        .unwrap_or(d)
+                });
+            let directive_deny_list = IndexSet::from_iter(extra_excluded.chain([
+                key_name.clone(),
+                connect_name.clone(),
+                source_name.clone(),
+            ]));
+
             Self {
                 connect_name,
                 source_name,
+                key_name,
                 original_schema: &subgraph.schema,
+                directive_deny_list,
             }
         }
 
@@ -295,50 +349,224 @@ mod helpers {
             object_field: &ObjectFieldDefinitionPosition,
             connector: &Connector,
         ) -> Result<(), FederationError> {
-            let field_def = object_field.get(self.original_schema.schema())?;
+            // Prime the schema for our new output parent
+            let parent = object_field.parent();
+            let parent_type = parent.get(self.original_schema.schema())?;
+            parent.pre_insert(to_schema)?;
 
-            // We first need to create the type pointed at by the current field
+            // Process the output type, making sure to carry over just the fields / types
+            // needed by the selection.
+            let field_def = object_field.get(self.original_schema.schema())?;
             let output_name = field_def.ty.inner_named_type().clone();
-            let output_type = self.original_schema.get_type(output_name)?;
+            let output_type = self.original_schema.get_type(output_name.clone())?;
             let extended_output_type = output_type.get(self.original_schema.schema())?;
 
             // If the type is built-in, then there isn't anything that we need to do for the output type
-            let directive_deny_list = IndexSet::from([&self.connect_name, &self.source_name]);
             if !extended_output_type.is_built_in() {
                 let visitor = ToSchemaVisitor::new(
                     self.original_schema,
                     to_schema,
                     output_type,
                     extended_output_type,
-                    &directive_deny_list,
+                    &self.directive_deny_list,
                 );
 
                 visitor.walk(&connector.selection)?;
             }
 
-            let parent = object_field.parent();
-            let parent_type = parent.get(self.original_schema.schema())?;
-
+            // Add the object to our schema
             let field_type = FieldDefinition {
                 description: field_def.description.clone(),
                 name: field_def.name.clone(),
                 arguments: field_def.arguments.clone(),
                 ty: field_def.ty.clone(),
-                directives: filter_directives(&directive_deny_list, &field_def.directives),
+                directives: filter_directives(&self.directive_deny_list, &field_def.directives),
             };
             let connector_parent_type = ObjectType {
                 description: parent_type.description.clone(),
                 name: parent_type.name.clone(),
                 implements_interfaces: parent_type.implements_interfaces.clone(),
-                directives: filter_directives(&directive_deny_list, &parent_type.directives),
+                directives: filter_directives(&self.directive_deny_list, &parent_type.directives),
                 fields: IndexMap::from([(
                     field_type.ty.inner_named_type().clone(),
                     Component::new(field_type),
                 )]),
             };
 
-            parent.pre_insert(to_schema)?;
             parent.insert(to_schema, Node::new(connector_parent_type))?;
+
+            // Now we need to process any inputs that need to be carried over, making sure to keep track
+            // of how these inputs should influence the output types in terms of federation directives.
+            self.process_inputs(
+                to_schema,
+                connector,
+                &field_def.arguments,
+                self.key_name.clone(),
+                parent_type.name.clone(),
+                output_name,
+            )?;
+
+            Ok(())
+        }
+
+        fn process_inputs(
+            &self,
+            to_schema: &mut FederationSchema,
+            connector: &Connector,
+            args: &[Node<InputValueDefinition>],
+            key_name: Name,
+            parent_type_name: Name,
+            output_type_name: Name,
+        ) -> Result<(), FederationError> {
+            let parent_type = to_schema.get_type(parent_type_name)?;
+            let output_type = to_schema.get_type(output_type_name)?;
+
+            let parameters = match connector.transport {
+                Transport::HttpJson(ref http) => http.path_template.parameters().map_err(|e| {
+                    FederationError::internal(format!(
+                        "could not extract path template parameters: {e}"
+                    ))
+                })?,
+            };
+
+            // We'll need to collect all synthesized keys for the output type, adding a federation
+            // `@key` directive once completed.
+            let mut keys = Vec::new();
+            for parameter in parameters {
+                match parameter {
+                    // Arguments should be added to the synthesized key, since they are mandatory
+                    // to resolving the output type. The synthesized key should only include the portions
+                    // of the inputs actually used throughout the selections of the transport.
+                    //
+                    // Note that this only applies to connectors marked as an entity resolver, since only
+                    // those should be allowed to fully resolve a type given the required arguments /
+                    // synthesized keys.
+                    Parameter::Argument { argument, paths } => {
+                        // Get the argument type
+                        let arg = args
+                            .iter()
+                            .find(|a| a.name.as_str() == argument)
+                            .ok_or(FederationError::internal("could not find argument"))?;
+                        let arg_type = self
+                            .original_schema
+                            .get_type(arg.ty.inner_named_type().clone())?;
+                        let extended_arg_type = arg_type.get(self.original_schema.schema())?;
+
+                        // TODO: Handle custom input types and their type expansion
+                        if !extended_arg_type.is_built_in() {
+                            todo!();
+                        }
+
+                        // Synthesize the key based on the argument. Note that this is only relevant in the
+                        // argument case when the connector is marked as being an entity resolved.
+                        if matches!(connector.entity_resolver, Some(EntityResolver::Explicit)) {
+                            let mut key = argument.to_string();
+                            if !paths.is_empty() {
+                                // Slight hack to generate nested { a { b { c } } }
+                                let sub_selection = {
+                                    let mut s = format!("{{ {}", paths.join(" { "));
+                                    s.push_str(&" }".repeat(paths.len()));
+
+                                    s
+                                };
+
+                                key.push(' ');
+                                key.push_str(&sub_selection);
+                            }
+
+                            keys.push(key);
+                        }
+                    }
+
+                    // All sibling fields marked by $this in a transport must be carried over to the output type
+                    // regardless of its use in the output selection.
+                    Parameter::Sibling { field, paths } => {
+                        match parent_type {
+                            TypeDefinitionPosition::Object(ref o) => {
+                                // Mark it as a required key for the output type
+                                let mut key = field.to_string();
+                                if !paths.is_empty() {
+                                    // Slight hack to generate nested { a { b { c } } }
+                                    let sub_selection = {
+                                        let mut s = format!("{{ {}", paths.join(" { "));
+                                        s.push_str(&" }".repeat(paths.len()));
+
+                                        s
+                                    };
+
+                                    key.push(' ');
+                                    key.push_str(&sub_selection);
+                                }
+
+                                keys.push(key);
+
+                                // Add the field if not already present in the output schema
+                                let field_name = Name::new(field)?;
+                                let field = o.field(field_name.clone());
+                                let field_def = field.get(self.original_schema.schema())?;
+
+                                if field.try_get(to_schema.schema()).is_none() {
+                                    field.insert(
+                                        to_schema,
+                                        Component::new(FieldDefinition {
+                                            description: field_def.description.clone(),
+                                            name: field_def.name.clone(),
+                                            arguments: field_def.arguments.clone(),
+                                            ty: field_def.ty.clone(),
+                                            directives: filter_directives(
+                                                &self.directive_deny_list,
+                                                &field_def.directives,
+                                            ),
+                                        }),
+                                    )?;
+                                }
+
+                                // Also add its type
+                                // TODO
+                            }
+                            TypeDefinitionPosition::Interface(_) => todo!(),
+                            TypeDefinitionPosition::Union(_) => todo!(),
+                            TypeDefinitionPosition::InputObject(_) => todo!(),
+
+                            other => {
+                                return Err(FederationError::internal(format!(
+                                    "cannot select a sibling on a leaf type: {other:#?}"
+                                )))
+                            }
+                        };
+                    }
+                }
+            }
+
+            // If we have marked keys as being necessary for this output type, add them as an `@key`
+            // directive now.
+            if !keys.is_empty() {
+                let key_directive = Directive {
+                    name: key_name.clone(),
+                    arguments: vec![Node::new(Argument {
+                        name: name!("fields"),
+                        value: Node::new(Value::String(keys.join(" "))),
+                    })],
+                };
+
+                let key_for_type =
+                    if matches!(connector.entity_resolver, Some(EntityResolver::Explicit)) {
+                        output_type
+                    } else {
+                        parent_type
+                    };
+                match key_for_type {
+                    TypeDefinitionPosition::Object(o) => {
+                        o.insert_directive(to_schema, Component::new(key_directive))
+                    }
+
+                    TypeDefinitionPosition::Scalar(_) => todo!(),
+                    TypeDefinitionPosition::Interface(_) => todo!(),
+                    TypeDefinitionPosition::Union(_) => todo!(),
+                    TypeDefinitionPosition::Enum(_) => todo!(),
+                    TypeDefinitionPosition::InputObject(_) => todo!(),
+                }?;
+            }
 
             Ok(())
         }
