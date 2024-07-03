@@ -16,6 +16,7 @@ use super::http::HttpRequest;
 use super::new_service::ServiceFactory;
 use crate::plugins::connectors::handle_responses::handle_responses;
 use crate::plugins::connectors::make_requests::make_requests;
+use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
@@ -73,15 +74,22 @@ async fn execute(
     schema: &Valid<apollo_compiler::Schema>,
 ) -> Result<ConnectResponse, BoxError> {
     let context = request.context.clone();
+    let context2 = context.clone();
     let original_subgraph_name = connector.id.subgraph_name.to_string();
 
+    let mut debug = context
+        .extensions()
+        .with_lock(|mut lock| lock.remove::<ConnectorContext>());
+
     let requests =
-        make_requests(request, connector, schema).map_err(|_e| BoxError::from("TODO"))?;
+        make_requests(request, connector, &mut debug).map_err(|_e| BoxError::from("TODO"))?;
 
     let tasks = requests.into_iter().map(move |(req, key)| {
         let context = context.clone();
         let original_subgraph_name = original_subgraph_name.clone();
         async move {
+            let context = context.clone();
+
             let client = http_client_factory.create(&original_subgraph_name);
             let req = HttpRequest {
                 http_request: req,
@@ -91,6 +99,7 @@ async fn execute(
             let mut res = res.http_response;
             let extensions = res.extensions_mut();
             extensions.insert(key);
+
             Ok::<_, BoxError>(res)
         }
     });
@@ -99,9 +108,17 @@ async fn execute(
         .await
         .map_err(BoxError::from)?;
 
-    handle_responses(responses, connector, schema, Some("TODO".to_string()))
+    let result = handle_responses(responses, connector, &mut debug, schema)
         .await
-        .map_err(|_e| BoxError::from("todo"))
+        .map_err(|_e| BoxError::from("todo"));
+
+    if let Some(debug) = debug {
+        context2
+            .extensions()
+            .with_lock(|mut lock| lock.insert::<ConnectorContext>(debug));
+    }
+
+    result
 }
 
 #[derive(Clone)]

@@ -717,6 +717,7 @@ pub(crate) async fn create_plugins(
     add_optional_apollo_plugin!("rhai");
     add_optional_apollo_plugin!("coprocessor");
     add_optional_apollo_plugin!("preview_demand_control");
+    add_optional_apollo_plugin!("preview_connectors");
     add_user_plugins!();
 
     // Macros above remove from `apollo_plugin_factories`, so anything left at the end

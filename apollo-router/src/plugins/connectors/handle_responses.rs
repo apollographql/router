@@ -8,6 +8,7 @@ use serde_json_bytes::Value;
 use crate::graphql;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
+use crate::plugins::connectors::plugin::ConnectorContext;
 use crate::services::connect::Response;
 use crate::services::router::body::RouterBody;
 
@@ -33,8 +34,8 @@ pub(crate) enum HandleResponseError {
 pub(crate) async fn handle_responses(
     responses: Vec<http::Response<RouterBody>>,
     connector: &Connector,
-    _schema: &Valid<Schema>,   // TODO for future apply_with_selection
-    _document: Option<String>, // TODO pass in relevant selection set, not the whole operation
+    debug: &mut Option<ConnectorContext>,
+    _schema: &Valid<Schema>, // TODO for future apply_with_selection
 ) -> Result<Response, HandleResponseError> {
     use HandleResponseError::*;
 
@@ -60,10 +61,22 @@ pub(crate) async fn handle_responses(
 
             let mut res_data = {
                 // TODO use response_key.selection_set() to use the operation selection set for alias/typename/field selection
-                let (res, _apply_to_errors) = connector.selection.apply_to(&json_data);
-                // TODO log apply_to_errors as diagnostics
+                let (res, apply_to_errors) = connector.selection.apply_to(&json_data);
+
+                if let Some(ref mut debug) = debug {
+                    debug.push_mapping(
+                        connector.selection.to_string(),
+                        res.clone(),
+                        apply_to_errors,
+                    );
+                }
+
                 res.unwrap_or_else(|| Value::Null)
             };
+
+            if let Some(ref mut debug) = debug {
+                debug.push_response(&parts, &json_data);
+            }
 
             match response_key {
                 // add the response to the "data" using the root field name or alias
@@ -141,6 +154,14 @@ pub(crate) async fn handle_responses(
                 }
                 _ => {}
             };
+
+            if let Some(ref mut debug) = debug {
+                let json_data: Value = serde_json::from_slice(body).map_err(|_| {
+                    InvalidResponseBody("couldn't deserialize response body".into())
+                })?;
+
+                debug.push_response(&parts, &json_data);
+            }
 
             errors.push(
                 graphql::Error::builder()
@@ -254,14 +275,10 @@ mod tests {
 
         let schema = Schema::parse_and_validate("type Query { hello: String }", "./").unwrap();
 
-        let res = super::handle_responses(
-            vec![response1, response2],
-            &connector,
-            &schema,
-            Some("{hello hello2: hello}".to_string()),
-        )
-        .await
-        .unwrap();
+        let res =
+            super::handle_responses(vec![response1, response2], &connector, &mut None, &schema)
+                .await
+                .unwrap();
 
         assert_debug_snapshot!(res, @r###"
         Response {
@@ -348,14 +365,10 @@ mod tests {
         )
         .unwrap();
 
-        let res = super::handle_responses(
-            vec![response1, response2],
-            &connector,
-            &schema,
-            Some("query ($representations: [_Any]) {_entities(representations: $representations) { ... on User { id }}}".to_string()),
-        )
-        .await
-        .unwrap();
+        let res =
+            super::handle_responses(vec![response1, response2], &connector, &mut None, &schema)
+                .await
+                .unwrap();
 
         assert_debug_snapshot!(res, @r###"
         Response {
@@ -456,14 +469,10 @@ mod tests {
         )
         .unwrap();
 
-        let res = super::handle_responses(
-            vec![response1, response2],
-            &connector,
-            &schema,
-            Some("query ($representations: [_Any]) {_entities(representations: $representations) { ... on User { field }}}".to_string()),
-        )
-        .await
-        .unwrap();
+        let res =
+            super::handle_responses(vec![response1, response2], &connector, &mut None, &schema)
+                .await
+                .unwrap();
 
         assert_debug_snapshot!(res, @r###"
         Response {
@@ -579,8 +588,8 @@ mod tests {
         let res = super::handle_responses(
             vec![response1, response2, response3],
             &connector,
+            &mut None,
             &schema,
-            Some("query ($representations: [_Any]) {_entities(representations: $representations) { ... on User { id }}}".to_string()),
         )
         .await
         .unwrap();
