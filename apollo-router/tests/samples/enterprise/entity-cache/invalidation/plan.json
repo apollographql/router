@@ -1,0 +1,133 @@
+{
+    "enterprise": true,
+    "redis": true,
+    "actions": [
+        {
+            "type": "Start",
+            "schema_path": "./supergraph.graphql",
+            "configuration_path": "./configuration.yaml",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"{me{name}}"}
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {"data": { "me": { "name": "test" } } }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "{ me { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "me":{
+                        "name":"test"
+                    }
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"mutation{updateMyAccount{name}}"}
+                            },
+                            "response": {
+                                "headers": {
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {
+                                    "data": { "updateMyAccount": { "name": "test2" } },
+                                    "extensions": {
+                                        "invalidation": [{
+                                            "kind": "subgraph",
+                                            "subgraph": "accounts"
+                                        }]
+                                    }
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "{ me { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "me":{
+                        "name":"test"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "mutation { updateMyAccount { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "updateMyAccount":{
+                        "name":"test2"
+                    }
+                }
+            }
+        },
+        {
+            "type": "ReloadSubgraphs",
+            "subgraphs": {
+                "accounts": {
+                    "requests": [
+                        {
+                            "request": {
+                                "body": {"query":"{me{name}}"}
+                            },
+                            "response": {
+                                "headers": {
+                                    "Cache-Control": "public, max-age=10",
+                                    "Content-Type": "application/json"
+                                },
+                                "body": {"data": { "me": { "name": "test2" } } }
+                            }
+                        }
+                    ]
+                }
+            }
+        },
+        {
+            "type": "Request",
+            "request": {
+                "query": "{ me { name } }"
+            },
+            "expected_response": {
+                "data":{
+                    "me":{
+                        "name":"test2"
+                    }
+                }
+            }
+        },
+        {
+            "type": "Stop"
+        }
+    ]
+}

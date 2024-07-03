@@ -25,6 +25,8 @@ enum E @join__type(graph: SUBGRAPH2) {
   V2 @join__enumValue(graph: SUBGRAPH2)
 }
 
+scalar Import @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2)
+
 type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
   t: T @join__field(graph: SUBGRAPH1)
 }
