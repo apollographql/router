@@ -437,7 +437,7 @@ impl Display for MultipleFederationErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "The following errors occurred:")?;
         for error in &self.errors {
-            write!(f, "\n\n  - ")?;
+            write!(f, "\n  - ")?;
             for c in error.to_string().chars() {
                 if c == '\n' {
                     write!(f, "\n    ")?;

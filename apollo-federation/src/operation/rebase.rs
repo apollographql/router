@@ -17,7 +17,6 @@ use super::InlineFragment;
 use super::InlineFragmentData;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
-use super::NormalizeSelectionOption;
 use super::OperationElement;
 use super::Selection;
 use super::SelectionId;
@@ -482,7 +481,7 @@ impl FragmentSpreadSelection {
             // return a `SelectionSet` complicate things quite a bit. So instead, we encapsulate the selection set
             // in an "empty" inline fragment. This make for non-really-optimal selection sets in the (relatively
             // rare) case where this is triggered, but in practice this "inefficiency" is removed by future calls
-            // to `normalize`.
+            // to `flatten_unnecessary_fragments`.
             return if expanded_selection_set.selections.is_empty() {
                 Err(RebaseError::EmptySelectionSet.into())
             } else {
@@ -811,11 +810,10 @@ impl NamedFragments {
                 ) {
                     // Rebasing can leave some inefficiencies in some case (particularly when a spread has to be "expanded", see `FragmentSpreadSelection.rebaseOn`),
                     // so we do a top-level normalization to keep things clean.
-                    rebased_selection = rebased_selection.normalize(
+                    rebased_selection = rebased_selection.flatten_unnecessary_fragments(
                         &rebased_type,
                         &rebased_fragments,
                         schema,
-                        NormalizeSelectionOption::NormalizeRecursively,
                     )?;
                     if NamedFragments::is_selection_set_worth_using(&rebased_selection) {
                         let fragment = Fragment {
