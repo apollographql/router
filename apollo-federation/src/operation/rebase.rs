@@ -1,3 +1,8 @@
+//! Rebasing takes a selection or a selection set and updates its parent type.
+//!
+//! Often, the change is between equivalent types from different schemas, but selections can also
+//! be rebased from one type to another in the same schema.
+
 use apollo_compiler::Name;
 use itertools::Itertools;
 
