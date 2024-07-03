@@ -1,11 +1,14 @@
 preview_entity_cache:
+  enabled: false
   redis:
     urls: [ "redis://localhost:6379" ]
     timeout: 5ms
     ttl: 60s
-  enabled: true
-  subgraphs:
-    accounts:
-      enabled: false
-    products:
-      ttl: 120s
+  subgraph:
+    all:
+      enabled: true
+    subgraphs:
+      accounts:
+        enabled: false
+      products:
+        ttl: 120s

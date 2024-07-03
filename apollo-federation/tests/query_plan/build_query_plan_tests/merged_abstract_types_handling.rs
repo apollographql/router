@@ -633,7 +633,7 @@ fn handles_spread_unions_correctly() {
 
 #[test]
 #[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
+// TODO: investigate this failure (reverse order of parallel fetches)
 fn handles_case_of_key_chains_in_parallel_requires() {
     let planner = planner!(
         Subgraph1: r#"

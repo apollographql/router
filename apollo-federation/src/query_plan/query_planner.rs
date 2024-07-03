@@ -994,10 +994,7 @@ type User
         "###);
     }
 
-    // TODO: This fails with "Subgraph unexpectedly does not use federation spec"
-    // which seems...unusual
     #[test]
-    #[ignore]
     fn plan_simple_root_field_query_for_multiple_subgraphs() {
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
@@ -1021,26 +1018,70 @@ type User
         .unwrap();
         let plan = planner.build_query_plan(&document, None).unwrap();
         insta::assert_snapshot!(plan, @r###"
-        QueryPlan {
-          Parallel {
-            Fetch(service: "accounts") {
-              {
+              QueryPlan {
+                Parallel {
+                  Fetch(service: "accounts") {
+                    {
                       userById(id: 1) {
-                  name
-                  email
-                }
+                        name
+                        email
+                      }
+                    }
+                  },
+                  Sequence {
+                    Fetch(service: "reviews") {
+                      {
+                        bestRatedProducts {
+                          __typename
+                          id
+                          ... on Book {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                          ... on Movie {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                        }
+                      }
+                    },
+                    Flatten(path: "bestRatedProducts.@") {
+                      Fetch(service: "products") {
+                        {
+                          ... on Book {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                          ... on Movie {
+                            __typename
+                            id
+                            reviews {
+                              rating
+                            }
+                          }
+                        } =>
+                        {
+                          ... on Book {
+                            avg_rating
+                          }
+                          ... on Movie {
+                            avg_rating
+                          }
+                        }
+                      },
+                    },
+                  },
+                },
               }
-            }
-            Fetch(service: "products") {
-              {
-                      bestRatedProducts {
-                  id
-                  avg_rating
-                }
-              }
-            }
-          }
-        }
         "###);
     }
 

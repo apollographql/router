@@ -24,7 +24,6 @@ use http::HeaderValue;
 use http::Method;
 use http::StatusCode;
 use http_body::Body as _;
-use hyper::Body;
 use mime::APPLICATION_JSON;
 use multimap::MultiMap;
 use tower::BoxError;
@@ -41,6 +40,7 @@ use crate::batching::BatchQuery;
 use crate::cache::DeduplicatingCache;
 use crate::configuration::Batching;
 use crate::configuration::BatchingMode;
+use crate::context::CONTAINS_GRAPHQL_ERROR;
 use crate::graphql;
 use crate::http_ext;
 #[cfg(test)]
@@ -57,6 +57,8 @@ use crate::services::layers::query_analysis::QueryAnalysisLayer;
 use crate::services::layers::static_page::StaticPageLayer;
 use crate::services::new_service::ServiceFactory;
 use crate::services::router;
+use crate::services::router::body::get_body_bytes;
+use crate::services::router::body::RouterBody;
 #[cfg(test)]
 use crate::services::supergraph;
 use crate::services::HasPlugins;
@@ -281,9 +283,10 @@ impl RouterService {
                 Ok(router::Response {
                     response: http::Response::builder()
                         .status(StatusCode::SERVICE_UNAVAILABLE)
-                        .body(Body::from(
-                            "router service is not available to process request",
-                        ))
+                        .body(
+                            RouterBody::from("router service is not available to process request")
+                                .into_inner(),
+                        )
                         .expect("cannot fail"),
                     context,
                 })
@@ -303,7 +306,10 @@ impl RouterService {
                     tracing::trace_span!("serialize_response").in_scope(|| {
                         let body = serde_json::to_string(&response)?;
                         Ok(router::Response {
-                            response: http::Response::from_parts(parts, Body::from(body)),
+                            response: http::Response::from_parts(
+                                parts,
+                                RouterBody::from(body).into_inner(),
+                            ),
                             context,
                         })
                     })
@@ -353,7 +359,10 @@ impl RouterService {
                         let mut body = Box::pin(body);
                         // We make a stream based on its `poll_data` method
                         // in order to create a `hyper::Body`.
-                        Body::wrap_stream(stream::poll_fn(move |ctx| body.as_mut().poll_data(ctx)))
+                        RouterBody::wrap_stream(stream::poll_fn(move |ctx| {
+                            body.as_mut().poll_data(ctx)
+                        }))
+                        .into_inner()
                         // … but we ignore the `poll_trailers` method:
                         // https://docs.rs/http-body/0.4.5/http_body/trait.Body.html#tymethod.poll_trailers
                         // Apparently HTTP/2 trailers are like headers, except after the response body.
@@ -368,6 +377,11 @@ impl RouterService {
                     tracing::info!(
                         monotonic_counter.apollo.router.graphql_error = 1u64,
                         code = "INVALID_ACCEPT_HEADER"
+                    );
+                    // Useful for selector in spans/instruments/events
+                    context.insert_json_value(
+                        CONTAINS_GRAPHQL_ERROR,
+                        serde_json_bytes::Value::Bool(true),
                     );
 
                     // this should be unreachable due to a previous check, but just to be sure...
@@ -406,6 +420,9 @@ impl RouterService {
                     status = err.status.as_u16() as i64,
                     error = err.error.to_string()
                 );
+                // Useful for selector in spans/instruments/events
+                context
+                    .insert_json_value(CONTAINS_GRAPHQL_ERROR, serde_json_bytes::Value::Bool(true));
 
                 return router::Response::error_builder()
                     .error(
@@ -473,15 +490,18 @@ impl RouterService {
             let context = first.context;
             let mut bytes = BytesMut::new();
             bytes.put_u8(b'[');
-            bytes.extend_from_slice(&hyper::body::to_bytes(body).await?);
+            bytes.extend_from_slice(&get_body_bytes(body).await?);
             for result in results_it {
                 bytes.put(&b", "[..]);
-                bytes.extend_from_slice(&hyper::body::to_bytes(result.response.into_body()).await?);
+                bytes.extend_from_slice(&get_body_bytes(result.response.into_body()).await?);
             }
             bytes.put_u8(b']');
 
             Ok(RouterResponse {
-                response: http::Response::from_parts(parts, Body::from(bytes.freeze())),
+                response: http::Response::from_parts(
+                    parts,
+                    RouterBody::from(bytes.freeze()).into_inner(),
+                ),
                 context,
             })
         } else {
@@ -661,7 +681,7 @@ impl RouterService {
                 })
             } else {
                 let body = http_body::Limited::new(body, self.http_max_request_bytes);
-                hyper::body::to_bytes(body)
+                get_body_bytes(body)
                     .instrument(tracing::debug_span!("receive_body"))
                     .await
                     .map_err(|e| {
