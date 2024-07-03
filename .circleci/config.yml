@@ -22,7 +22,7 @@ executors:
   amd_linux_test: &amd_linux_test_executor
     docker:
       - image: cimg/base:stable
-      - image: cimg/redis:7.2.4
+      - image: cimg/redis:7.2.5
       - image: jaegertracing/all-in-one:1.54.0
       - image: openzipkin/zipkin:2.23.2
       - image: ghcr.io/datadog/dd-apm-test-agent/ddapm-test-agent:v1.17.0
