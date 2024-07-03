@@ -44,6 +44,7 @@ pub(super) fn rearrange_query_plan(
         usage_reporting: query_plan.usage_reporting.clone(),
         formatted_query_plan: query_plan.formatted_query_plan.clone(),
         query: query_plan.query.clone(),
+        query_metrics: query_plan.query_metrics,
     })
 }
 
@@ -80,7 +81,7 @@ fn rearrange_plan_node<'a>(
         PlanNode::Fetch(fetch) => {
             // Extract variables used in this node.
             for variable in fetch.variable_usages.iter() {
-                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
+                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_ref()) {
                     acc_variables.entry(name).or_insert(range);
                 }
             }
@@ -89,7 +90,7 @@ fn rearrange_plan_node<'a>(
         PlanNode::Subscription { primary, rest } => {
             // Extract variables used in this node
             for variable in primary.variable_usages.iter() {
-                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_str()) {
+                if let Some((name, range)) = variable_ranges.get_key_value(variable.as_ref()) {
                     acc_variables.entry(name).or_insert(range);
                 }
             }

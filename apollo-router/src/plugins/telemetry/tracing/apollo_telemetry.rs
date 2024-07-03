@@ -55,15 +55,25 @@ use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_pla
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::SequenceNode;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Details;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Http;
+use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::Limits;
 use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::QueryPlanNode;
 use crate::plugins::telemetry::apollo_exporter::ApolloExporter;
 use crate::plugins::telemetry::apollo_otlp_exporter::ApolloOtlpExporter;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ACTUAL;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_ESTIMATED;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_RESULT;
+use crate::plugins::telemetry::config_new::cost::APOLLO_PRIVATE_COST_STRATEGY;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::BoxError;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_HEIGHT;
+use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ROOT_FIELDS;
 use crate::plugins::telemetry::EXECUTION_SPAN_NAME;
 use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::SUBGRAPH_SPAN_NAME;
@@ -110,7 +120,7 @@ pub(crate) const OPERATION_SUBTYPE: Key = Key::from_static_str("apollo_private.o
 const EXT_TRACE_ID: Key = Key::from_static_str("trace_id");
 
 /// The set of attributes to include when sending to the Apollo Reports protocol.
-const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
+const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
     APOLLO_PRIVATE_REQUEST,
     APOLLO_PRIVATE_DURATION_NS_KEY,
     APOLLO_PRIVATE_SENT_TIME_OFFSET,
@@ -119,6 +129,14 @@ const REPORTS_INCLUDE_ATTRS: [Key; 18] = [
     APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS,
     APOLLO_PRIVATE_OPERATION_SIGNATURE,
     APOLLO_PRIVATE_FTV1,
+    APOLLO_PRIVATE_COST_STRATEGY,
+    APOLLO_PRIVATE_COST_RESULT,
+    APOLLO_PRIVATE_COST_ESTIMATED,
+    APOLLO_PRIVATE_COST_ACTUAL,
+    APOLLO_PRIVATE_QUERY_ALIASES,
+    APOLLO_PRIVATE_QUERY_DEPTH,
+    APOLLO_PRIVATE_QUERY_HEIGHT,
+    APOLLO_PRIVATE_QUERY_ROOT_FIELDS,
     PATH,
     SUBGRAPH_NAME,
     CLIENT_NAME_KEY,
@@ -261,6 +279,7 @@ enum TreeData {
         operation_signature: String,
         operation_name: String,
         variables_json: HashMap<String, String>,
+        limits: Option<Limits>,
     },
     QueryPlanNode(QueryPlanNode),
     DeferPrimary(DeferNodePrimary),
@@ -287,6 +306,7 @@ impl Exporter {
         errors_configuration: &'a ErrorsConfiguration,
         batch_config: &'a BatchProcessorConfig,
         use_legacy_request_span: Option<bool>,
+        metrics_reference_mode: ApolloMetricsReferenceMode,
     ) -> Result<Self, BoxError> {
         tracing::debug!("creating studio exporter");
 
@@ -313,6 +333,7 @@ impl Exporter {
                     apollo_key,
                     apollo_graph_ref,
                     schema_id,
+                    metrics_reference_mode,
                 )?))
             } else {
                 None
@@ -395,6 +416,7 @@ impl Exporter {
                     operation_signature,
                     operation_name,
                     variables_json,
+                    limits,
                 } => {
                     root_trace.field_execution_weight = self.field_execution_weight;
                     root_trace.signature = operation_signature;
@@ -402,6 +424,7 @@ impl Exporter {
                         variables_json,
                         operation_name,
                     });
+                    root_trace.limits = limits;
                     results.push(root_trace.clone());
                 }
                 TreeData::Execution(operation_type) => {
@@ -589,6 +612,7 @@ impl Exporter {
                         .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
                         .and_then(extract_json)
                         .unwrap_or_default(),
+                    limits: Some(extract_limits(span)),
                 });
                 child_nodes
             }
@@ -751,6 +775,7 @@ impl Exporter {
                         .and_then(extract_string)
                         .unwrap_or_default(),
                     variables_json: HashMap::new(),
+                    limits: None,
                 });
 
                 child_nodes.push(TreeData::Execution(
@@ -766,6 +791,51 @@ impl Exporter {
             }
             _ => child_nodes,
         })
+    }
+}
+
+fn extract_limits(span: &LightSpanData) -> Limits {
+    Limits {
+        result: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_RESULT)
+            .and_then(extract_string)
+            .unwrap_or_default(),
+        strategy: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_STRATEGY)
+            .and_then(extract_string)
+            .unwrap_or_default(),
+        cost_estimated: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_ESTIMATED)
+            .and_then(extract_f64)
+            .unwrap_or_default() as u64,
+        cost_actual: span
+            .attributes
+            .get(&APOLLO_PRIVATE_COST_ACTUAL)
+            .and_then(extract_f64)
+            .unwrap_or_default() as u64,
+        depth: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_DEPTH)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
+        height: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_HEIGHT)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
+        alias_count: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_ALIASES)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
+        root_field_count: span
+            .attributes
+            .get(&APOLLO_PRIVATE_QUERY_ROOT_FIELDS)
+            .and_then(extract_i64)
+            .unwrap_or_default() as u64,
     }
 }
 
@@ -815,6 +885,14 @@ fn extract_path(v: &Value) -> Vec<ResponsePathElement> {
 
 pub(crate) fn extract_i64(v: &Value) -> Option<i64> {
     if let Value::I64(v) = v {
+        Some(*v)
+    } else {
+        None
+    }
+}
+
+pub(crate) fn extract_f64(v: &Value) -> Option<f64> {
+    if let Value::F64(v) = v {
         Some(*v)
     } else {
         None
@@ -1136,14 +1214,18 @@ impl ChildNodes for Vec<TreeData> {
 
 #[cfg(test)]
 mod test {
+    use std::time::SystemTime;
     use opentelemetry::Value;
+    use opentelemetry_api::KeyValue;
+    use opentelemetry_api::trace::{SpanId, SpanKind, TraceId};
+    use opentelemetry_sdk::trace::EvictedHashMap;
     use serde_json::json;
     use crate::plugins::telemetry::apollo::ErrorConfiguration;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::{DeferNodePrimary, DeferredNode, ResponsePathElement};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::{QueryPlanNode, Node, Error};
     use crate::plugins::telemetry::apollo_exporter::proto::reports::trace::query_plan_node::response_path_element::Id;
-    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData};
+    use crate::plugins::telemetry::tracing::apollo_telemetry::{extract_ftv1_trace, extract_ftv1_trace_with_error_count, extract_i64, extract_json, extract_path, extract_string, preprocess_errors, encode_ftv1_trace, ChildNodes, TreeData, LightSpanData, APOLLO_PRIVATE_COST_RESULT, APOLLO_PRIVATE_COST_ESTIMATED, APOLLO_PRIVATE_COST_ACTUAL, APOLLO_PRIVATE_COST_STRATEGY, extract_limits, APOLLO_PRIVATE_QUERY_ALIASES, APOLLO_PRIVATE_QUERY_DEPTH, APOLLO_PRIVATE_QUERY_HEIGHT, APOLLO_PRIVATE_QUERY_ROOT_FIELDS};
 
     fn elements(tree_data: Vec<TreeData>) -> Vec<&'static str> {
         let mut elements = Vec::new();
@@ -1483,5 +1565,59 @@ mod test {
         assert_eq!(error_count, 0);
         assert!(node.error.is_empty());
         assert!(node.child[0].error.is_empty());
+    }
+
+    #[test]
+    fn test_extract_limits() {
+        let mut span = LightSpanData {
+            trace_id: TraceId::from_u128(0),
+            span_id: SpanId::from_u64(1),
+            parent_span_id: SpanId::INVALID,
+            span_kind: SpanKind::Client,
+            name: Default::default(),
+            start_time: SystemTime::now(),
+            end_time: SystemTime::now(),
+            attributes: EvictedHashMap::new(10, 10),
+            status: Default::default(),
+        };
+
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_COST_RESULT,
+            Value::String("OK".into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_COST_ESTIMATED,
+            Value::F64(9.2),
+        ));
+        span.attributes
+            .insert(KeyValue::new(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9)));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_COST_STRATEGY,
+            Value::String("static_estimated".into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_ALIASES,
+            Value::I64(0.into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_DEPTH,
+            Value::I64(5.into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_HEIGHT,
+            Value::I64(7.into()),
+        ));
+        span.attributes.insert(KeyValue::new(
+            APOLLO_PRIVATE_QUERY_ROOT_FIELDS,
+            Value::I64(1.into()),
+        ));
+        let limits = extract_limits(&span);
+        assert_eq!(limits.result, "OK");
+        assert_eq!(limits.cost_estimated, 9);
+        assert_eq!(limits.cost_actual, 6);
+        assert_eq!(limits.alias_count, 0);
+        assert_eq!(limits.depth, 5);
+        assert_eq!(limits.height, 7);
+        assert_eq!(limits.root_field_count, 1);
     }
 }

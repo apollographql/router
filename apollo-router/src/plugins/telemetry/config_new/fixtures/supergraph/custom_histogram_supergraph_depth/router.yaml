@@ -1,0 +1,10 @@
+telemetry:
+  instrumentation:
+    instruments:
+      supergraph:
+        'query.depth':
+          description: 'The depth of the query'
+          value:
+            query: depth
+          unit: unit
+          type: histogram

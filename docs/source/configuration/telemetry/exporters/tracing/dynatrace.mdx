@@ -1,0 +1,40 @@
+---
+title: Dynatrace exporter (via OTLP)
+subtitle: Configure the Dynatrace exporter for tracing
+description: Configure the Dynatrace exporter for tracing via OpenTelemetry Protocol (OTLP) in the Apollo Router.
+---
+
+Enable and configure the [OTLP exporter](./otlp) for tracing in the Apollo Router for use with [Dynatrace](https://dynatrace.com/).
+
+For general tracing configuration, refer to [Router Tracing Configuration](./overview).
+
+## Dynatrace configuration
+
+To configure the router:
+
+- Enable the [OTLP exporter](./otlp#configuration)
+-  Set the `protocol` as `http`;  Dynatrace [doesn't currently support](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export) `grpc`
+- Provide your Dynatrace endpoint
+- Provide your Dynatrace API token in the `Authorization` header; the header should start with [`Api-token` and then your Dynatrace token](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export#authentication-export-to-activegate)
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      otlp:
+        enabled: true
+        # Endpoint for your region.
+        endpoint: <dynatrace-endpoint>
+        protocol: http
+        http:
+          headers:
+            Authorization: Api-Token <dynatrace-token>
+```
+
+<Note>
+
+You must specify `protocol: http` or the exporter will fail to connect to Dynatrace.
+
+</Note>
+
+For more details about Dynatrace configuration, see [Dynatrace's docs on OpenTelemetry configuration](https://docs.dynatrace.com/docs/extend-dynatrace/opentelemetry/getting-started/otlp-export).

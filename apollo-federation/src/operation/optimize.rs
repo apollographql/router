@@ -3,6 +3,8 @@
 //! This module contains the logic to optimize (or "compress") a subgraph query by using fragments
 //! (either reusing existing ones in the original query or generating new ones).
 //!
+//! ## Add __typename field for abstract types in named fragment definitions
+//!
 //! ## Selection/SelectionSet intersection/minus operations
 //! These set-theoretic operation methods are used to compute the optimized selection set.
 //!
@@ -39,7 +41,7 @@ use std::ops::Not;
 use std::sync::Arc;
 
 use apollo_compiler::executable;
-use apollo_compiler::executable::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 
 use super::CollectedFieldInSet;
@@ -51,7 +53,6 @@ use super::Fragment;
 use super::FragmentSpreadSelection;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
-use super::NormalizeSelectionOption;
 use super::Operation;
 use super::Selection;
 use super::SelectionKey;
@@ -60,6 +61,125 @@ use super::SelectionOrSet;
 use super::SelectionSet;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
+
+//=============================================================================
+// Add __typename field for abstract types in named fragment definitions
+
+impl NamedFragments {
+    // - Expands all nested fragments
+    // - Applies the provided `mapper` to each selection set of the expanded fragments.
+    // - Finally, re-fragments the nested fragments.
+    // - `mapper` must return a fragment-spread-free selection set.
+    fn map_to_expanded_selection_sets(
+        &self,
+        mut mapper: impl FnMut(&SelectionSet) -> Result<SelectionSet, FederationError>,
+    ) -> Result<NamedFragments, FederationError> {
+        let mut result = NamedFragments::default();
+        // Note: `self.fragments` has insertion order topologically sorted.
+        for fragment in self.fragments.values() {
+            let expanded_selection_set = fragment
+                .selection_set
+                .expand_all_fragments()?
+                .flatten_unnecessary_fragments(
+                    &fragment.type_condition_position,
+                    &Default::default(),
+                    &fragment.schema,
+                )?;
+            let mut mapped_selection_set = mapper(&expanded_selection_set)?;
+            // `mapped_selection_set` must be fragment-spread-free.
+            mapped_selection_set.optimize_at_root(&result)?;
+            let updated = Fragment {
+                selection_set: mapped_selection_set,
+                schema: fragment.schema.clone(),
+                name: fragment.name.clone(),
+                type_condition_position: fragment.type_condition_position.clone(),
+                directives: fragment.directives.clone(),
+            };
+            result.insert(updated);
+        }
+        Ok(result)
+    }
+
+    pub(crate) fn add_typename_field_for_abstract_types_in_named_fragments(
+        &self,
+    ) -> Result<Self, FederationError> {
+        // This method is a bit tricky due to potentially nested fragments. More precisely, suppose that
+        // we have:
+        //   fragment MyFragment on T {
+        //     a {
+        //       b {
+        //         ...InnerB
+        //       }
+        //     }
+        //   }
+        //
+        //   fragment InnerB on B {
+        //     __typename
+        //     x
+        //     y
+        //   }
+        // then if we were to "naively" add `__typename`, the first fragment would end up being:
+        //   fragment MyFragment on T {
+        //     a {
+        //       __typename
+        //       b {
+        //         __typename
+        //         ...InnerX
+        //       }
+        //     }
+        //   }
+        // but that's not ideal because the inner-most `__typename` is already within `InnerX`. And that
+        // gets in the way to re-adding fragments (the `SelectionSet.optimize` method) because if we start
+        // with:
+        //   {
+        //     a {
+        //       __typename
+        //       b {
+        //         __typename
+        //         x
+        //         y
+        //       }
+        //     }
+        //   }
+        // and add `InnerB` first, we get:
+        //   {
+        //     a {
+        //       __typename
+        //       b {
+        //         ...InnerB
+        //       }
+        //     }
+        //   }
+        // and it becomes tricky to recognize the "updated-with-typename" version of `MyFragment` now (we "seem"
+        // to miss a `__typename`).
+        //
+        // Anyway, to avoid this issue, what we do is that for every fragment, we:
+        //  1. expand any nested fragments in its selection.
+        //  2. add `__typename` where we should in that expanded selection.
+        //  3. re-optimize all fragments (using the "updated-with-typename" versions).
+        // which is what `mapToExpandedSelectionSets` gives us.
+
+        if self.is_empty() {
+            // PORT_NOTE: This was an assertion failure in JS version. But, it's actually ok to
+            // return unchanged if empty.
+            return Ok(self.clone());
+        }
+        let updated = self.map_to_expanded_selection_sets(|ss| {
+            // Note: Since `ss` won't have any fragment spreads, `add_typename_field_for_abstract_types`'s return
+            // value won't have any fragment spreads.
+            ss.add_typename_field_for_abstract_types(/*parent_type_if_abstract*/ None)
+        })?;
+        // PORT_NOTE: The JS version asserts if `updated` is empty or not. But, we really want to
+        // check the `updated` has the same set of fragments. To avoid performance hit, only the
+        // size is checked here.
+        if updated.size() != self.size() {
+            return Err(FederationError::internal(
+                "Unexpected change in the number of fragments",
+            ));
+        }
+        Ok(updated)
+    }
+}
 
 //=============================================================================
 // Selection/SelectionSet intersection/minus operations
@@ -250,6 +370,7 @@ struct FieldsConflictValidator {
 }
 
 impl FieldsConflictValidator {
+    // `selection_set` must be fragment-spread-free.
     fn from_selection_set(selection_set: &SelectionSet) -> Self {
         Self::for_level(&selection_set.fields_in_set())
     }
@@ -259,7 +380,7 @@ impl FieldsConflictValidator {
         let mut at_level: HashMap<Name, HashMap<Field, Option<Vec<CollectedFieldInSet>>>> =
             HashMap::new();
         for collected_field in level {
-            let response_name = collected_field.field().field.data().response_name();
+            let response_name = collected_field.field().field.response_name();
             let at_response_name = at_level.entry(response_name).or_default();
             if let Some(ref field_selection_set) = collected_field.field().selection_set {
                 at_response_name
@@ -293,8 +414,7 @@ impl FieldsConflictValidator {
     }
 
     fn for_field(&self, field: &Field) -> Vec<Arc<Self>> {
-        let Some(by_response_name) = self.by_response_name.get(&field.data().response_name())
-        else {
+        let Some(by_response_name) = self.by_response_name.get(&field.response_name()) else {
             return Vec::new();
         };
         by_response_name.values().flatten().cloned().collect()
@@ -349,8 +469,8 @@ impl FieldsConflictValidator {
                     if p1 == p2 || !p1.is_object_type() || !p2.is_object_type() {
                         // Additional checks of `FieldsInSetCanMerge` when same parent type or one
                         // isn't object
-                        if self_field.data().name() != other_field.data().name()
-                            || self_field.data().arguments != other_field.data().arguments
+                        if self_field.name() != other_field.name()
+                            || self_field.arguments != other_field.arguments
                         {
                             return Ok(false);
                         }
@@ -527,11 +647,10 @@ impl Fragment {
         ty: &CompositeTypeDefinitionPosition,
     ) -> Result<FragmentRestrictionAtType, FederationError> {
         let expanded_selection_set = self.selection_set.expand_all_fragments()?;
-        let normalized_selection_set = expanded_selection_set.normalize(
+        let normalized_selection_set = expanded_selection_set.flatten_unnecessary_fragments(
             ty,
             /*named_fragments*/ &Default::default(),
             &self.schema,
-            NormalizeSelectionOption::NormalizeRecursively,
         )?;
 
         if !self.type_condition_position.is_object_type() {
@@ -840,15 +959,15 @@ impl Selection {
     ) -> Result<SelectionOrSet, FederationError> {
         match self {
             Selection::FragmentSpread(fragment) => {
-                if fragments_to_keep.contains(&fragment.spread.data().fragment_name) {
+                if fragments_to_keep.contains(&fragment.spread.fragment_name) {
                     // Keep this spread
                     Ok(self.clone().into())
                 } else {
                     // Expand the fragment
                     let expanded_sub_selections =
                         fragment.selection_set.retain_fragments(fragments_to_keep)?;
-                    if *parent_type == fragment.spread.data().type_condition_position
-                        && fragment.spread.data().directives.is_empty()
+                    if *parent_type == fragment.spread.type_condition_position
+                        && fragment.spread.directives.is_empty()
                     {
                         // The fragment is of the same type as the parent, so we can just use
                         // the expanded sub-selections directly.
@@ -858,7 +977,7 @@ impl Selection {
                         let inline = InlineFragmentSelection::from_selection_set(
                             parent_type.clone(),
                             expanded_sub_selections,
-                            fragment.spread.data().directives.clone(),
+                            fragment.spread.directives.clone(),
                         );
                         Ok(Selection::from(inline).into())
                     }
@@ -966,11 +1085,11 @@ impl NamedFragments {
             // If we've expanded some fragments but kept others, then it's not 100% impossible that
             // some fragment was used multiple times in some expanded fragment(s), but that
             // post-expansion all of it's usages are "dead" branches that are removed by the final
-            // `normalize`. In that case though, we need to ensure we don't include the now-unused
+            // `flatten_unnecessary_fragments`. In that case though, we need to ensure we don't include the now-unused
             // fragment in the final list of fragments.
             // TODO: remark that the same reasoning could leave a single instance of a fragment
             // usage, so if we really really want to never have less than `minUsagesToOptimize`, we
-            // could do some loop of `expand then normalize` unless all fragments are provably used
+            // could do some loop of `expand then flatten` unless all fragments are provably used
             // enough. We don't bother, because leaving this is not a huge deal and it's not worth
             // the complexity, but it could be that we can refactor all this later to avoid this
             // case without additional complexity.
@@ -1042,11 +1161,10 @@ impl NamedFragments {
             Node::make_mut(fragment).selection_set = fragment
                 .selection_set
                 .retain_fragments(&fragments_to_keep)?
-                .normalize(
+                .flatten_unnecessary_fragments(
                     &fragment.selection_set.type_position,
                     &fragments_to_keep,
                     &fragment.schema,
-                    NormalizeSelectionOption::NormalizeRecursively,
                 )?;
         }
 
@@ -1059,13 +1177,12 @@ impl NamedFragments {
         let reduced_selection_set = selection_set.retain_fragments(self)?;
 
         // Expanding fragments could create some "inefficiencies" that we wouldn't have if we
-        // hadn't re-optimized the fragments to de-optimize it later, so we do a final "normalize"
+        // hadn't re-optimized the fragments to de-optimize it later, so we do a final "flatten"
         // pass to remove those.
-        reduced_selection_set.normalize(
+        reduced_selection_set.flatten_unnecessary_fragments(
             &reduced_selection_set.type_position,
             self,
             &selection_set.schema,
-            NormalizeSelectionOption::NormalizeRecursively,
         )
     }
 
@@ -1105,7 +1222,7 @@ impl FieldSelection {
         validator: &mut FieldsConflictMultiBranchValidator,
     ) -> Result<Self, FederationError> {
         let Some(base_composite_type): Option<CompositeTypeDefinitionPosition> =
-            self.field.data().output_base_type()?.try_into().ok()
+            self.field.output_base_type()?.try_into().ok()
         else {
             return Ok(self.clone());
         };
@@ -1167,7 +1284,7 @@ impl InlineFragmentSelection {
     ) -> Result<InlineOrFragmentSelection, FederationError> {
         let mut optimized = self.selection_set.clone();
 
-        let type_condition_position = &self.inline_fragment.data().type_condition_position;
+        let type_condition_position = &self.inline_fragment.type_condition_position;
         if let Some(type_condition_position) = type_condition_position {
             let opt = self.selection_set.try_optimize_with_fragments(
                 type_condition_position,
@@ -1175,7 +1292,7 @@ impl InlineFragmentSelection {
                 validator,
                 FullMatchingFragmentCondition::ForInlineFragmentSelection {
                     type_condition_position,
-                    directives: &self.inline_fragment.data().directives,
+                    directives: &self.inline_fragment.directives,
                 },
             )?;
 
@@ -1196,7 +1313,6 @@ impl InlineFragmentSelection {
                         //            is handled differently in Rust version (see `FragmentSpreadData`).
                         let directives: executable::DirectiveList = self
                             .inline_fragment
-                            .data()
                             .directives
                             .iter()
                             .filter(|d1| !fragment.directives.iter().any(|d2| *d1 == d2))
@@ -1246,8 +1362,9 @@ impl SelectionSet {
         })
     }
 
-    /// Specialized version of `optimize` for top-level sub-selections under Operation
-    /// or Fragment.
+    // Specialized version of `optimize` for top-level sub-selections under Operation
+    // or Fragment.
+    // - `self` must be fragment-spread-free.
     pub(crate) fn optimize_at_root(
         &mut self,
         fragments: &NamedFragments,
@@ -1308,7 +1425,8 @@ impl Operation {
     //            However, it's only used in tests. So, it's removed in the Rust version.
     const DEFAULT_MIN_USAGES_TO_OPTIMIZE: u32 = 2;
 
-    /// `fragments` - rebased fragment definitions for the operation's subgraph
+    // `fragments` - rebased fragment definitions for the operation's subgraph
+    // - `self.selection_set` must be fragment-spread-free.
     fn optimize_internal(
         &mut self,
         fragments: &NamedFragments,
@@ -1352,12 +1470,14 @@ impl Operation {
     // PORT_NOTE: This mirrors the JS version's `Operation.expandAllFragments`. But this method is
     // mainly for unit tests. The actual port of `expandAllFragments` is in `normalize_operation`.
     fn expand_all_fragments_and_normalize(&self) -> Result<Self, FederationError> {
-        let selection_set = self.selection_set.expand_all_fragments()?.normalize(
-            &self.selection_set.type_position,
-            &self.named_fragments,
-            &self.schema,
-            NormalizeSelectionOption::NormalizeRecursively,
-        )?;
+        let selection_set = self
+            .selection_set
+            .expand_all_fragments()?
+            .flatten_unnecessary_fragments(
+                &self.selection_set.type_position,
+                &self.named_fragments,
+                &self.schema,
+            )?;
         Ok(Self {
             named_fragments: Default::default(),
             selection_set,
@@ -1371,48 +1491,8 @@ impl Operation {
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::schema::Schema;
-
     use super::*;
-    use crate::schema::ValidFederationSchema;
-
-    fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
-        let schema = Schema::parse_and_validate(schema_doc, "schema.graphql").unwrap();
-        ValidFederationSchema::new(schema).unwrap()
-    }
-
-    fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
-        let executable_document = apollo_compiler::ExecutableDocument::parse_and_validate(
-            schema.schema(),
-            query,
-            "query.graphql",
-        )
-        .unwrap();
-        let operation = executable_document.get_operation(None).unwrap();
-        let named_fragments = NamedFragments::new(&executable_document.fragments, schema);
-        let selection_set =
-            SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
-                .unwrap();
-
-        Operation {
-            schema: schema.clone(),
-            root_kind: operation.operation_type.into(),
-            name: operation.name.clone(),
-            variables: Arc::new(operation.variables.clone()),
-            directives: Arc::new(operation.directives.clone()),
-            selection_set,
-            named_fragments,
-        }
-    }
-
-    fn validate_operation(schema: &ValidFederationSchema, query: &str) {
-        apollo_compiler::ExecutableDocument::parse_and_validate(
-            schema.schema(),
-            query,
-            "query.graphql",
-        )
-        .unwrap();
-    }
+    use crate::operation::tests::*;
 
     macro_rules! assert_without_fragments {
         ($operation: expr, @$expected: literal) => {{
@@ -2591,7 +2671,7 @@ mod tests {
         //   }
         // }
         // and so `Inner` will not be expanded (it's used twice). Except that
-        // the `normalize` code is apply then and will _remove_ both instances
+        // the `flatten_unnecessary_fragments` code is apply then and will _remove_ both instances
         // of `.... Inner`. Which is ok, but we must make sure the fragment
         // itself is removed since it is not used now, which this test ensures.
         assert_optimized!(expanded, operation.named_fragments, @r###"
@@ -2972,6 +3052,8 @@ mod tests {
     ///
 
     mod test_empty_branch_removal {
+        use apollo_compiler::name;
+
         use super::*;
 
         const TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL: &str = r#"
@@ -2992,85 +3074,188 @@ mod tests {
             }
         "#;
 
-        fn without_empty_branches(query: &str) -> String {
-            let operation =
-                parse_operation(&parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL), query);
+        fn operation_without_empty_branches(operation: &Operation) -> Option<String> {
             operation
                 .selection_set
                 .without_empty_branches()
                 .unwrap()
-                .unwrap()
-                .to_string()
+                .map(|s| s.to_string())
+        }
+
+        fn without_empty_branches(query: &str) -> Option<String> {
+            let operation =
+                parse_operation(&parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL), query);
+            operation_without_empty_branches(&operation)
+        }
+
+        // To test `without_empty_branches` method, we need to test operations with empty selection
+        // sets. However, such operations can't be constructed from strings, since the parser will
+        // reject them. Thus, we first create a valid query with non-empty selection sets and then
+        // clear some of them.
+        // PORT_NOTE: The JS tests use `astSSet` function to construct queries with
+        // empty selection sets using graphql-js's SelectionSetNode API. In Rust version,
+        // instead of re-creating such API, we will selectively clear selection sets.
+
+        fn clear_selection_set_at_path(
+            ss: &mut SelectionSet,
+            path: &[Name],
+        ) -> Result<(), FederationError> {
+            match path.split_first() {
+                None => {
+                    // Base case
+                    Arc::make_mut(&mut ss.selections).clear();
+                    Ok(())
+                }
+
+                Some((first, rest)) => {
+                    let result = Arc::make_mut(&mut ss.selections).get_mut(&SelectionKey::Field {
+                        response_name: (*first).clone(),
+                        directives: Default::default(),
+                    });
+                    let Some(mut value) = result else {
+                        return Err(FederationError::internal("No matching field found"));
+                    };
+                    match value.get_selection_set_mut() {
+                        None => Err(FederationError::internal(
+                            "Sub-selection expected, but not found.",
+                        )),
+                        Some(sub_selection_set) => {
+                            // Recursive case
+                            clear_selection_set_at_path(sub_selection_set, rest)?;
+                            Ok(())
+                        }
+                    }
+                }
+            }
         }
 
         #[test]
         fn operation_not_modified_if_no_empty_branches() {
             let test_vec = vec!["{ t { a } }", "{ t { a b } }", "{ t { a c { x y } } }"];
             for query in test_vec {
-                assert_eq!(without_empty_branches(query), query);
+                assert_eq!(without_empty_branches(query).unwrap(), query);
             }
         }
 
         #[test]
-        // TODO: port `SelectionSetNode`
         fn removes_simple_empty_branches() {
-            //it('removes simple empty branches', () => {
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('a'),
-            //           astField('c', astSSet()),
-            //         ))
-            //       )
-            //     )).toBe('{ t { a } }');
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //           astField('a'),
-            //         ))
-            //       )
-            //     )).toBe('{ t { a } }');
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet())
-            //       )
-            //     )).toBeUndefined();
-            //   });
+            {
+                // query to test: "{ t { a c { } } }"
+                let expected = "{ t { a } }";
+
+                // Since the parser won't accept empty selection set, we first create
+                // a valid query and then clear the selection set.
+                let valid_query = r#"{ t { a c { x } } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                // Note: Unfortunately, this assertion won't work since SelectionSet.to_string() can't
+                // display empty selection set.
+                // assert_eq!(operation.selection_set.to_string(), "{ t { a c { } } }");
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
+
+            {
+                // query to test: "{ t { c { } a } }"
+                let expected = "{ t { a } }";
+
+                let valid_query = r#"{ t { c { x } a } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
+
+            {
+                // query to test: "{ t { } }"
+                let expected = None;
+
+                let valid_query = r#"{ t { a } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(&mut operation.selection_set, &[name!("t")]).unwrap();
+                assert_eq!(operation_without_empty_branches(&operation), expected);
+            }
         }
 
         #[test]
-        // TODO: port `SelectionSetNode`
         fn removes_cascading_empty_branches() {
-            //it('removes cascading empty branches', () => {
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //         ))
-            //       )
-            //     )).toBeUndefined();
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('u'),
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //         ))
-            //       )
-            //     )).toBe('{ u }');
-            //
-            //     expect(withoutEmptyBranches(
-            //       astSSet(
-            //         astField('t', astSSet(
-            //           astField('c', astSSet()),
-            //         )),
-            //         astField('u'),
-            //       )
-            //     )).toBe('{ u }');
-            //   });
+            {
+                // query to test: "{ t { c { } } }"
+                let expected = None;
+
+                let valid_query = r#"{ t { c { x } } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(operation_without_empty_branches(&operation), expected);
+            }
+
+            {
+                // query to test: "{ u t { c { } } }"
+                let expected = "{ u }";
+
+                let valid_query = r#"{ u t { c { x } } }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
+
+            {
+                // query to test: "{ t { c { } } u }"
+                let expected = "{ u }";
+
+                let valid_query = r#"{ t { c { x } } u }"#;
+                let mut operation = parse_operation(
+                    &parse_schema(TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL),
+                    valid_query,
+                );
+                clear_selection_set_at_path(
+                    &mut operation.selection_set,
+                    &[name!("t"), name!("c")],
+                )
+                .unwrap();
+                assert_eq!(
+                    operation_without_empty_branches(&operation).unwrap(),
+                    expected
+                );
+            }
         }
     }
 }

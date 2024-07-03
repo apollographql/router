@@ -6,7 +6,7 @@ telemetry:
           description: "count of requests"
           type: histogram
           unit: "unit"
-          value: field_unit
+          value: unit
           attributes:
             graphql.field.name: true
             graphql.field.type: true

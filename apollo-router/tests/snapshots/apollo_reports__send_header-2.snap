@@ -165,6 +165,36 @@ traces_per_query:
                                         ResponseName: name
                                   id:
                                     Index: 2
+                                - original_field_name: ""
+                                  type: ""
+                                  parent_type: ""
+                                  cache_policy: ~
+                                  start_time: "[start_time]"
+                                  end_time: "[end_time]"
+                                  error: []
+                                  child:
+                                    - original_field_name: ""
+                                      type: String!
+                                      parent_type: Product
+                                      cache_policy: ~
+                                      start_time: "[start_time]"
+                                      end_time: "[end_time]"
+                                      error: []
+                                      child: []
+                                      id:
+                                        ResponseName: upc
+                                    - original_field_name: ""
+                                      type: String
+                                      parent_type: Product
+                                      cache_policy: ~
+                                      start_time: "[start_time]"
+                                      end_time: "[end_time]"
+                                      error: []
+                                      child: []
+                                      id:
+                                        ResponseName: name
+                                  id:
+                                    Index: 3
                               id:
                                 ResponseName: topProducts
                           id: ~
@@ -409,6 +439,26 @@ traces_per_query:
                                               ResponseName: reviews
                                         id:
                                           Index: 2
+                                      - original_field_name: ""
+                                        type: ""
+                                        parent_type: ""
+                                        cache_policy: ~
+                                        start_time: "[start_time]"
+                                        end_time: "[end_time]"
+                                        error: []
+                                        child:
+                                          - original_field_name: ""
+                                            type: "[Review]"
+                                            parent_type: Product
+                                            cache_policy: ~
+                                            start_time: "[start_time]"
+                                            end_time: "[end_time]"
+                                            error: []
+                                            child: []
+                                            id:
+                                              ResponseName: reviews
+                                        id:
+                                          Index: 3
                                     id:
                                       ResponseName: _entities
                                 id: ~
@@ -552,7 +602,15 @@ traces_per_query:
         registered_operation: false
         forbidden_operation: false
         field_execution_weight: 1
-        limits: ~
+        limits:
+          result: ""
+          strategy: ""
+          cost_estimated: 0
+          cost_actual: 0
+          depth: 4
+          height: 7
+          alias_count: 0
+          root_field_count: 1
     stats_with_context: []
     referenced_fields_by_type: {}
     query_metadata: ~

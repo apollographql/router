@@ -8,6 +8,9 @@ use tower::BoxError;
 
 use crate::context::OPERATION_NAME;
 use crate::plugins::telemetry::config::AttributeValue;
+use crate::plugins::telemetry::config_new::instruments;
+use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::StandardUnit;
 use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::Context;
@@ -45,6 +48,24 @@ pub(crate) enum FieldType {
 pub(crate) enum TypeName {
     /// The GraphQL type name
     String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum GraphQLValue {
+    Unit(StandardUnit),
+    Custom(GraphQLSelector),
+}
+
+impl From<&GraphQLValue> for InstrumentValue<GraphQLSelector> {
+    fn from(value: &GraphQLValue) -> Self {
+        match value {
+            GraphQLValue::Unit(_) => InstrumentValue::Field(instruments::Field::Unit),
+            GraphQLValue::Custom(selector) => {
+                InstrumentValue::Field(instruments::Field::Custom(selector.clone()))
+            }
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
@@ -169,7 +190,7 @@ mod tests {
             list_length: ListLength::Value,
         };
         let result = selector.on_response_field(
-            ty(),
+            &ty(),
             field(),
             &json!(vec![true, true, true]),
             &Context::default(),
@@ -182,7 +203,7 @@ mod tests {
         let selector = GraphQLSelector::FieldName {
             field_name: FieldName::String,
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("field_name".into())));
     }
 
@@ -191,14 +212,14 @@ mod tests {
         let selector = GraphQLSelector::FieldType {
             field_type: FieldType::Name,
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("field_type".into())));
     }
 
     #[test]
     fn field_type_scalar_type() {
-        assert_scalar(ty(), field(), &json!("value"));
-        assert_scalar(ty(), field(), &json!(1));
+        assert_scalar(&ty(), field(), &json!("value"));
+        assert_scalar(&ty(), field(), &json!(1));
     }
 
     fn assert_scalar(ty: &NamedType, field: &Field, value: &serde_json_bytes::Value) {
@@ -214,7 +235,7 @@ mod tests {
         let selector = GraphQLSelector::FieldType {
             field_type: FieldType::Type,
         };
-        let result = selector.on_response_field(ty(), field(), &json!({}), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!({}), &Context::default());
         assert_eq!(result, Some(Value::String("object".into())));
     }
 
@@ -224,7 +245,7 @@ mod tests {
             field_type: FieldType::Type,
         };
         let result =
-            selector.on_response_field(ty(), field(), &json!(vec![true]), &Context::default());
+            selector.on_response_field(&ty(), field(), &json!(vec![true]), &Context::default());
         assert_eq!(result, Some(Value::String("list".into())));
     }
 
@@ -233,7 +254,8 @@ mod tests {
         let selector = GraphQLSelector::TypeName {
             type_name: TypeName::String,
         };
-        let result = selector.on_response_field(ty(), field(), &json!("true"), &Context::default());
+        let result =
+            selector.on_response_field(&ty(), field(), &json!("true"), &Context::default());
         assert_eq!(result, Some(Value::String("type_name".into())));
     }
 
@@ -242,7 +264,7 @@ mod tests {
         let selector = GraphQLSelector::StaticField {
             r#static: "static_value".into(),
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("static_value".into())));
     }
 
@@ -254,7 +276,7 @@ mod tests {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "some-operation".to_string());
-        let result = selector.on_response_field(ty(), field(), &json!(true), &ctx);
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &ctx);
         assert_eq!(result, Some(Value::String("some-operation".into())));
     }
 
@@ -266,7 +288,7 @@ mod tests {
         };
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "some-operation".to_string());
-        let result = selector.on_response_field(ty(), field(), &json!(true), &ctx);
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &ctx);
         assert_eq!(
             result,
             Some(Value::String(
@@ -281,7 +303,7 @@ mod tests {
             operation_name: OperationName::String,
             default: Some("no-operation".to_string()),
         };
-        let result = selector.on_response_field(ty(), field(), &json!(true), &Context::default());
+        let result = selector.on_response_field(&ty(), field(), &json!(true), &Context::default());
         assert_eq!(result, Some(Value::String("no-operation".into())));
     }
 }

@@ -18,7 +18,7 @@ pub(crate) mod attributes;
 pub(crate) mod conditions;
 
 mod conditional;
-mod cost;
+pub(crate) mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
 pub(crate) mod extendable;
@@ -122,7 +122,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
     if span_context.is_valid() {
         Some(span_context.trace_id())
     } else {
-        None
+        crate::tracer::TraceId::current().map(|trace_id| TraceId::from(trace_id.to_u128()))
     }
 }
 
@@ -214,10 +214,9 @@ mod test {
 
     use apollo_compiler::ast::FieldDefinition;
     use apollo_compiler::ast::NamedType;
-    use apollo_compiler::ast::Type;
     use apollo_compiler::executable::Field;
+    use apollo_compiler::name;
     use apollo_compiler::Node;
-    use apollo_compiler::NodeStr;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
@@ -239,22 +238,19 @@ mod test {
         static FIELD: OnceLock<Field> = OnceLock::new();
         FIELD.get_or_init(|| {
             Field::new(
-                NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                name!("field_name"),
                 Node::new(FieldDefinition {
                     description: None,
-                    name: NamedType::new_unchecked(NodeStr::from_static(&"field_name")),
+                    name: name!("field_name"),
                     arguments: vec![],
-                    ty: Type::Named(NamedType::new_unchecked(NodeStr::from_static(
-                        &"field_type",
-                    ))),
+                    ty: apollo_compiler::ty!(field_type),
                     directives: Default::default(),
                 }),
             )
         })
     }
-    pub(crate) fn ty() -> &'static NamedType {
-        static TYPE: NamedType = NamedType::new_unchecked(NodeStr::from_static(&"type_name"));
-        &TYPE
+    pub(crate) fn ty() -> NamedType {
+        name!("type_name")
     }
 
     #[test]
@@ -270,7 +266,7 @@ mod test {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
+                TraceId::from(42),
                 SpanId::from_u64(42),
                 TraceFlags::default(),
                 false,

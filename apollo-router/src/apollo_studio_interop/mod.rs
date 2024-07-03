@@ -5,10 +5,11 @@ use std::collections::HashMap;
 use std::collections::HashSet;
 use std::fmt;
 use std::fmt::Write;
+use std::ops::AddAssign;
+use std::sync::Arc;
 
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::DirectiveList;
-use apollo_compiler::ast::Name;
 use apollo_compiler::ast::OperationType;
 use apollo_compiler::ast::Value;
 use apollo_compiler::ast::VariableDefinition;
@@ -19,14 +20,147 @@ use apollo_compiler::executable::InlineFragment;
 use apollo_compiler::executable::Operation;
 use apollo_compiler::executable::Selection;
 use apollo_compiler::executable::SelectionSet;
+use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use router_bridge::planner::ReferencedFieldsForType;
 use router_bridge::planner::UsageReporting;
+use serde::Serialize;
 
+use crate::json_ext::Object;
+use crate::json_ext::Value as JsonValue;
 use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
+use crate::spec::Fragments;
+use crate::spec::Query;
+use crate::spec::Selection as SpecSelection;
+
+/// The stats for a single execution of an input object field.
+#[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct InputObjectFieldStats {
+    /// True if the input object field was referenced.
+    pub(crate) referenced: bool,
+    /// True if the input object field was referenced but the value was null.
+    pub(crate) null_reference: bool,
+    /// True if the input object field was missing or undefined.
+    pub(crate) undefined_reference: bool,
+}
+
+/// The stats for a an input object field across multiple executions.
+#[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct AggregatedInputObjectFieldStats {
+    /// The number of executions where the field was referenced.
+    pub(crate) referenced: u64,
+    /// The number of executions where the field was referenced with a null value.
+    pub(crate) null_reference: u64,
+    /// The number of executions where the field was missing or undefined.
+    pub(crate) undefined_reference: u64,
+}
+
+pub(crate) type ReferencedEnums = HashMap<String, HashSet<String>>;
+
+/// The result of the generate_extended_references function which contains input object field and
+/// enum value stats for a single execution.
+#[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct ExtendedReferenceStats {
+    /// A map of parent type to a map of field name to stats
+    pub(crate) referenced_input_fields: HashMap<String, HashMap<String, InputObjectFieldStats>>,
+    /// A map of enum name to a set of enum values that were referenced
+    pub(crate) referenced_enums: ReferencedEnums,
+}
+
+/// The aggregation of ExtendedReferenceStats across a number of executions.
+#[derive(Clone, Default, Debug, Serialize)]
+pub(crate) struct AggregatedExtendedReferenceStats {
+    /// A map of parent type to a map of field name to aggregated stats
+    pub(crate) referenced_input_fields:
+        HashMap<String, HashMap<String, AggregatedInputObjectFieldStats>>,
+    /// A map of enum name to a map of enum values to the number of executions that referenced them.
+    pub(crate) referenced_enums: HashMap<String, HashMap<String, u64>>,
+}
+
+impl AggregatedExtendedReferenceStats {
+    pub(crate) fn is_empty(&self) -> bool {
+        self.referenced_input_fields.is_empty() && self.referenced_enums.is_empty()
+    }
+}
+
+impl AddAssign<ExtendedReferenceStats> for AggregatedExtendedReferenceStats {
+    fn add_assign(&mut self, other_stats: ExtendedReferenceStats) {
+        // Not using entry API here due to performance impact
+
+        // Merge input object references
+        for (type_name, type_stats) in other_stats.referenced_input_fields.iter() {
+            let field_name_stats = match self.referenced_input_fields.get_mut(type_name) {
+                Some(existing_stats) => existing_stats,
+                None => {
+                    self.referenced_input_fields
+                        .insert(type_name.to_string(), HashMap::new());
+                    self.referenced_input_fields.get_mut(type_name).unwrap()
+                }
+            };
+
+            for (field_name, field_stats) in type_stats.iter() {
+                let ref_count = if field_stats.referenced { 1 } else { 0 };
+                let null_ref_count = if field_stats.null_reference { 1 } else { 0 };
+                let undefined_ref_count = if field_stats.undefined_reference {
+                    1
+                } else {
+                    0
+                };
+
+                match field_name_stats.get_mut(field_name) {
+                    Some(existing_stats) => {
+                        existing_stats.referenced += ref_count;
+                        existing_stats.null_reference += null_ref_count;
+                        existing_stats.undefined_reference += undefined_ref_count;
+                    }
+                    None => {
+                        field_name_stats.insert(
+                            field_name.to_string(),
+                            AggregatedInputObjectFieldStats {
+                                referenced: ref_count,
+                                null_reference: null_ref_count,
+                                undefined_reference: undefined_ref_count,
+                            },
+                        );
+                    }
+                };
+            }
+        }
+
+        *self += other_stats.referenced_enums;
+    }
+}
+
+impl AddAssign<ReferencedEnums> for AggregatedExtendedReferenceStats {
+    fn add_assign(&mut self, other_enum_stats: ReferencedEnums) {
+        // Not using entry API here due to performance impact
+        for (enum_name, enum_values) in other_enum_stats.iter() {
+            let enum_name_stats = match self.referenced_enums.get_mut(enum_name) {
+                Some(existing_stats) => existing_stats,
+                None => {
+                    self.referenced_enums
+                        .insert(enum_name.to_string(), HashMap::new());
+                    self.referenced_enums
+                        .get_mut(enum_name)
+                        .expect("value is expected to be in map")
+                }
+            };
+
+            for enum_value in enum_values.iter() {
+                match enum_name_stats.get_mut(enum_value) {
+                    Some(existing_stats) => *existing_stats += 1,
+                    None => {
+                        enum_name_stats.insert(enum_value.to_string(), 1);
+                    }
+                };
+            }
+        }
+    }
+}
 
 /// The result of the generate_usage_reporting function which contains a UsageReporting struct and
 /// functions that allow comparison with another ComparableUsageReporting or UsageReporting object.
@@ -104,35 +238,175 @@ pub(crate) fn generate_usage_reporting(
     schema: &Valid<Schema>,
     normalization_algorithm: &ApolloSignatureNormalizationAlgorithm,
 ) -> ComparableUsageReporting {
-    let mut generator = UsageReportingGenerator {
+    let mut generator = UsageGenerator {
         signature_doc,
         references_doc,
         operation_name,
         schema,
         normalization_algorithm,
+        variables: &Object::new(),
         fragments_map: HashMap::new(),
         fields_by_type: HashMap::new(),
         fields_by_interface: HashMap::new(),
+        enums_by_name: HashMap::new(),
+        input_field_references: HashMap::new(),
         fragment_spread_set: HashSet::new(),
     };
 
-    generator.generate()
+    generator.generate_usage_reporting()
 }
 
-struct UsageReportingGenerator<'a> {
+pub(crate) fn generate_extended_references(
+    doc: Arc<Valid<ExecutableDocument>>,
+    operation_name: Option<String>,
+    schema: &Valid<Schema>,
+    variables: &Object,
+) -> ExtendedReferenceStats {
+    let mut generator = UsageGenerator {
+        signature_doc: &doc,
+        references_doc: &doc,
+        operation_name: &operation_name,
+        schema,
+        normalization_algorithm: &ApolloSignatureNormalizationAlgorithm::default(),
+        variables,
+        fragments_map: HashMap::new(),
+        fields_by_type: HashMap::new(),
+        fields_by_interface: HashMap::new(),
+        enums_by_name: HashMap::new(),
+        input_field_references: HashMap::new(),
+        fragment_spread_set: HashSet::new(),
+    };
+
+    generator.generate_extended_references()
+}
+
+pub(crate) fn extract_enums_from_response(
+    query: Arc<Query>,
+    operation_name: Option<&str>,
+    schema: &Valid<Schema>,
+    response_body: &Object,
+) -> ReferencedEnums {
+    let mut result = ReferencedEnums::new();
+    if let Some(operation) = query.operation(operation_name) {
+        extract_enums_from_selection_set(
+            &operation.selection_set,
+            &query.fragments,
+            schema,
+            response_body,
+            &mut result,
+        );
+    }
+    result
+}
+
+fn add_enum_value_to_map(
+    enum_name: &Name,
+    enum_value: &JsonValue,
+    referenced_enums: &mut ReferencedEnums,
+) {
+    match enum_value {
+        JsonValue::String(val_str) => {
+            // Not using entry API here due to performance impact
+            let enum_name_stats = match referenced_enums.get_mut(enum_name.as_str()) {
+                Some(existing_stats) => existing_stats,
+                None => {
+                    referenced_enums.insert(enum_name.to_string(), HashSet::new());
+                    referenced_enums
+                        .get_mut(enum_name.as_str())
+                        .expect("value is expected to be in map")
+                }
+            };
+
+            enum_name_stats.insert(val_str.as_str().to_string());
+        }
+        JsonValue::Array(val_list) => {
+            for val in val_list {
+                add_enum_value_to_map(enum_name, val, referenced_enums);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn extract_enums_from_selection_set(
+    selection_set: &[SpecSelection],
+    fragments: &Fragments,
+    schema: &Valid<Schema>,
+    selection_response: &Object,
+    result_set: &mut ReferencedEnums,
+) {
+    for selection in selection_set.iter() {
+        match selection {
+            SpecSelection::Field {
+                name,
+                alias,
+                field_type,
+                selection_set,
+                ..
+            } => {
+                let field_name = alias.as_ref().unwrap_or(name).as_str();
+                if let Some(field_value) = selection_response.get(field_name) {
+                    let field_type_def = schema.types.get(field_type.0.inner_named_type());
+
+                    // If the value is an enum, we want to add all values to the map
+                    if let Some(ExtendedType::Enum(enum_type)) = field_type_def {
+                        add_enum_value_to_map(&enum_type.name, field_value, result_set);
+                    }
+                    // Otherwise if the response value is an object, add any enums from the field's selection set
+                    else if let JsonValue::Object(value_object) = field_value {
+                        if let Some(selection_set) = selection_set {
+                            extract_enums_from_selection_set(
+                                selection_set,
+                                fragments,
+                                schema,
+                                value_object,
+                                result_set,
+                            );
+                        }
+                    }
+                }
+            }
+            SpecSelection::InlineFragment { selection_set, .. } => {
+                extract_enums_from_selection_set(
+                    selection_set,
+                    fragments,
+                    schema,
+                    selection_response,
+                    result_set,
+                );
+            }
+            SpecSelection::FragmentSpread { name, .. } => {
+                if let Some(fragment) = fragments.get(name) {
+                    extract_enums_from_selection_set(
+                        &fragment.selection_set,
+                        fragments,
+                        schema,
+                        selection_response,
+                        result_set,
+                    );
+                }
+            }
+        }
+    }
+}
+
+struct UsageGenerator<'a> {
     signature_doc: &'a ExecutableDocument,
     references_doc: &'a ExecutableDocument,
     operation_name: &'a Option<String>,
     schema: &'a Valid<Schema>,
     normalization_algorithm: &'a ApolloSignatureNormalizationAlgorithm,
+    variables: &'a Object,
     fragments_map: HashMap<String, Node<Fragment>>,
     fields_by_type: HashMap<String, HashSet<String>>,
     fields_by_interface: HashMap<String, bool>,
+    enums_by_name: HashMap<String, HashSet<String>>,
+    input_field_references: HashMap<String, HashMap<String, InputObjectFieldStats>>,
     fragment_spread_set: HashSet<Name>,
 }
 
-impl UsageReportingGenerator<'_> {
-    fn generate(&mut self) -> ComparableUsageReporting {
+impl UsageGenerator<'_> {
+    fn generate_usage_reporting(&mut self) -> ComparableUsageReporting {
         ComparableUsageReporting {
             result: UsageReporting {
                 stats_report_key: self.generate_stats_report_key(),
@@ -214,7 +488,7 @@ impl UsageReportingGenerator<'_> {
     }
 
     fn generate_apollo_reporting_refs(&mut self) -> HashMap<String, ReferencedFieldsForType> {
-        self.fragments_map.clear();
+        self.fragment_spread_set.clear();
         self.fields_by_type.clear();
         self.fields_by_interface.clear();
 
@@ -300,6 +574,225 @@ impl UsageReportingGenerator<'_> {
                 }
             }
         }
+    }
+
+    fn generate_extended_references(&mut self) -> ExtendedReferenceStats {
+        self.fragment_spread_set.clear();
+        self.enums_by_name.clear();
+        self.input_field_references.clear();
+
+        if let Ok(operation) = self
+            .references_doc
+            .get_operation(self.operation_name.as_deref())
+        {
+            self.process_extended_refs_for_selection_set(&operation.selection_set);
+        }
+
+        ExtendedReferenceStats {
+            referenced_input_fields: self.input_field_references.clone(),
+            referenced_enums: self.enums_by_name.clone(),
+        }
+    }
+
+    fn add_enum_reference(&mut self, enum_name: String, enum_value: String) {
+        // Not using entry API here due to performance impact
+        let enum_name_stats = match self.enums_by_name.get_mut(&enum_name) {
+            Some(existing_stats) => existing_stats,
+            None => {
+                self.enums_by_name
+                    .insert(enum_name.to_string(), HashSet::new());
+                self.enums_by_name
+                    .get_mut(&enum_name)
+                    .expect("value is expected to be in map")
+            }
+        };
+
+        enum_name_stats.insert(enum_value.to_string());
+    }
+
+    fn add_input_object_reference(
+        &mut self,
+        type_name: String,
+        field_name: String,
+        is_referenced: bool,
+        is_null_reference: bool,
+    ) {
+        // Not using entry API here due to performance impact
+        let type_name_stats = match self.input_field_references.get_mut(&type_name) {
+            Some(existing_stats) => existing_stats,
+            None => {
+                self.input_field_references
+                    .insert(type_name.to_string(), HashMap::new());
+                self.input_field_references
+                    .get_mut(&type_name)
+                    .expect("value is expected to be in map")
+            }
+        };
+
+        match type_name_stats.get_mut(&field_name) {
+            Some(stats) => {
+                stats.referenced = stats.referenced || is_referenced;
+                stats.null_reference = stats.null_reference || is_null_reference;
+                stats.undefined_reference = stats.undefined_reference || !is_referenced;
+            }
+            None => {
+                type_name_stats.insert(
+                    field_name.to_string(),
+                    InputObjectFieldStats {
+                        referenced: is_referenced,
+                        null_reference: is_null_reference,
+                        undefined_reference: !is_referenced,
+                    },
+                );
+            }
+        };
+    }
+
+    fn process_extended_refs_for_selection_set(&mut self, selection_set: &SelectionSet) {
+        for selection in &selection_set.selections {
+            match selection {
+                Selection::Field(field) => {
+                    for arg in &field.arguments {
+                        if let Some(arg_def) = field.definition.argument_by_name(arg.name.as_str())
+                        {
+                            let type_name = arg_def.ty.inner_named_type();
+                            self.process_extended_refs_for_value(type_name.to_string(), &arg.value);
+                        }
+                    }
+                }
+                Selection::InlineFragment(fragment) => {
+                    self.process_extended_refs_for_selection_set(&fragment.selection_set);
+                }
+                Selection::FragmentSpread(fragment) => {
+                    if !self.fragment_spread_set.contains(&fragment.fragment_name) {
+                        self.fragment_spread_set
+                            .insert(fragment.fragment_name.clone());
+
+                        if let Some(fragment) =
+                            self.references_doc.fragments.get(&fragment.fragment_name)
+                        {
+                            self.process_extended_refs_for_selection_set(&fragment.selection_set);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    fn process_extended_refs_for_value(&mut self, type_name: String, value: &Node<Value>) {
+        match value.as_ref() {
+            Value::Enum(enum_value) => {
+                self.add_enum_reference(type_name.clone(), enum_value.to_string());
+            }
+            Value::List(list_values) => {
+                for list_value in list_values {
+                    self.process_extended_refs_for_value(type_name.to_string(), list_value);
+                }
+            }
+            Value::Object(obj_value) => {
+                self.process_extended_refs_for_object(type_name.to_string(), obj_value);
+            }
+            Value::Variable(var_name) => {
+                let var_value = self.variables.get(var_name.to_string().as_str());
+                self.process_extended_refs_for_variable(type_name.to_string(), var_value);
+            }
+            _ => (),
+        }
+    }
+
+    fn process_extended_refs_for_object(
+        &mut self,
+        type_name: String,
+        obj_value: &[(Name, Node<Value>)],
+    ) {
+        // For object references, we're only interested in input object types
+        if let Some(ExtendedType::InputObject(input_object_type)) =
+            self.schema.types.get(type_name.to_string().as_str())
+        {
+            let obj_value_map: HashMap<String, &Node<Value>> = obj_value
+                .iter()
+                .map(|(name, val)| (name.to_string(), val))
+                .collect();
+            for (field_name, field_def) in &input_object_type.fields {
+                let field_type = field_def.ty.inner_named_type().to_string();
+                let maybe_field_val = obj_value_map.get(&field_name.to_string());
+
+                self.add_input_object_reference(
+                    type_name.to_string(),
+                    field_name.to_string(),
+                    maybe_field_val.is_some(),
+                    maybe_field_val.is_some_and(|v| v.is_null()),
+                );
+
+                if let Some(field_val) = maybe_field_val {
+                    self.process_extended_refs_for_value(field_type, field_val);
+                }
+            }
+        }
+    }
+
+    fn process_extended_refs_for_variable(
+        &mut self,
+        type_name: String,
+        var_value: Option<&JsonValue>,
+    ) {
+        match self.schema.types.get(type_name.to_string().as_str()) {
+            Some(ExtendedType::InputObject(input_object_type)) => {
+                match var_value {
+                    // For input objects, we store input object references and process each of the field variables
+                    Some(JsonValue::Object(json_obj)) => {
+                        let var_value_map: HashMap<String, &JsonValue> = json_obj
+                            .iter()
+                            .map(|(name, val)| (name.as_str().to_string(), val))
+                            .collect();
+
+                        for (field_name, field_def) in &input_object_type.fields {
+                            let field_type = field_def.ty.inner_named_type().to_string();
+                            let maybe_field_val = var_value_map.get(&field_name.to_string());
+
+                            self.add_input_object_reference(
+                                type_name.to_string(),
+                                field_name.to_string(),
+                                maybe_field_val.is_some(),
+                                maybe_field_val.is_some_and(|v| v.is_null()),
+                            );
+
+                            if let Some(&field_val) = maybe_field_val {
+                                self.process_extended_refs_for_variable(
+                                    field_type,
+                                    Some(field_val),
+                                );
+                            }
+                        }
+                    }
+                    // For arrays of objects, we process each array value separately
+                    Some(JsonValue::Array(json_array)) => {
+                        for array_val in json_array {
+                            self.process_extended_refs_for_variable(
+                                type_name.clone(),
+                                Some(array_val),
+                            );
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            Some(ExtendedType::Enum(enum_type)) => match var_value {
+                Some(JsonValue::String(enum_value)) => {
+                    self.add_enum_reference(
+                        enum_type.name.to_string(),
+                        enum_value.as_str().to_string(),
+                    );
+                }
+                Some(JsonValue::Array(array_values)) => {
+                    for array_val in array_values {
+                        self.process_extended_refs_for_variable(type_name.clone(), Some(array_val));
+                    }
+                }
+                _ => {}
+            },
+            _ => {}
+        };
     }
 }
 
