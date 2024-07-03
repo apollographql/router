@@ -1715,10 +1715,14 @@ expression: "&schema"
       ],
       "type": "object"
     },
-    "Connectors": {
+    "ConnectorsConfig": {
       "additionalProperties": false,
-      "description": "Connectors configuration",
       "properties": {
+        "debug_extensions": {
+          "default": false,
+          "description": "Enables connector debugging information on response extensions if the feature is enabled",
+          "type": "boolean"
+        },
         "subgraphs": {
           "additionalProperties": {
             "additionalProperties": {
@@ -8106,8 +8110,8 @@ expression: "&schema"
       "description": "#/definitions/Plugins"
     },
     "preview_connectors": {
-      "$ref": "#/definitions/Connectors",
-      "description": "#/definitions/Connectors"
+      "$ref": "#/definitions/ConnectorsConfig",
+      "description": "#/definitions/ConnectorsConfig"
     },
     "preview_demand_control": {
       "$ref": "#/definitions/DemandControlConfig",
