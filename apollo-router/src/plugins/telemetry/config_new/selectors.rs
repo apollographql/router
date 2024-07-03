@@ -1436,6 +1436,7 @@ mod test {
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
     use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::FIRST_EVENT_CONTEXT_KEY;
     use crate::spec::operation_limits::OperationLimits;
 
     #[test]
@@ -1928,6 +1929,32 @@ mod test {
                     .unwrap()
             ),
             None
+        );
+    }
+
+    #[test]
+    fn supergraph_is_primary() {
+        let selector = SupergraphSelector::IsPrimaryResponse {
+            is_primary_response: true,
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert(FIRST_EVENT_CONTEXT_KEY, true);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            true.into()
+        );
+        assert_eq!(
+            selector
+                .on_response_event(&crate::graphql::Response::builder().build(), &context)
+                .unwrap(),
+            true.into()
         );
     }
 
