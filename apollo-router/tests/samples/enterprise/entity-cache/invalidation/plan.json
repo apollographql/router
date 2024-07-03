@@ -55,7 +55,7 @@
                                     "data": { "updateMyAccount": { "name": "test2" } },
                                     "extensions": {
                                         "invalidation": [{
-                                            "kind": "Subgraph",
+                                            "kind": "subgraph",
                                             "subgraph": "accounts"
                                         }]
                                     }

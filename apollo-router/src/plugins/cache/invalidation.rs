@@ -121,7 +121,7 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind")]
+#[serde(tag = "kind", rename_all = "lowercase")]
 pub(crate) enum InvalidationRequest {
     Subgraph {
         subgraph: String,
