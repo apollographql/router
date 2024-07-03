@@ -79,12 +79,19 @@ fn lookup_dir(
                     }
                 };
 
-                if !plan.enterprise
-                    || (std::env::var("TEST_APOLLO_KEY").is_ok()
+                if plan.enterprise
+                    && !(std::env::var("TEST_APOLLO_KEY").is_ok()
                         && std::env::var("TEST_APOLLO_GRAPH_REF").is_ok())
                 {
-                    tests.push(Trial::test(name, move || test(&path, plan)));
+                    continue;
                 }
+
+                #[cfg(all(feature = "ci", not(all(target_arch = "x86_64", target_os = "linux"))))]
+                if plan.redis {
+                    continue;
+                }
+
+                tests.push(Trial::test(name, move || test(&path, plan)));
             } else {
                 lookup_dir(&path, &name, tests)?;
             }
@@ -499,9 +506,12 @@ fn check_path(path: &Path, out: &mut String) -> Result<(), Failed> {
 }
 
 #[derive(Deserialize)]
+#[allow(dead_code)]
 struct Plan {
     #[serde(default)]
     enterprise: bool,
+    #[serde(default)]
+    redis: bool,
     actions: Vec<Action>,
 }
 
