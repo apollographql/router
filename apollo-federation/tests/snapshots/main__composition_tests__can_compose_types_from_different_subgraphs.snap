@@ -20,6 +20,8 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
+scalar Import @join__type(graph: SUBGRAPHA) @join__type(graph: SUBGRAPHB)
+
 type Product @join__type(graph: SUBGRAPHA) {
   sku: String! @join__field(graph: SUBGRAPHA)
   name: String! @join__field(graph: SUBGRAPHA)

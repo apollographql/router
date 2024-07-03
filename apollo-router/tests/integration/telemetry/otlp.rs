@@ -1,4 +1,3 @@
-#![cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 extern crate core;
 
 use std::collections::HashSet;
@@ -6,6 +5,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;
@@ -83,7 +83,7 @@ async fn test_basic() -> Result<(), BoxError> {
 
 async fn validate_telemetry(
     mock_server: &MockServer,
-    _id: String,
+    _id: TraceId,
     query: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],
