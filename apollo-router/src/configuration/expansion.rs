@@ -168,6 +168,11 @@ fn dev_mode_defaults() -> Vec<Override> {
             .value(false)
             .value_type(ValueType::Bool)
             .build(),
+        Override::builder()
+            .config_path("preview_connectors.debug_extensions")
+            .value(true)
+            .value_type(ValueType::Bool)
+            .build(),
     ]
 }
 

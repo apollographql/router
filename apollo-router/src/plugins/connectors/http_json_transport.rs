@@ -64,6 +64,7 @@ pub(crate) fn make_request(
     inputs: Value,
     original_request: &connect::Request,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
+    // TODO build body using transport.body and inputs
     let body = hyper::Body::empty();
 
     let mut request = http::Request::builder()

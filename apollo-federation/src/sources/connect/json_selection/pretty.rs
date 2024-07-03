@@ -11,6 +11,12 @@ use crate::sources::connect::json_selection::PathSelection;
 use crate::sources::connect::json_selection::StarSelection;
 use crate::sources::connect::json_selection::SubSelection;
 
+impl std::fmt::Display for JSONSelection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.pretty_print())
+    }
+}
+
 /// Pretty print trait
 ///
 /// This trait marks a type as supporting pretty printing itself outside of a

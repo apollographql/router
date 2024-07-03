@@ -1,6 +1,4 @@
 use apollo_compiler::executable::Selection;
-use apollo_compiler::validation::Valid;
-use apollo_compiler::Schema;
 use apollo_federation::sources::connect::Connector;
 use itertools::Itertools;
 use serde_json_bytes::json;
@@ -10,6 +8,7 @@ use serde_json_bytes::Value;
 
 use super::http_json_transport::make_request;
 use super::http_json_transport::HttpJsonTransportError;
+use super::plugin::ConnectorContext;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
 
@@ -117,36 +116,42 @@ pub(crate) enum ResponseTypeName {
 pub(crate) fn make_requests(
     request: connect::Request,
     connector: &Connector,
-    schema: &Valid<Schema>,
+    debug: &mut Option<ConnectorContext>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let request_params = if connector.entity {
-        entities_from_request(&request, schema)
+        entities_from_request(&request)
     } else if connector.on_root_type {
-        root_fields(&request, schema)
+        root_fields(&request)
     } else {
-        entities_with_fields_from_request(&request, schema)
+        entities_with_fields_from_request(&request)
     }?;
 
-    request_params_to_requests(connector, request_params, &request)
+    request_params_to_requests(connector, request_params, &request, debug)
 }
 
 fn request_params_to_requests(
     connector: &Connector,
     request_params: Vec<(ResponseKey, RequestInputs)>,
     original_request: &connect::Request,
+    debug: &mut Option<ConnectorContext>,
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
-    request_params
-        .into_iter()
-        .map(|(response_key, inputs)| {
-            let request = match connector.transport {
-                apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
-                    make_request(transport, inputs.merge(), original_request)?
-                }
-            };
+    let mut results = vec![];
 
-            Ok((request, response_key))
-        })
-        .collect::<Result<Vec<_>, _>>()
+    for (response_key, inputs) in request_params {
+        let request = match connector.transport {
+            apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
+                make_request(transport, inputs.merge(), original_request)?
+            }
+        };
+
+        if let Some(ref mut debug) = debug {
+            debug.push_request(&request);
+        }
+
+        results.push((request, response_key));
+    }
+
+    Ok(results)
 }
 
 // --- ERRORS ------------------------------------------------------------------
@@ -192,7 +197,6 @@ pub(crate) enum MakeRequestError {
 /// ```
 fn root_fields(
     request: &connect::Request,
-    schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
     use MakeRequestError::*;
 
@@ -200,13 +204,6 @@ fn root_fields(
         .operation
         .get_operation(None)
         .map_err(|_| InvalidOperation("no operation document".into()))?;
-
-    let parent_type_name = schema.root_operation(op.operation_type).ok_or_else(|| {
-        InvalidOperation(format!(
-            "missing root operation of type {:?}",
-            op.operation_type
-        ))
-    })?;
 
     op.selection_set
         .selections
@@ -218,19 +215,11 @@ fn root_fields(
                     .as_ref()
                     .unwrap_or_else(|| &field.name)
                     .to_string();
-                let field_def = schema
-                    .type_field(parent_type_name, &field.name)
-                    .map_err(|_| {
-                        InvalidOperation(format!(
-                            "field {}.{} not found in schema",
-                            parent_type_name, field.name
-                        ))
-                    })?;
 
                 let response_key = ResponseKey::RootField {
                     name: response_name,
                     typename: ResponseTypeName::Concrete(
-                        field_def.ty.inner_named_type().to_string(),
+                        field.definition.ty.inner_named_type().to_string(),
                     ),
                     selection_set: field.selection_set.clone(),
                 };
@@ -282,12 +271,11 @@ fn root_fields(
 /// Returns a list of request inputs and the response key (index in the array).
 fn entities_from_request(
     request: &connect::Request,
-    schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
     use MakeRequestError::*;
 
     let Some(representations) = request.variables.variables.get(REPRESENTATIONS_VAR) else {
-        return root_fields(request, schema);
+        return root_fields(request);
     };
 
     let op = request
@@ -366,7 +354,6 @@ fn entities_from_request(
 /// name/alias of field) for each.
 fn entities_with_fields_from_request(
     request: &connect::Request,
-    _schema: &Valid<Schema>,
 ) -> Result<Vec<(ResponseKey, RequestInputs)>, MakeRequestError> {
     use MakeRequestError::*;
 
@@ -522,7 +509,7 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req, &schema), @r###"
+        assert_debug_snapshot!(super::root_fields(&req), @r###"
         Ok(
             [
                 (
@@ -588,7 +575,7 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req, &schema), @r###"
+        assert_debug_snapshot!(super::root_fields(&req), @r###"
         Ok(
             [
                 (
@@ -688,7 +675,7 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::root_fields(&req, &schema), @r###"
+        assert_debug_snapshot!(super::root_fields(&req), @r###"
         Ok(
             [
                 (
@@ -769,7 +756,7 @@ mod tests {
           field: String
         }
         "#;
-        let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
+
         let subgraph_schema = Arc::new(
             Schema::parse_and_validate(
                 format!(
@@ -828,7 +815,7 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_from_request(&req, &schema).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(&req).unwrap(), @r###"
         [
             (
                 Entity {
@@ -926,7 +913,7 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_from_request(&req, &schema).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_from_request(&req).unwrap(), @r###"
         [
             (
                 RootField {
@@ -980,7 +967,7 @@ mod tests {
           selected: String
         }
         "#;
-        let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
+
         let subgraph_schema = Arc::new(
             Schema::parse_and_validate(
                 format!(
@@ -1040,7 +1027,7 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, &schema).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&req).unwrap(), @r###"
         [
             (
                 EntityField {
@@ -1160,7 +1147,7 @@ mod tests {
           selected: String
         }
         "#;
-        let schema = Arc::new(Schema::parse_and_validate(partial_sdl, "./").unwrap());
+
         let subgraph_schema = Arc::new(
             Schema::parse_and_validate(
                 format!(
@@ -1218,7 +1205,7 @@ mod tests {
             ))
             .build();
 
-        assert_debug_snapshot!(super::entities_with_fields_from_request(&req, &schema).unwrap(), @r###"
+        assert_debug_snapshot!(super::entities_with_fields_from_request(&req).unwrap(), @r###"
         [
             (
                 EntityField {
@@ -1320,7 +1307,7 @@ mod tests {
             on_root_type: true,
         };
 
-        let requests = super::make_requests(req, &connector, &schema).unwrap();
+        let requests = super::make_requests(req, &connector, &mut None).unwrap();
 
         assert_debug_snapshot!(requests, @r###"
         [

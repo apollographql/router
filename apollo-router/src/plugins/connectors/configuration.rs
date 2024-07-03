@@ -7,15 +7,8 @@ use serde::Deserialize;
 use serde::Serialize;
 use url::Url;
 
+use super::plugin::ConnectorsConfig;
 use crate::Configuration;
-
-/// Connectors configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct Connectors {
-    /// Per subgraph configuration
-    pub(crate) subgraphs: HashMap<String, HashMap<String, SourceApiConfiguration>>,
-}
 
 /// Configuration for a connector subgraph
 #[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
@@ -39,9 +32,15 @@ pub(crate) fn override_connector_base_urls<'a, I>(config: &Configuration, connec
 where
     I: IntoIterator<Item = &'a mut Connector>,
 {
+    let Some(config) = config.apollo_plugins.plugins.get("preview_connectors") else {
+        return;
+    };
+    let Ok(config) = serde_json::from_value::<ConnectorsConfig>(config.clone()) else {
+        return;
+    };
+
     for connector in connectors {
         if let Some(url) = config
-            .preview_connectors
             .subgraphs
             .get(&connector.id.subgraph_name.to_string())
             .and_then(|map| map.get(&connector.id.source_name.clone()?.to_string()))
