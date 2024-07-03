@@ -11,7 +11,6 @@ use super::FieldSelection;
 use super::FragmentSpreadSelection;
 use super::InlineFragmentSelection;
 use super::NamedFragments;
-use super::RebaseErrorHandlingOption;
 use super::Selection;
 use super::SelectionMap;
 use super::SelectionSet;
@@ -147,16 +146,8 @@ impl FragmentSpreadSelection {
             ));
         }
 
-        if let Some(rebased_fragment_spread) = self.rebase_on(
-            parent_type,
-            named_fragments,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )? {
-            Ok(Some(SelectionOrSet::Selection(rebased_fragment_spread)))
-        } else {
-            unreachable!("We should always be able to either rebase the fragment spread OR throw an exception");
-        }
+        let rebased_fragment_spread = self.rebase_on(parent_type, named_fragments, schema)?;
+        Ok(Some(SelectionOrSet::Selection(rebased_fragment_spread)))
     }
 }
 
@@ -211,12 +202,7 @@ impl InlineFragmentSelection {
                     let selection_set = if useless_fragment {
                         selection_set.clone()
                     } else {
-                        selection_set.rebase_on(
-                            parent_type,
-                            named_fragments,
-                            schema,
-                            RebaseErrorHandlingOption::ThrowError,
-                        )?
+                        selection_set.rebase_on(parent_type, named_fragments, schema)?
                     };
                     Ok(Some(SelectionOrSet::SelectionSet(selection_set)))
                 };
@@ -233,11 +219,8 @@ impl InlineFragmentSelection {
         if selection_set.is_empty() {
             if self.inline_fragment.directives.is_empty() {
                 return Ok(None);
-            } else if let Some(rebased_fragment) = self.inline_fragment.rebase_on(
-                parent_type,
-                schema,
-                RebaseErrorHandlingOption::ThrowError,
-            )? {
+            } else {
+                let rebased_fragment = self.inline_fragment.rebase_on(parent_type, schema)?;
                 // We should be able to rebase, or there is a bug, so error if that is the case.
                 // If we rebased successfully then we add "non-included" __typename field selection
                 // just to keep the query valid.
@@ -320,12 +303,8 @@ impl InlineFragmentSelection {
             // If we can lift all selections, then that just mean we can get rid of the current fragment altogether
             if liftable_selections.len() == selection_set.selections.len() {
                 // Rebasing is necessary since this normalized sub-selection set changed its parent.
-                let rebased_selection_set = selection_set.rebase_on(
-                    parent_type,
-                    named_fragments,
-                    schema,
-                    RebaseErrorHandlingOption::ThrowError,
-                )?;
+                let rebased_selection_set =
+                    selection_set.rebase_on(parent_type, named_fragments, schema)?;
                 return Ok(Some(SelectionOrSet::SelectionSet(rebased_selection_set)));
             }
 
@@ -338,16 +317,8 @@ impl InlineFragmentSelection {
                 // selection could be broken down further and lifted again), but
                 // flatten_unnecessary_fragments is not
                 // applied recursively. This could be worth investigating.
-                let Some(rebased_inline_fragment) = self.inline_fragment.rebase_on(
-                    parent_type,
-                    schema,
-                    RebaseErrorHandlingOption::ThrowError,
-                )?
-                else {
-                    return Err(FederationError::internal(
-                        "Rebase should've thrown an error",
-                    ));
-                };
+                let rebased_inline_fragment =
+                    self.inline_fragment.rebase_on(parent_type, schema)?;
                 let mut mutable_selections = self.selection_set.selections.clone();
                 let final_fragment_selections = Arc::make_mut(&mut mutable_selections);
                 final_fragment_selections.retain(|k, _| !liftable_selections.contains_key(k));
@@ -365,17 +336,7 @@ impl InlineFragmentSelection {
                 // Since liftable_selections are changing their parent, we need to rebase them.
                 liftable_selections = liftable_selections
                     .into_iter()
-                    .map(|(_key, sel)| {
-                        sel.rebase_on(
-                            parent_type,
-                            named_fragments,
-                            schema,
-                            RebaseErrorHandlingOption::ThrowError,
-                        )?
-                        .ok_or_else(|| {
-                            FederationError::internal("Unable to rebase selection updates")
-                        })
-                    })
+                    .map(|(_key, sel)| sel.rebase_on(parent_type, named_fragments, schema))
                     .collect::<Result<_, _>>()?;
 
                 let mut final_selection_map = SelectionMap::new();
@@ -399,26 +360,17 @@ impl InlineFragmentSelection {
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(self.clone()),
             ))))
-        } else if let Some(rebased_inline_fragment) = self.inline_fragment.rebase_on(
-            parent_type,
-            schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )? {
+        } else {
+            let rebased_inline_fragment = self.inline_fragment.rebase_on(parent_type, schema)?;
             let rebased_casted_type = rebased_inline_fragment.casted_type();
-            let rebased_selection_set = selection_set.rebase_on(
-                &rebased_casted_type,
-                named_fragments,
-                schema,
-                RebaseErrorHandlingOption::ThrowError,
-            )?;
+            let rebased_selection_set =
+                selection_set.rebase_on(&rebased_casted_type, named_fragments, schema)?;
             Ok(Some(SelectionOrSet::Selection(Selection::InlineFragment(
                 Arc::new(InlineFragmentSelection::new(
                     rebased_inline_fragment,
                     rebased_selection_set,
                 )),
             ))))
-        } else {
-            unreachable!("We should always be able to either rebase the inline fragment OR throw an exception");
         }
     }
 }

@@ -55,8 +55,8 @@ mod simplify;
 #[cfg(test)]
 mod tests;
 
-pub use contains::*;
-pub use rebase::*;
+pub(crate) use contains::*;
+pub(crate) use rebase::*;
 
 pub(crate) const TYPENAME_FIELD: Name = name!("__typename");
 
@@ -2532,20 +2532,12 @@ impl SelectionSet {
         let Some(second) = iter.next() else {
             // Optimize for the simple case of a single selection, as we don't have to do anything
             // complex to merge the sub-selections.
-            return first
-                .rebase_on(
-                    parent_type,
-                    named_fragments,
-                    schema,
-                    RebaseErrorHandlingOption::ThrowError,
-                )?
-                .ok_or_else(|| FederationError::internal("Unable to rebase selection updates"));
+            return first.rebase_on(parent_type, named_fragments, schema);
         };
 
-        let element =
-            first
-                .operation_element()?
-                .rebase_on_or_error(parent_type, schema, named_fragments)?;
+        let element = first
+            .operation_element()?
+            .rebase_on(parent_type, schema, named_fragments)?;
         let sub_selection_parent_type: Option<CompositeTypeDefinitionPosition> =
             element.sub_selection_type_position()?;
 
@@ -2802,12 +2794,8 @@ impl SelectionSet {
         selection_set: &SelectionSet,
         named_fragments: &NamedFragments,
     ) -> Result<(), FederationError> {
-        let rebased = selection_set.rebase_on(
-            &self.type_position,
-            named_fragments,
-            &self.schema,
-            RebaseErrorHandlingOption::ThrowError,
-        )?;
+        let rebased =
+            selection_set.rebase_on(&self.type_position, named_fragments, &self.schema)?;
         self.add_local_selection_set(&rebased)
     }
 
@@ -2845,7 +2833,7 @@ impl SelectionSet {
         match path.split_first() {
             // If we have a sub-path, recurse.
             Some((ele, path @ &[_, ..])) => {
-                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
+                let element = ele.rebase_on(&self.type_position, &self.schema)?;
                 let Some(sub_selection_type) = element.sub_selection_type_position()? else {
                     return Err(FederationError::internal("unexpected error: add_at_path encountered a field that is not of a composite type".to_string()));
                 };
@@ -2878,7 +2866,7 @@ impl SelectionSet {
                 // turn the path and selection set into a selection. Because we are mutating things
                 // in-place, we eagerly construct the selection that needs to be rebased on the target
                 // schema.
-                let element = ele.rebase_on_or_error(&self.type_position, &self.schema)?;
+                let element = ele.rebase_on(&self.type_position, &self.schema)?;
                 if selection_set.is_none() || selection_set.is_some_and(|s| s.is_empty()) {
                     // This is a somewhat common case when dealing with `@key` "conditions" that we can
                     // end up with trying to add empty sub selection set on a non-leaf node. There is
@@ -2901,7 +2889,6 @@ impl SelectionSet {
                                 })?,
                                 &NamedFragments::default(),
                                 &self.schema,
-                                RebaseErrorHandlingOption::ThrowError,
                             )
                         })
                         .transpose()?
