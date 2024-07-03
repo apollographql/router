@@ -61,5 +61,6 @@ type User
   id: ID!
   name: String @join__field(graph: CONNECTORS)
   username: String @join__field(graph: CONNECTORS)
-  c: String @join__field(graph: GRAPHQL)
+  c: String @join__field(graph: CONNECTORS, external: true) @join__field(graph: GRAPHQL)
+  d: String @join__field(graph: CONNECTORS, requires: "c") @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users/{$this.c}"}, selection: "$.phone"})
 }

@@ -89,7 +89,7 @@ pub(crate) mod mock_api {
               "id": 2,
               "name": "Ervin Howell",
               "username": "Antonette",
-              "d": "1-770-736-8031 x56442"
+              "phone": "1-770-736-8031 x56442"
             })))
     }
 }
@@ -102,7 +102,7 @@ pub(crate) mod mock_subgraph {
             .and(path("/graphql"))
             .and(body_json(serde_json::json!({
               "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
-              "variables": {"representations":[{"__typename":"User"}]}
+              "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
             })))
             .respond_with(
                 ResponseTemplate::new(200)
@@ -112,6 +112,9 @@ pub(crate) mod mock_subgraph {
                         "_entities": [{
                           "__typename": "User",
                           "c": "1",
+                        }, {
+                          "__typename": "User",
+                          "c": "2",
                         }]
                       }
                     })),
@@ -164,7 +167,6 @@ async fn test_root_field_plus_entity() {
 }
 
 #[tokio::test]
-#[ignore] // TODO remove after the tests are wired up
 async fn test_root_field_plus_entity_plus_requires() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
@@ -205,16 +207,16 @@ async fn test_root_field_plus_entity_plus_requires() {
         &mock_server.received_requests().await.unwrap(),
         vec![
             Matcher::new().method("GET").path("/users").build(),
-            Matcher::new().method("GET").path("/users/1").build(),
-            Matcher::new().method("GET").path("/users/2").build(),
             Matcher::new().method("POST").path("/graphql").build(),
             Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users/2").build(),
+            Matcher::new().method("GET").path("/users/1").build(),
+            Matcher::new().method("GET").path("/users/2").build(),
         ],
     );
 }
 
 #[tokio::test]
-#[ignore] // TODO remove after the tests are wired up
 async fn basic_errors() {
     let mock_server = MockServer::start().await;
     Mock::given(method("GET"))
