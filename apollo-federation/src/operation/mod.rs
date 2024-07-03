@@ -4409,21 +4409,57 @@ fn remove_introspection(selection_set: &mut SelectionSet) {
     });
 }
 
+/// Check if the runtime types of two composite types intersect.
+///
+/// This avoids using `possible_runtime_types` and instead implements fast paths.
 fn runtime_types_intersect(
     type1: &CompositeTypeDefinitionPosition,
     type2: &CompositeTypeDefinitionPosition,
     schema: &ValidFederationSchema,
 ) -> bool {
-    if type1 == type2 {
-        return true;
+    use CompositeTypeDefinitionPosition::*;
+    match (type1, type2) {
+        (Object(left), Object(right)) => left == right,
+        (Object(object), Union(union_)) | (Union(union_), Object(object)) => union_
+            .get(schema.schema())
+            .is_ok_and(|union_| union_.members.contains(&object.type_name)),
+        (Object(object), Interface(interface)) | (Interface(interface), Object(object)) => schema
+            .referencers()
+            .get_interface_type(&interface.type_name)
+            .is_ok_and(|referencers| referencers.object_types.contains(object)),
+        (Union(left), Union(right)) if left == right => true,
+        (Union(left), Union(right)) => {
+            match (left.get(schema.schema()), right.get(schema.schema())) {
+                (Ok(left), Ok(right)) => left.members.intersection(&right.members).next().is_some(),
+                _ => false,
+            }
+        }
+        (Interface(left), Interface(right)) if left == right => true,
+        (Interface(left), Interface(right)) => {
+            let r = schema.referencers();
+            match (
+                r.get_interface_type(&left.type_name),
+                r.get_interface_type(&right.type_name),
+            ) {
+                (Ok(left), Ok(right)) => left
+                    .object_types
+                    .intersection(&right.object_types)
+                    .next()
+                    .is_some(),
+                _ => false,
+            }
+        }
+        (Union(union_), Interface(interface)) | (Interface(interface), Union(union_)) => match (
+            union_.get(schema.schema()),
+            schema
+                .referencers()
+                .get_interface_type(&interface.type_name),
+        ) {
+            (Ok(union_), Ok(referencers)) => referencers
+                .object_types
+                .iter()
+                .any(|implementer| union_.members.contains(&implementer.type_name)),
+            _ => false,
+        },
     }
-
-    if let (Ok(runtimes_1), Ok(runtimes_2)) = (
-        schema.possible_runtime_types(type1.clone()),
-        schema.possible_runtime_types(type2.clone()),
-    ) {
-        return runtimes_1.intersection(&runtimes_2).next().is_some();
-    }
-
-    false
 }
