@@ -256,7 +256,7 @@ mod helpers {
             // any connect-related directives. The following directives are also special because they
             // influence planning and satisfiability:
             //
-            // - @key: derived based on the fieds selected
+            // - @key: derived based on the fields selected
             // - @external: the current approach will only add external fields to the list of keys
             //     if used in the transport. If not used at all, the field marked with this directive
             //     won't even be included in the expanded subgraph, but if it _is_ used then leaving
