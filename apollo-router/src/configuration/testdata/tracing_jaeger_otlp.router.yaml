@@ -3,7 +3,5 @@ supergraph:
 telemetry:
   exporters:
     tracing:
-      jaeger:
+      otlp:
         enabled: true
-        collector:
-          endpoint: ${env.TEST_CONFIG_COLLECTOR_ENDPOINT}

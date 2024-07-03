@@ -1,6 +1,4 @@
-use opentelemetry::Key;
-use opentelemetry::KeyValue;
-use opentelemetry::OrderMap;
+use opentelemetry::{Key, KeyValue, Value};
 use tracing_subscriber::layer::Context;
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
@@ -67,12 +65,13 @@ impl DynAttributeLayer {
 
 /// To add dynamic attributes for spans
 pub(crate) trait SpanDynAttribute {
-    fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
+    fn set_span_dyn_attribute<K: Into<Key>, V: Into<Value>>(&self, key: K, value: V);
     fn set_span_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
 }
 
 impl SpanDynAttribute for ::tracing::Span {
-    fn set_span_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
+    fn set_span_dyn_attribute<K: Into<Key>, V: Into<Value>>(&self, key: K, value: V) {
+        let key_value = KeyValue::new(key.into(), value.into());
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
@@ -82,17 +81,17 @@ impl SpanDynAttribute for ::tracing::Span {
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => {
-                                    update_otel_data(otel_data, &key, &value);
+                                    update_otel_data(otel_data, &key_value);
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes =
-                                            Some([(key, value)].into_iter().collect());
+                                            Some(vec![key_value]);
                                     } else {
                                         otel_data
                                             .builder
                                             .attributes
                                             .as_mut()
                                             .expect("we checked the attributes value in the condition above")
-                                            .insert(key, value);
+                                            .push(key_value);
                                     }
                                 }
                                 None => {
@@ -101,13 +100,13 @@ impl SpanDynAttribute for ::tracing::Span {
                                 }
                             }
                         } else {
-                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
+                            if key_value.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
                                 return;
                             }
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<LogAttributes>() {
                                 Some(attributes) => {
-                                    attributes.insert(KeyValue::new(key, value));
+                                    attributes.insert(key_value);
                                 }
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
@@ -140,20 +139,14 @@ impl SpanDynAttribute for ::tracing::Span {
                                     if otel_data.builder.attributes.is_none() {
                                         otel_data.builder.attributes = Some(
                                             attributes
-                                                .inspect(|attr| {
-                                                    update_otel_data(
-                                                        otel_data,
-                                                        &attr.key,
-                                                        &attr.value,
-                                                    )
+                                                .inspect(|key_value| {
+                                                    update_otel_data(otel_data, key_value)
                                                 })
                                                 .collect(),
                                         );
                                     } else {
                                         let attributes: Vec<KeyValue> = attributes
-                                            .inspect(|attr| {
-                                                update_otel_data(otel_data, &attr.key, &attr.value)
-                                            })
+                                            .inspect(|attr| update_otel_data(otel_data, &attr))
                                             .collect();
                                         otel_data
                                             .builder
@@ -195,16 +188,18 @@ impl SpanDynAttribute for ::tracing::Span {
     }
 }
 
-fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::Value) {
-    match key.as_str() {
+fn update_otel_data(otel_data: &mut OtelData, key_value: &KeyValue) {
+    match key_value.key.as_str() {
         OTEL_NAME if otel_data.forced_span_name.is_none() => {
-            otel_data.forced_span_name = Some(value.to_string())
+            otel_data.forced_span_name = Some(key_value.value.to_string())
         }
-        OTEL_KIND => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
-        OTEL_STATUS_CODE => otel_data.forced_status = str_to_status(&value.as_str()).into(),
+        OTEL_KIND => otel_data.builder.span_kind = str_to_span_kind(&key_value.value.as_str()),
+        OTEL_STATUS_CODE => {
+            otel_data.forced_status = str_to_status(&key_value.value.as_str()).into()
+        }
         OTEL_STATUS_MESSAGE => {
             otel_data.builder.status =
-                opentelemetry::trace::Status::error(value.as_str().to_string())
+                opentelemetry::trace::Status::error(key_value.value.as_str().to_string())
         }
         _ => {}
     }
@@ -232,19 +227,19 @@ impl EventAttributes {
 /// To add dynamic attributes for spans
 pub(crate) trait EventDynAttribute {
     /// Always use before sending the event
-    fn set_event_dyn_attribute(&self, key: Key, value: opentelemetry::Value);
+    fn set_event_dyn_attribute(&self, key_value: KeyValue);
     /// Always use before sending the event
     fn set_event_dyn_attributes(&self, attributes: impl IntoIterator<Item = KeyValue>);
 }
 
 impl EventDynAttribute for ::tracing::Span {
-    fn set_event_dyn_attribute(&self, key: Key, value: opentelemetry::Value) {
+    fn set_event_dyn_attribute(&self, key_value: KeyValue) {
         self.with_subscriber(move |(id, dispatch)| {
             if let Some(reg) = dispatch.downcast_ref::<Registry>() {
                 match reg.span(id) {
                     None => eprintln!("no spanref, this is a bug"),
                     Some(s) => {
-                        if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
+                        if key_value.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
                             return;
                         }
                         if s.is_sampled() {
@@ -252,12 +247,10 @@ impl EventDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => match &mut otel_data.event_attributes {
                                     Some(attributes) => {
-                                        attributes.insert(key, value);
+                                        attributes.push(key_value);
                                     }
                                     None => {
-                                        let mut order_map = OrderMap::new();
-                                        order_map.insert(key, value);
-                                        otel_data.event_attributes = Some(order_map);
+                                        otel_data.event_attributes = Some(vec![key_value]);
                                     }
                                 },
                                 None => {
@@ -266,13 +259,13 @@ impl EventDynAttribute for ::tracing::Span {
                                 }
                             }
                         } else {
-                            if key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
+                            if key_value.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX) {
                                 return;
                             }
                             let mut extensions = s.extensions_mut();
                             match extensions.get_mut::<EventAttributes>() {
                                 Some(attributes) => {
-                                    attributes.insert(KeyValue::new(key, value));
+                                    attributes.insert(key_value);
                                 }
                                 None => {
                                     // Can't use ::tracing::error! because it could create deadlock on extensions
@@ -303,13 +296,10 @@ impl EventDynAttribute for ::tracing::Span {
                             match extensions.get_mut::<OtelData>() {
                                 Some(otel_data) => match &mut otel_data.event_attributes {
                                     Some(event_attributes) => {
-                                        event_attributes
-                                            .extend(attributes.map(|kv| (kv.key, kv.value)));
+                                        event_attributes.extend(attributes);
                                     }
                                     None => {
-                                        otel_data.event_attributes = Some(OrderMap::from_iter(
-                                            attributes.map(|kv| (kv.key, kv.value)),
-                                        ));
+                                        otel_data.event_attributes = Some(attributes.collect());
                                     }
                                 },
                                 None => {

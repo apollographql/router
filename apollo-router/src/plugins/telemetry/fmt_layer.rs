@@ -399,8 +399,8 @@ subgraph:
             first = "one",
             apollo_private.should_not_display = "this should be skipped"
         );
-        test_span.set_span_dyn_attribute("another".into(), 2.into());
-        test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+        test_span.set_span_dyn_attribute("another", 2);
+        test_span.set_span_dyn_attribute("custom_dyn", "test");
         let _enter = test_span.enter();
         info!(event_attr = "foo", "Hello from test");
     }
@@ -411,8 +411,8 @@ subgraph:
             first = "one",
             apollo_private.should_not_display = "this should be skipped"
         );
-        test_span.set_span_dyn_attribute("another".into(), 2.into());
-        test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+        test_span.set_span_dyn_attribute("another", 2);
+        test_span.set_span_dyn_attribute("custom_dyn", "test");
         let _enter = test_span.enter();
         {
             let nested_test_span = info_span!(
@@ -575,18 +575,12 @@ subgraph:
                     first = "one",
                     apollo_private.should_not_display = "this should be skipped"
                 );
-                test_span.set_span_dyn_attribute("another".into(), 2.into());
-                test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                test_span.set_span_dyn_attribute("another", 2);
+                test_span.set_span_dyn_attribute("custom_dyn", "test");
                 let _enter = test_span.enter();
                 let attributes = vec![
-                    KeyValue::new(
-                        Key::from_static_str("http.response.body.size"),
-                        opentelemetry::Value::String("125".to_string().into()),
-                    ),
-                    KeyValue::new(
-                        Key::from_static_str("http.response.body"),
-                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
-                    ),
+                    KeyValue::new("http.response.body.size", "125"),
+                    KeyValue::new("http.response.body", r#"{"foo": "bar"}"#),
                 ];
                 log_event(
                     EventLevel::Info,
@@ -628,8 +622,8 @@ subgraph:
                     first = "one",
                     apollo_private.should_not_display = "this should be skipped"
                 );
-                test_span.set_span_dyn_attribute("another".into(), 2.into());
-                test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                test_span.set_span_dyn_attribute("another", 2);
+                test_span.set_span_dyn_attribute("custom_dyn", "test");
                 let _enter = test_span.enter();
                 let attributes = vec![
                     KeyValue::new(
@@ -683,8 +677,8 @@ subgraph:
                     first = "one",
                     apollo_private.should_not_display = "this should be skipped"
                 );
-                test_span.set_span_dyn_attribute("another".into(), 2.into());
-                test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                test_span.set_span_dyn_attribute("another", 2);
+                test_span.set_span_dyn_attribute("custom_dyn", "test");
                 let _enter = test_span.enter();
 
                 let attributes = vec![
@@ -822,19 +816,13 @@ subgraph:
                     first = "one",
                     apollo_private.should_not_display = "this should be skipped"
                 );
-                test_span.set_span_dyn_attribute("another".into(), 2.into());
-                test_span.set_span_dyn_attribute("custom_dyn".into(), "test".into());
+                test_span.set_span_dyn_attribute("another", 2);
+                test_span.set_span_dyn_attribute("custom_dyn", "test");
                 let _enter = test_span.enter();
 
                 let attributes = vec![
-                    KeyValue::new(
-                        Key::from_static_str("http.response.body.size"),
-                        opentelemetry::Value::String("125".to_string().into()),
-                    ),
-                    KeyValue::new(
-                        Key::from_static_str("http.response.body"),
-                        opentelemetry::Value::String(r#"{"foo": "bar"}"#.to_string().into()),
-                    ),
+                    KeyValue::new("http.response.body.size", "125"),
+                    KeyValue::new("http.response.body", r#"{"foo": "bar"}"#),
                 ];
                 log_event(
                     EventLevel::Info,

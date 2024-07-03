@@ -1,6 +1,6 @@
 //! Tracing configuration for apollo telemetry.
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Builder;
 use serde::Serialize;
 use tower::BoxError;
 
@@ -48,7 +48,7 @@ impl TracingConfigurator for Config {
             .metrics_reference_mode(self.experimental_apollo_metrics_reference_mode)
             .build()?;
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+            BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build(),
         ))

@@ -12,12 +12,10 @@ telemetry:
       common:
         service_name: router
         sampler: always_off
-      jaeger:
+      otlp:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        collector:
-          endpoint: http://127.0.0.1:14268/api/traces
     logging:
       experimental_when_header:
         - name: apollo-router-log-request

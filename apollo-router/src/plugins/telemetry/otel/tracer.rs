@@ -1,6 +1,5 @@
 use opentelemetry::trace as otel;
 use opentelemetry::trace::noop;
-use opentelemetry::trace::OrderMap;
 use opentelemetry::trace::SamplingDecision;
 use opentelemetry::trace::SamplingResult;
 use opentelemetry::trace::SpanBuilder;
@@ -94,7 +93,7 @@ impl PreSampledTracer for SdkTracer {
                 trace_id,
                 &builder.name,
                 builder.span_kind.as_ref().unwrap_or(&SpanKind::Internal),
-                builder.attributes.as_ref().unwrap_or(&OrderMap::default()),
+                builder.attributes.as_ref().unwrap_or(&Default::default()),
                 builder.links.as_deref().unwrap_or(&[]),
             ));
 

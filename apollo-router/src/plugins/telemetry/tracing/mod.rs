@@ -2,15 +2,13 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::time::Duration;
 
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::trace::BatchConfig;
-use opentelemetry::sdk::trace::Builder;
-use opentelemetry::sdk::trace::EvictedHashMap;
-use opentelemetry::sdk::trace::Span;
-use opentelemetry::sdk::trace::SpanProcessor;
 use opentelemetry::trace::TraceResult;
 use opentelemetry::Context;
-use opentelemetry::KeyValue;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::trace::Builder;
+use opentelemetry_sdk::trace::Span;
+use opentelemetry_sdk::trace::SpanProcessor;
+use opentelemetry_sdk::trace::{BatchConfig, BatchConfigBuilder};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -22,7 +20,6 @@ use crate::plugins::telemetry::config::TracingCommon;
 pub(crate) mod apollo;
 pub(crate) mod apollo_telemetry;
 pub(crate) mod datadog;
-pub(crate) mod jaeger;
 pub(crate) mod otlp;
 pub(crate) mod reload;
 pub(crate) mod zipkin;
@@ -47,32 +44,10 @@ impl<T: SpanProcessor> SpanProcessor for ApolloFilterSpanProcessor<T> {
         self.delegate.on_start(span, cx);
     }
 
-    fn on_end(&self, span: SpanData) {
-        if span
-            .attributes
-            .iter()
-            .any(|(key, _)| key.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-        {
-            let attributes_len = span.attributes.len();
-            let span = SpanData {
-                attributes: span
-                    .attributes
-                    .into_iter()
-                    .filter(|(k, _)| !k.as_str().starts_with(APOLLO_PRIVATE_PREFIX))
-                    .fold(
-                        EvictedHashMap::new(attributes_len as u32, attributes_len),
-                        |mut m, (k, v)| {
-                            m.insert(KeyValue::new(k, v));
-                            m
-                        },
-                    ),
-                ..span
-            };
-
-            self.delegate.on_end(span);
-        } else {
-            self.delegate.on_end(span);
-        }
+    fn on_end(&self, mut span: SpanData) {
+        span.attributes
+            .retain(|kv| !kv.key.as_str().starts_with(APOLLO_PRIVATE_PREFIX));
+        self.delegate.on_end(span);
     }
 
     fn force_flush(&self) -> TraceResult<()> {
@@ -157,13 +132,13 @@ fn max_concurrent_exports_default() -> usize {
 
 impl From<BatchProcessorConfig> for BatchConfig {
     fn from(config: BatchProcessorConfig) -> Self {
-        let mut default = BatchConfig::default();
+        let mut default = BatchConfigBuilder::default();
         default = default.with_scheduled_delay(config.scheduled_delay);
         default = default.with_max_queue_size(config.max_queue_size);
         default = default.with_max_export_batch_size(config.max_export_batch_size);
         default = default.with_max_export_timeout(config.max_export_timeout);
         default = default.with_max_concurrent_exports(config.max_concurrent_exports);
-        default
+        default.build()
     }
 }
 

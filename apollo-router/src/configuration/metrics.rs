@@ -2,9 +2,9 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 use jsonpath_rust::JsonPathInst;
+use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
-use opentelemetry_api::metrics::Meter;
-use opentelemetry_api::KeyValue;
+use opentelemetry::KeyValue;
 use paste::paste;
 use serde_json::Value;
 
@@ -582,6 +582,7 @@ mod test {
             let yaml = &serde_yaml::from_str::<serde_json::Value>(&input)
                 .expect("config must be valid yaml");
 
+            println!("Testing metrics for file: {}", file_name);
             let mut data = InstrumentData::default();
             data.populate_config_instruments(yaml);
             let configuration: Configuration = input.parse().unwrap();

@@ -2,10 +2,9 @@ use std::collections::HashSet;
 use std::fmt;
 use std::io;
 
-use opentelemetry::sdk::Resource;
 use opentelemetry::Array;
-use opentelemetry::OrderMap;
 use opentelemetry::Value;
+use opentelemetry_sdk::Resource;
 use serde::ser::SerializeMap;
 use serde::ser::Serializer as _;
 use serde_json::Serializer;
@@ -22,10 +21,10 @@ use super::APOLLO_PRIVATE_PREFIX;
 use super::EXCLUDED_ATTRIBUTES;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::logging::JsonFormat;
-use crate::plugins::telemetry::dynamic_attribute::EventAttributes;
 use crate::plugins::telemetry::dynamic_attribute::LogAttributes;
 use crate::plugins::telemetry::formatters::to_list;
 use crate::plugins::telemetry::otel::OtelData;
+use crate::plugins::telemetry::utils::VecKeyValueExt;
 
 #[derive(Debug)]
 pub(crate) struct Json {
@@ -122,11 +121,11 @@ where
                 .get::<OtelData>()
                 .and_then(|otel_data| otel_data.builder.attributes.as_ref());
             if let Some(otel_attributes) = otel_attributes {
-                for (key, value) in otel_attributes.iter().filter(|(key, _)| {
-                    let key_name = key.as_str();
+                for kv in otel_attributes.iter().filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX) && !self.1.contains(&key_name)
                 }) {
-                    serializer.serialize_entry(key.as_str(), &value.as_str())?;
+                    serializer.serialize_entry(kv.key.as_str(), &kv.value.as_str())?;
                 }
             }
         }
@@ -241,25 +240,12 @@ where
                 let event_attributes = {
                     let mut extensions = span.extensions_mut();
                     let otel_data = extensions.get_mut::<OtelData>();
-                    let attrs = otel_data.and_then(|od| od.event_attributes.take());
-                    match attrs {
-                        Some(attrs) => Some(attrs),
-                        None => {
-                            let event_attributes = extensions.get_mut::<EventAttributes>();
-                            event_attributes.map(|event_attributes| {
-                                OrderMap::from_iter(
-                                    event_attributes
-                                        .take()
-                                        .into_iter()
-                                        .map(|kv| (kv.key, kv.value)),
-                                )
-                            })
-                        }
-                    }
+                    otel_data.and_then(|od| od.event_attributes.take())
                 };
                 if let Some(event_attributes) = event_attributes {
-                    for (key, value) in event_attributes {
-                        serializer.serialize_entry(key.as_str(), &AttributeValue::from(value))?;
+                    for kv in event_attributes {
+                        serializer
+                            .serialize_entry(kv.key.as_str(), &AttributeValue::from(kv.value))?;
                     }
                 }
             }
@@ -327,10 +313,7 @@ fn extract_dd_trace_id<'a, 'b, T: LookupSpan<'a>>(span: &SpanRef<'a, T>) -> Opti
         // Extract dd_trace_id, this could be in otel data or log attributes
         if let Some(otel_data) = root_span.extensions().get::<OtelData>() {
             if let Some(attributes) = otel_data.builder.attributes.as_ref() {
-                if let Some((_k, v)) = attributes
-                    .iter()
-                    .find(|(k, _v)| k.as_str() == "dd.trace_id")
-                {
+                if let Some(v) = attributes.find("dd.trace_id") {
                     dd_trace_id = Some(v.to_string());
                 }
             }
@@ -439,7 +422,7 @@ mod test {
                 .with(otel::layer().force_sampling()),
             || {
                 let root_span = tracing::info_span!("root");
-                root_span.set_span_dyn_attribute("dd.trace_id".into(), "1234".into());
+                root_span.set_span_dyn_attribute("dd.trace_id", "1234");
                 let _root_span = root_span.enter();
                 tracing::info!("test");
             },

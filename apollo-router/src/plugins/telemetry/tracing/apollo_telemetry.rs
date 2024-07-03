@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 use std::collections::HashSet;
+use std::convert::Into;
 use std::io::Cursor;
 use std::num::NonZeroUsize;
 use std::sync::Arc;
@@ -16,10 +17,6 @@ use futures::FutureExt;
 use futures::TryFutureExt;
 use itertools::Itertools;
 use lru::LruCache;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedHashMap;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::SpanKind;
 use opentelemetry::trace::Status;
@@ -28,6 +25,12 @@ use opentelemetry::trace::TraceId;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use opentelemetry::Value;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_semantic_conventions::trace::{
+    HTTP_REQUEST_BODY_SIZE, HTTP_RESPONSE_BODY_SIZE, HTTP_RESPONSE_STATUS_CODE,
+};
 use prost::Message;
 use rand::Rng;
 use serde::de::DeserializeOwned;
@@ -73,6 +76,7 @@ use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::otlp::Protocol;
 use crate::plugins::telemetry::tracing::apollo::TracesReport;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::utils::VecKeyValueExt;
 use crate::plugins::telemetry::BoxError;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_ALIASES;
 use crate::plugins::telemetry::APOLLO_PRIVATE_QUERY_DEPTH;
@@ -146,16 +150,16 @@ const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
     CONDITION,
     OPERATION_NAME,
     OPERATION_TYPE,
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD,
+    Key::from_static_str(opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD),
 ];
 
 /// Additional attributes to include when sending to the OTLP protocol.
 const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
-    opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
-    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
-    opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
+    Key::from_static_str(HTTP_REQUEST_BODY_SIZE),
+    Key::from_static_str(HTTP_RESPONSE_BODY_SIZE),
+    Key::from_static_str(HTTP_RESPONSE_STATUS_CODE),
 ];
 
 const REPORTS_INCLUDE_SPANS: [&str; 16] = [
@@ -204,33 +208,21 @@ pub(crate) struct LightSpanData {
     pub(crate) name: Cow<'static, str>,
     pub(crate) start_time: SystemTime,
     pub(crate) end_time: SystemTime,
-    pub(crate) attributes: EvictedHashMap,
+    pub(crate) attributes: Vec<KeyValue>,
+    pub(crate) dropped_attributes_count: u32,
     pub(crate) status: Status,
 }
 
 impl LightSpanData {
     /// Convert from a full Span into a lighter more memory-efficient span for caching purposes.
     /// - If `include_attr_names` is passed, filter out any attributes that are not in the list.
-    fn from_span_data(value: SpanData, include_attr_names: &Option<HashSet<Key>>) -> Self {
-        let filtered_attributes = match include_attr_names {
-            None => value.attributes,
-            Some(attr_names) => {
-                // Looks like this transformation will be easier after upgrading opentelemetry_sdk >= 0.21
-                // when attributes are stored as Vec<KeyValue>.
-                // https://github.com/open-telemetry/opentelemetry-rust/blob/943bb7a03f9cd17a0b6b53c2eb12acf77764c122/opentelemetry-sdk/CHANGELOG.md?plain=1#L157-L159
-                let max_attr_len = std::cmp::min(attr_names.len(), value.attributes.len());
-                let mut new_attrs = EvictedHashMap::new(
-                    max_attr_len.try_into().expect("expected usize -> u32"),
-                    max_attr_len,
-                );
-                value.attributes.into_iter().for_each(|(key, value)| {
-                    if attr_names.contains(&key) {
-                        new_attrs.insert(KeyValue::new(key, value))
-                    }
-                });
-                new_attrs
-            }
-        };
+    fn from_span_data(mut value: SpanData, include_attr_names: &Option<HashSet<Key>>) -> Self {
+        if let Some(include_attr_names) = include_attr_names {
+            value
+                .attributes
+                .retain(|kv| include_attr_names.contains(&kv.key));
+        }
+
         Self {
             trace_id: value.span_context.trace_id(),
             span_id: value.span_context.span_id(),
@@ -239,7 +231,8 @@ impl LightSpanData {
             name: value.name,
             start_time: value.start_time,
             end_time: value.end_time,
-            attributes: filtered_attributes,
+            attributes: value.attributes,
+            dropped_attributes_count: value.dropped_attributes_count,
             status: value.status,
         }
     }
@@ -539,13 +532,12 @@ impl Exporter {
                     Some(TreeData::Trace(Some(Err(_err)))) => (true, None),
                     _ => (false, None),
                 };
-                let service_name = (span
+
+                let service_name = span
                     .attributes
-                    .get(&SUBGRAPH_NAME)
-                    .cloned()
-                    .unwrap_or_else(|| Value::String("unknown service".into()))
-                    .as_str())
-                .to_string();
+                    .find(SUBGRAPH_NAME)
+                    .map(|s| s.to_string())
+                    .unwrap_or_else(|| "unknown service".to_string());
                 vec![TreeData::QueryPlanNode(QueryPlanNode {
                     node: Some(proto::reports::trace::query_plan_node::Node::Fetch(
                         Box::new(FetchNode {
@@ -554,7 +546,7 @@ impl Exporter {
                             trace,
                             sent_time_offset: span
                                 .attributes
-                                .get(&APOLLO_PRIVATE_SENT_TIME_OFFSET)
+                                .find(APOLLO_PRIVATE_SENT_TIME_OFFSET)
                                 .and_then(extract_i64)
                                 .map(|f| f as u64)
                                 .unwrap_or_default(),
@@ -570,7 +562,7 @@ impl Exporter {
                         Box::new(FlattenNode {
                             response_path: span
                                 .attributes
-                                .get(&PATH)
+                                .find(PATH)
                                 .map(extract_path)
                                 .unwrap_or_default(),
                             node: child_nodes.remove_first_query_plan_node().map(Box::new),
@@ -581,7 +573,7 @@ impl Exporter {
             SUBGRAPH_SPAN_NAME => {
                 let subgraph_name = span
                     .attributes
-                    .get(&SUBGRAPH_NAME)
+                    .find(SUBGRAPH_NAME)
                     .and_then(extract_string)
                     .unwrap_or_default();
                 let error_configuration = self
@@ -590,7 +582,7 @@ impl Exporter {
                     .get_error_config(&subgraph_name);
                 vec![TreeData::Trace(
                     span.attributes
-                        .get(&APOLLO_PRIVATE_FTV1)
+                        .find(APOLLO_PRIVATE_FTV1)
                         .and_then(|t| extract_ftv1_trace(t, error_configuration)),
                 )]
             }
@@ -599,17 +591,17 @@ impl Exporter {
                 child_nodes.push(TreeData::Supergraph {
                     operation_signature: span
                         .attributes
-                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .find(APOLLO_PRIVATE_OPERATION_SIGNATURE)
                         .and_then(extract_string)
                         .unwrap_or_default(),
                     operation_name: span
                         .attributes
-                        .get(&OPERATION_NAME)
+                        .find(OPERATION_NAME)
                         .and_then(extract_string)
                         .unwrap_or_default(),
                     variables_json: span
                         .attributes
-                        .get(&APOLLO_PRIVATE_GRAPHQL_VARIABLES)
+                        .find(APOLLO_PRIVATE_GRAPHQL_VARIABLES)
                         .and_then(extract_json)
                         .unwrap_or_default(),
                     limits: Some(extract_limits(span)),
@@ -621,15 +613,15 @@ impl Exporter {
                     http: Box::new(extract_http_data(span)),
                     client_name: span
                         .attributes
-                        .get(&CLIENT_NAME_KEY)
+                        .find(CLIENT_NAME_KEY)
                         .and_then(extract_string),
                     client_version: span
                         .attributes
-                        .get(&CLIENT_VERSION_KEY)
+                        .find(CLIENT_VERSION_KEY)
                         .and_then(extract_string),
                     duration_ns: span
                         .attributes
-                        .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
+                        .find(APOLLO_PRIVATE_DURATION_NS_KEY)
                         .and_then(extract_i64)
                         .map(|e| e as u64)
                         .unwrap_or_default(),
@@ -643,21 +635,21 @@ impl Exporter {
                         .collect()
                 }
             }
-            _ if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some() => {
+            _ if span.attributes.find(APOLLO_PRIVATE_REQUEST).is_some() => {
                 if !self.use_legacy_request_span {
                     child_nodes.push(TreeData::Router {
                         http: Box::new(extract_http_data(span)),
                         client_name: span
                             .attributes
-                            .get(&CLIENT_NAME_KEY)
+                            .find(CLIENT_NAME_KEY)
                             .and_then(extract_string),
                         client_version: span
                             .attributes
-                            .get(&CLIENT_VERSION_KEY)
+                            .find(CLIENT_VERSION_KEY)
                             .and_then(extract_string),
                         duration_ns: span
                             .attributes
-                            .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
+                            .find(APOLLO_PRIVATE_DURATION_NS_KEY)
                             .and_then(extract_i64)
                             .map(|e| e as u64)
                             .unwrap_or_default(),
@@ -687,13 +679,13 @@ impl Exporter {
                     node: child_nodes.remove_first_query_plan_node(),
                     path: span
                         .attributes
-                        .get(&PATH)
+                        .find(PATH)
                         .map(extract_path)
                         .unwrap_or_default(),
                     // In theory we don't have to do the transformation here, but it is safer to do so.
                     depends: span
                         .attributes
-                        .get(&DEPENDS)
+                        .find(DEPENDS)
                         .and_then(extract_json::<Vec<crate::query_planner::Depends>>)
                         .unwrap_or_default()
                         .iter()
@@ -704,7 +696,7 @@ impl Exporter {
                         .collect(),
                     label: span
                         .attributes
-                        .get(&LABEL)
+                        .find(LABEL)
                         .and_then(extract_string)
                         .unwrap_or_default(),
                 })]
@@ -715,7 +707,7 @@ impl Exporter {
                     node: Some(Node::Condition(Box::new(ConditionNode {
                         condition: span
                             .attributes
-                            .get(&CONDITION)
+                            .find(CONDITION)
                             .and_then(extract_string)
                             .unwrap_or_default(),
                         if_clause: child_nodes.remove_first_condition_if_node().map(Box::new),
@@ -736,7 +728,7 @@ impl Exporter {
             EXECUTION_SPAN_NAME => {
                 child_nodes.push(TreeData::Execution(
                     span.attributes
-                        .get(&OPERATION_TYPE)
+                        .find(OPERATION_TYPE)
                         .and_then(extract_string)
                         .unwrap_or_default(),
                 ));
@@ -748,15 +740,15 @@ impl Exporter {
                     http: Box::new(extract_http_data(span)),
                     client_name: span
                         .attributes
-                        .get(&CLIENT_NAME_KEY)
+                        .find(CLIENT_NAME_KEY)
                         .and_then(extract_string),
                     client_version: span
                         .attributes
-                        .get(&CLIENT_VERSION_KEY)
+                        .find(CLIENT_VERSION_KEY)
                         .and_then(extract_string),
                     duration_ns: span
                         .attributes
-                        .get(&APOLLO_PRIVATE_DURATION_NS_KEY)
+                        .find(APOLLO_PRIVATE_DURATION_NS_KEY)
                         .and_then(extract_i64)
                         .map(|e| e as u64)
                         .unwrap_or_default(),
@@ -766,12 +758,12 @@ impl Exporter {
                 child_nodes.push(TreeData::Supergraph {
                     operation_signature: span
                         .attributes
-                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .find(APOLLO_PRIVATE_OPERATION_SIGNATURE)
                         .and_then(extract_string)
                         .unwrap_or_default(),
                     operation_name: span
                         .attributes
-                        .get(&OPERATION_NAME)
+                        .find(OPERATION_NAME)
                         .and_then(extract_string)
                         .unwrap_or_default(),
                     variables_json: HashMap::new(),
@@ -798,42 +790,42 @@ fn extract_limits(span: &LightSpanData) -> Limits {
     Limits {
         result: span
             .attributes
-            .get(&APOLLO_PRIVATE_COST_RESULT)
+            .find(APOLLO_PRIVATE_COST_RESULT)
             .and_then(extract_string)
             .unwrap_or_default(),
         strategy: span
             .attributes
-            .get(&APOLLO_PRIVATE_COST_STRATEGY)
+            .find(APOLLO_PRIVATE_COST_STRATEGY)
             .and_then(extract_string)
             .unwrap_or_default(),
         cost_estimated: span
             .attributes
-            .get(&APOLLO_PRIVATE_COST_ESTIMATED)
+            .find(APOLLO_PRIVATE_COST_ESTIMATED)
             .and_then(extract_f64)
             .unwrap_or_default() as u64,
         cost_actual: span
             .attributes
-            .get(&APOLLO_PRIVATE_COST_ACTUAL)
+            .find(APOLLO_PRIVATE_COST_ACTUAL)
             .and_then(extract_f64)
             .unwrap_or_default() as u64,
         depth: span
             .attributes
-            .get(&APOLLO_PRIVATE_QUERY_DEPTH)
+            .find(APOLLO_PRIVATE_QUERY_DEPTH)
             .and_then(extract_i64)
             .unwrap_or_default() as u64,
         height: span
             .attributes
-            .get(&APOLLO_PRIVATE_QUERY_HEIGHT)
+            .find(APOLLO_PRIVATE_QUERY_HEIGHT)
             .and_then(extract_i64)
             .unwrap_or_default() as u64,
         alias_count: span
             .attributes
-            .get(&APOLLO_PRIVATE_QUERY_ALIASES)
+            .find(APOLLO_PRIVATE_QUERY_ALIASES)
             .and_then(extract_i64)
             .unwrap_or_default() as u64,
         root_field_count: span
             .attributes
-            .get(&APOLLO_PRIVATE_QUERY_ROOT_FIELDS)
+            .find(APOLLO_PRIVATE_QUERY_ROOT_FIELDS)
             .and_then(extract_i64)
             .unwrap_or_default() as u64,
     }
@@ -899,6 +891,22 @@ pub(crate) fn extract_f64(v: &Value) -> Option<f64> {
     }
 }
 
+pub(crate) fn extract_ftv1_trace(
+    v: &Value,
+    error_config: &ErrorConfiguration,
+) -> Option<Result<Box<proto::reports::Trace>, Error>> {
+    if let Value::String(s) = v {
+        if let Some(mut t) = decode_ftv1_trace(s.as_str()) {
+            if let Some(root) = &mut t.root {
+                preprocess_errors(root, error_config);
+            }
+            return Some(Ok(Box::new(t)));
+        }
+        return Some(Err(Error::TraceParsingFailed));
+    }
+    None
+}
+
 pub(crate) fn extract_ftv1_trace_with_error_count(
     v: &Value,
     error_config: &ErrorConfiguration,
@@ -910,22 +918,6 @@ pub(crate) fn extract_ftv1_trace_with_error_count(
                 error_count += preprocess_errors(root, error_config);
             }
             return Some(Ok((Box::new(t), error_count)));
-        }
-        return Some(Err(Error::TraceParsingFailed));
-    }
-    None
-}
-
-pub(crate) fn extract_ftv1_trace(
-    v: &Value,
-    error_config: &ErrorConfiguration,
-) -> Option<Result<Box<proto::reports::Trace>, Error>> {
-    if let Value::String(s) = v {
-        if let Some(mut t) = decode_ftv1_trace(s.as_str()) {
-            if let Some(root) = &mut t.root {
-                preprocess_errors(root, error_config);
-            }
-            return Some(Ok(Box::new(t)));
         }
         return Some(Err(Error::TraceParsingFailed));
     }
@@ -967,7 +959,7 @@ pub(crate) fn encode_ftv1_trace(trace: &proto::reports::Trace) -> String {
 fn extract_http_data(span: &LightSpanData) -> Http {
     let method = match span
         .attributes
-        .get(&opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
+        .find(opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD)
         .map(|data| data.as_str())
         .unwrap_or_default()
         .as_ref()
@@ -985,7 +977,7 @@ fn extract_http_data(span: &LightSpanData) -> Http {
     };
     let request_headers = span
         .attributes
-        .get(&APOLLO_PRIVATE_HTTP_REQUEST_HEADERS)
+        .find(APOLLO_PRIVATE_HTTP_REQUEST_HEADERS)
         .and_then(extract_json::<HashMap<String, Vec<String>>>)
         .unwrap_or_default()
         .into_iter()
@@ -993,7 +985,7 @@ fn extract_http_data(span: &LightSpanData) -> Http {
         .collect();
     let response_headers = span
         .attributes
-        .get(&APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
+        .find(APOLLO_PRIVATE_HTTP_RESPONSE_HEADERS)
         .and_then(extract_json::<HashMap<String, Vec<String>>>)
         .unwrap_or_default()
         .into_iter()
@@ -1024,7 +1016,7 @@ impl SpanExporter for Exporter {
         let send_reports = self.report_exporter.is_some() && !send_otlp;
 
         for span in batch {
-            if span.attributes.get(&APOLLO_PRIVATE_REQUEST).is_some()
+            if span.attributes.find(APOLLO_PRIVATE_REQUEST).is_some()
                 || span.name == SUBSCRIPTION_EVENT_SPAN_NAME
             {
                 let root_span: LightSpanData =
@@ -1216,9 +1208,8 @@ impl ChildNodes for Vec<TreeData> {
 mod test {
     use std::time::SystemTime;
     use opentelemetry::Value;
-    use opentelemetry_api::KeyValue;
-    use opentelemetry_api::trace::{SpanId, SpanKind, TraceId};
-    use opentelemetry_sdk::trace::EvictedHashMap;
+    use opentelemetry::KeyValue;
+    use opentelemetry::trace::{SpanId, SpanKind, TraceId};
     use serde_json::json;
     use crate::plugins::telemetry::apollo::ErrorConfiguration;
     use crate::plugins::telemetry::apollo_exporter::proto::reports::Trace;
@@ -1577,37 +1568,38 @@ mod test {
             name: Default::default(),
             start_time: SystemTime::now(),
             end_time: SystemTime::now(),
-            attributes: EvictedHashMap::new(10, 10),
+            attributes: Vec::default(),
+            dropped_attributes_count: 0,
             status: Default::default(),
         };
 
-        span.attributes.insert(KeyValue::new(
+        span.attributes.push(KeyValue::new(
             APOLLO_PRIVATE_COST_RESULT,
             Value::String("OK".into()),
         ));
-        span.attributes.insert(KeyValue::new(
+        span.attributes.push(KeyValue::new(
             APOLLO_PRIVATE_COST_ESTIMATED,
             Value::F64(9.2),
         ));
         span.attributes
-            .insert(KeyValue::new(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9)));
-        span.attributes.insert(KeyValue::new(
+            .push(KeyValue::new(APOLLO_PRIVATE_COST_ACTUAL, Value::F64(6.9)));
+        span.attributes.push(KeyValue::new(
             APOLLO_PRIVATE_COST_STRATEGY,
             Value::String("static_estimated".into()),
         ));
-        span.attributes.insert(KeyValue::new(
+        span.attributes.push(KeyValue::new(
             APOLLO_PRIVATE_QUERY_ALIASES,
             Value::I64(0.into()),
         ));
-        span.attributes.insert(KeyValue::new(
+        span.attributes.push(KeyValue::new(
             APOLLO_PRIVATE_QUERY_DEPTH,
             Value::I64(5.into()),
         ));
-        span.attributes.insert(KeyValue::new(
+        span.attributes.push(KeyValue::new(
             APOLLO_PRIVATE_QUERY_HEIGHT,
             Value::I64(7.into()),
         ));
-        span.attributes.insert(KeyValue::new(
+        span.attributes.push(KeyValue::new(
             APOLLO_PRIVATE_QUERY_ROOT_FIELDS,
             Value::I64(1.into()),
         ));

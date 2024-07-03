@@ -9,9 +9,7 @@ telemetry:
     tracing:
       common:
         service_name: router
-      jaeger:
+      otlp:
         enabled: true
-        agent:
-          endpoint: jaeger:6831
       propagation:
         jaeger: true

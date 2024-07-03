@@ -8,25 +8,25 @@ use std::sync::Mutex;
 
 use derive_more::From;
 use itertools::Itertools;
+use opentelemetry::metrics::AsyncInstrument;
 use opentelemetry::metrics::Callback;
+use opentelemetry::metrics::CallbackRegistration;
 use opentelemetry::metrics::Counter;
 use opentelemetry::metrics::Histogram;
 use opentelemetry::metrics::InstrumentProvider;
 use opentelemetry::metrics::Meter;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::MetricsError;
 use opentelemetry::metrics::ObservableCounter;
 use opentelemetry::metrics::ObservableGauge;
 use opentelemetry::metrics::ObservableUpDownCounter;
+use opentelemetry::metrics::Observer;
 use opentelemetry::metrics::SyncCounter;
 use opentelemetry::metrics::SyncHistogram;
 use opentelemetry::metrics::SyncUpDownCounter;
 use opentelemetry::metrics::Unit;
 use opentelemetry::metrics::UpDownCounter;
 use opentelemetry::KeyValue;
-use opentelemetry_api::metrics::AsyncInstrument;
-use opentelemetry_api::metrics::CallbackRegistration;
-use opentelemetry_api::metrics::MetricsError;
-use opentelemetry_api::metrics::Observer;
 
 use crate::metrics::filter::FilterMeterProvider;
 
@@ -62,7 +62,7 @@ impl Default for AggregateMeterProvider {
         meter_provider.set(
             MeterProviderType::OtelDefault,
             Some(FilterMeterProvider::public(
-                opentelemetry_api::global::meter_provider(),
+                opentelemetry::global::meter_provider(),
             )),
         );
 
@@ -412,7 +412,6 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
     aggregate_instrument_fn!(u64_histogram, u64, Histogram, AggregateHistogram);
     aggregate_instrument_fn!(f64_histogram, f64, Histogram, AggregateHistogram);
-    aggregate_instrument_fn!(i64_histogram, i64, Histogram, AggregateHistogram);
 
     aggregate_instrument_fn!(
         i64_up_down_counter,
@@ -463,7 +462,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
         &self,
         _instruments: &[Arc<dyn Any>],
         _callbacks: Box<dyn Fn(&dyn Observer) + Send + Sync>,
-    ) -> opentelemetry_api::metrics::Result<Box<dyn CallbackRegistration>> {
+    ) -> opentelemetry::metrics::Result<Box<dyn CallbackRegistration>> {
         // We may implement this in future, but for now we don't need it and it's a pain to implement because we need to unwrap the aggregate instruments and pass them to the meter provider that owns them.
         unimplemented!("register_callback is not supported on AggregateInstrumentProvider");
     }
@@ -471,7 +470,7 @@ impl InstrumentProvider for AggregateInstrumentProvider {
 
 struct AggregatedCallbackRegistrations(Vec<Box<dyn CallbackRegistration>>);
 impl CallbackRegistration for AggregatedCallbackRegistrations {
-    fn unregister(&mut self) -> opentelemetry_api::metrics::Result<()> {
+    fn unregister(&mut self) -> opentelemetry::metrics::Result<()> {
         let mut errors = vec![];
         for mut registration in mem::take(&mut self.0) {
             if let Err(err) = registration.unregister() {
@@ -493,22 +492,20 @@ mod test {
     use std::sync::Arc;
     use std::sync::Weak;
 
-    use opentelemetry::sdk::metrics::data::Gauge;
-    use opentelemetry::sdk::metrics::data::ResourceMetrics;
-    use opentelemetry::sdk::metrics::data::Temporality;
-    use opentelemetry::sdk::metrics::reader::AggregationSelector;
-    use opentelemetry::sdk::metrics::reader::MetricProducer;
-    use opentelemetry::sdk::metrics::reader::MetricReader;
-    use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry::sdk::metrics::Aggregation;
-    use opentelemetry::sdk::metrics::InstrumentKind;
-    use opentelemetry::sdk::metrics::ManualReader;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::Pipeline;
-    use opentelemetry_api::global::GlobalMeterProvider;
-    use opentelemetry_api::metrics::MeterProvider;
-    use opentelemetry_api::metrics::Result;
-    use opentelemetry_api::Context;
+    use opentelemetry::global::GlobalMeterProvider;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry::metrics::Result;
+    use opentelemetry_sdk::metrics::data::Gauge;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::Pipeline;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
@@ -534,16 +531,12 @@ mod test {
             self.0.register_pipeline(pipeline)
         }
 
-        fn register_producer(&self, producer: Box<dyn MetricProducer>) {
-            self.0.register_producer(producer)
-        }
-
         fn collect(&self, rm: &mut ResourceMetrics) -> Result<()> {
             self.0.collect(rm)
         }
 
-        fn force_flush(&self, cx: &Context) -> Result<()> {
-            self.0.force_flush(cx)
+        fn force_flush(&self) -> Result<()> {
+            self.0.force_flush()
         }
 
         fn shutdown(&self) -> Result<()> {

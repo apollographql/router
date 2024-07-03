@@ -98,12 +98,10 @@ telemetry:
     tracing:
       propagation:
         trace_context: true
-      jaeger:
+      otlp:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        agent:
-          endpoint: default
     logging:
       experimental_when_header:
         - name: content-type

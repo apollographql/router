@@ -1,13 +1,11 @@
 #[cfg(test)]
-use std::collections::BTreeMap;
-use std::collections::HashSet;
-use std::fmt;
-
+use itertools::Itertools;
 use nu_ansi_term::Color;
 use nu_ansi_term::Style;
-use opentelemetry::sdk::Resource;
-use opentelemetry::OrderMap;
+use opentelemetry_sdk::Resource;
 use serde_json::Value;
+use std::collections::HashSet;
+use std::fmt;
 use tracing_core::Event;
 use tracing_core::Field;
 use tracing_core::Level;
@@ -232,8 +230,8 @@ impl Text {
         {
             let mut attrs = otel_attributes
                 .iter()
-                .filter(|(key, _value)| {
-                    let key_name = key.as_str();
+                .filter(|kv| {
+                    let key_name = kv.key.as_str();
                     !key_name.starts_with(APOLLO_PRIVATE_PREFIX)
                         && !self.excluded_attributes.contains(&key_name)
                 })
@@ -243,8 +241,9 @@ impl Text {
                 write!(writer, "{}{{", span.name())?;
             }
             #[cfg(test)]
-            let attrs: BTreeMap<&opentelemetry::Key, &opentelemetry::Value> = attrs.collect();
-            for (key, value) in attrs {
+            for key_value in attrs.sorted_by(|kv1, kv2| kv1.key.as_str().cmp(kv2.key.as_str())) {
+                let key = &key_value.key;
+                let value = &key_value.value;
                 write!(writer, "{key}={value},")?;
             }
         }
@@ -371,19 +370,12 @@ where
                 Some(attrs) => Some(attrs),
                 None => {
                     let event_attributes = extensions.get_mut::<EventAttributes>();
-                    event_attributes.map(|event_attributes| {
-                        OrderMap::from_iter(
-                            event_attributes
-                                .take()
-                                .into_iter()
-                                .map(|kv| (kv.key, kv.value)),
-                        )
-                    })
+                    event_attributes.map(|event_attributes| event_attributes.take())
                 }
             };
             if let Some(event_attributes) = event_attributes {
-                for (key, value) in event_attributes {
-                    default_visitor.log_debug_attrs(key.as_str(), &value);
+                for kv in event_attributes {
+                    default_visitor.log_debug_attrs(kv.key.as_str(), &kv.value);
                 }
             }
         }

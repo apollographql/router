@@ -2,7 +2,7 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
-use opentelemetry_api::Value;
+use opentelemetry::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;

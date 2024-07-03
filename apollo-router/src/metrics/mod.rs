@@ -4,10 +4,9 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::OnceLock;
 
+use crate::metrics::aggregation::AggregateMeterProvider;
 #[cfg(test)]
 use futures::FutureExt;
-
-use crate::metrics::aggregation::AggregateMeterProvider;
 
 pub(crate) mod aggregation;
 pub(crate) mod filter;
@@ -28,34 +27,33 @@ pub(crate) mod test_utils {
     use itertools::Itertools;
     use num_traits::NumCast;
     use num_traits::ToPrimitive;
-    use opentelemetry::sdk::metrics::data::DataPoint;
-    use opentelemetry::sdk::metrics::data::Gauge;
-    use opentelemetry::sdk::metrics::data::Histogram;
-    use opentelemetry::sdk::metrics::data::HistogramDataPoint;
-    use opentelemetry::sdk::metrics::data::Metric;
-    use opentelemetry::sdk::metrics::data::ResourceMetrics;
-    use opentelemetry::sdk::metrics::data::Sum;
-    use opentelemetry::sdk::metrics::data::Temporality;
-    use opentelemetry::sdk::metrics::reader::AggregationSelector;
-    use opentelemetry::sdk::metrics::reader::MetricProducer;
-    use opentelemetry::sdk::metrics::reader::MetricReader;
-    use opentelemetry::sdk::metrics::reader::TemporalitySelector;
-    use opentelemetry::sdk::metrics::Aggregation;
-    use opentelemetry::sdk::metrics::InstrumentKind;
-    use opentelemetry::sdk::metrics::ManualReader;
-    use opentelemetry::sdk::metrics::MeterProviderBuilder;
-    use opentelemetry::sdk::metrics::Pipeline;
-    use opentelemetry::sdk::AttributeSet;
     use opentelemetry::Array;
     use opentelemetry::KeyValue;
     use opentelemetry::Value;
-    use opentelemetry_api::Context;
+    use opentelemetry_sdk::metrics::data::DataPoint;
+    use opentelemetry_sdk::metrics::data::Gauge;
+    use opentelemetry_sdk::metrics::data::Histogram;
+    use opentelemetry_sdk::metrics::data::HistogramDataPoint;
+    use opentelemetry_sdk::metrics::data::Metric;
+    use opentelemetry_sdk::metrics::data::ResourceMetrics;
+    use opentelemetry_sdk::metrics::data::Sum;
+    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::reader::AggregationSelector;
+    use opentelemetry_sdk::metrics::reader::MetricReader;
+    use opentelemetry_sdk::metrics::reader::TemporalitySelector;
+    use opentelemetry_sdk::metrics::Aggregation;
+    use opentelemetry_sdk::metrics::InstrumentKind;
+    use opentelemetry_sdk::metrics::ManualReader;
+    use opentelemetry_sdk::metrics::MeterProviderBuilder;
+    use opentelemetry_sdk::metrics::Pipeline;
+    use opentelemetry_sdk::AttributeSet;
     use serde::Serialize;
     use tokio::task_local;
 
     use crate::metrics::aggregation::AggregateMeterProvider;
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::filter::FilterMeterProvider;
+
     task_local! {
         pub(crate) static AGGREGATE_METER_PROVIDER_ASYNC: OnceLock<(AggregateMeterProvider, ClonableManualReader)>;
     }
@@ -84,19 +82,15 @@ pub(crate) mod test_utils {
             self.reader.register_pipeline(pipeline)
         }
 
-        fn register_producer(&self, producer: Box<dyn MetricProducer>) {
-            self.reader.register_producer(producer)
-        }
-
         fn collect(&self, rm: &mut ResourceMetrics) -> opentelemetry::metrics::Result<()> {
             self.reader.collect(rm)
         }
 
-        fn force_flush(&self, cx: &Context) -> opentelemetry_api::metrics::Result<()> {
-            self.reader.force_flush(cx)
+        fn force_flush(&self) -> opentelemetry::metrics::Result<()> {
+            self.reader.force_flush()
         }
 
-        fn shutdown(&self) -> opentelemetry_api::metrics::Result<()> {
+        fn shutdown(&self) -> opentelemetry::metrics::Result<()> {
             self.reader.shutdown()
         }
     }
@@ -160,10 +154,7 @@ pub(crate) mod test_utils {
     }
 
     impl Metrics {
-        pub(crate) fn find(
-            &self,
-            name: &str,
-        ) -> Option<&opentelemetry::sdk::metrics::data::Metric> {
+        pub(crate) fn find(&self, name: &str) -> Option<&opentelemetry_sdk::metrics::data::Metric> {
             self.resource_metrics
                 .scope_metrics
                 .iter()
@@ -183,7 +174,7 @@ pub(crate) mod test_utils {
             value: T,
             attributes: &[KeyValue],
         ) -> bool {
-            let attributes = AttributeSet::from(attributes);
+            let attributes = Self::normalize_attributes(&AttributeSet::from(attributes));
             if let Some(value) = value.to_u64() {
                 if self.metric_matches(name, &ty, value, &attributes) {
                     return true;
@@ -205,6 +196,14 @@ pub(crate) mod test_utils {
             false
         }
 
+        fn normalize_attributes(attribute_set: &AttributeSet) -> AttributeSet {
+            if attribute_set.is_empty() {
+                AttributeSet::default()
+            } else {
+                attribute_set.clone()
+            }
+        }
+
         pub(crate) fn metric_matches<T: Debug + PartialEq + Display + ToPrimitive + 'static>(
             &self,
             name: &str,
@@ -218,21 +217,24 @@ pub(crate) mod test_utils {
                     // Find the datapoint with the correct attributes.
                     if matches!(ty, MetricType::Gauge) {
                         return gauge.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            Self::normalize_attributes(&datapoint.attributes) == *attributes
+                                && datapoint.value == value
                         });
                     }
                 } else if let Some(sum) = metric.data.as_any().downcast_ref::<Sum<T>>() {
                     // Note that we can't actually tell if the sum is monotonic or not, so we just check if it's a sum.
                     if matches!(ty, MetricType::Counter | MetricType::UpDownCounter) {
                         return sum.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.value == value
+                            Self::normalize_attributes(&datapoint.attributes) == *attributes
+                                && datapoint.value == value
                         });
                     }
                 } else if let Some(histogram) = metric.data.as_any().downcast_ref::<Histogram<T>>()
                 {
                     if matches!(ty, MetricType::Histogram) {
                         return histogram.data_points.iter().any(|datapoint| {
-                            datapoint.attributes == *attributes && datapoint.sum == value
+                            Self::normalize_attributes(&datapoint.attributes) == *attributes
+                                && datapoint.sum == value
                         });
                     }
                 }
@@ -367,7 +369,7 @@ pub(crate) mod test_utils {
     impl SerdeMetricData {
         fn extract_datapoints<T: Into<serde_json::Value> + Clone + 'static>(
             metric_data: &mut SerdeMetricData,
-            value: &dyn opentelemetry::sdk::metrics::data::Aggregation,
+            value: &dyn opentelemetry_sdk::metrics::data::Aggregation,
         ) {
             if let Some(gauge) = value.as_any().downcast_ref::<Gauge<T>>() {
                 gauge.data_points.iter().for_each(|datapoint| {
@@ -467,8 +469,8 @@ pub(crate) mod test_utils {
         }
     }
 
-    impl From<Box<dyn opentelemetry::sdk::metrics::data::Aggregation>> for SerdeMetricData {
-        fn from(value: Box<dyn opentelemetry::sdk::metrics::data::Aggregation>) -> Self {
+    impl From<Box<dyn opentelemetry_sdk::metrics::data::Aggregation>> for SerdeMetricData {
+        fn from(value: Box<dyn opentelemetry_sdk::metrics::data::Aggregation>) -> Self {
             let mut metric_data = SerdeMetricData::default();
             Self::extract_datapoints::<u64>(&mut metric_data, value.as_ref());
             Self::extract_datapoints::<f64>(&mut metric_data, value.as_ref());
@@ -802,7 +804,7 @@ macro_rules! metric {
                 let cache_callsite = true;
 
                 if cache_callsite {
-                    static INSTRUMENT_CACHE: std::sync::OnceLock<std::sync::Mutex<std::sync::Weak<opentelemetry_api::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
+                    static INSTRUMENT_CACHE: std::sync::OnceLock<std::sync::Mutex<std::sync::Weak<opentelemetry::metrics::[<$instrument:camel>]<$ty>>>> = std::sync::OnceLock::new();
 
                     let mut instrument_guard = INSTRUMENT_CACHE
                         .get_or_init(|| {
@@ -1142,8 +1144,8 @@ impl<T> FutureMetricsExt<T> for T where T: Future {}
 
 #[cfg(test)]
 mod test {
-    use opentelemetry_api::metrics::MeterProvider;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry::metrics::MeterProvider;
+    use opentelemetry::KeyValue;
 
     use crate::metrics::aggregation::MeterProviderType;
     use crate::metrics::meter_provider;
@@ -1277,16 +1279,6 @@ mod test {
     async fn test_u64_histogram() {
         async {
             u64_histogram!("test", "test description", 1, "attr" = "val");
-            assert_histogram_sum!("test", 1, "attr" = "val");
-        }
-        .with_metrics()
-        .await;
-    }
-
-    #[tokio::test]
-    async fn test_i64_histogram() {
-        async {
-            i64_histogram!("test", "test description", 1, "attr" = "val");
             assert_histogram_sum!("test", 1, "attr" = "val");
         }
         .with_metrics()

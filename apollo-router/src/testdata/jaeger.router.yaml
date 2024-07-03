@@ -13,12 +13,10 @@ telemetry:
         jaeger: true
       common:
         service_name: router
-      jaeger:
+      otlp:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        agent:
-          endpoint: default
     logging:
       experimental_when_header:
         - name: apollo-router-log-request

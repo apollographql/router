@@ -5,11 +5,6 @@ use derivative::Derivative;
 use futures::future;
 use futures::future::BoxFuture;
 use futures::TryFutureExt;
-use opentelemetry::sdk::export::trace::ExportResult;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::export::trace::SpanExporter;
-use opentelemetry::sdk::trace::EvictedQueue;
-use opentelemetry::sdk::Resource;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::Status;
 use opentelemetry::trace::TraceFlags;
@@ -18,9 +13,13 @@ use opentelemetry::InstrumentationLibrary;
 use opentelemetry::KeyValue;
 use opentelemetry_otlp::SpanExporterBuilder;
 use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::{SpanEvents, SpanLinks};
+use opentelemetry_sdk::Resource;
 use parking_lot::Mutex;
 use sys_info::hostname;
-use tonic::codec::CompressionEncoding;
 use tonic::metadata::MetadataMap;
 use tonic::metadata::MetadataValue;
 use tower::BoxError;
@@ -42,6 +41,7 @@ use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_OPERATION_SIGNATURE;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
+use crate::plugins::telemetry::utils::VecKeyValueExt;
 use crate::plugins::telemetry::GLOBAL_TRACER_NAME;
 
 /// The Apollo Otlp exporter is a thin wrapper around the OTLP SpanExporter.
@@ -75,7 +75,7 @@ impl ApolloOtlpExporter {
         metadata.insert("apollo.api.key", MetadataValue::try_from(apollo_key)?);
         let otlp_exporter = match protocol {
             Protocol::Grpc => {
-                let mut span_exporter = SpanExporterBuilder::from(
+                let span_exporter = SpanExporterBuilder::from(
                     opentelemetry_otlp::new_exporter()
                         .tonic()
                         .with_timeout(batch_config.max_export_timeout)
@@ -84,22 +84,6 @@ impl ApolloOtlpExporter {
                         .with_compression(opentelemetry_otlp::Compression::Gzip),
                 )
                 .build_span_exporter()?;
-
-                // This is a hack and won't be needed anymore once opentelemetry_otlp will be upgraded
-                span_exporter = if let opentelemetry_otlp::SpanExporter::Tonic {
-                    trace_exporter,
-                    metadata,
-                    timeout,
-                } = span_exporter
-                {
-                    opentelemetry_otlp::SpanExporter::Tonic {
-                        timeout,
-                        metadata,
-                        trace_exporter: trace_exporter.accept_compressed(CompressionEncoding::Gzip),
-                    }
-                } else {
-                    span_exporter
-                };
 
                 Arc::new(Mutex::new(span_exporter))
             }
@@ -134,16 +118,13 @@ impl ApolloOtlpExporter {
                 KeyValue::new("apollo.client.host", hostname()?),
                 KeyValue::new("apollo.client.uname", get_uname()?),
             ]),
-            intrumentation_library: InstrumentationLibrary::new(
-                GLOBAL_TRACER_NAME,
-                Some(format!(
+            intrumentation_library: InstrumentationLibrary::builder(GLOBAL_TRACER_NAME)
+                .with_version(format!(
                     "{}@{}",
                     std::env!("CARGO_PKG_NAME"),
                     std::env!("CARGO_PKG_VERSION")
-                )),
-                Option::<String>::None,
-                None,
-            ),
+                ))
+                .build(),
             otlp_exporter,
             errors_configuration: errors_configuration.clone(),
         })
@@ -162,7 +143,8 @@ impl ApolloOtlpExporter {
                 SUPERGRAPH_SPAN_NAME => {
                     if span
                         .attributes
-                        .get(&APOLLO_PRIVATE_OPERATION_SIGNATURE)
+                        .iter()
+                        .find(|kv| kv.key == APOLLO_PRIVATE_OPERATION_SIGNATURE)
                         .is_some()
                     {
                         export_spans.push(self.base_prepare_span(span));
@@ -200,8 +182,9 @@ impl ApolloOtlpExporter {
             start_time: span.start_time,
             end_time: span.end_time,
             attributes: span.attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            dropped_attributes_count: span.dropped_attributes_count,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status: span.status,
             // If the underlying exporter supported it, we could
             // group by resource attributes here and significantly reduce the
@@ -217,10 +200,10 @@ impl ApolloOtlpExporter {
         let mut status = Status::Unset;
 
         // If there is an FTV1 attribute, process it for error redaction and replace it
-        if let Some(ftv1) = span.attributes.get(&APOLLO_PRIVATE_FTV1) {
+        if let Some(ftv1) = span.attributes.find(APOLLO_PRIVATE_FTV1) {
             let subgraph_name = span
                 .attributes
-                .get(&SUBGRAPH_NAME)
+                .find(SUBGRAPH_NAME)
                 .and_then(extract_string)
                 .unwrap_or_default();
             let subgraph_error_config = self
@@ -228,14 +211,14 @@ impl ApolloOtlpExporter {
                 .subgraph
                 .get_error_config(&subgraph_name);
             if let Some(Ok((trace_result, error_count))) =
-                extract_ftv1_trace_with_error_count(ftv1, subgraph_error_config)
+                extract_ftv1_trace_with_error_count(&ftv1, subgraph_error_config)
             {
                 if error_count > 0 {
                     status = Status::error("ftv1")
                 }
                 let encoded = encode_ftv1_trace(&trace_result);
                 span.attributes
-                    .insert(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
+                    .push(KeyValue::new(APOLLO_PRIVATE_FTV1, encoded));
             }
         }
 
@@ -253,8 +236,9 @@ impl ApolloOtlpExporter {
             start_time: span.start_time,
             end_time: span.end_time,
             attributes: span.attributes,
-            events: EvictedQueue::new(0),
-            links: EvictedQueue::new(0),
+            dropped_attributes_count: 0,
+            events: SpanEvents::default(),
+            links: SpanLinks::default(),
             status,
             resource: Cow::Owned(self.resource_template.to_owned()),
             instrumentation_lib: self.intrumentation_library.clone(),

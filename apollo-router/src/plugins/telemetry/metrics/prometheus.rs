@@ -5,9 +5,9 @@ use std::task::Poll;
 use futures::future::BoxFuture;
 use http::StatusCode;
 use once_cell::sync::Lazy;
-use opentelemetry::sdk::metrics::MeterProvider;
-use opentelemetry::sdk::metrics::View;
-use opentelemetry::sdk::Resource;
+use opentelemetry_sdk::metrics::SdkMeterProvider;
+use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::Resource;
 use prometheus::Encoder;
 use prometheus::Registry;
 use prometheus::TextEncoder;
@@ -136,7 +136,7 @@ impl MetricsConfigurator for Config {
             .with_registry(registry.clone())
             .build()?;
 
-        let mut meter_provider_builder = MeterProvider::builder()
+        let mut meter_provider_builder = SdkMeterProvider::builder()
             .with_reader(exporter)
             .with_resource(builder.resource.clone());
         for metric_view in metrics_config.views.clone() {

@@ -1,7 +1,7 @@
-use opentelemetry::runtime;
-use opentelemetry::sdk::metrics::PeriodicReader;
-use opentelemetry::sdk::metrics::View;
 use opentelemetry_otlp::MetricsExporterBuilder;
+use opentelemetry_sdk::metrics::PeriodicReader;
+use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::runtime;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::MetricsCommon;

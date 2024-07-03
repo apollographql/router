@@ -41,7 +41,6 @@ pub(crate) struct Instruments {
     i64_up_down_counter: MetricsMap<UpDownCounter<i64>>,
     f64_up_down_counter: MetricsMap<UpDownCounter<f64>>,
     u64_histogram: MetricsMap<Histogram<u64>>,
-    i64_histogram: MetricsMap<Histogram<i64>>,
     f64_histogram: MetricsMap<Histogram<f64>>,
     u64_gauge: MetricsMap<ObservableGauge<u64>>,
 }
@@ -55,7 +54,6 @@ pub(crate) enum InstrumentType {
     UpDownCounterI64(i64),
     UpDownCounterF64(f64),
     HistogramU64(u64),
-    HistogramI64(i64),
     HistogramF64(f64),
     GaugeU64(u64),
 }
@@ -130,14 +128,6 @@ impl Instruments {
                     &self.u64_histogram,
                     metric_name,
                     || meter.u64_histogram(metric_name).init(),
-                    |rec| rec.record(value, custom_attributes),
-                );
-            }
-            InstrumentType::HistogramI64(value) => {
-                update_or_insert(
-                    &self.i64_histogram,
-                    metric_name,
-                    || meter.i64_histogram(metric_name).init(),
                     |rec| rec.record(value, custom_attributes),
                 );
             }
@@ -217,7 +207,14 @@ impl<'a> Visit for MetricVisitor<'a> {
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_COUNTER) {
             self.set_metric(metric_name, InstrumentType::UpDownCounterI64(value));
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_HISTOGRAM) {
-            self.set_metric(metric_name, InstrumentType::HistogramI64(value));
+            if value < 0 {
+                log_and_panic_in_debug_build!(
+                    metric_name,
+                    "histogram must be u64 or f64. This metric will be ignored"
+                );
+            } else {
+                self.set_metric(metric_name, InstrumentType::HistogramU64(value as u64));
+            }
         } else if let Some(metric_name) = field.name().strip_prefix(METRIC_PREFIX_VALUE) {
             if value < 0 {
                 log_and_panic_in_debug_build!(

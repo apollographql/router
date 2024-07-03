@@ -125,6 +125,7 @@ pub(crate) struct SocketEndpoint {
 }
 
 impl SocketEndpoint {
+    #[allow(dead_code)]
     pub(crate) fn to_socket(&self) -> Option<SocketAddr> {
         self.socket
     }

@@ -6,9 +6,9 @@ use http::header::FORWARDED;
 use http::header::USER_AGENT;
 use http::StatusCode;
 use http::Uri;
+use opentelemetry::baggage::BaggageExt;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_api::baggage::BaggageExt;
 use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
 use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
 use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
@@ -985,6 +985,7 @@ mod test {
     use http::HeaderValue;
     use http::StatusCode;
     use http::Uri;
+    use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
@@ -992,8 +993,7 @@ mod test {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use opentelemetry::Context;
-    use opentelemetry_api::baggage::BaggageExt;
-    use opentelemetry_api::KeyValue;
+    use opentelemetry::KeyValue;
     use opentelemetry_semantic_conventions::trace::CLIENT_ADDRESS;
     use opentelemetry_semantic_conventions::trace::CLIENT_PORT;
     use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
@@ -1038,6 +1038,7 @@ mod test {
     use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_NAME;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::otel;
+    use crate::plugins::telemetry::utils::VecKeyValueExt;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -1074,36 +1075,16 @@ mod test {
                 attributes.on_request(&router::Request::fake_builder().build().unwrap());
 
             assert_eq!(
-                attributes
-                    .iter()
-                    .find(|key_val| key_val.key == opentelemetry::Key::from_static_str("trace_id"))
-                    .map(|key_val| &key_val.value),
+                attributes.find("trace_id"),
                 Some(&"0000000000000000000000000000002a".into())
             );
+            assert_eq!(attributes.find("dd.trace_id"), Some(&"42".into()));
             assert_eq!(
-                attributes
-                    .iter()
-                    .find(
-                        |key_val| key_val.key == opentelemetry::Key::from_static_str("dd.trace_id")
-                    )
-                    .map(|key_val| &key_val.value),
-                Some(&"42".into())
-            );
-            assert_eq!(
-                attributes
-                    .iter()
-                    .find(
-                        |key_val| key_val.key == opentelemetry::Key::from_static_str("baggage_key")
-                    )
-                    .map(|key_val| &key_val.value),
+                attributes.find("baggage_key"),
                 Some(&"baggage_value".into())
             );
             assert_eq!(
-                attributes
-                    .iter()
-                    .find(|key_val| key_val.key
-                        == opentelemetry::Key::from_static_str("baggage_key_bis"))
-                    .map(|key_val| &key_val.value),
+                attributes.find("baggage_key_bis"),
                 Some(&"baggage_value_bis".into())
             );
         });
@@ -1122,10 +1103,7 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == GRAPHQL_DOCUMENT)
-                .map(|key_val| &key_val.value),
+            attributes.find(GRAPHQL_DOCUMENT),
             Some(&"query { __typename }".into())
         );
     }
@@ -1145,10 +1123,7 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == GRAPHQL_OPERATION_NAME)
-                .map(|key_val| &key_val.value),
+            attributes.find(GRAPHQL_OPERATION_NAME),
             Some(&"topProducts".into())
         );
     }
@@ -1168,10 +1143,7 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == GRAPHQL_OPERATION_TYPE)
-                .map(|key_val| &key_val.value),
+            attributes.find(GRAPHQL_OPERATION_TYPE),
             Some(&"query".into())
         );
     }
@@ -1197,10 +1169,7 @@ mod test {
                 .build(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_DOCUMENT)
-                .map(|key_val| &key_val.value),
+            attributes.find(SUBGRAPH_GRAPHQL_DOCUMENT),
             Some(&"query { __typename }".into())
         );
     }
@@ -1227,10 +1196,7 @@ mod test {
                 .build(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_OPERATION_NAME)
-                .map(|key_val| &key_val.value),
+            attributes.find(SUBGRAPH_GRAPHQL_OPERATION_NAME),
             Some(&"topProducts".into())
         );
     }
@@ -1256,10 +1222,7 @@ mod test {
                 .build(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_GRAPHQL_OPERATION_TYPE)
-                .map(|key_val| &key_val.value),
+            attributes.find(SUBGRAPH_GRAPHQL_OPERATION_TYPE),
             Some(&"query".into())
         );
     }
@@ -1282,13 +1245,7 @@ mod test {
                 )
                 .build(),
         );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SUBGRAPH_NAME)
-                .map(|key_val| &key_val.value),
-            Some(&"products".into())
-        );
+        assert_eq!(attributes.find(SUBGRAPH_NAME), Some(&"products".into()));
     }
 
     #[test]
@@ -1305,10 +1262,7 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == ERROR_TYPE)
-                .map(|key_val| &key_val.value),
+            attributes.find(ERROR_TYPE),
             Some(
                 &StatusCode::BAD_REQUEST
                     .canonical_reason()
@@ -1319,10 +1273,7 @@ mod test {
 
         let attributes = common.on_error(&anyhow!("test error").into(), &Default::default());
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == ERROR_TYPE)
-                .map(|key_val| &key_val.value),
+            attributes.find(ERROR_TYPE),
             Some(
                 &StatusCode::INTERNAL_SERVER_ERROR
                     .canonical_reason()
@@ -1348,13 +1299,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == HTTP_REQUEST_BODY_SIZE)
-                .map(|key_val| &key_val.value),
-            Some(&256.into())
-        );
+        assert_eq!(attributes.find(HTTP_REQUEST_BODY_SIZE), Some(&256.into()));
     }
 
     #[test]
@@ -1373,13 +1318,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == HTTP_RESPONSE_BODY_SIZE)
-                .map(|key_val| &key_val.value),
-            Some(&256.into())
-        );
+        assert_eq!(attributes.find(HTTP_RESPONSE_BODY_SIZE), Some(&256.into()));
     }
 
     #[test]
@@ -1395,13 +1334,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == HTTP_REQUEST_METHOD)
-                .map(|key_val| &key_val.value),
-            Some(&"POST".into())
-        );
+        assert_eq!(attributes.find(HTTP_REQUEST_METHOD), Some(&"POST".into()));
     }
 
     #[test]
@@ -1418,19 +1351,13 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == HTTP_RESPONSE_STATUS_CODE)
-                .map(|key_val| &key_val.value),
+            attributes.find(HTTP_RESPONSE_STATUS_CODE),
             Some(&(StatusCode::BAD_REQUEST.as_u16() as i64).into())
         );
 
         let attributes = common.on_error(&anyhow!("test error").into(), &Default::default());
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == HTTP_RESPONSE_STATUS_CODE)
-                .map(|key_val| &key_val.value),
+            attributes.find(HTTP_RESPONSE_STATUS_CODE),
             Some(&(StatusCode::INTERNAL_SERVER_ERROR.as_u16() as i64).into())
         );
     }
@@ -1449,10 +1376,7 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_PROTOCOL_NAME)
-                .map(|key_val| &key_val.value),
+            attributes.find(NETWORK_PROTOCOL_NAME),
             Some(&"https".into())
         );
     }
@@ -1471,10 +1395,7 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION)
-                .map(|key_val| &key_val.value),
+            attributes.find(NETWORK_PROTOCOL_VERSION),
             Some(&"HTTP/1.1".into())
         );
     }
@@ -1487,13 +1408,7 @@ mod test {
         };
 
         let attributes = common.on_request(&router::Request::fake_builder().build().unwrap());
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_TRANSPORT)
-                .map(|key_val| &key_val.value),
-            Some(&"tcp".into())
-        );
+        assert_eq!(attributes.find(NETWORK_TRANSPORT), Some(&"tcp".into()));
     }
 
     #[test]
@@ -1509,13 +1424,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = common.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_TYPE)
-                .map(|key_val| &key_val.value),
-            Some(&"ipv4".into())
-        );
+        assert_eq!(attributes.find(NETWORK_TYPE), Some(&"ipv4".into()));
     }
 
     #[test]
@@ -1531,13 +1440,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == CLIENT_ADDRESS)
-                .map(|key_val| &key_val.value),
-            Some(&"192.168.0.8".into())
-        );
+        assert_eq!(attributes.find(CLIENT_ADDRESS), Some(&"192.168.0.8".into()));
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "for=2.4.6.8:8000")
@@ -1548,13 +1451,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == CLIENT_ADDRESS)
-                .map(|key_val| &key_val.value),
-            Some(&"2.4.6.8".into())
-        );
+        assert_eq!(attributes.find(CLIENT_ADDRESS), Some(&"2.4.6.8".into()));
     }
 
     #[test]
@@ -1570,13 +1467,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == CLIENT_PORT)
-                .map(|key_val| &key_val.value),
-            Some(&6060.into())
-        );
+        assert_eq!(attributes.find(CLIENT_PORT), Some(&6060.into()));
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "for=2.4.6.8:8000")
@@ -1587,13 +1478,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == CLIENT_PORT)
-                .map(|key_val| &key_val.value),
-            Some(&8000.into())
-        );
+        assert_eq!(attributes.find(CLIENT_PORT), Some(&8000.into()));
     }
 
     #[test]
@@ -1612,13 +1497,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == HTTP_ROUTE)
-                .map(|key_val| &key_val.value),
-            Some(&"/graphql".into())
-        );
+        assert_eq!(attributes.find(HTTP_ROUTE), Some(&"/graphql".into()));
     }
 
     #[test]
@@ -1638,10 +1517,7 @@ mod test {
         });
         let attributes = server.on_request(&req);
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_LOCAL_ADDRESS)
-                .map(|key_val| &key_val.value),
+            attributes.find(NETWORK_LOCAL_ADDRESS),
             Some(&"192.168.0.1".into())
         );
     }
@@ -1662,13 +1538,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_LOCAL_PORT)
-                .map(|key_val| &key_val.value),
-            Some(&8080.into())
-        );
+        assert_eq!(attributes.find(NETWORK_LOCAL_PORT), Some(&8080.into()));
     }
 
     #[test]
@@ -1688,10 +1558,7 @@ mod test {
         });
         let attributes = server.on_request(&req);
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_PEER_ADDRESS)
-                .map(|key_val| &key_val.value),
+            attributes.find(NETWORK_PEER_ADDRESS),
             Some(&"192.168.0.8".into())
         );
     }
@@ -1712,13 +1579,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == NETWORK_PEER_PORT)
-                .map(|key_val| &key_val.value),
-            Some(&6060.into())
-        );
+        assert_eq!(attributes.find(NETWORK_PEER_PORT), Some(&6060.into()));
     }
 
     #[test]
@@ -1734,13 +1595,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SERVER_ADDRESS)
-                .map(|key_val| &key_val.value),
-            Some(&"192.168.0.1".into())
-        );
+        assert_eq!(attributes.find(SERVER_ADDRESS), Some(&"192.168.0.1".into()));
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "host=2.4.6.8:8000")
@@ -1751,13 +1606,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SERVER_ADDRESS)
-                .map(|key_val| &key_val.value),
-            Some(&"2.4.6.8".into())
-        );
+        assert_eq!(attributes.find(SERVER_ADDRESS), Some(&"2.4.6.8".into()));
     }
 
     #[test]
@@ -1773,13 +1622,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SERVER_PORT)
-                .map(|key_val| &key_val.value),
-            Some(&8080.into())
-        );
+        assert_eq!(attributes.find(SERVER_PORT), Some(&8080.into()));
 
         let mut req = router::Request::fake_builder()
             .header(FORWARDED, "host=2.4.6.8:8000")
@@ -1790,13 +1633,7 @@ mod test {
             server_address: Some(SocketAddr::from_str("192.168.0.1:8080").unwrap()),
         });
         let attributes = server.on_request(&req);
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == SERVER_PORT)
-                .map(|key_val| &key_val.value),
-            Some(&8000.into())
-        );
+        assert_eq!(attributes.find(SERVER_PORT), Some(&8000.into()));
     }
     #[test]
     fn test_http_server_url_path() {
@@ -1811,13 +1648,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == URL_PATH)
-                .map(|key_val| &key_val.value),
-            Some(&"/graphql".into())
-        );
+        assert_eq!(attributes.find(URL_PATH), Some(&"/graphql".into()));
     }
     #[test]
     fn test_http_server_query() {
@@ -1832,13 +1663,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == URL_QUERY)
-                .map(|key_val| &key_val.value),
-            Some(&"hi=5".into())
-        );
+        assert_eq!(attributes.find(URL_QUERY), Some(&"hi=5".into()));
     }
     #[test]
     fn test_http_server_scheme() {
@@ -1853,13 +1678,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == URL_SCHEME)
-                .map(|key_val| &key_val.value),
-            Some(&"https".into())
-        );
+        assert_eq!(attributes.find(URL_SCHEME), Some(&"https".into()));
     }
 
     #[test]
@@ -1876,10 +1695,7 @@ mod test {
                 .unwrap(),
         );
         assert_eq!(
-            attributes
-                .iter()
-                .find(|key_val| key_val.key == USER_AGENT_ORIGINAL)
-                .map(|key_val| &key_val.value),
+            attributes.find(USER_AGENT_ORIGINAL),
             Some(&"my-agent".into())
         );
     }

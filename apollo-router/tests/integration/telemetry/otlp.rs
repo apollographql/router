@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use itertools::Itertools;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry::trace::TraceId;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceResponse;
 use opentelemetry_proto::tonic::collector::trace::v1::ExportTraceServiceResponse;
 use prost::Message;

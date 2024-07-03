@@ -166,7 +166,8 @@ impl OpenTelemetrySpanExt for tracing::Span {
                     get_context.with_context(subscriber, id, move |data, _tracer| {
                         if let Some(cx) = cx.take() {
                             let attr = att.take().unwrap_or_default();
-                            let follows_link = opentelemetry::trace::Link::new(cx, attr);
+                            // TODO what is dropped attribute count?
+                            let follows_link = opentelemetry::trace::Link::new(cx, attr, 0);
                             data.builder
                                 .links
                                 .get_or_insert_with(|| Vec::with_capacity(1))
@@ -205,7 +206,7 @@ impl OpenTelemetrySpanExt for tracing::Span {
                         .attributes
                         .as_mut()
                         .unwrap()
-                        .insert(key.take().unwrap(), value.take().unwrap());
+                        .push(KeyValue::new(key.take().unwrap(), value.take().unwrap()));
                 })
             }
         });

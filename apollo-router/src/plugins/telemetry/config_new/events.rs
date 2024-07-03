@@ -609,7 +609,7 @@ where
     message: Arc<String>,
     selectors: Option<Arc<Extendable<A, T>>>,
     condition: Condition<T>,
-    attributes: Vec<opentelemetry_api::KeyValue>,
+    attributes: Vec<opentelemetry::KeyValue>,
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomEvent<Request, Response, A, T>

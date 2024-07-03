@@ -1,6 +1,6 @@
+use opentelemetry::{Key, KeyValue};
 use std::time::Duration;
 use std::time::Instant;
-
 use tracing_core::field::Value;
 
 pub(crate) trait TracingUtils {
@@ -49,5 +49,23 @@ where
 {
     fn drop(&mut self) {
         self.f.take().expect("f must exist")(self.start.elapsed())
+    }
+}
+
+pub(crate) trait VecKeyValueExt {
+    fn find<K: Into<Key>>(&self, key: K) -> Option<&opentelemetry::Value>;
+}
+
+impl VecKeyValueExt for Vec<KeyValue> {
+    fn find<K: Into<Key>>(&self, key: K) -> Option<&opentelemetry::Value> {
+        let key = key.into();
+        self.iter().find(|kv| kv.key == key).map(|kv| &kv.value)
+    }
+}
+
+impl VecKeyValueExt for &Vec<KeyValue> {
+    fn find<K: Into<Key>>(&self, key: K) -> Option<&opentelemetry::Value> {
+        let key = key.into();
+        self.iter().find(|kv| kv.key == key).map(|kv| &kv.value)
     }
 }

@@ -122,8 +122,9 @@ mod test {
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::graphql;
     use crate::plugins::telemetry::config::AttributeValue;
-    use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-    use crate::plugins::telemetry::config_new::attributes::SUBGRAPH_GRAPHQL_DOCUMENT;
+    use crate::plugins::telemetry::config_new::attributes::{
+        DefaultAttributeRequirementLevel, SUBGRAPH_GRAPHQL_DOCUMENT,
+    };
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::conditions::Condition;
     use crate::plugins::telemetry::config_new::conditions::SelectorOrValue;
@@ -137,6 +138,7 @@ mod test {
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
+    use crate::plugins::telemetry::utils::VecKeyValueExt;
     use crate::plugins::telemetry::OTEL_NAME;
     use crate::services::router;
     use crate::services::subgraph;
@@ -157,16 +159,10 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(!values.iter().any(|key_val| key_val.key == URL_PATH));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+        assert!(values.find(HTTP_REQUEST_METHOD).is_none());
+        assert!(values.find(NETWORK_PROTOCOL_VERSION).is_none());
+        assert!(values.find(URL_PATH).is_none());
+        assert!(values.find(USER_AGENT_ORIGINAL).is_none());
     }
 
     #[test]
@@ -183,16 +179,10 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
-        assert!(!values
-            .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+        assert!(values.find(HTTP_REQUEST_METHOD).is_some());
+        assert!(values.find(NETWORK_PROTOCOL_VERSION).is_none());
+        assert!(values.find(URL_PATH).is_some());
+        assert!(values.find(USER_AGENT_ORIGINAL).is_none());
     }
 
     #[test]
@@ -209,16 +199,10 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == HTTP_REQUEST_METHOD));
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == NETWORK_PROTOCOL_VERSION));
-        assert!(values.iter().any(|key_val| key_val.key == URL_PATH));
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == USER_AGENT_ORIGINAL));
+        assert!(values.find(HTTP_REQUEST_METHOD).is_some());
+        assert!(values.find(NETWORK_PROTOCOL_VERSION).is_some());
+        assert!(values.find(URL_PATH).is_some());
+        assert!(values.find(USER_AGENT_ORIGINAL).is_some());
     }
 
     #[test]
@@ -234,7 +218,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(values.find(GRAPHQL_DOCUMENT).is_none());
     }
 
     #[test]
@@ -250,7 +234,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(values.find(GRAPHQL_DOCUMENT).is_none());
     }
 
     #[test]
@@ -266,7 +250,7 @@ mod test {
                 .build()
                 .unwrap(),
         );
-        assert!(values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(values.find(GRAPHQL_DOCUMENT).is_some());
     }
 
     #[test]
@@ -290,7 +274,7 @@ mod test {
                 )
                 .build(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(values.find(SUBGRAPH_GRAPHQL_DOCUMENT).is_none());
     }
 
     #[test]
@@ -314,7 +298,7 @@ mod test {
                 )
                 .build(),
         );
-        assert!(!values.iter().any(|key_val| key_val.key == GRAPHQL_DOCUMENT));
+        assert!(values.find(SUBGRAPH_GRAPHQL_DOCUMENT).is_none());
     }
 
     #[test]
@@ -338,9 +322,7 @@ mod test {
                 )
                 .build(),
         );
-        assert!(values
-            .iter()
-            .any(|key_val| key_val.key == SUBGRAPH_GRAPHQL_DOCUMENT));
+        assert!(values.find(SUBGRAPH_GRAPHQL_DOCUMENT).is_some());
     }
 
     #[test]

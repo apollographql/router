@@ -16,10 +16,6 @@ telemetry:
       datadog:
         enabled: true
         endpoint: default
-      jaeger:
-        enabled: true
-        agent:
-          endpoint: default
     logging:
       experimental_when_header:
         - name: apollo-router-log-request

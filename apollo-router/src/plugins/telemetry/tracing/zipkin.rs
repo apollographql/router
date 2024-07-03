@@ -1,9 +1,9 @@
 //! Configuration for zipkin tracing.
 use http::Uri;
 use lazy_static::lazy_static;
-use opentelemetry::sdk;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry_sdk;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use schemars::JsonSchema;
 use serde::Deserialize;
@@ -48,13 +48,13 @@ impl TracingConfigurator for Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("configuring Zipkin tracing: {}", self.batch_processor);
-        let common: sdk::trace::Config = trace.into();
+        let common: opentelemetry_sdk::trace::Config = trace.into();
         let exporter = opentelemetry_zipkin::new_pipeline()
             .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |b, endpoint| {
                 b.with_collector_endpoint(endpoint.to_string())
             })
             .with(
-                &common.resource.get(SERVICE_NAME),
+                &common.resource.get(SERVICE_NAME.into()),
                 |builder, service_name| {
                     // Zipkin exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -65,7 +65,7 @@ impl TracingConfigurator for Config {
             .init_exporter()?;
 
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+            BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

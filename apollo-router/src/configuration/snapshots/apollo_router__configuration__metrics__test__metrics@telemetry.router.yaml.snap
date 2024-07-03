@@ -27,6 +27,6 @@ expression: "&metrics.non_zero()"
           opt.spans.subgraph: true
           opt.spans.supergraph: true
           opt.tracing.datadog: true
-          opt.tracing.jaeger: true
+          opt.tracing.jaeger: false
           opt.tracing.otlp: true
           opt.tracing.zipkin: true

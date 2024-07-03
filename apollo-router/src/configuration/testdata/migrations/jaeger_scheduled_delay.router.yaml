@@ -1,6 +1,0 @@
-telemetry:
-  tracing:
-    jaeger:
-      scheduled_delay: 100ms
-      agent:
-        endpoint: default

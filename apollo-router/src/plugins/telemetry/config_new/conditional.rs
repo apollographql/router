@@ -297,7 +297,7 @@ where
         field: &apollo_compiler::executable::Field,
         response_value: &serde_json_bytes::Value,
         ctx: &Context,
-    ) -> Option<opentelemetry_api::Value> {
+    ) -> Option<opentelemetry::Value> {
         // We may have got the value from the request.
         let value = mem::take(&mut *self.value.lock());
 
@@ -408,7 +408,7 @@ where
 #[cfg(test)]
 mod test {
     use http::StatusCode;
-    use opentelemetry_api::Value;
+    use opentelemetry::Value;
 
     use crate::plugins::telemetry::config_new::conditional::Conditional;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;

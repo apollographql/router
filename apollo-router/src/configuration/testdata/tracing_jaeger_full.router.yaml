@@ -3,9 +3,5 @@ supergraph:
 telemetry:
   exporters:
     tracing:
-      jaeger:
+      otlp:
         enabled: true
-        collector:
-          endpoint: "http://foo"
-          password: ""
-          username: ""

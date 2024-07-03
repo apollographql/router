@@ -8,7 +8,6 @@ use std::time::SystemTime;
 
 use once_cell::unsync;
 use opentelemetry::trace::noop;
-use opentelemetry::trace::OrderMap;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::{self as otel};
 use opentelemetry::Context as OtelContext;
@@ -271,10 +270,10 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
         if self.exception_config.propagate {
             if let Some(span) = &mut self.span_builder {
                 if let Some(attrs) = span.attributes.as_mut() {
-                    attrs.insert(
-                        Key::new(FIELD_EXCEPTION_MESSAGE),
-                        Value::String(error_msg.clone().into()),
-                    );
+                    attrs.push(KeyValue::new(
+                        FIELD_EXCEPTION_MESSAGE,
+                        error_msg.to_string(),
+                    ));
 
                     // NOTE: This is actually not the stacktrace of the exception. This is
                     // the "source chain". It represents the heirarchy of errors from the
@@ -282,10 +281,10 @@ impl<'a, 'b> field::Visit for SpanEventVisitor<'a, 'b> {
                     // of the callsites in the code that led to the error happening.
                     // `std::error::Error::backtrace` is a nightly-only API and cannot be
                     // used here until the feature is stabilized.
-                    attrs.insert(
-                        Key::new(FIELD_EXCEPTION_STACKTRACE),
+                    attrs.push(KeyValue::new(
+                        FIELD_EXCEPTION_STACKTRACE,
                         Value::Array(chain.clone().into()),
-                    );
+                    ));
                 }
             }
         }
@@ -320,7 +319,7 @@ impl<'a> SpanAttributeVisitor<'a> {
     fn record(&mut self, attribute: KeyValue) {
         debug_assert!(self.span_builder.attributes.is_some());
         if let Some(v) = self.span_builder.attributes.as_mut() {
-            v.insert(attribute.key, attribute.value);
+            v.push(attribute);
         }
     }
 }
@@ -768,7 +767,7 @@ where
             match sampled_span {
                 // It's not the root span
                 Some(SampledSpan::Sampled(trace_id, _) | SampledSpan::NotSampled(trace_id, _)) => {
-                    opentelemetry_api::trace::TraceId::from(trace_id.to_u128())
+                    opentelemetry::trace::TraceId::from(trace_id.to_u128())
                 }
                 // It's probably the root span
                 None => self.tracer.new_trace_id(),
@@ -800,7 +799,7 @@ where
             .with_span_id(span_id)
             .with_trace_id(trace_id);
 
-        let builder_attrs = builder.attributes.get_or_insert(OrderMap::with_capacity(
+        let builder_attrs = builder.attributes.get_or_insert(Vec::with_capacity(
             attrs.fields().len() + self.extra_span_attrs(),
         ));
 
@@ -808,26 +807,26 @@ where
             let meta = attrs.metadata();
 
             if let Some(filename) = meta.file() {
-                builder_attrs.insert("code.filepath".into(), filename.into());
+                builder_attrs.push(KeyValue::new("code.filepath", filename));
             }
 
             if let Some(module) = meta.module_path() {
-                builder_attrs.insert("code.namespace".into(), module.into());
+                builder_attrs.push(KeyValue::new("code.namespace", module));
             }
 
             if let Some(line) = meta.line() {
-                builder_attrs.insert("code.lineno".into(), (line as i64).into());
+                builder_attrs.push(KeyValue::new("code.lineno", line as i64));
             }
         }
 
         if self.with_threads {
-            THREAD_ID.with(|id| builder_attrs.insert("thread.id".into(), (**id as i64).into()));
+            THREAD_ID.with(|id| builder_attrs.push(KeyValue::new("thread.id", **id as i64)));
             if let Some(name) = std::thread::current().name() {
                 // TODO(eliza): it's a bummer that we have to allocate here, but
                 // we can't easily get the string as a `static`. it would be
                 // nice if `opentelemetry` could also take `Arc<str>`s as
                 // `String` values...
-                builder_attrs.insert("thread.name".into(), name.to_owned().into());
+                builder_attrs.push(KeyValue::new("thread.name", name.to_string()));
             }
         }
 
@@ -943,7 +942,8 @@ where
             .span()
             .span_context()
             .clone();
-        let follows_link = otel::Link::new(follows_context, Vec::new());
+        // TODO what is dropped attribute count?
+        let follows_link = otel::Link::new(follows_context, Vec::new(), 0);
         if let Some(ref mut links) = data.builder.links {
             links.push(follows_link);
         } else {
@@ -1000,11 +1000,7 @@ where
                 let event_attributes = otel_data.as_ref().and_then(|o| o.event_attributes.clone());
 
                 if let Some(event_attributes) = event_attributes {
-                    otel_event.attributes.extend(
-                        event_attributes
-                            .into_iter()
-                            .map(|(key, value)| KeyValue::new(key, value)),
-                    )
+                    otel_event.attributes.extend(event_attributes)
                 }
             }
 
@@ -1078,9 +1074,9 @@ where
 
                     let attributes = builder
                         .attributes
-                        .get_or_insert_with(|| OrderMap::with_capacity(3));
-                    attributes.insert(busy_ns, timings.busy.into());
-                    attributes.insert(idle_ns, timings.idle.into());
+                        .get_or_insert_with(|| Vec::with_capacity(3));
+                    attributes.push(KeyValue::new(busy_ns, timings.busy));
+                    attributes.push(KeyValue::new(idle_ns, timings.idle));
                 }
             }
             if let Some(forced_status) = forced_status {
@@ -1090,8 +1086,8 @@ where
                 // Insert the original span name as an attribute so that we can map it later
                 let attributes = builder
                     .attributes
-                    .get_or_insert_with(|| OrderMap::with_capacity(1));
-                attributes.insert(OTEL_ORIGINAL_NAME.into(), builder.name.into());
+                    .get_or_insert_with(|| Vec::with_capacity(1));
+                attributes.push(KeyValue::new(OTEL_ORIGINAL_NAME, builder.name));
                 builder.name = forced_span_name.into();
             }
 
@@ -1151,13 +1147,14 @@ mod tests {
     use std::thread;
     use std::time::SystemTime;
 
-    use opentelemetry::trace::noop;
     use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::{noop, SpanContext};
     use opentelemetry::StringValue;
     use tracing_subscriber::prelude::*;
 
     use super::*;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+    use crate::plugins::telemetry::utils::VecKeyValueExt;
     use crate::plugins::telemetry::OTEL_NAME;
 
     #[derive(Debug, Clone)]
@@ -1168,7 +1165,7 @@ mod tests {
         where
             T: Into<Cow<'static, str>>,
         {
-            noop::NoopSpan::new()
+            noop::NoopSpan::DEFAULT
         }
         fn span_builder<T>(&self, name: T) -> otel::SpanBuilder
         where
@@ -1188,7 +1185,7 @@ mod tests {
                 forced_status: None,
                 forced_span_name: None,
             });
-            noop::NoopSpan::new()
+            noop::NoopSpan::DEFAULT
         }
     }
 
@@ -1231,6 +1228,9 @@ mod tests {
         fn set_attribute(&mut self, _attribute: KeyValue) {}
         fn set_status(&mut self, _status: otel::Status) {}
         fn update_name<T: Into<Cow<'static, str>>>(&mut self, _new_name: T) {}
+
+        fn add_link(&mut self, _span_context: SpanContext, _attributes: Vec<KeyValue>) {}
+
         fn end_with_timestamp(&mut self, _timestamp: SystemTime) {}
     }
 
@@ -1402,12 +1402,9 @@ mod tests {
         });
 
         let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
-        let keys = attributes
-            .iter()
-            .map(|(key, _)| key.as_str())
-            .collect::<Vec<&str>>();
-        assert!(keys.contains(&"idle_ns"));
-        assert!(keys.contains(&"busy_ns"));
+
+        assert!(attributes.find("idle_ns").is_some());
+        assert!(attributes.find("busy_ns").is_some());
     }
 
     #[test]
@@ -1445,7 +1442,7 @@ mod tests {
 
         let key_values = attributes
             .into_iter()
-            .map(|(key, value)| (key.as_str().to_owned(), value))
+            .map(|kv| (kv.key.as_str().to_owned(), kv.value))
             .collect::<HashMap<_, _>>();
 
         assert_eq!(key_values["error"].as_str(), "user error");
@@ -1484,13 +1481,9 @@ mod tests {
         });
 
         let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
-        let keys = attributes
-            .iter()
-            .map(|(key, _)| key.as_str())
-            .collect::<Vec<&str>>();
-        assert!(keys.contains(&"code.filepath"));
-        assert!(keys.contains(&"code.namespace"));
-        assert!(keys.contains(&"code.lineno"));
+        assert!(attributes.find("code.filepath").is_some());
+        assert!(attributes.find("code.namespace").is_some());
+        assert!(attributes.find("code.lineno").is_some());
     }
 
     #[test]
@@ -1513,13 +1506,9 @@ mod tests {
             tracing::debug_span!("request");
         });
 
-        let attributes = tracer
-            .with_data(|data| data.builder.attributes.as_ref().unwrap().clone())
-            .drain(..)
-            .map(|(key, value)| (key.as_str().to_string(), value))
-            .collect::<HashMap<_, _>>();
-        assert_eq!(attributes.get("thread.name"), expected_name.as_ref());
-        assert_eq!(attributes.get("thread.id"), Some(&expected_id));
+        let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
+        assert_eq!(attributes.find("thread.name"), expected_name.as_ref());
+        assert_eq!(attributes.find("thread.id"), Some(&expected_id));
     }
 
     #[test]
@@ -1537,12 +1526,8 @@ mod tests {
         });
 
         let attributes = tracer.with_data(|data| data.builder.attributes.as_ref().unwrap().clone());
-        let keys = attributes
-            .iter()
-            .map(|(key, _)| key.as_str())
-            .collect::<Vec<&str>>();
-        assert!(!keys.contains(&"thread.name"));
-        assert!(!keys.contains(&"thread.id"));
+        assert!(attributes.find("thread.name").is_none());
+        assert!(attributes.find("thread.id").is_none());
     }
 
     #[test]
@@ -1582,7 +1567,7 @@ mod tests {
 
         let key_values = attributes
             .into_iter()
-            .map(|(key, value)| (key.as_str().to_owned(), value))
+            .map(|kv| (kv.key.as_str().to_owned(), kv.value))
             .collect::<HashMap<_, _>>();
 
         assert_eq!(key_values[FIELD_EXCEPTION_MESSAGE].as_str(), "user error");

@@ -3,11 +3,11 @@
 use std::collections::HashMap;
 
 use http::Uri;
-use opentelemetry::sdk;
-use opentelemetry::sdk::trace::BatchSpanProcessor;
-use opentelemetry::sdk::trace::Builder;
+use opentelemetry::Key;
 use opentelemetry::Value;
-use opentelemetry_api::Key;
+use opentelemetry_sdk;
+use opentelemetry_sdk::trace::BatchSpanProcessor;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -97,7 +97,7 @@ impl TracingConfigurator for Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let common: sdk::trace::Config = trace.into();
+        let common: opentelemetry_sdk::trace::Config = trace.into();
 
         // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
         let resource_mappings = self.enable_span_mapping.then(|| {
@@ -121,15 +121,18 @@ impl TracingConfigurator for Config {
                 builder.with_resource_mapping(move |span, _model_config| {
                     let span_name = if let Some(original) = span
                         .attributes
-                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
+                        .iter()
+                        .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
                     {
-                        original.as_str()
+                        original.value.as_str()
                     } else {
                         span.name.clone()
                     };
                     if let Some(mapping) = resource_mappings.get(span_name.as_ref()) {
-                        if let Some(Value::String(value)) = span.attributes.get(mapping) {
-                            return value.as_str();
+                        if let Some(kv) = span.attributes.iter().find(|kv| &kv.key == mapping) {
+                            if let Value::String(s) = &kv.value {
+                                return s.as_str();
+                            }
                         }
                     }
                     return span.name.as_ref();
@@ -139,12 +142,13 @@ impl TracingConfigurator for Config {
                 if fixed_span_names {
                     if let Some(original) = span
                         .attributes
-                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
+                        .iter()
+                        .find(|kv| kv.key.as_str() == OTEL_ORIGINAL_NAME)
                     {
                         // Datadog expects static span names, not the ones in the otel spec.
                         // Remap the span name to the original name if it was remapped.
                         for name in BUILT_IN_SPAN_NAMES {
-                            if name == original.as_str() {
+                            if name == original.value.as_str() {
                                 return name;
                             }
                         }
@@ -153,7 +157,7 @@ impl TracingConfigurator for Config {
                 &span.name
             })
             .with(
-                &common.resource.get(SERVICE_NAME),
+                &common.resource.get(SERVICE_NAME.into()),
                 |builder, service_name| {
                     // Datadog exporter incorrectly ignores the service name in the resource
                     // Set it explicitly here
@@ -166,14 +170,14 @@ impl TracingConfigurator for Config {
             .with_version(
                 common
                     .resource
-                    .get(SERVICE_VERSION)
+                    .get(SERVICE_VERSION.into())
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
             .with_trace_config(common)
             .build_exporter()?;
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
+            BatchSpanProcessor::builder(exporter, opentelemetry_sdk::runtime::Tokio)
                 .with_batch_config(self.batch_processor.clone().into())
                 .build()
                 .filtered(),

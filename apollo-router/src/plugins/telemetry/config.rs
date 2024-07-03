@@ -4,16 +4,16 @@ use std::collections::HashSet;
 
 use axum::headers::HeaderName;
 use derivative::Derivative;
-use opentelemetry::sdk::metrics::new_view;
-use opentelemetry::sdk::metrics::Aggregation;
-use opentelemetry::sdk::metrics::Instrument;
-use opentelemetry::sdk::metrics::Stream;
-use opentelemetry::sdk::metrics::View;
-use opentelemetry::sdk::trace::SpanLimits;
+use opentelemetry::metrics::MetricsError;
+use opentelemetry::metrics::Unit;
 use opentelemetry::Array;
 use opentelemetry::Value;
-use opentelemetry_api::metrics::MetricsError;
-use opentelemetry_api::metrics::Unit;
+use opentelemetry_sdk::metrics::new_view;
+use opentelemetry_sdk::metrics::Aggregation;
+use opentelemetry_sdk::metrics::Instrument;
+use opentelemetry_sdk::metrics::Stream;
+use opentelemetry_sdk::metrics::View;
+use opentelemetry_sdk::trace::SpanLimits;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
@@ -211,8 +211,6 @@ pub(crate) struct Tracing {
     pub(crate) common: TracingCommon,
     /// OpenTelemetry native exporter configuration
     pub(crate) otlp: otlp::Config,
-    /// Jaeger exporter configuration
-    pub(crate) jaeger: tracing::jaeger::Config,
     /// Zipkin exporter configuration
     pub(crate) zipkin: tracing::zipkin::Config,
     /// Datadog exporter configuration
@@ -589,31 +587,31 @@ pub(crate) enum Sampler {
     AlwaysOff,
 }
 
-impl From<Sampler> for opentelemetry::sdk::trace::Sampler {
+impl From<Sampler> for opentelemetry_sdk::trace::Sampler {
     fn from(s: Sampler) -> Self {
         match s {
-            Sampler::AlwaysOn => opentelemetry::sdk::trace::Sampler::AlwaysOn,
-            Sampler::AlwaysOff => opentelemetry::sdk::trace::Sampler::AlwaysOff,
+            Sampler::AlwaysOn => opentelemetry_sdk::trace::Sampler::AlwaysOn,
+            Sampler::AlwaysOff => opentelemetry_sdk::trace::Sampler::AlwaysOff,
         }
     }
 }
 
-impl From<SamplerOption> for opentelemetry::sdk::trace::Sampler {
+impl From<SamplerOption> for opentelemetry_sdk::trace::Sampler {
     fn from(s: SamplerOption) -> Self {
         match s {
             SamplerOption::Always(s) => s.into(),
             SamplerOption::TraceIdRatioBased(ratio) => {
-                opentelemetry::sdk::trace::Sampler::TraceIdRatioBased(ratio)
+                opentelemetry_sdk::trace::Sampler::TraceIdRatioBased(ratio)
             }
         }
     }
 }
 
-impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
+impl From<&TracingCommon> for opentelemetry_sdk::trace::Config {
     fn from(config: &TracingCommon) -> Self {
-        let mut common = opentelemetry::sdk::trace::config();
+        let mut common = opentelemetry_sdk::trace::config();
 
-        let mut sampler: opentelemetry::sdk::trace::Sampler = config.sampler.clone().into();
+        let mut sampler: opentelemetry_sdk::trace::Sampler = config.sampler.clone().into();
         if config.parent_based_sampler {
             sampler = parent_based(sampler);
         }
@@ -631,8 +629,8 @@ impl From<&TracingCommon> for opentelemetry::sdk::trace::Config {
     }
 }
 
-fn parent_based(sampler: opentelemetry::sdk::trace::Sampler) -> opentelemetry::sdk::trace::Sampler {
-    opentelemetry::sdk::trace::Sampler::ParentBased(Box::new(sampler))
+fn parent_based(sampler: opentelemetry_sdk::trace::Sampler) -> opentelemetry_sdk::trace::Sampler {
+    opentelemetry_sdk::trace::Sampler::ParentBased(Box::new(sampler))
 }
 
 impl Conf {

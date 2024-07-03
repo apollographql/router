@@ -28,18 +28,18 @@ use opentelemetry::metrics::MetricsError;
 use opentelemetry::propagation::text_map_propagator::FieldIter;
 use opentelemetry::propagation::Extractor;
 use opentelemetry::propagation::Injector;
+use opentelemetry::propagation::TextMapCompositePropagator;
 use opentelemetry::propagation::TextMapPropagator;
-use opentelemetry::sdk::propagation::TextMapCompositePropagator;
-use opentelemetry::sdk::trace::Builder;
 use opentelemetry::trace::SpanContext;
 use opentelemetry::trace::SpanId;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceFlags;
+use opentelemetry::trace::TraceId;
 use opentelemetry::trace::TraceState;
 use opentelemetry::trace::TracerProvider;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
-use opentelemetry_api::trace::TraceId;
+use opentelemetry_sdk::trace::Builder;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
 use rand::Rng;
@@ -202,7 +202,7 @@ pub(crate) struct Telemetry {
 }
 
 struct TelemetryActivation {
-    tracer_provider: Option<opentelemetry::sdk::trace::TracerProvider>,
+    tracer_provider: Option<opentelemetry_sdk::trace::TracerProvider>,
     // We have to have separate meter providers for prometheus metrics so that they don't get zapped on router reload.
     public_meter_provider: Option<FilterMeterProvider>,
     public_prometheus_meter_provider: Option<FilterMeterProvider>,
@@ -336,17 +336,13 @@ impl Plugin for Telemetry {
                             span.record("graphql.operation.name", operation_name);
                         }
                         match (&operation_kind, &operation_name) {
-                            (Ok(Some(kind)), Ok(Some(name))) => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                format!("{kind} {name}").into(),
-                            ),
-                            (Ok(Some(kind)), _) => {
-                                span.set_span_dyn_attribute(OTEL_NAME.into(), kind.clone().into())
+                            (Ok(Some(kind)), Ok(Some(name))) => {
+                                span.set_span_dyn_attribute(OTEL_NAME, format!("{kind} {name}"))
                             }
-                            _ => span.set_span_dyn_attribute(
-                                OTEL_NAME.into(),
-                                "GraphQL Operation".into(),
-                            ),
+                            (Ok(Some(kind)), _) => {
+                                span.set_span_dyn_attribute(OTEL_NAME, kind.clone())
+                            }
+                            _ => span.set_span_dyn_attribute(OTEL_NAME, "GraphQL Operation"),
                         };
                     }
                 }
@@ -365,7 +361,7 @@ impl Plugin for Telemetry {
 
                         span.set_span_dyn_attribute(
                             HTTP_REQUEST_METHOD,
-                            request.router_request.method().to_string().into(),
+                            request.router_request.method().to_string(),
                         );
                     }
 
@@ -822,12 +818,10 @@ impl Telemetry {
                 .take()
                 .expect("must have new tracer_provider");
 
-            let tracer = tracer_provider.versioned_tracer(
-                GLOBAL_TRACER_NAME,
-                Some(env!("CARGO_PKG_VERSION")),
-                None::<String>,
-                None,
-            );
+            let tracer = tracer_provider
+                .tracer_builder(GLOBAL_TRACER_NAME)
+                .with_version(env!("CARGO_PKG_VERSION"))
+                .build();
             hot_tracer.reload(tracer);
 
             let last_provider = opentelemetry::global::set_tracer_provider(tracer_provider);
@@ -849,18 +843,12 @@ impl Telemetry {
         let tracing = &config.exporters.tracing;
 
         let mut propagators: Vec<Box<dyn TextMapPropagator + Send + Sync + 'static>> = Vec::new();
-        // TLDR the jaeger propagator MUST BE the first one because the version of opentelemetry_jaeger is buggy.
-        // It overrides the current span context with an empty one if it doesn't find the corresponding headers.
-        // Waiting for the >=0.16.1 release
-        if propagation.jaeger || tracing.jaeger.enabled() {
-            propagators.push(Box::<opentelemetry_jaeger::Propagator>::default());
-        }
         if propagation.baggage {
-            propagators.push(Box::<opentelemetry::sdk::propagation::BaggagePropagator>::default());
+            propagators.push(Box::<opentelemetry_sdk::propagation::BaggagePropagator>::default());
         }
         if propagation.trace_context || tracing.otlp.enabled {
             propagators
-                .push(Box::<opentelemetry::sdk::propagation::TraceContextPropagator>::default());
+                .push(Box::<opentelemetry_sdk::propagation::TraceContextPropagator>::default());
         }
         if propagation.zipkin || tracing.zipkin.enabled {
             propagators.push(Box::<opentelemetry_zipkin::Propagator>::default());
@@ -869,7 +857,7 @@ impl Telemetry {
             propagators.push(Box::<opentelemetry_datadog::DatadogPropagator>::default());
         }
         if propagation.aws_xray {
-            propagators.push(Box::<opentelemetry_aws::XrayPropagator>::default());
+            propagators.push(Box::<opentelemetry_aws::trace::XrayPropagator>::default());
         }
         if let Some(from_request_header) = &propagation.request.header_name {
             propagators.push(Box::new(CustomTraceIdPropagator::new(
@@ -882,7 +870,7 @@ impl Telemetry {
 
     fn create_tracer_provider(
         config: &config::Conf,
-    ) -> Result<(SamplerOption, opentelemetry::sdk::trace::TracerProvider), BoxError> {
+    ) -> Result<(SamplerOption, opentelemetry_sdk::trace::TracerProvider), BoxError> {
         let tracing_config = &config.exporters.tracing;
         let spans_config = &config.instrumentation.spans;
         let mut common = tracing_config.common.clone();
@@ -892,16 +880,14 @@ impl Telemetry {
         common.sampler = SamplerOption::Always(Sampler::AlwaysOn);
 
         let mut builder =
-            opentelemetry::sdk::trace::TracerProvider::builder().with_config((&common).into());
+            opentelemetry_sdk::trace::TracerProvider::builder().with_config((&common).into());
 
-        builder = setup_tracing(builder, &tracing_config.jaeger, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.zipkin, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.datadog, &common, spans_config)?;
         builder = setup_tracing(builder, &tracing_config.otlp, &common, spans_config)?;
         builder = setup_tracing(builder, &config.apollo, &common, spans_config)?;
 
-        if !tracing_config.jaeger.enabled()
-            && !tracing_config.zipkin.enabled()
+        if !tracing_config.zipkin.enabled()
             && !tracing_config.datadog.enabled()
             && !TracingConfigurator::enabled(&tracing_config.otlp)
             && !TracingConfigurator::enabled(&config.apollo)
@@ -1675,12 +1661,10 @@ impl Telemetry {
         let metrics_otlp_used = MetricsConfigurator::enabled(&config.exporters.metrics.otlp);
         let tracing_otlp_used = TracingConfigurator::enabled(&config.exporters.tracing.otlp);
         let tracing_datadog_used = config.exporters.tracing.datadog.enabled();
-        let tracing_jaeger_used = config.exporters.tracing.jaeger.enabled();
         let tracing_zipkin_used = config.exporters.tracing.zipkin.enabled();
 
         if metrics_prom_used
             || metrics_otlp_used
-            || tracing_jaeger_used
             || tracing_otlp_used
             || tracing_zipkin_used
             || tracing_datadog_used
@@ -1691,13 +1675,12 @@ impl Telemetry {
                 telemetry.metrics.prometheus = metrics_prom_used.or_empty(),
                 telemetry.tracing.otlp = tracing_otlp_used.or_empty(),
                 telemetry.tracing.datadog = tracing_datadog_used.or_empty(),
-                telemetry.tracing.jaeger = tracing_jaeger_used.or_empty(),
                 telemetry.tracing.zipkin = tracing_zipkin_used.or_empty(),
             );
         }
     }
 
-    fn checked_tracer_shutdown(tracer_provider: opentelemetry::sdk::trace::TracerProvider) {
+    fn checked_tracer_shutdown(tracer_provider: opentelemetry_sdk::trace::TracerProvider) {
         Self::checked_spawn_task(Box::new(move || {
             drop(tracer_provider);
         }));

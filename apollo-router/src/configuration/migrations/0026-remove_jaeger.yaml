@@ -1,0 +1,7 @@
+description: Jaeger exporter has been removed, use OTLP exporter instead.
+actions:
+  - type: log
+    level: error
+    path: telemetry.exporters.jaeger.*
+    log: "Jaeger exporter has been removed, use OTLP exporter instead."
+
