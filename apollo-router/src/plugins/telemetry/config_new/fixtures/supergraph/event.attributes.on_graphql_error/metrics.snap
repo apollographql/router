@@ -16,6 +16,8 @@ info:
             attributes:
               on.graphql.error:
                 on_graphql_error: true
+              operation:
+                response_context: operation_name
 ---
 - name: custom_counter
   description: count of requests
@@ -25,3 +27,4 @@ info:
       - value: 1
         attributes:
           on.graphql.error: true
+          operation: Test

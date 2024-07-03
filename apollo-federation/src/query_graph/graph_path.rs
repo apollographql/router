@@ -30,7 +30,6 @@ use crate::operation::FieldData;
 use crate::operation::HasSelectionKey;
 use crate::operation::InlineFragment;
 use crate::operation::InlineFragmentData;
-use crate::operation::RebaseErrorHandlingOption;
 use crate::operation::SelectionId;
 use crate::operation::SelectionKey;
 use crate::operation::SelectionSet;
@@ -435,25 +434,17 @@ impl OpPathElement {
         }
     }
 
-    pub(crate) fn rebase_on_or_error(
+    pub(crate) fn rebase_on(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         schema: &ValidFederationSchema,
     ) -> Result<OpPathElement, FederationError> {
-        let result: Option<OpPathElement> = match self {
-            OpPathElement::Field(field) => field
-                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
-                .map(|val| val.map(Into::into)),
-            OpPathElement::InlineFragment(inline) => inline
-                .rebase_on(parent_type, schema, RebaseErrorHandlingOption::ThrowError)
-                .map(|val| val.map(Into::into)),
-        }?;
-        result.ok_or_else(|| {
-            FederationError::internal(format!(
-                "Cannot rebase operation element {} on {}",
-                self, parent_type
-            ))
-        })
+        match self {
+            OpPathElement::Field(field) => Ok(field.rebase_on(parent_type, schema)?.into()),
+            OpPathElement::InlineFragment(inline) => {
+                Ok(inline.rebase_on(parent_type, schema)?.into())
+            }
+        }
     }
 }
 
