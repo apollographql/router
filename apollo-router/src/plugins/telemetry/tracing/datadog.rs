@@ -3,7 +3,6 @@
 use std::collections::HashMap;
 
 use http::Uri;
-use lazy_static::lazy_static;
 use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
@@ -18,41 +17,72 @@ use tower::BoxError;
 use crate::plugins::telemetry::config::GenericWith;
 use crate::plugins::telemetry::config::TracingCommon;
 use crate::plugins::telemetry::config_new::spans::Spans;
+use crate::plugins::telemetry::consts::BUILT_IN_SPAN_NAMES;
+use crate::plugins::telemetry::consts::HTTP_REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
+use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
+use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
+use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
 
-lazy_static! {
-    static ref SPAN_RESOURCE_NAME_ATTRIBUTE_MAPPING: HashMap<&'static str, &'static str> = {
-        let mut map = HashMap::new();
-        map.insert("request", "http.route");
-        map.insert("supergraph", "graphql.operation.name");
-        map.insert("query_planning", "graphql.operation.name");
-        map.insert("subgraph", "subgraph.name");
-        map.insert("subgraph_request", "graphql.operation.name");
-        map
-    };
-    static ref DEFAULT_ENDPOINT: Uri = Uri::from_static("http://127.0.0.1:8126");
+fn default_resource_mappings() -> HashMap<String, String> {
+    let mut map = HashMap::with_capacity(7);
+    map.insert(REQUEST_SPAN_NAME, "http.route");
+    map.insert(ROUTER_SPAN_NAME, "http.route");
+    map.insert(SUPERGRAPH_SPAN_NAME, "graphql.operation.name");
+    map.insert(QUERY_PLANNING_SPAN_NAME, "graphql.operation.name");
+    map.insert(SUBGRAPH_SPAN_NAME, "subgraph.name");
+    map.insert(SUBGRAPH_REQUEST_SPAN_NAME, "graphql.operation.name");
+    map.insert(HTTP_REQUEST_SPAN_NAME, "http.route");
+    map.iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
-#[derive(Debug, Clone, Deserialize, JsonSchema, Default)]
+const ENV_KEY: Key = Key::from_static_str("env");
+const DEFAULT_ENDPOINT: &str = "http://127.0.0.1:8126";
+
+#[derive(Debug, Clone, Deserialize, JsonSchema, serde_derive_default::Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct Config {
     /// Enable datadog
-    pub(crate) enabled: bool,
+    enabled: bool,
 
     /// The endpoint to send to
     #[serde(default)]
-    pub(crate) endpoint: UriEndpoint,
+    endpoint: UriEndpoint,
 
     /// batch processor configuration
     #[serde(default)]
-    pub(crate) batch_processor: BatchProcessorConfig,
+    batch_processor: BatchProcessorConfig,
 
     /// Enable datadog span mapping for span name and resource name.
+    #[serde(default = "default_true")]
+    enable_span_mapping: bool,
+
+    /// Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.
+    #[serde(default = "default_true")]
+    fixed_span_names: bool,
+
+    /// Custom mapping to be used as the resource field in spans, defaults to:
+    /// router -> http.route
+    /// supergraph -> graphql.operation.name
+    /// query_planning -> graphql.operation.name
+    /// subgraph -> subgraph.name
+    /// subgraph_request -> subgraph.name
+    /// http_request -> http.route
     #[serde(default)]
-    pub(crate) enable_span_mapping: bool,
+    resource_mapping: HashMap<String, String>,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 impl TracingConfigurator for Config {
@@ -67,25 +97,60 @@ impl TracingConfigurator for Config {
         _spans_config: &Spans,
     ) -> Result<Builder, BoxError> {
         tracing::info!("Configuring Datadog tracing: {}", self.batch_processor);
-        let enable_span_mapping = self.enable_span_mapping.then_some(true);
         let common: sdk::trace::Config = trace.into();
+
+        // Precompute representation otel Keys for the mappings so that we don't do heap allocation for each span
+        let resource_mappings = self.enable_span_mapping.then(|| {
+            let mut resource_mappings = default_resource_mappings();
+            resource_mappings.extend(self.resource_mapping.clone());
+            resource_mappings
+                .iter()
+                .map(|(k, v)| (k.clone(), opentelemetry::Key::from(v.clone())))
+                .collect::<HashMap<String, Key>>()
+        });
+
+        let fixed_span_names = self.fixed_span_names;
+
         let exporter = opentelemetry_datadog::new_pipeline()
-            .with(&self.endpoint.to_uri(&DEFAULT_ENDPOINT), |builder, e| {
-                builder.with_agent_endpoint(e.to_string().trim_end_matches('/'))
+            .with(
+                &self.endpoint.to_uri(&Uri::from_static(DEFAULT_ENDPOINT)),
+                |builder, e| builder.with_agent_endpoint(e.to_string().trim_end_matches('/')),
+            )
+            .with(&resource_mappings, |builder, resource_mappings| {
+                let resource_mappings = resource_mappings.clone();
+                builder.with_resource_mapping(move |span, _model_config| {
+                    let span_name = if let Some(original) = span
+                        .attributes
+                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
+                    {
+                        original.as_str()
+                    } else {
+                        span.name.clone()
+                    };
+                    if let Some(mapping) = resource_mappings.get(span_name.as_ref()) {
+                        if let Some(Value::String(value)) = span.attributes.get(mapping) {
+                            return value.as_str();
+                        }
+                    }
+                    return span.name.as_ref();
+                })
             })
-            .with(&enable_span_mapping, |builder, _e| {
-                builder
-                    .with_name_mapping(|span, _model_config| span.name.as_ref())
-                    .with_resource_mapping(|span, _model_config| {
-                        SPAN_RESOURCE_NAME_ATTRIBUTE_MAPPING
-                            .get(span.name.as_ref())
-                            .and_then(|key| span.attributes.get(&Key::from_static_str(key)))
-                            .and_then(|value| match value {
-                                Value::String(value) => Some(value.as_str()),
-                                _ => None,
-                            })
-                            .unwrap_or(span.name.as_ref())
-                    })
+            .with_name_mapping(move |span, _model_config| {
+                if fixed_span_names {
+                    if let Some(original) = span
+                        .attributes
+                        .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
+                    {
+                        // Datadog expects static span names, not the ones in the otel spec.
+                        // Remap the span name to the original name if it was remapped.
+                        for name in BUILT_IN_SPAN_NAMES {
+                            if name == original.as_str() {
+                                return name;
+                            }
+                        }
+                    }
+                }
+                &span.name
             })
             .with(
                 &common.resource.get(SERVICE_NAME),
@@ -95,6 +160,9 @@ impl TracingConfigurator for Config {
                     builder.with_service_name(service_name.as_str())
                 },
             )
+            .with(&common.resource.get(ENV_KEY), |builder, env| {
+                builder.with_env(env.as_str())
+            })
             .with_version(
                 common
                     .resource

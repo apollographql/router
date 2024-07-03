@@ -11,10 +11,10 @@ telemetry:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
+        fixed_span_names: false
+        enable_span_mapping: false
   instrumentation:
     spans:
       mode: spec_compliant
-      supergraph:
-        attributes:
-          graphql.operation.name: true
+
 

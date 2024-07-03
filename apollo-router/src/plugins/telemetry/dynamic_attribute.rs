@@ -6,13 +6,13 @@ use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::Layer;
 use tracing_subscriber::Registry;
 
+use super::consts::OTEL_KIND;
+use super::consts::OTEL_NAME;
+use super::consts::OTEL_STATUS_CODE;
+use super::consts::OTEL_STATUS_MESSAGE;
 use super::formatters::APOLLO_PRIVATE_PREFIX;
 use super::otel::layer::str_to_span_kind;
 use super::otel::layer::str_to_status;
-use super::otel::layer::SPAN_KIND_FIELD;
-use super::otel::layer::SPAN_NAME_FIELD;
-use super::otel::layer::SPAN_STATUS_CODE_FIELD;
-use super::otel::layer::SPAN_STATUS_MESSAGE_FIELD;
 use super::otel::OtelData;
 use super::reload::IsSampled;
 
@@ -197,10 +197,12 @@ impl SpanDynAttribute for ::tracing::Span {
 
 fn update_otel_data(otel_data: &mut OtelData, key: &Key, value: &opentelemetry::Value) {
     match key.as_str() {
-        SPAN_NAME_FIELD => otel_data.forced_span_name = Some(value.to_string()),
-        SPAN_KIND_FIELD => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
-        SPAN_STATUS_CODE_FIELD => otel_data.forced_status = str_to_status(&value.as_str()).into(),
-        SPAN_STATUS_MESSAGE_FIELD => {
+        OTEL_NAME if otel_data.forced_span_name.is_none() => {
+            otel_data.forced_span_name = Some(value.to_string())
+        }
+        OTEL_KIND => otel_data.builder.span_kind = str_to_span_kind(&value.as_str()),
+        OTEL_STATUS_CODE => otel_data.forced_status = str_to_status(&value.as_str()).into(),
+        OTEL_STATUS_MESSAGE => {
             otel_data.builder.status =
                 opentelemetry::trace::Status::error(value.as_str().to_string())
         }
