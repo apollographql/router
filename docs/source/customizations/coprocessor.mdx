@@ -92,6 +92,41 @@ coprocessor:
 
 In this case, the `RouterService` only sends a coprocessor request whenever it receives a client request. The coprocessor request body includes _no_ data related to the client request (only "control" data, which is [covered below](#coprocessor-request-format)).
 
+### Conditions
+
+You can add [conditions](../configuration/telemetry/instrumentation/conditions) on coprocessor stages (except for `Execution` service) to conditionnally execute these stages in a coprocessor based on headers or context entries using [selectors](../configuration//telemetry//instrumentation/selectors).
+
+Here is the configuration example if you don't want to execute a coprocessor on `SupergraphResponse` for every subscription events when a subscription is opened :
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:3000
+  supergraph:
+    response: 
+      condition:
+        eq:
+        - true
+        - is_primary_response: true # Will be true only for the first event received on a supergraph response (like classical queries and mutations for example)
+      body: true
+      headers: true
+```
+
+Another example if you don't want to execute the router request coprocessor if it contains a request header:
+
+
+```yaml title="router.yaml"
+coprocessor:
+  url: http://127.0.0.1:3000
+  router:
+    request: 
+      condition:
+        eq:
+        - request_header: should-execute-copro # Header name 
+        - "enabled" # Header value
+      body: true
+      headers: true
+```
+
 ### Client configuration
 
 <HttpConnection type="coprocessor" />
