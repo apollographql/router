@@ -846,9 +846,11 @@ where {
         }
         fn field(&mut self, value: Option<i64>) -> bool {
             match value {
-                None => self.evaluate_response_field(ty(), field(), &json!(false), &Context::new()),
+                None => {
+                    self.evaluate_response_field(&ty(), field(), &json!(false), &Context::new())
+                }
                 Some(value) => {
-                    self.evaluate_response_field(ty(), field(), &json!(value), &Context::new())
+                    self.evaluate_response_field(&ty(), field(), &json!(value), &Context::new())
                 }
             }
         }

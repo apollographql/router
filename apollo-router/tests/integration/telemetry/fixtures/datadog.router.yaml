@@ -1,8 +1,20 @@
 telemetry:
   exporters:
     tracing:
+      experimental_response_trace_id:
+        enabled: true
+        header_name: apollo-custom-trace-id
+        format: datadog
       common:
         service_name: router
       datadog:
         enabled: true
-        endpoint: default
+        batch_processor:
+          scheduled_delay: 100ms
+  instrumentation:
+    spans:
+      mode: spec_compliant
+      supergraph:
+        attributes:
+          graphql.operation.name: true
+

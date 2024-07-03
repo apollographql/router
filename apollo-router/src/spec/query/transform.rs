@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use apollo_compiler::ast;
 use apollo_compiler::schema::FieldLookupError;
+use apollo_compiler::Name;
 use tower::BoxError;
 
 /// Transform a document with the given visitor.
@@ -243,7 +244,7 @@ pub(crate) fn selection_set(
 
 pub(crate) fn collect_fragments(
     executable: &ast::Document,
-) -> HashMap<&ast::Name, &ast::FragmentDefinition> {
+) -> HashMap<&Name, &ast::FragmentDefinition> {
     executable
         .definitions
         .iter()

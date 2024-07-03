@@ -2,10 +2,9 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
@@ -187,7 +186,8 @@ pub struct QueryPlanner {
     federated_query_graph: Arc<QueryGraph>,
     supergraph_schema: ValidFederationSchema,
     api_schema: ValidFederationSchema,
-    subgraph_federation_spec_definitions: Arc<IndexMap<NodeStr, &'static FederationSpecDefinition>>,
+    subgraph_federation_spec_definitions:
+        Arc<IndexMap<Arc<str>, &'static FederationSpecDefinition>>,
     /// A set of the names of interface types for which at least one subgraph use an
     /// @interfaceObject to abstract that interface.
     interface_types_with_interface_objects: IndexSet<InterfaceTypeDefinitionPosition>,
@@ -306,7 +306,7 @@ impl QueryPlanner {
         })
     }
 
-    pub fn subgraph_schemas(&self) -> &IndexMap<NodeStr, ValidFederationSchema> {
+    pub fn subgraph_schemas(&self) -> &IndexMap<Arc<str>, ValidFederationSchema> {
         self.federated_query_graph.subgraph_schemas()
     }
 
@@ -341,7 +341,7 @@ impl QueryPlanner {
                 let node = FetchNode {
                     subgraph_name: subgraph_name.clone(),
                     operation_document: document.clone(),
-                    operation_name: operation.name.as_deref().cloned(),
+                    operation_name: operation.name.clone(),
                     operation_kind: operation.operation_type,
                     id: None,
                     variable_usages: operation
@@ -1308,6 +1308,53 @@ type User
               name
               email
               id
+            }
+          },
+        }
+        "###);
+    }
+
+    #[test]
+    fn drop_operation_root_level_typename() {
+        let subgraph1 = Subgraph::parse_and_expand(
+            "Subgraph1",
+            "https://Subgraph1",
+            r#"
+                type Query {
+                    t: T
+                }
+
+                type T @key(fields: "id") {
+                    id: ID!
+                    x: Int
+                }
+            "#,
+        )
+        .unwrap();
+        let subgraphs = vec![&subgraph1];
+        let supergraph = Supergraph::compose(subgraphs).unwrap();
+        let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
+        let document = ExecutableDocument::parse_and_validate(
+            planner.api_schema().schema(),
+            r#"
+                query {
+                    __typename
+                    t {
+                        x
+                    }
+                }
+            "#,
+            "operation.graphql",
+        )
+        .unwrap();
+        let plan = planner.build_query_plan(&document, None).unwrap();
+        insta::assert_snapshot!(plan, @r###"
+        QueryPlan {
+          Fetch(service: "Subgraph1") {
+            {
+              t {
+                x
+              }
             }
           },
         }

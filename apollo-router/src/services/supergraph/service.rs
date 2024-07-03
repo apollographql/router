@@ -37,6 +37,7 @@ use crate::plugin::DynPlugin;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::telemetry::config_new::events::log_event;
 use crate::plugins::telemetry::config_new::events::SupergraphEventResponse;
+use crate::plugins::telemetry::consts::QUERY_PLANNING_SPAN_NAME;
 use crate::plugins::telemetry::tracing::apollo_telemetry::APOLLO_PRIVATE_DURATION_NS;
 use crate::plugins::telemetry::Telemetry;
 use crate::plugins::telemetry::LOGGING_DISPLAY_BODY;
@@ -76,7 +77,6 @@ use crate::Configuration;
 use crate::Context;
 use crate::Notify;
 
-pub(crate) const QUERY_PLANNING_SPAN_NAME: &str = "query_planning";
 pub(crate) const FIRST_EVENT_CONTEXT_KEY: &str = "apollo_router::supergraph::first_event";
 
 /// An [`IndexMap`] of available plugins.

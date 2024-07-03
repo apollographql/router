@@ -4,8 +4,8 @@ use std::ops::Deref;
 use std::sync::Arc;
 
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use indexmap::IndexSet;
 use referencer::Referencers;
@@ -135,6 +135,12 @@ impl FederationSchema {
         self.get_type(type_name).ok()
     }
 
+    /// Return the possible runtime types for a definition.
+    ///
+    /// For a union, the possible runtime types are its members.
+    /// For an interface, the possible runtime types are its implementers.
+    ///
+    /// Note this always allocates a set for the result. Avoid calling it frequently.
     pub(crate) fn possible_runtime_types(
         &self,
         composite_type_definition_position: CompositeTypeDefinitionPosition,

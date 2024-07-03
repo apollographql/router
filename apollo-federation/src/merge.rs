@@ -20,14 +20,13 @@ use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::schema::InputValueDefinition;
 use apollo_compiler::schema::InterfaceType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::UnionType;
 use apollo_compiler::ty;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use indexmap::map::Entry::Occupied;
 use indexmap::map::Entry::Vacant;
@@ -38,10 +37,15 @@ use itertools::Itertools;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
@@ -433,6 +437,10 @@ impl Merger {
             })
             .unwrap_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC);
 
+        let override_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC);
+
         let is_interface_object = object.directives.has(&interface_object_directive_name);
         let existing_type = types
             .entry(object_name.clone())
@@ -492,23 +500,29 @@ impl Merger {
                     }
                 }
 
-                let requires_directive_option = Option::and_then(
-                    field.directives.get_all(&requires_directive_name).next(),
-                    |p| {
-                        let requires_fields =
-                            directive_string_arg_value(p, &name!("fields")).unwrap();
-                        Some(requires_fields.as_str())
-                    },
-                );
+                let requires_directive_option = field
+                    .directives
+                    .get_all(&requires_directive_name)
+                    .next()
+                    .and_then(|p| directive_string_arg_value(p, &FEDERATION_FIELDS_ARGUMENT_NAME));
 
-                let provides_directive_option = Option::and_then(
-                    field.directives.get_all(&provides_directive_name).next(),
-                    |p| {
-                        let provides_fields =
-                            directive_string_arg_value(p, &name!("fields")).unwrap();
-                        Some(provides_fields.as_str())
-                    },
-                );
+                let provides_directive_option = field
+                    .directives
+                    .get_all(&provides_directive_name)
+                    .next()
+                    .and_then(|p| directive_string_arg_value(p, &FEDERATION_FIELDS_ARGUMENT_NAME));
+
+                let overrides_directive_option = field
+                    .directives
+                    .get_all(&override_directive_name)
+                    .next()
+                    .and_then(|p| {
+                        let overrides_from =
+                            directive_string_arg_value(p, &FEDERATION_FROM_ARGUMENT_NAME);
+                        let overrides_label =
+                            directive_string_arg_value(p, &FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME);
+                        overrides_from.map(|from| (from, overrides_label))
+                    });
 
                 let external_field = field
                     .directives
@@ -521,6 +535,7 @@ impl Merger {
                     requires_directive_option,
                     provides_directive_option,
                     external_field,
+                    overrides_directive_option,
                 );
 
                 supergraph_field
@@ -569,7 +584,7 @@ impl Merger {
                         }),
                         Node::new(Argument {
                             name: name!("member"),
-                            value: Node::new(Value::String(NodeStr::new(union_member))),
+                            value: union_member.as_str().into(),
                         }),
                     ],
                 }));
@@ -713,7 +728,7 @@ fn copy_fields(
     new_fields
 }
 
-fn copy_union_type(union_name: Name, description: Option<NodeStr>) -> ExtendedType {
+fn copy_union_type(union_name: Name, description: Option<Node<str>>) -> ExtendedType {
     ExtendedType::Union(Node::new(UnionType {
         description,
         name: union_name,
@@ -749,7 +764,7 @@ fn join_type_applied_directive<'a>(
             .arguments
             .push(Node::new(Argument {
                 name: name!("key"),
-                value: Node::new(Value::String(NodeStr::new(field_set.as_str()))),
+                value: field_set.into(),
             }));
 
         let resolvable =
@@ -786,7 +801,7 @@ fn join_implements_applied_directive(
             }),
             Node::new(Argument {
                 name: name!("interface"),
-                value: Node::new(Value::String(intf_name.to_string().into())),
+                value: intf_name.as_str().into(),
             }),
         ],
     })
@@ -800,10 +815,7 @@ fn directive_arg_value<'a>(directive: &'a Directive, arg_name: &Name) -> Option<
         .map(|arg| arg.value.as_ref())
 }
 
-fn directive_string_arg_value<'a>(
-    directive: &'a Directive,
-    arg_name: &Name,
-) -> Option<&'a NodeStr> {
+fn directive_string_arg_value<'a>(directive: &'a Directive, arg_name: &Name) -> Option<&'a str> {
     match directive_arg_value(directive, arg_name) {
         Some(Value::String(value)) => Some(value),
         _ => None,
@@ -828,9 +840,7 @@ fn add_core_feature_link(supergraph: &mut Schema) {
             name: name!("link"),
             arguments: vec![Node::new(Argument {
                 name: name!("url"),
-                value: Node::new(Value::String(NodeStr::new(
-                    "https://specs.apollo.dev/link/v1.0",
-                ))),
+                value: Node::new("https://specs.apollo.dev/link/v1.0".into()),
             })],
         }));
 
@@ -914,16 +924,16 @@ fn link_purpose_enum_type() -> (Name, EnumType) {
         values: IndexMap::new(),
     };
     let link_purpose_security_value = EnumValueDefinition {
-        description: Some(NodeStr::new(
-            r"SECURITY features provide metadata necessary to securely resolve fields.",
-        )),
+        description: Some(
+            r"SECURITY features provide metadata necessary to securely resolve fields.".into(),
+        ),
         directives: Default::default(),
         value: name!("SECURITY"),
     };
     let link_purpose_execution_value = EnumValueDefinition {
-        description: Some(NodeStr::new(
-            r"EXECUTION features provide metadata necessary for operation execution.",
-        )),
+        description: Some(
+            r"EXECUTION features provide metadata necessary for operation execution.".into(),
+        ),
         directives: Default::default(),
         value: name!("EXECUTION"),
     };
@@ -953,9 +963,7 @@ fn add_core_feature_join(
             arguments: vec![
                 Node::new(Argument {
                     name: name!("url"),
-                    value: Node::new(Value::String(NodeStr::new(
-                        "https://specs.apollo.dev/join/v0.3",
-                    ))),
+                    value: "https://specs.apollo.dev/join/v0.3".into(),
                 }),
                 Node::new(Argument {
                     name: name!("for"),
@@ -1089,6 +1097,13 @@ fn join_field_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
             Node::new(InputValueDefinition {
+                name: JOIN_OVERRIDE_LABEL_ARGUMENT_NAME,
+                description: None,
+                directives: Default::default(),
+                ty: ty!(String).into(),
+                default_value: None,
+            }),
+            Node::new(InputValueDefinition {
                 name: name!("usedOverridden"),
                 description: None,
                 directives: Default::default(),
@@ -1109,6 +1124,7 @@ fn join_field_applied_directive(
     requires: Option<&str>,
     provides: Option<&str>,
     external: bool,
+    overrides: Option<(&str, Option<&str>)>, // from, label
 ) -> Directive {
     let mut join_field_directive = Directive {
         name: name!("join__field"),
@@ -1120,20 +1136,32 @@ fn join_field_applied_directive(
     if let Some(required_fields) = requires {
         join_field_directive.arguments.push(Node::new(Argument {
             name: name!("requires"),
-            value: Node::new(Value::String(NodeStr::new(required_fields))),
+            value: required_fields.into(),
         }));
     }
     if let Some(provided_fields) = provides {
         join_field_directive.arguments.push(Node::new(Argument {
             name: name!("provides"),
-            value: Node::new(Value::String(NodeStr::new(provided_fields))),
+            value: provided_fields.into(),
         }));
     }
     if external {
         join_field_directive.arguments.push(Node::new(Argument {
             name: name!("external"),
-            value: Node::new(Value::Boolean(external)),
+            value: external.into(),
         }));
+    }
+    if let Some((from, label)) = overrides {
+        join_field_directive.arguments.push(Node::new(Argument {
+            name: name!("override"),
+            value: Node::new(Value::String(from.to_string())),
+        }));
+        if let Some(label) = label {
+            join_field_directive.arguments.push(Node::new(Argument {
+                name: name!("overrideLabel"),
+                value: Node::new(Value::String(label.to_string())),
+            }));
+        }
     }
     join_field_directive
 }
@@ -1296,11 +1324,11 @@ fn join_graph_enum_type(
             arguments: vec![
                 (Node::new(Argument {
                     name: name!("name"),
-                    value: Node::new(Value::String(NodeStr::new(s.name.as_str()))),
+                    value: s.name.as_str().into(),
                 })),
                 (Node::new(Argument {
                     name: name!("url"),
-                    value: Node::new(Value::String(NodeStr::new(s.url.as_str()))),
+                    value: s.url.as_str().into(),
                 })),
             ],
         };
