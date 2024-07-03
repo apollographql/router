@@ -28,10 +28,10 @@
         {
             "type": "Request",
             "request": {
-                "query": "query private { me { name } }",
-                "headers": {
-                    "x-user": "1"
-                }
+                "query": "query private { me { name } }"
+            },
+            "headers": {
+                "x-user": "1"
             },
             "expected_response": {
                 "data":{
@@ -65,10 +65,10 @@
         {
             "type": "Request",
             "request": {
-                "query": "query private { me { name } }",
-                "headers": {
-                    "x-user": "2"
-                }
+                "query": "query private { me { name } }"
+            },
+            "headers": {
+                "x-user": "2"
             },
             "expected_response": {
                 "data":{
@@ -89,10 +89,10 @@
         {
             "type": "Request",
             "request": {
-                "query": "query private { me { name } }",
-                "headers": {
-                    "x-user": "1"
-                }
+                "query": "query private { me { name } }"
+            },
+            "headers": {
+                "x-user": "1"
             },
             "expected_response": {
                 "data":{
@@ -105,10 +105,10 @@
         {
             "type": "Request",
             "request": {
-                "query": "query private { me { name } }",
-                "headers": {
-                    "x-user": "2"
-                }
+                "query": "query private { me { name } }"
+            },
+            "headers": {
+                "x-user": "2"
             },
             "expected_response": {
                 "data":{
