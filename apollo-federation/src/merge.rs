@@ -609,10 +609,10 @@ impl Merger {
         let existing_type = types
             .entry(scalar_name.clone())
             .or_insert(copy_scalar_type(scalar_name, ty));
-        if let ExtendedType::Scalar(e) = existing_type {
+        if let ExtendedType::Scalar(s) = existing_type {
             let join_type_directives =
                 join_type_applied_directive(subgraph_name.clone(), iter::empty(), false);
-            e.make_mut().directives.extend(join_type_directives);
+            s.make_mut().directives.extend(join_type_directives);
         } else {
             // conflict?
         }
