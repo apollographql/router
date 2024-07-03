@@ -258,7 +258,7 @@ impl PlanNode {
                                     .current_dir(current_dir.clone())
                                     .deferred_fetches(parameters.deferred_fetches.clone())
                                     .build();
-                                let (v, e) = service
+                                let (v, e) = match service
                                     .oneshot(request)
                                     .instrument(tracing::info_span!(
                                         FETCH_SPAN_NAME,
@@ -267,7 +267,16 @@ impl PlanNode {
                                         "apollo_private.sent_time_offset" = fetch_time_offset
                                     ))
                                     .await
-                                    .unwrap();
+                                {
+                                    Ok(r) => r,
+                                    Err(e) => (
+                                        Value::Null,
+                                        vec![Error::builder()
+                                            .message(format!("{:?}", e))
+                                            .extension_code("FETCH_SERVICE")
+                                            .build()],
+                                    ),
+                                };
                                 value = v;
                                 errors = e;
                             }

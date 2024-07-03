@@ -23,6 +23,7 @@ use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
 use lazy_static::lazy_static;
+use percent_encoding::percent_decode_str;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
@@ -117,30 +118,33 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError
     {
         // Path segments being none indicates the base_uri cannot be a base URL.
         // This means the schema is invalid.
-        let segments = base_uri
+        let base_segments = base_uri
             .path_segments()
             .ok_or(ConnectorDirectiveError::InvalidBaseUri(
                 url::ParseError::RelativeUrlWithCannotBeABaseBase,
-            ))?;
+            ))?
+            .filter(|segment| !segment.is_empty());
+
+        let path_segments = path_uri
+            .path_segments()
+            .ok_or(ConnectorDirectiveError::InvalidPath(
+                url::ParseError::RelativeUrlWithCannotBeABaseBase,
+            ))?
+            .filter(|segment| !segment.is_empty())
+            // parsing encodes the segments, so we need to decode them before adding them
+            .map(|segment| percent_decode_str(segment).decode_utf8().unwrap());
 
         // Ok this one is a bit tricky.
         // Here we're trying to only append segments that are not empty, to avoid `//`
-        let mut res_segments = res.path_segments_mut().map_err(|_| {
-            ConnectorDirectiveError::InvalidBaseUri(
-                url::ParseError::RelativeUrlWithCannotBeABaseBase,
-            )
-        })?;
-        res_segments
+        res.path_segments_mut()
+            .map_err(|_| {
+                ConnectorDirectiveError::InvalidBaseUri(
+                    url::ParseError::RelativeUrlWithCannotBeABaseBase,
+                )
+            })?
             .clear()
-            .extend(segments.filter(|segment| !segment.is_empty()))
-            .extend(
-                path_uri
-                    .path_segments()
-                    .ok_or(ConnectorDirectiveError::InvalidPath(
-                        url::ParseError::RelativeUrlWithCannotBeABaseBase,
-                    ))?
-                    .filter(|segment| !segment.is_empty()),
-            );
+            .extend(base_segments)
+            .extend(path_segments);
     }
     // Calling clear on query_pairs will cause a `?` to be appended.
     // We only want to do it if necessary
@@ -336,6 +340,19 @@ mod tests {
             .unwrap()
             .as_str(),
             "https://localhost:8080/v1/hello/42?foo=bar"
+        );
+    }
+
+    #[test]
+    fn append_path_test_with_encoded_characters() {
+        assert_eq!(
+            super::append_path(
+                "https://localhost:8080/v1".parse().unwrap(),
+                "/users/user%3A1" // must be authored encoded
+            )
+            .unwrap()
+            .as_str(),
+            "https://localhost:8080/v1/users/user:1"
         );
     }
 
