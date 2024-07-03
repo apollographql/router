@@ -72,7 +72,7 @@ impl Plugin for Connectors {
                             == Some(&HeaderValue::from_static("true"));
                     if is_enabled {
                         req.context.extensions().with_lock(|mut lock| {
-                            lock.insert::<ConnectorContext>(ConnectorContext::new());
+                            lock.insert::<ConnectorContext>(ConnectorContext::default());
                         });
                     }
 
@@ -121,7 +121,7 @@ register_plugin!("apollo", "preview_connectors", Connectors);
 
 // === Structs for collecting debugging information ============================
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub(crate) struct ConnectorContext {
     requests: Vec<ConnectorDebugHttpRequest>,
     responses: Vec<ConnectorDebugHttpResponse>,
@@ -129,13 +129,6 @@ pub(crate) struct ConnectorContext {
 }
 
 impl ConnectorContext {
-    fn new() -> Self {
-        Self {
-            requests: Default::default(),
-            responses: Default::default(),
-            selections: Default::default(),
-        }
-    }
     pub(crate) fn push_request(&mut self, req: &http::Request<RouterBody>) {
         self.requests.push(req.into());
     }

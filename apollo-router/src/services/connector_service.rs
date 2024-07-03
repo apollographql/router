@@ -93,7 +93,7 @@ async fn execute(
             let client = http_client_factory.create(&original_subgraph_name);
             let req = HttpRequest {
                 http_request: req,
-                context: context.clone(),
+                context,
             };
             let res = client.oneshot(req).await?;
             let mut res = res.http_response;
