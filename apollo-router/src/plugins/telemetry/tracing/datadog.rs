@@ -27,9 +27,9 @@ use crate::plugins::telemetry::consts::SUBGRAPH_REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
-use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
+use crate::plugins::telemetry::tracing::{datadog_exporter, BatchProcessorConfig};
 
 fn default_resource_mappings() -> HashMap<String, String> {
     let mut map = HashMap::with_capacity(7);
@@ -111,7 +111,7 @@ impl TracingConfigurator for Config {
 
         let fixed_span_names = self.fixed_span_names;
 
-        let exporter = opentelemetry_datadog::new_pipeline()
+        let exporter = datadog_exporter::new_pipeline()
             .with(
                 &self.endpoint.to_uri(&Uri::from_static(DEFAULT_ENDPOINT)),
                 |builder, e| builder.with_agent_endpoint(e.to_string().trim_end_matches('/')),

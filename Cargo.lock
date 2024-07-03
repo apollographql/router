@@ -546,7 +546,6 @@ dependencies = [
  "once_cell",
  "opentelemetry 0.20.0",
  "opentelemetry-aws",
- "opentelemetry-datadog",
  "opentelemetry-http",
  "opentelemetry-jaeger",
  "opentelemetry-otlp",
@@ -570,6 +569,7 @@ dependencies = [
  "regex",
  "reqwest",
  "rhai",
+ "rmp",
  "router-bridge",
  "rstack",
  "rust-embed",
@@ -4892,26 +4892,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "opentelemetry-datadog"
-version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b5f4ecf595095d3b641dd2761a0c3d1f175d3d6c28f38e65418d8004ea3255dd"
-dependencies = [
- "futures-core",
- "http 0.2.11",
- "indexmap 1.9.3",
- "itertools 0.10.5",
- "once_cell",
- "opentelemetry 0.20.0",
- "opentelemetry-http",
- "opentelemetry-semantic-conventions",
- "reqwest",
- "rmp",
- "thiserror",
- "url",
-]
-
-[[package]]
 name = "opentelemetry-http"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6076,9 +6056,9 @@ dependencies = [
 
 [[package]]
 name = "rmp"
-version = "0.8.12"
+version = "0.8.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f9860a6cc38ed1da53456442089b4dfa35e7cedaa326df63017af88385e6b20"
+checksum = "228ed7c16fa39782c3b3468e974aec2795e9089153cd08ee2e9aefb3613334c4"
 dependencies = [
  "byteorder",
  "num-traits",
