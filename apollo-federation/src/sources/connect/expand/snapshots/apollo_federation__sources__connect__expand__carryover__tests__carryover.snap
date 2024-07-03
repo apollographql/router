@@ -12,7 +12,7 @@ directive @join__graph(name: String!, url: String!) on ENUM_VALUE
 
 directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on ENUM | INPUT_OBJECT | INTERFACE | OBJECT | SCALAR | UNION
 
-directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, overrideLabel: String, usedOverridden: Boolean) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
 
 directive @join__implements(graph: join__Graph!, interface: String!) repeatable on INTERFACE | OBJECT
 
@@ -57,7 +57,7 @@ type Query @join__type(graph: ONE) @join__type(graph: TWO) {
   authenticated: String @join__field(graph: ONE) @authenticated
   requiresScopes: String @join__field(graph: ONE) @requiresScopes(scopes: ["scope"])
   policy: String @join__field(graph: ONE) @policy(policies: [["admin"]])
-  overridden: String @join__field(graph: ONE) @join__field(graph: TWO)
+  overridden: String @join__field(graph: ONE, override: "two", overrideLabel: "label") @join__field(graph: TWO)
 }
 
 scalar requiresScopes__Scope
