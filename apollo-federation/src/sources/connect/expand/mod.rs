@@ -438,7 +438,7 @@ mod helpers {
                     // to resolving the output type. The synthesized key should only include the portions
                     // of the inputs actually used throughout the selections of the transport.
                     //
-                    // Note that this only applies to conectors marked as being entities, since only
+                    // Note that this only applies to connectors marked as an entity resolver, since only
                     // those should be allowed to fully resolve a type given the required arguments /
                     // synthesized keys.
                     Parameter::Argument { argument, paths } => {
