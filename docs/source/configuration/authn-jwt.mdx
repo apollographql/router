@@ -181,13 +181,15 @@ authentication:
 </td>
 <td>
 
-By default, the Router errors when an unknown prefix is provided in the `Authorization` header. You must explicitly define prefixes in `header_value_prefix` or `sources`.
+This option lets you have a mix of `Authorization` header schemes, for example, both `Basic` and `Bearer`, without requiring you to use an another header.
 
-If you set `ignore_other_prefixes` to `true`, the Router allows unknown prefixes in the `Authorization` header and does not respond with an error when encountering one.
+By default, the router responds with an error when it encounters an unknown prefix in the `Authorization` header. You must explicitly define prefixes in [`header_value_prefix`](#header_value_prefix) or [`sources`](#sources).
 
-If you set `ignore_other_prefixes` to `false` or leave it unspecified, the Router assumes the default behavior of responding with an error when it finds an unknown prefix in the `Authorization` header.
+When `ignore_other_prefixes` is `false` (the default value), the router uses the default behavior and errors when it encounters an unknown prefix in the `Authorization` header.
 
-If you set a header prefix to an empty string, the Router ignores this option.
+If you set `ignore_other_prefixes` to `true`, the router allows requests with unknown prefixes in the `Authorization` header through and does not respond with an error when encountering one.
+
+If you set `header_value_prefix` to an empty string, the router ignores the `ignore_other_prefixes` setting.
 
 The default value is `false`.
 
