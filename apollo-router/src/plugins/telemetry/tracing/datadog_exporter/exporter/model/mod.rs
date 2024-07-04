@@ -75,6 +75,7 @@ fn default_resource_mapping<'a>(span: &'a SpanData, _config: &'a ModelConfig) ->
 }
 
 /// Wrap type for errors from opentelemetry datadog exporter
+#[allow(clippy::enum_variant_names)]
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     /// Message pack error
@@ -194,6 +195,7 @@ pub(crate) mod tests {
     use std::time::Duration;
     use std::time::SystemTime;
 
+    use base64::Engine;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::SpanKind;
@@ -202,8 +204,8 @@ pub(crate) mod tests {
     use opentelemetry::trace::TraceId;
     use opentelemetry::trace::TraceState;
     use opentelemetry::KeyValue;
-    use opentelemetry_sdk::trace::SpanEvents;
-    use opentelemetry_sdk::trace::SpanLinks;
+    use opentelemetry_sdk::trace::EvictedHashMap;
+    use opentelemetry_sdk::trace::EvictedQueue;
     use opentelemetry_sdk::InstrumentationLibrary;
     use opentelemetry_sdk::Resource;
     use opentelemetry_sdk::{self};
@@ -226,11 +228,15 @@ pub(crate) mod tests {
         let start_time = SystemTime::UNIX_EPOCH;
         let end_time = start_time.checked_add(Duration::from_secs(1)).unwrap();
 
-        let attributes = vec![KeyValue::new("span.type", "web")];
-        let events = SpanEvents::default();
-        let links = SpanLinks::default();
+        let mut attributes: EvictedHashMap = EvictedHashMap::new(1, 1);
+        attributes.insert(KeyValue::new("span.type", "web"));
         let resource = Resource::new(vec![KeyValue::new("host.name", "test")]);
-        let instrumentation_lib = InstrumentationLibrary::builder("component").build();
+        let instrumentation_lib = InstrumentationLibrary::new(
+            "component",
+            None::<&'static str>,
+            None::<&'static str>,
+            None,
+        );
 
         trace::SpanData {
             span_context,
@@ -240,9 +246,8 @@ pub(crate) mod tests {
             start_time,
             end_time,
             attributes,
-            dropped_attributes_count: 0,
-            events,
-            links,
+            events: EvictedQueue::new(0),
+            links: EvictedQueue::new(0),
             status: Status::Ok,
             resource: Cow::Owned(resource),
             instrumentation_lib,
@@ -256,12 +261,13 @@ pub(crate) mod tests {
             service_name: "service_name".to_string(),
             ..Default::default()
         };
-        let encoded = base64::encode(ApiVersion::Version03.encode(
-            &model_config,
-            traces.iter().map(|x| &x[..]).collect(),
-            &Mapping::empty(),
-            &UnifiedTags::new(),
-        )?);
+        let encoded =
+            base64::engine::general_purpose::STANDARD.encode(ApiVersion::Version03.encode(
+                &model_config,
+                traces.iter().map(|x| &x[..]).collect(),
+                &Mapping::empty(),
+                &UnifiedTags::new(),
+            )?);
 
         assert_eq!(encoded.as_str(), "kZGMpHR5cGWjd2Vip3NlcnZpY2Wsc2VydmljZV9uYW1lpG5hbWWpY29tcG9uZW\
         50qHJlc291cmNlqHJlc291cmNlqHRyYWNlX2lkzwAAAAAAAAAHp3NwYW5faWTPAAAAAAAAAGOpcGFyZW50X2lkzwAAAA\
@@ -284,12 +290,13 @@ pub(crate) mod tests {
         unified_tags.set_version(Some(String::from("test-version")));
         unified_tags.set_service(Some(String::from("test-service")));
 
-        let _encoded = base64::encode(ApiVersion::Version05.encode(
-            &model_config,
-            traces.iter().map(|x| &x[..]).collect(),
-            &Mapping::empty(),
-            &unified_tags,
-        )?);
+        let _encoded =
+            base64::engine::general_purpose::STANDARD.encode(ApiVersion::Version05.encode(
+                &model_config,
+                traces.iter().map(|x| &x[..]).collect(),
+                &Mapping::empty(),
+                &unified_tags,
+            )?);
 
         // TODO: Need someone to generate the expected result or instructions to do so.
         // assert_eq!(encoded.as_str(), "kp6jd2VirHNlcnZpY2VfbmFtZaljb21wb25lbnSocmVzb3VyY2WpaG9zdC5uYW\

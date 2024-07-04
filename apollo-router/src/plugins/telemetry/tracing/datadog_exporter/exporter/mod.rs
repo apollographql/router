@@ -239,7 +239,7 @@ impl DatadogPipelineBuilder {
         } else {
             let service_name = SdkProvidedResourceDetector
                 .detect(Duration::from_secs(0))
-                .get(semcov::resource::SERVICE_NAME.into())
+                .get(semcov::resource::SERVICE_NAME)
                 .unwrap()
                 .to_string();
             (

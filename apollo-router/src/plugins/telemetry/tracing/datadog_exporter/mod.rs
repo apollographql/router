@@ -157,7 +157,7 @@ pub use propagator::DatadogTraceState;
 #[allow(unused_imports)]
 pub use propagator::DatadogTraceStateBuilder;
 
-mod propagator {
+pub(crate) mod propagator {
     use once_cell::sync::Lazy;
     use opentelemetry::propagation::text_map_propagator::FieldIter;
     use opentelemetry::propagation::Extractor;
@@ -177,9 +177,9 @@ mod propagator {
 
     const TRACE_FLAG_DEFERRED: TraceFlags = TraceFlags::new(0x02);
     const TRACE_STATE_PRIORITY_SAMPLING: &str = "psr";
-    const TRACE_STATE_MEASURE: &str = "m";
-    const TRACE_STATE_TRUE_VALUE: &str = "1";
-    const TRACE_STATE_FALSE_VALUE: &str = "0";
+    pub(crate) const TRACE_STATE_MEASURE: &str = "m";
+    pub(crate) const TRACE_STATE_TRUE_VALUE: &str = "1";
+    pub(crate) const TRACE_STATE_FALSE_VALUE: &str = "0";
 
     static DATADOG_HEADER_FIELDS: Lazy<[String; 3]> = Lazy::new(|| {
         [

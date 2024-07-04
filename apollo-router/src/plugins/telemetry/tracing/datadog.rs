@@ -1,13 +1,22 @@
 //! Configuration for datadog tracing.
 
-use std::collections::HashMap;
+use std::fmt::Debug;
+use std::fmt::Formatter;
 
+use ahash::HashMap;
+use ahash::HashMapExt;
+use futures::future::BoxFuture;
 use http::Uri;
 use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
+use opentelemetry_api::trace::SpanContext;
 use opentelemetry_api::Key;
+use opentelemetry_api::KeyValue;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -28,6 +37,8 @@ use crate::plugins::telemetry::consts::SUBGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::consts::SUPERGRAPH_SPAN_NAME;
 use crate::plugins::telemetry::endpoint::UriEndpoint;
 use crate::plugins::telemetry::tracing::datadog_exporter;
+use crate::plugins::telemetry::tracing::datadog_exporter::propagator::TRACE_STATE_MEASURE;
+use crate::plugins::telemetry::tracing::datadog_exporter::propagator::TRACE_STATE_TRUE_VALUE;
 use crate::plugins::telemetry::tracing::BatchProcessorConfig;
 use crate::plugins::telemetry::tracing::SpanProcessorExt;
 use crate::plugins::telemetry::tracing::TracingConfigurator;
@@ -80,6 +91,19 @@ pub(crate) struct Config {
     /// http_request -> http.route
     #[serde(default)]
     resource_mapping: HashMap<String, String>,
+
+    /// Which spans will be eligable for span stats to be collected for viewing in the APM view.
+    /// Defaults to true for `router` and `supergraph`, `subgraph`, `subgraph_request`, `http_request` and `query_planning`.
+    #[serde(default = "default_span_metrics")]
+    span_metrics: HashMap<String, bool>,
+}
+
+fn default_span_metrics() -> HashMap<String, bool> {
+    let mut map = HashMap::with_capacity(BUILT_IN_SPAN_NAMES.len());
+    for name in BUILT_IN_SPAN_NAMES {
+        map.insert(name.to_string(), true);
+    }
+    map
 }
 
 fn default_true() -> bool {
@@ -179,11 +203,94 @@ impl TracingConfigurator for Config {
             )
             .with_trace_config(common)
             .build_exporter()?;
+
+        // Use the default span metrics and override with the ones from the config
+        let mut span_metrics = default_span_metrics();
+        span_metrics.extend(self.span_metrics.clone());
+
         Ok(builder.with_span_processor(
-            BatchSpanProcessor::builder(exporter, opentelemetry::runtime::Tokio)
-                .with_batch_config(self.batch_processor.clone().into())
-                .build()
-                .filtered(),
+            BatchSpanProcessor::builder(
+                ExporterWrapper {
+                    delegate: exporter,
+                    span_metrics,
+                },
+                opentelemetry::runtime::Tokio,
+            )
+            .with_batch_config(self.batch_processor.clone().into())
+            .build()
+            .filtered(),
         ))
+    }
+}
+
+struct ExporterWrapper {
+    delegate: datadog_exporter::DatadogExporter,
+    span_metrics: HashMap<String, bool>,
+}
+
+impl Debug for ExporterWrapper {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        self.delegate.fmt(f)
+    }
+}
+
+impl SpanExporter for ExporterWrapper {
+    fn export(&mut self, mut batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
+        // Here we do some special processing of the spans before passing them to the delegate
+        // In particular we default the span.type to the span kind if not set, and also override the trace measure status if we need to.
+        for span in &mut batch {
+            // If the span metrics are enabled for this span, set the trace state to measuring.
+            // We do all this dancing to avoid allocating.
+            let original_span_name = span
+                .attributes
+                .get(&Key::from_static_str(OTEL_ORIGINAL_NAME))
+                .map(|v| v.as_str());
+            let final_span_name = if let Some(span_name) = &original_span_name {
+                span_name.as_ref()
+            } else {
+                span.name.as_ref()
+            };
+
+            // Unfortunately trace state is immutable, so we have to create a new one
+            if self.span_metrics.get(final_span_name).is_some() {
+                let new_trace_state = span
+                    .span_context
+                    .trace_state()
+                    .insert(TRACE_STATE_MEASURE, TRACE_STATE_TRUE_VALUE)
+                    .expect("valid trace state");
+                span.span_context = SpanContext::new(
+                    span.span_context.trace_id(),
+                    span.span_context.span_id(),
+                    span.span_context.trace_flags(),
+                    span.span_context.is_remote(),
+                    new_trace_state,
+                )
+            }
+            // If span type is not overridden, use the span kind
+            // Otherwise use the appropriate span types from: https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/app_types.go
+            if span
+                .attributes
+                .get(&Key::from_static_str("span.type"))
+                .is_none()
+            {
+                let kind = match span.name.as_ref() {
+                    ROUTER_SPAN_NAME => "web",
+                    SUPERGRAPH_SPAN_NAME => "graphql",
+                    SUBGRAPH_REQUEST_SPAN_NAME => "graphql",
+                    HTTP_REQUEST_SPAN_NAME => "http",
+                    _ => "",
+                };
+                if !kind.is_empty() {
+                    span.attributes.insert(KeyValue::new("span.type", kind));
+                }
+            }
+        }
+        self.delegate.export(batch)
+    }
+    fn shutdown(&mut self) {
+        self.delegate.shutdown()
+    }
+    fn force_flush(&mut self) -> BoxFuture<'static, ExportResult> {
+        self.delegate.force_flush()
     }
 }
