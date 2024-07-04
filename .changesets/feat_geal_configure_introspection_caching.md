@@ -7,7 +7,7 @@ Currently, introspection has to go through the query planner, and since that is 
 ```yaml
 supergraph:
   query_planning:
-    legacy_introspection_caching: true
+    legacy_introspection_caching: false
 ```
 
 By [@Geal](https://github.com/Geal) in https://github.com/apollographql/router/pull/5583
