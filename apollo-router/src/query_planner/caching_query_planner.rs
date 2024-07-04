@@ -900,7 +900,7 @@ mod tests {
         let mut delegate = MockMyQueryPlanner::new();
         delegate
             .expect_clone()
-            // This is the main point of the test: if ontrospection queries are not cached, then the delegate
+            // This is the main point of the test: if introspection queries are not cached, then the delegate
             // will be called twice when we send the same request twice
             .times(2)
             .returning(|| {
