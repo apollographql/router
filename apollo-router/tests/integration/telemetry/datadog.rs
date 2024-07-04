@@ -380,6 +380,7 @@ async fn test_span_metrics() -> Result<(), BoxError> {
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn validate_trace(
     id: TraceId,
     query: &Value,
@@ -424,6 +425,7 @@ async fn validate_trace(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn find_valid_trace(
     url: &str,
     _query: &Value,
@@ -559,9 +561,15 @@ fn validate_span_kind(trace: &Value, name: &str, kind: &str) -> Result<(), BoxEr
         trace.select_path(&format!("$..[?(@.name == '{}')].meta.['span.kind']", name))?;
     let binding = binding1.first().or(binding2.first());
 
+    assert!(
+        binding.is_some(),
+        "span.kind missing or incorrect {}, {}",
+        name,
+        trace
+    );
     assert_eq!(
         binding
-            .expect(format!("span.kind missing or incorrect {}, {}", name, trace).as_str())
+            .expect("expected binding")
             .as_str()
             .expect("expected string"),
         kind
