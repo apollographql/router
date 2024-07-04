@@ -1,14 +1,14 @@
-use self::unified_tags::UnifiedTags;
-use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
-use http::uri;
-use opentelemetry_sdk::export::{
-    trace::{self, SpanData},
-    ExportError,
-};
 use std::fmt::Debug;
+
+use http::uri;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::{self};
+use opentelemetry_sdk::export::ExportError;
 use url::ParseError;
 
+use self::unified_tags::UnifiedTags;
 use super::Mapping;
+use crate::plugins::telemetry::tracing::datadog_exporter::ModelConfig;
 
 pub mod unified_tags;
 mod v03;
@@ -190,18 +190,25 @@ impl ApiVersion {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use super::*;
-    use opentelemetry::{
-        trace::{SpanContext, SpanId, SpanKind, Status, TraceFlags, TraceId, TraceState},
-        KeyValue,
-    };
-    use opentelemetry_sdk::{
-        self,
-        trace::{SpanEvents, SpanLinks},
-        InstrumentationLibrary, Resource,
-    };
     use std::borrow::Cow;
-    use std::time::{Duration, SystemTime};
+    use std::time::Duration;
+    use std::time::SystemTime;
+
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::SpanKind;
+    use opentelemetry::trace::Status;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry::trace::TraceState;
+    use opentelemetry::KeyValue;
+    use opentelemetry_sdk::trace::SpanEvents;
+    use opentelemetry_sdk::trace::SpanLinks;
+    use opentelemetry_sdk::InstrumentationLibrary;
+    use opentelemetry_sdk::Resource;
+    use opentelemetry_sdk::{self};
+
+    use super::*;
 
     fn get_traces() -> Vec<Vec<trace::SpanData>> {
         vec![vec![get_span(7, 1, 99)]]

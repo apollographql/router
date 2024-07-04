@@ -1,31 +1,41 @@
 mod intern;
 mod model;
 
+use std::borrow::Cow;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::sync::Arc;
+use std::time::Duration;
+
+use futures::future::BoxFuture;
+use http::Method;
+use http::Request;
+use http::Uri;
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
+use opentelemetry::global;
+use opentelemetry::sdk;
+use opentelemetry::trace::TraceError;
+use opentelemetry::KeyValue;
+use opentelemetry_api::trace::TracerProvider;
+use opentelemetry_http::HttpClient;
+use opentelemetry_http::ResponseExt;
+use opentelemetry_sdk::export::trace::ExportResult;
+use opentelemetry_sdk::export::trace::SpanData;
+use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::resource::ResourceDetector;
+use opentelemetry_sdk::resource::SdkProvidedResourceDetector;
+use opentelemetry_sdk::runtime::RuntimeChannel;
+use opentelemetry_sdk::trace::BatchMessage;
+use opentelemetry_sdk::trace::Config;
+use opentelemetry_sdk::trace::Tracer;
+use opentelemetry_sdk::Resource;
+use opentelemetry_semantic_conventions as semcov;
+use url::Url;
 
 use self::model::unified_tags::UnifiedTags;
 use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::FieldMapping;
-use futures::future::BoxFuture;
-use http::{Method, Request, Uri};
-use opentelemetry::{global, sdk, trace::TraceError, KeyValue};
-use opentelemetry_api::trace::TracerProvider;
-use opentelemetry_http::{HttpClient, ResponseExt};
-use opentelemetry_sdk::trace::BatchMessage;
-use opentelemetry_sdk::{
-    export::trace::{ExportResult, SpanData, SpanExporter},
-    resource::{ResourceDetector, SdkProvidedResourceDetector},
-    runtime::RuntimeChannel,
-    trace::{Config, Tracer},
-    Resource,
-};
-use opentelemetry_semantic_conventions as semcov;
-use std::borrow::Cow;
-use std::fmt::{Debug, Formatter};
-use std::sync::Arc;
-use std::time::Duration;
-use url::Url;
 
 /// Default Datadog collector endpoint
 const DEFAULT_AGENT_ENDPOINT: &str = "http://127.0.0.1:8126";
@@ -463,7 +473,6 @@ fn mapping_debug(f: &Option<FieldMapping>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-
     use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::tests::get_span;
     use crate::plugins::telemetry::tracing::datadog_exporter::ApiVersion::Version05;
 

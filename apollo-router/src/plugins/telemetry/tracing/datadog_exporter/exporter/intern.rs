@@ -1,10 +1,12 @@
+use std::cell::RefCell;
+use std::hash::BuildHasherDefault;
+use std::hash::Hash;
+
 use indexmap::set::IndexSet;
-use opentelemetry::{StringValue, Value};
-use rmp::encode::{RmpWrite, ValueWriteError};
-use std::{
-    cell::RefCell,
-    hash::{BuildHasherDefault, Hash},
-};
+use opentelemetry::StringValue;
+use opentelemetry::Value;
+use rmp::encode::RmpWrite;
+use rmp::encode::ValueWriteError;
 
 type InternHasher = ahash::AHasher;
 

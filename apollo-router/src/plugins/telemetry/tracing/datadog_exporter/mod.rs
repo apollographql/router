@@ -137,20 +137,39 @@
 mod exporter;
 
 #[allow(unused_imports)]
-pub use exporter::{
-    new_pipeline, ApiVersion, DatadogExporter, DatadogPipelineBuilder, Error, FieldMappingFn,
-    ModelConfig,
-};
+pub use exporter::new_pipeline;
 #[allow(unused_imports)]
-pub use propagator::{DatadogPropagator, DatadogTraceState, DatadogTraceStateBuilder};
+pub use exporter::ApiVersion;
+#[allow(unused_imports)]
+pub use exporter::DatadogExporter;
+#[allow(unused_imports)]
+pub use exporter::DatadogPipelineBuilder;
+#[allow(unused_imports)]
+pub use exporter::Error;
+#[allow(unused_imports)]
+pub use exporter::FieldMappingFn;
+#[allow(unused_imports)]
+pub use exporter::ModelConfig;
+#[allow(unused_imports)]
+pub use propagator::DatadogPropagator;
+#[allow(unused_imports)]
+pub use propagator::DatadogTraceState;
+#[allow(unused_imports)]
+pub use propagator::DatadogTraceStateBuilder;
 
 mod propagator {
     use once_cell::sync::Lazy;
-    use opentelemetry::{
-        propagation::{text_map_propagator::FieldIter, Extractor, Injector, TextMapPropagator},
-        trace::{SpanContext, SpanId, TraceContextExt, TraceFlags, TraceId, TraceState},
-        Context,
-    };
+    use opentelemetry::propagation::text_map_propagator::FieldIter;
+    use opentelemetry::propagation::Extractor;
+    use opentelemetry::propagation::Injector;
+    use opentelemetry::propagation::TextMapPropagator;
+    use opentelemetry::trace::SpanContext;
+    use opentelemetry::trace::SpanId;
+    use opentelemetry::trace::TraceContextExt;
+    use opentelemetry::trace::TraceFlags;
+    use opentelemetry::trace::TraceId;
+    use opentelemetry::trace::TraceState;
+    use opentelemetry::Context;
 
     const DATADOG_TRACE_ID_HEADER: &str = "x-datadog-trace-id";
     const DATADOG_PARENT_ID_HEADER: &str = "x-datadog-parent-id";
@@ -436,10 +455,12 @@ mod propagator {
 
     #[cfg(test)]
     mod tests {
-        use super::*;
+        use std::collections::HashMap;
+
         use opentelemetry::trace::TraceState;
         use opentelemetry_sdk::testing::trace::TestSpan;
-        use std::collections::HashMap;
+
+        use super::*;
 
         #[rustfmt::skip]
         fn extract_test_data() -> Vec<(Vec<(&'static str, &'static str)>, SpanContext)> {
