@@ -1,6 +1,7 @@
 use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_compiler::execution::JsonMap;
 use http::header::CONTENT_TYPE;
 use itertools::EitherOrBoth;
 use itertools::Itertools;
@@ -92,6 +93,17 @@ pub(crate) mod mock_api {
               "phone": "1-770-736-8031 x56442"
             })))
     }
+
+    pub(crate) fn create_user() -> Mock {
+        Mock::given(method("POST")).and(path("/user")).respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!(
+              {
+                "id": 3,
+                "username": "New User"
+              }
+            )),
+        )
+    }
 }
 
 pub(crate) mod mock_subgraph {
@@ -130,8 +142,10 @@ async fn test_root_field_plus_entity() {
     mock_api::user_2().mount(&mock_server).await;
 
     let response = execute(
+        STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
         "query { users { id name username } }",
+        Default::default(),
         None,
         |_| {},
     )
@@ -175,8 +189,10 @@ async fn test_root_field_plus_entity_plus_requires() {
     mock_subgraph::user_entity_query().mount(&mock_server).await;
 
     let response = execute(
+        STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
         "query { users { id name username d } }",
+        Default::default(),
         None,
         |_| {},
     )
@@ -227,7 +243,15 @@ async fn basic_errors() {
         .mount(&mock_server)
         .await;
 
-    let response = execute(&mock_server.uri(), "{ users { id } }", None, |_| {}).await;
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "{ users { id } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
 
     req_asserts::matches(
         &mock_server.received_requests().await.unwrap(),
@@ -256,8 +280,10 @@ async fn test_header_propagation() {
     mock_api::users().mount(&mock_server).await;
 
     execute(
+        STEEL_THREAD_SCHEMA,
         &mock_server.uri(),
         "query { users { id } }",
+        Default::default(),
         None,
         |request| {
             let headers = request.router_request.headers_mut();
@@ -288,11 +314,58 @@ async fn test_header_propagation() {
     );
 }
 
-const SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
+#[tokio::test]
+async fn test_mutation() {
+    let mock_server = MockServer::start().await;
+    mock_api::create_user().mount(&mock_server).await;
+
+    let response = execute(
+        MUTATION_SCHEMA,
+        &mock_server.uri(),
+        "mutation CreateUser($name: String!) {
+            createUser(name: $name) {
+                id
+                name
+            }
+        }",
+        serde_json_bytes::json!({ "name": "New User" })
+            .as_object()
+            .unwrap()
+            .clone(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "createUser": {
+          "id": 3,
+          "name": "New User"
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("POST")
+            .body(serde_json::json!({ "username": "New User" }))
+            .path("/user")
+            .build()],
+    );
+}
+
+const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
+const MUTATION_SCHEMA: &str = include_str!("./testdata/mutation.graphql");
 
 async fn execute(
+    schema: &str,
     uri: &str,
     query: &str,
+    variables: JsonMap,
     config: Option<serde_json::Value>,
     mut request_mutator: impl FnMut(&mut Request),
 ) -> serde_json::Value {
@@ -331,7 +404,7 @@ async fn execute(
         .create(
             false,
             Arc::new(serde_json::from_value(config).unwrap()),
-            SCHEMA.to_string(),
+            schema.to_string(),
             None,
             None,
         )
@@ -341,6 +414,7 @@ async fn execute(
 
     let mut request = supergraph::Request::fake_builder()
         .query(query)
+        .variables(variables)
         .header("x-client-header", "client-header-value")
         .build()
         .unwrap()

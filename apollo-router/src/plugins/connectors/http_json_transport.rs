@@ -3,6 +3,7 @@ use std::iter::Iterator;
 use std::str::FromStr;
 use std::sync::Arc;
 
+use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::HTTPHeader;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use displaydoc::Display;
@@ -24,12 +25,15 @@ use http::HeaderName;
 use http::HeaderValue;
 use lazy_static::lazy_static;
 use percent_encoding::percent_decode_str;
+use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
 
 use crate::error::ConnectorDirectiveError;
+use crate::plugins::connectors::plugin::ConnectorContext;
+use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect;
 use crate::services::router::body::RouterBody;
 
@@ -64,9 +68,28 @@ pub(crate) fn make_request(
     transport: &HttpJsonTransport,
     inputs: Value,
     original_request: &connect::Request,
+    debug: &mut Option<ConnectorContext>,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
-    // TODO build body using transport.body and inputs
-    let body = hyper::Body::empty();
+    let Value::Object(ref inputs_map) = inputs else {
+        return Err(HttpJsonTransportError::InvalidArguments(
+            "inputs must be a JSON object".to_string(),
+        ));
+    };
+    let (json_body, body, apply_to_errors) = if let Some(ref selection) = transport.body {
+        let inputs = inputs_map
+            .iter()
+            .map(|(k, v)| (k.as_str().to_string(), v.clone()))
+            .collect();
+        let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
+        let body = if let Some(json_body) = json_body.as_ref() {
+            hyper::Body::from(serde_json::to_vec(json_body)?)
+        } else {
+            hyper::Body::empty()
+        };
+        (json_body, body, apply_to_errors)
+    } else {
+        (None, hyper::Body::empty(), vec![])
+    };
 
     let mut request = http::Request::builder()
         .method(transport.method.as_str())
@@ -84,6 +107,18 @@ pub(crate) fn make_request(
         original_request.supergraph_request.headers(),
         &transport.headers,
     );
+
+    if let Some(ref mut debug) = debug {
+        debug.push_request(
+            &request,
+            json_body.as_ref(),
+            transport.body.as_ref().map(|body| SelectionData {
+                source: body.to_string(),
+                result: json_body.clone(),
+                errors: apply_to_errors,
+            }),
+        );
+    }
 
     Ok(request)
 }
@@ -268,16 +303,17 @@ fn add_headers<T>(
 
 // These are runtime error only, configuration errors should be captured as ConnectorDirectiveError
 #[derive(Error, Display, Debug)]
-#[allow(dead_code)]
 pub(crate) enum HttpJsonTransportError {
     /// Error building URI: {0:?}
     NewUriError(#[from] Option<http::uri::InvalidUri>),
     /// Could not generate HTTP request: {0}
     InvalidNewRequest(#[source] http::Error),
     /// Could not serialize body: {0}
-    BodySerialization(#[source] serde_json::Error),
+    BodySerialization(#[from] serde_json::Error),
     /// Invalid connector directive. This error should have been caught earlier: {0}
     ConnectorDirectiveError(#[source] ConnectorDirectiveError),
+    /// Invalid arguments
+    InvalidArguments(String),
 }
 
 #[cfg(test)]
