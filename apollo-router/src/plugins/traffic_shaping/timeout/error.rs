@@ -3,7 +3,6 @@
 use std::error;
 use std::fmt;
 
-use http::StatusCode;
 use crate::graphql;
 
 /// The timeout elapsed.

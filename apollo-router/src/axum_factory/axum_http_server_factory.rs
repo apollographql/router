@@ -59,7 +59,6 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::SpanMode;
-use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -662,18 +661,7 @@ async fn handle_graphql(
     );
 
     match res {
-        Err(err) => {
-            if let Some(source_err) = err.source() {
-                if source_err.is::<RateLimited>() {
-                    return RateLimited::new().into_response();
-                }
-            }
-            if err.is::<RateLimited>() {
-                return RateLimited::new().into_response();
-            }
-
-            internal_server_error(err)
-        }
+        Err(err) => internal_server_error(err),
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
 
