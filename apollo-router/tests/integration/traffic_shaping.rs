@@ -27,7 +27,7 @@ async fn test_router_timeout() -> Result<(), BoxError> {
             {PROMETHEUS_CONFIG}
             traffic_shaping:
                 router:
-                    timeout: 10ms
+                    timeout: 1ns
             "#
         ))
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
@@ -59,7 +59,7 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
                 all: true
             traffic_shaping:
                 all:
-                    timeout: 10ms
+                    timeout: 1ns
             "#
         ))
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
@@ -84,13 +84,13 @@ async fn test_subgraph_timeout() -> Result<(), BoxError> {
 #[tokio::test(flavor = "multi_thread")]
 async fn test_router_timeout_operation_name_in_tracing() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
-        .config(format!(
+        .config(
             r#"
             traffic_shaping:
                 router:
-                    timeout: 10ms
-            "#
-        ))
+                    timeout: 1ns
+            "#,
+        )
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
         .build()
         .await;
@@ -137,7 +137,7 @@ async fn test_router_timeout_custom_metric() -> Result<(), BoxError> {
                                         on_graphql_error: true
             traffic_shaping:
                 router:
-                    timeout: 10ms
+                    timeout: 1ns
             "#
         ))
         .responder(ResponseTemplate::new(500).set_delay(Duration::from_millis(20)))
