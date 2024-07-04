@@ -2466,8 +2466,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "format": {
-          "$ref": "#/definitions/TraceIdFormat",
-          "description": "#/definitions/TraceIdFormat"
+          "$ref": "#/definitions/TraceIdFormat2",
+          "description": "#/definitions/TraceIdFormat2"
         },
         "header_name": {
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
@@ -4759,6 +4759,11 @@ expression: "&schema"
           "description": "Send the body",
           "type": "boolean"
         },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_RouterSelector",
+          "description": "#/definitions/Condition_for_RouterSelector",
+          "nullable": true
+        },
         "context": {
           "default": false,
           "description": "Send the context",
@@ -4795,6 +4800,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_RouterSelector",
+          "description": "#/definitions/Condition_for_RouterSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -4892,8 +4902,8 @@ expression: "&schema"
           "description": "The trace ID of the request.",
           "properties": {
             "trace_id": {
-              "$ref": "#/definitions/TraceIdFormat2",
-              "description": "#/definitions/TraceIdFormat2"
+              "$ref": "#/definitions/TraceIdFormat",
+              "description": "#/definitions/TraceIdFormat"
             }
           },
           "required": [
@@ -5703,6 +5713,11 @@ expression: "&schema"
           "description": "Send the body",
           "type": "boolean"
         },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SubgraphSelector",
+          "description": "#/definitions/Condition_for_SubgraphSelector",
+          "nullable": true
+        },
         "context": {
           "default": false,
           "description": "Send the context",
@@ -5739,6 +5754,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SubgraphSelector",
+          "description": "#/definitions/Condition_for_SubgraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -6408,6 +6428,11 @@ expression: "&schema"
           "description": "Send the body",
           "type": "boolean"
         },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SupergraphSelector",
+          "description": "#/definitions/Condition_for_SupergraphSelector",
+          "nullable": true
+        },
         "context": {
           "default": false,
           "description": "Send the context",
@@ -6439,6 +6464,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SupergraphSelector",
+          "description": "#/definitions/Condition_for_SupergraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -6746,6 +6776,20 @@ expression: "&schema"
             "cost"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Boolean returning true if it's the primary response and not events like subscription events or deferred responses",
+          "properties": {
+            "is_primary_response": {
+              "description": "Boolean returning true if it's the primary response and not events like subscription events or deferred responses",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "is_primary_response"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -6907,6 +6951,24 @@ expression: "&schema"
     "TraceIdFormat": {
       "oneOf": [
         {
+          "description": "Open Telemetry trace ID, a hex string.",
+          "enum": [
+            "open_telemetry"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Datadog trace ID, a u64.",
+          "enum": [
+            "datadog"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "TraceIdFormat2": {
+      "oneOf": [
+        {
           "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
           "enum": [
             "hexadecimal"
@@ -6922,24 +6984,6 @@ expression: "&schema"
         },
         {
           "description": "Datadog",
-          "enum": [
-            "datadog"
-          ],
-          "type": "string"
-        }
-      ]
-    },
-    "TraceIdFormat2": {
-      "oneOf": [
-        {
-          "description": "Open Telemetry trace ID, a hex string.",
-          "enum": [
-            "open_telemetry"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Datadog trace ID, a u64.",
           "enum": [
             "datadog"
           ],
