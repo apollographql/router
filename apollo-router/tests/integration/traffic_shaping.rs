@@ -127,7 +127,7 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
                 all:
                     global_rate_limit:
                         capacity: 1
-                        interval: 100ms
+                        interval: 1min
             "#,
         ))
         .build()
