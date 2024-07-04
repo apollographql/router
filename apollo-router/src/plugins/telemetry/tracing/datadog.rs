@@ -17,7 +17,6 @@ use opentelemetry_api::KeyValue;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
-use opentelemetry_sdk::trace::EvictedHashMap;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -253,7 +252,7 @@ impl SpanExporter for ExporterWrapper {
             };
 
             // Unfortunately trace state is immutable, so we have to create a new one
-            if self.span_metrics.get(final_span_name).is_some() {
+            if let Some(true) = self.span_metrics.get(final_span_name) {
                 let new_trace_state = span
                     .span_context
                     .trace_state()
@@ -267,6 +266,7 @@ impl SpanExporter for ExporterWrapper {
                     new_trace_state,
                 )
             }
+
             // Set the span kind https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/span_kind.go
             let span_kind = match &span.span_kind {
                 SpanKind::Client => "client",

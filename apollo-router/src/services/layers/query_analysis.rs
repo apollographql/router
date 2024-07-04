@@ -22,6 +22,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -31,8 +32,6 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
-
-pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query";
 
 /// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]

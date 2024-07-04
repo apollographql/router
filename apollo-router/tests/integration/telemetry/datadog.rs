@@ -60,6 +60,8 @@ async fn test_default_span_names() -> Result<(), BoxError> {
             "http_request",
             "parse_query",
         ],
+        &[],
+        &[],
     )
     .await?;
     router.graceful_shutdown().await;
@@ -112,6 +114,8 @@ async fn test_override_span_names() -> Result<(), BoxError> {
             "http_request",
             "parse_query",
         ],
+        &[],
+        &[],
     )
     .await?;
     router.graceful_shutdown().await;
@@ -164,6 +168,8 @@ async fn test_override_span_names_late() -> Result<(), BoxError> {
             "http_request",
             "parse_query",
         ],
+        &[],
+        &[],
     )
     .await?;
     router.graceful_shutdown().await;
@@ -213,6 +219,17 @@ async fn test_basic() -> Result<(), BoxError> {
             "subgraph server",
             "parse_query",
         ],
+        &[
+            "query_planning",
+            "subgraph",
+            "http_request",
+            "subgraph_request",
+            "router",
+            "execution",
+            "supergraph",
+            "parse_query",
+        ],
+        &[],
     )
     .await?;
     router.graceful_shutdown().await;
@@ -250,6 +267,7 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
         false,
         &[
             "parse_query",
+            "/",
             "ExampleQuery",
             "client_request",
             "execution",
@@ -259,6 +277,8 @@ async fn test_resource_mapping_default() -> Result<(), BoxError> {
             "subgraph server",
             "ExampleQuery__products__0",
         ],
+        &[],
+        &[],
     )
     .await?;
     router.graceful_shutdown().await;
@@ -306,6 +326,54 @@ async fn test_resource_mapping_override() -> Result<(), BoxError> {
             "overridden",
             "ExampleQuery__products__0",
         ],
+        &[],
+        &[],
+    )
+    .await?;
+    router.graceful_shutdown().await;
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_span_metrics() -> Result<(), BoxError> {
+    if !graph_os_enabled() {
+        return Ok(());
+    }
+    let mut router = IntegrationTest::builder()
+        .telemetry(Telemetry::Datadog)
+        .config(include_str!("fixtures/disable_span_metrics.router.yaml"))
+        .build()
+        .await;
+
+    router.start().await;
+    router.assert_started().await;
+
+    let query = json!({"query":"query ExampleQuery {topProducts{name}}","variables":{}});
+    let (id, result) = router.execute_query(&query).await;
+    assert!(!result
+        .headers()
+        .get("apollo-custom-trace-id")
+        .unwrap()
+        .is_empty());
+    validate_trace(
+        id,
+        &query,
+        Some("ExampleQuery"),
+        &["client", "router", "subgraph"],
+        false,
+        &[
+            "parse_query",
+            "ExampleQuery",
+            "client_request",
+            "execution",
+            "query_planning",
+            "products",
+            "fetch",
+            "subgraph server",
+            "ExampleQuery__products__0",
+        ],
+        &["subgraph"],
+        &["supergraph"],
     )
     .await?;
     router.graceful_shutdown().await;
@@ -319,6 +387,8 @@ async fn validate_trace(
     services: &[&'static str],
     custom_span_instrumentation: bool,
     expected_span_names: &[&'static str],
+    expected_measured: &[&'static str],
+    unexpected_measured: &[&'static str],
 ) -> Result<(), BoxError> {
     let datadog_id = id.to_datadog();
     let url = format!("http://localhost:8126/test/traces?trace_ids={datadog_id}");
@@ -330,6 +400,8 @@ async fn validate_trace(
             services,
             custom_span_instrumentation,
             expected_span_names,
+            expected_measured,
+            unexpected_measured,
         )
         .await
         .is_ok()
@@ -345,6 +417,8 @@ async fn validate_trace(
         services,
         custom_span_instrumentation,
         expected_span_names,
+        expected_measured,
+        unexpected_measured,
     )
     .await?;
     Ok(())
@@ -357,6 +431,8 @@ async fn find_valid_trace(
     services: &[&'static str],
     _custom_span_instrumentation: bool,
     expected_span_names: &[&'static str],
+    expected_measured: &[&'static str],
+    unexpected_measured: &[&'static str],
 ) -> Result<(), BoxError> {
     // A valid trace has:
     // * All three services
@@ -373,6 +449,55 @@ async fn find_valid_trace(
     tracing::debug!("{}", serde_json::to_string_pretty(&trace)?);
     verify_trace_participants(&trace, services)?;
     verify_spans_present(&trace, operation_name, services, expected_span_names)?;
+    validate_span_kinds(&trace)?;
+    validate_measured_spans(&trace, expected_measured, unexpected_measured)?;
+    Ok(())
+}
+
+fn validate_measured_spans(
+    trace: &Value,
+    expected: &[&'static str],
+    unexpected: &[&'static str],
+) -> Result<(), BoxError> {
+    for expected in expected {
+        assert!(
+            measured_span(trace, expected)?,
+            "missing measured span {}",
+            expected
+        );
+    }
+    for unexpected in unexpected {
+        assert!(
+            !measured_span(trace, unexpected)?,
+            "unexpected measured span {}",
+            unexpected
+        );
+    }
+    Ok(())
+}
+
+fn measured_span(trace: &Value, name: &&str) -> Result<bool, BoxError> {
+    let binding1 = trace.select_path(&format!(
+        "$..[?(@.meta.['otel.original_name'] == '{}')].metrics.['_dd.measured']",
+        name
+    ))?;
+    let binding2 = trace.select_path(&format!(
+        "$..[?(@.name == '{}')].metrics.['_dd.measured']",
+        name
+    ))?;
+    Ok(binding1
+        .first()
+        .or(binding2.first())
+        .and_then(|v| v.as_f64())
+        .map(|v| v == 1.0)
+        .unwrap_or_default())
+}
+
+fn validate_span_kinds(trace: &Value) -> Result<(), BoxError> {
+    // Validate that the span.kind has been propagated. We can just do this for a selection of spans.
+    validate_span_kind(trace, "router", "server")?;
+    validate_span_kind(trace, "supergraph", "internal")?;
+    validate_span_kind(trace, "http_request", "client")?;
     Ok(())
 }
 
@@ -422,6 +547,25 @@ fn verify_spans_present(
             "spans did not match, got {operation_names:?}, missing {missing_operation_names:?}"
         )));
     }
+    Ok(())
+}
+
+fn validate_span_kind(trace: &Value, name: &str, kind: &str) -> Result<(), BoxError> {
+    let binding1 = trace.select_path(&format!(
+        "$..[?(@.meta.['otel.original_name'] == '{}')].meta.['span.kind']",
+        name
+    ))?;
+    let binding2 =
+        trace.select_path(&format!("$..[?(@.name == '{}')].meta.['span.kind']", name))?;
+    let binding = binding1.first().or(binding2.first());
+
+    assert_eq!(
+        binding
+            .expect(format!("span.kind missing or incorrect {}, {}", name, trace).as_str())
+            .as_str()
+            .expect("expected string"),
+        kind
+    );
     Ok(())
 }
 
