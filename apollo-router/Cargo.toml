@@ -66,7 +66,7 @@ features = ["docs_rs"]
 [dependencies]
 askama = "0.12.1"
 access-json = "0.1.0"
-anyhow = "1.0.80"
+anyhow = "1.0.86"
 apollo-compiler.workspace = true
 apollo-federation = { path = "../apollo-federation", version = "=1.50.0" }
 arc-swap = "1.6.0"
@@ -83,7 +83,7 @@ base64 = "0.21.7"
 bloomfilter = "1.0.13"
 buildstructor = "0.5.4"
 bytes = "1.6.0"
-clap = { version = "4.5.1", default-features = false, features = [
+clap = { version = "4.5.8", default-features = false, features = [
     "env",
     "derive",
     "std",
@@ -115,12 +115,12 @@ humantime = "2.1.0"
 humantime-serde = "1.1.1"
 hyper = { version = "0.14.28", features = ["server", "client", "stream"] }
 hyper-rustls = { version = "0.24.2", features = ["http1", "http2"] }
-indexmap = { version = "2.2.3", features = ["serde"] }
+indexmap = { version = "2.2.6", features = ["serde"] }
 itertools = "0.12.1"
 jsonpath_lib = "0.3.0"
 jsonpath-rust = "0.3.5"
 jsonschema = { version = "0.17.1", default-features = false }
-jsonwebtoken = "9.2.0"
+jsonwebtoken = "9.3.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
 linkme = "0.3.23"
@@ -193,7 +193,7 @@ reqwest.workspace = true
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
 router-bridge = "=0.5.27+v2.8.1"
 
-rust-embed = { version = "8.2.0", features = ["include-exclude"] }
+rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.21.11"
 rustls-native-certs = "0.6.3"
 rustls-pemfile = "1.0.4"
@@ -210,7 +210,7 @@ serde_yaml = "0.8.26"
 static_assertions = "1.1.0"
 strum_macros = "0.25.3"
 sys-info = "0.9.1"
-thiserror = "1.0.57"
+thiserror = "1.0.61"
 tokio.workspace = true
 tokio-stream = { version = "0.1.14", features = ["sync", "net"] }
 tokio-util = { version = "0.7.10", features = ["net", "codec", "time"] }
