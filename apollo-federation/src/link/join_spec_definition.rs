@@ -41,6 +41,7 @@ pub(crate) const JOIN_PROVIDES_ARGUMENT_NAME: Name = name!("provides");
 pub(crate) const JOIN_TYPE_ARGUMENT_NAME: Name = name!("type");
 pub(crate) const JOIN_EXTERNAL_ARGUMENT_NAME: Name = name!("external");
 pub(crate) const JOIN_OVERRIDE_ARGUMENT_NAME: Name = name!("override");
+pub(crate) const JOIN_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("overrideLabel");
 pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
@@ -65,6 +66,7 @@ pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) type_: Option<&'doc str>,
     pub(crate) external: Option<bool>,
     pub(crate) override_: Option<&'doc str>,
+    pub(crate) override_label: Option<&'doc str>,
     pub(crate) user_overridden: Option<bool>,
 }
 
@@ -217,6 +219,10 @@ impl JoinSpecDefinition {
             override_: directive_optional_string_argument(
                 application,
                 &JOIN_OVERRIDE_ARGUMENT_NAME,
+            )?,
+            override_label: directive_optional_string_argument(
+                application,
+                &JOIN_OVERRIDE_LABEL_ARGUMENT_NAME,
             )?,
             user_overridden: directive_optional_boolean_argument(
                 application,
