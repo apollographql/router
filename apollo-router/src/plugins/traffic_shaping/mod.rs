@@ -462,12 +462,12 @@ mod test {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use maplit::hashmap;
     use once_cell::sync::Lazy;
     use serde_json_bytes::json;
     use serde_json_bytes::ByteString;
     use serde_json_bytes::Value;
     use tower::Service;
-    use maplit::hashmap;
 
     use super::*;
     use crate::json_ext::Object;

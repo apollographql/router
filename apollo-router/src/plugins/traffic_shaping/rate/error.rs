@@ -22,8 +22,8 @@ impl fmt::Display for RateLimited {
     }
 }
 
-impl Into<graphql::Error> for RateLimited {
-    fn into(self) -> graphql::Error {
+impl From<RateLimited> for graphql::Error {
+    fn from(_: RateLimited) -> Self {
         graphql::Error::builder()
             .message(String::from("Your request has been rate limited"))
             .extension_code("REQUEST_RATE_LIMITED")

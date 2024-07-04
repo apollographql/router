@@ -22,8 +22,8 @@ impl fmt::Display for Elapsed {
     }
 }
 
-impl Into<graphql::Error> for Elapsed {
-    fn into(self) -> graphql::Error {
+impl From<Elapsed> for graphql::Error {
+    fn from(_: Elapsed) -> Self {
         graphql::Error::builder()
             .message(String::from("Request timed out"))
             .extension_code("REQUEST_TIMEOUT")
