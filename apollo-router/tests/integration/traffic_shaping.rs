@@ -88,7 +88,7 @@ async fn test_router_rate_limit() -> Result<(), BoxError> {
                 router:
                     global_rate_limit:
                         capacity: 1
-                        interval: 100ms
+                        interval: 10min
             "#
         ))
         .build()
@@ -127,7 +127,7 @@ async fn test_subgraph_rate_limit() -> Result<(), BoxError> {
                 all:
                     global_rate_limit:
                         capacity: 1
-                        interval: 1min
+                        interval: 10min
             "#,
         ))
         .build()
