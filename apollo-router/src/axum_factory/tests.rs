@@ -2391,7 +2391,7 @@ async fn test_supergraph_timeout() {
          "errors": [{
              "message": "Request timed out",
              "extensions": {
-                 "code": "REQUEST_TIMED_OUT"
+                 "code": "REQUEST_TIMEOUT"
              }
          }]
     }));

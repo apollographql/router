@@ -435,7 +435,7 @@ where
         tracing::info!(monotonic_counter.apollo_router_timeout = 1u64,);
         graphql::Error::builder()
             .message(String::from("Request timed out"))
-            .extension_code("REQUEST_TIMED_OUT")
+            .extension_code("REQUEST_TIMEOUT")
             .build()
     })
 }
@@ -825,16 +825,11 @@ mod test {
         let mut mock_service = MockSupergraphService::new();
         mock_service.expect_clone().returning(|| {
             let mut mock_service = MockSupergraphService::new();
-
-            mock_service.expect_clone().returning(|| {
-                let mut mock_service = MockSupergraphService::new();
-                mock_service.expect_call().times(0..2).returning(move |_| {
-                    Ok(SupergraphResponse::fake_builder()
-                        .data(json!({ "test": 1234_u32 }))
-                        .build()
-                        .unwrap())
-                });
-                mock_service
+            mock_service.expect_call().times(0..2).returning(move |_| {
+                Ok(SupergraphResponse::fake_builder()
+                    .data(json!({ "test": 1234_u32 }))
+                    .build()
+                    .unwrap())
             });
             mock_service
         });
