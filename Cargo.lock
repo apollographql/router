@@ -563,6 +563,7 @@ dependencies = [
  "p256",
  "parking_lot",
  "paste",
+ "percent-encoding",
  "pin-project-lite",
  "prometheus",
  "prost 0.12.3",

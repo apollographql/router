@@ -56,11 +56,18 @@ pub(crate) async fn handle_responses(
             .map_err(|_| InvalidResponseBody("couldn't retrieve http response body".into()))?;
 
         if parts.status.is_success() {
-            let json_data: Value = serde_json::from_slice(body)
-                .map_err(|_| InvalidResponseBody("couldn't deserialize response body".into()))?;
+            let Ok(json_data) = serde_json::from_slice::<Value>(body) else {
+                if let Some(ref mut debug) = debug {
+                    debug.push_invalid_response(&parts, body);
+                }
+                return Err(InvalidResponseBody(
+                    "couldn't deserialize response body".into(),
+                ));
+            };
 
             let mut res_data = {
                 // TODO use response_key.selection_set() to use the operation selection set for alias/typename/field selection
+                // TODO use apply_with_args after passing the inputs to this function
                 let (res, apply_to_errors) = connector.selection.apply_to(&json_data);
 
                 if let Some(ref mut debug) = debug {

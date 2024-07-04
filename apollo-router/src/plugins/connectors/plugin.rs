@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use apollo_federation::sources::connect::ApplyToError;
+use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
 use futures::StreamExt;
@@ -125,7 +126,7 @@ register_plugin!("apollo", "preview_connectors", Connectors);
 pub(crate) struct ConnectorContext {
     requests: Vec<ConnectorDebugHttpRequest>,
     responses: Vec<ConnectorDebugHttpResponse>,
-    selections: Vec<ConnectorDebugSelection>,
+    selections: Vec<Option<ConnectorDebugSelection>>,
 }
 
 impl ConnectorContext {
@@ -138,7 +139,44 @@ impl ConnectorContext {
         parts: &http::response::Parts,
         json_body: &serde_json_bytes::Value,
     ) {
-        self.responses.push(serialize_response(parts, json_body));
+        self.responses.push(ConnectorDebugHttpResponse {
+            status: parts.status.as_u16(),
+            headers: parts
+                .headers
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        name.as_str().to_string(),
+                        value.to_str().unwrap().to_string(),
+                    )
+                })
+                .collect(),
+            body: ConnectorDebugBody {
+                kind: "json".to_string(),
+                content: json_body.clone(),
+            },
+        });
+    }
+
+    pub(crate) fn push_invalid_response(&mut self, parts: &http::response::Parts, body: &Bytes) {
+        self.responses.push(ConnectorDebugHttpResponse {
+            status: parts.status.as_u16(),
+            headers: parts
+                .headers
+                .iter()
+                .map(|(name, value)| {
+                    (
+                        name.as_str().to_string(),
+                        value.to_str().unwrap().to_string(),
+                    )
+                })
+                .collect(),
+            body: ConnectorDebugBody {
+                kind: "invalid".to_string(),
+                content: format!("{:?}", body).into(),
+            },
+        });
+        self.selections.push(None);
     }
 
     pub(crate) fn push_mapping(
@@ -147,11 +185,11 @@ impl ConnectorContext {
         result: Option<serde_json_bytes::Value>,
         errors: Vec<ApplyToError>,
     ) {
-        self.selections.push(ConnectorDebugSelection {
+        self.selections.push(Some(ConnectorDebugSelection {
             source,
             result,
             errors: aggregate_apply_to_errors(&errors),
-        });
+        }));
     }
 
     fn serialize(self) -> Value {
@@ -215,29 +253,6 @@ struct ConnectorDebugHttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: ConnectorDebugBody,
-}
-
-fn serialize_response(
-    parts: &http::response::Parts,
-    json_body: &serde_json_bytes::Value,
-) -> ConnectorDebugHttpResponse {
-    ConnectorDebugHttpResponse {
-        status: parts.status.as_u16(),
-        headers: parts
-            .headers
-            .iter()
-            .map(|(name, value)| {
-                (
-                    name.as_str().to_string(),
-                    value.to_str().unwrap().to_string(),
-                )
-            })
-            .collect(),
-        body: ConnectorDebugBody {
-            kind: "json".to_string(),
-            content: json_body.clone(),
-        },
-    }
 }
 
 fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<serde_json_bytes::Value> {

@@ -81,8 +81,7 @@ async fn execute(
         .extensions()
         .with_lock(|mut lock| lock.remove::<ConnectorContext>());
 
-    let requests =
-        make_requests(request, connector, &mut debug).map_err(|_e| BoxError::from("TODO"))?;
+    let requests = make_requests(request, connector, &mut debug).map_err(BoxError::from)?;
 
     let tasks = requests.into_iter().map(move |(req, key)| {
         let context = context.clone();
@@ -110,7 +109,7 @@ async fn execute(
 
     let result = handle_responses(responses, connector, &mut debug, schema)
         .await
-        .map_err(|_e| BoxError::from("todo"));
+        .map_err(BoxError::from);
 
     if let Some(debug) = debug {
         context2
