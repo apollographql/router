@@ -37,10 +37,15 @@ use itertools::Itertools;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_FIELDS_ARGUMENT_NAME;
+use crate::link::federation_spec_definition::FEDERATION_FROM_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_KEY_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
@@ -202,8 +207,15 @@ impl Merger {
                         type_name.clone(),
                         value,
                     ),
-                    ExtendedType::Scalar(_value) => {
-                        // DO NOTHING
+                    ExtendedType::Scalar(value) => {
+                        if !value.is_built_in() {
+                            self.merge_scalar_type(
+                                &mut supergraph.types,
+                                subgraph_name.clone(),
+                                type_name.clone(),
+                                value,
+                            );
+                        }
                     }
                 }
             }
@@ -432,6 +444,10 @@ impl Merger {
             })
             .unwrap_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC);
 
+        let override_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(FEDERATION_OVERRIDE_DIRECTIVE_NAME_IN_SPEC);
+
         let is_interface_object = object.directives.has(&interface_object_directive_name);
         let existing_type = types
             .entry(object_name.clone())
@@ -491,23 +507,29 @@ impl Merger {
                     }
                 }
 
-                let requires_directive_option = Option::and_then(
-                    field.directives.get_all(&requires_directive_name).next(),
-                    |p| {
-                        let requires_fields =
-                            directive_string_arg_value(p, &name!("fields")).unwrap();
-                        Some(requires_fields)
-                    },
-                );
+                let requires_directive_option = field
+                    .directives
+                    .get_all(&requires_directive_name)
+                    .next()
+                    .and_then(|p| directive_string_arg_value(p, &FEDERATION_FIELDS_ARGUMENT_NAME));
 
-                let provides_directive_option = Option::and_then(
-                    field.directives.get_all(&provides_directive_name).next(),
-                    |p| {
-                        let provides_fields =
-                            directive_string_arg_value(p, &name!("fields")).unwrap();
-                        Some(provides_fields)
-                    },
-                );
+                let provides_directive_option = field
+                    .directives
+                    .get_all(&provides_directive_name)
+                    .next()
+                    .and_then(|p| directive_string_arg_value(p, &FEDERATION_FIELDS_ARGUMENT_NAME));
+
+                let overrides_directive_option = field
+                    .directives
+                    .get_all(&override_directive_name)
+                    .next()
+                    .and_then(|p| {
+                        let overrides_from =
+                            directive_string_arg_value(p, &FEDERATION_FROM_ARGUMENT_NAME);
+                        let overrides_label =
+                            directive_string_arg_value(p, &FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME);
+                        overrides_from.map(|from| (from, overrides_label))
+                    });
 
                 let external_field = field
                     .directives
@@ -520,6 +542,7 @@ impl Merger {
                     requires_directive_option,
                     provides_directive_option,
                     external_field,
+                    overrides_directive_option,
                 );
 
                 supergraph_field
@@ -575,6 +598,25 @@ impl Merger {
             }
         }
     }
+
+    fn merge_scalar_type(
+        &self,
+        types: &mut IndexMap<Name, ExtendedType>,
+        subgraph_name: Name,
+        scalar_name: NamedType,
+        ty: &Node<ScalarType>,
+    ) {
+        let existing_type = types
+            .entry(scalar_name.clone())
+            .or_insert(copy_scalar_type(scalar_name, ty));
+        if let ExtendedType::Scalar(s) = existing_type {
+            let join_type_directives =
+                join_type_applied_directive(subgraph_name.clone(), iter::empty(), false);
+            s.make_mut().directives.extend(join_type_directives);
+        } else {
+            // conflict?
+        }
+    }
 }
 
 const EXECUTABLE_DIRECTIVE_LOCATIONS: [DirectiveLocation; 8] = [
@@ -602,6 +644,14 @@ fn is_mergeable_type(type_name: &str) -> bool {
         return false;
     }
     !FEDERATION_TYPES.contains(&type_name)
+}
+
+fn copy_scalar_type(scalar_name: Name, scalar_type: &Node<ScalarType>) -> ExtendedType {
+    ExtendedType::Scalar(Node::new(ScalarType {
+        description: scalar_type.description.clone(),
+        name: scalar_name,
+        directives: Default::default(),
+    }))
 }
 
 fn copy_enum_type(enum_name: Name, enum_type: &Node<EnumType>) -> ExtendedType {
@@ -1081,6 +1131,13 @@ fn join_field_directive_definition() -> DirectiveDefinition {
                 default_value: None,
             }),
             Node::new(InputValueDefinition {
+                name: JOIN_OVERRIDE_LABEL_ARGUMENT_NAME,
+                description: None,
+                directives: Default::default(),
+                ty: ty!(String).into(),
+                default_value: None,
+            }),
+            Node::new(InputValueDefinition {
                 name: name!("usedOverridden"),
                 description: None,
                 directives: Default::default(),
@@ -1101,6 +1158,7 @@ fn join_field_applied_directive(
     requires: Option<&str>,
     provides: Option<&str>,
     external: bool,
+    overrides: Option<(&str, Option<&str>)>, // from, label
 ) -> Directive {
     let mut join_field_directive = Directive {
         name: name!("join__field"),
@@ -1126,6 +1184,18 @@ fn join_field_applied_directive(
             name: name!("external"),
             value: external.into(),
         }));
+    }
+    if let Some((from, label)) = overrides {
+        join_field_directive.arguments.push(Node::new(Argument {
+            name: name!("override"),
+            value: Node::new(Value::String(from.to_string())),
+        }));
+        if let Some(label) = label {
+            join_field_directive.arguments.push(Node::new(Argument {
+                name: name!("overrideLabel"),
+                value: Node::new(Value::String(label.to_string())),
+            }));
+        }
     }
     join_field_directive
 }
@@ -1388,6 +1458,42 @@ mod tests {
                 url: "".to_string(),
                 schema: ValidFederationSchema::new(
                     Schema::parse_and_validate(graphql_sdl, "./graphql.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+
+        let result = merge_federation_subgraphs(subgraphs).unwrap();
+
+        let schema = result.schema.into_inner();
+        let validation = schema.clone().validate();
+        assert!(validation.is_ok(), "{:?}", validation);
+
+        assert_snapshot!(schema.serialize());
+    }
+
+    #[test]
+    fn test_basic() {
+        let one_sdl = include_str!("./sources/connect/expand/merge/basic_1.graphql");
+        let two_sdl = include_str!("./sources/connect/expand/merge/basic_2.graphql");
+
+        let mut subgraphs = ValidFederationSubgraphs::new();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "basic_1".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(one_sdl, "./basic_1.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "basic_2".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(two_sdl, "./basic_2.graphql").unwrap(),
                 )
                 .unwrap(),
             })

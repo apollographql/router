@@ -264,7 +264,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
     directive @federation__inaccessible on FIELD_DEFINITION | OBJECT | INTERFACE | UNION | ARGUMENT_DEFINITION | SCALAR | ENUM | ENUM_VALUE | INPUT_OBJECT | INPUT_FIELD_DEFINITION
 
-    directive @federation__override(from: String!) on FIELD_DEFINITION
+    directive @federation__override(from: String!, label: String) on FIELD_DEFINITION
 
     directive @federation__composeDirective(name: String) repeatable on SCHEMA
 
@@ -1299,6 +1299,7 @@ fn add_subgraph_field(
             type_: None,
             external: None,
             override_: None,
+            override_label: None,
             user_overridden: None,
         });
     let subgraph_field_type = match &field_directive_application.type_ {
@@ -1352,10 +1353,13 @@ fn add_subgraph_field(
         ));
     }
     if let Some(override_) = &field_directive_application.override_ {
-        subgraph_field.directives.push(Node::new(
-            federation_spec_definition
-                .override_directive(&subgraph.schema, override_.to_string())?,
-        ));
+        subgraph_field
+            .directives
+            .push(Node::new(federation_spec_definition.override_directive(
+                &subgraph.schema,
+                override_.to_string(),
+                &field_directive_application.override_label,
+            )?));
     }
     if is_shareable && !external && !user_overridden {
         subgraph_field.directives.push(Node::new(
@@ -1389,6 +1393,7 @@ fn add_subgraph_input_field(
             type_: None,
             external: None,
             override_: None,
+            override_label: None,
             user_overridden: None,
         });
     let subgraph_input_field_type = match &field_directive_application.type_ {
