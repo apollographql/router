@@ -94,9 +94,19 @@ In this case, the `RouterService` only sends a coprocessor request whenever it r
 
 ### Conditions
 
-You can add [conditions](../configuration/telemetry/instrumentation/conditions) on coprocessor stages (except for `Execution` service) to conditionnally execute these stages in a coprocessor based on headers or context entries using [selectors](../configuration//telemetry//instrumentation/selectors).
+You can define [conditions](../configuration/telemetry/instrumentation/conditions) for a stage of the request lifecycle that you want to run the coprocessor. You can set coprocessor conditions with [selectors](../configuration//telemetry//instrumentation/selectors) based on headers or context entries.
 
-Here is the configuration example if you don't want to execute a coprocessor on `SupergraphResponse` for every subscription events when a subscription is opened :
+<Note>
+
+The `Execution` stage doesn't support coprocessor conditions.
+
+</Note> 
+
+
+Example configurations:
+
+ - Run during the `SupergraphResponse` stage only for the first event of a supergraph response. Useful for handling only the first subscription event when a subscription is opened:
+ 
 
 ```yaml title="router.yaml"
 coprocessor:
@@ -111,7 +121,7 @@ coprocessor:
       headers: true
 ```
 
-Another example if you don't want to execute the router request coprocessor if it contains a request header:
+- Run during the `Request` stage only if the request contains a request header:
 
 
 ```yaml title="router.yaml"
