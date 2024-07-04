@@ -3,6 +3,95 @@ source: apollo-federation/src/sources/connect/expand/tests/mod.rs
 expression: connectors.by_service_name
 ---
 {
+    "connectors_Query_usersByCompany_0": Connector {
+        id: ConnectId {
+            label: "connectors.example http: Get /by-company/{$args.company.name!}",
+            subgraph_name: "connectors",
+            source_name: Some(
+                "example",
+            ),
+            directive: ObjectOrInterfaceFieldDirectivePosition {
+                field: Object(Query.usersByCompany),
+                directive_name: "connect",
+                directive_index: 0,
+            },
+        },
+        transport: HttpJson(
+            HttpJsonTransport {
+                base_url: "http://example",
+                path_template: URLPathTemplate {
+                    path: [
+                        ParameterValue {
+                            parts: [
+                                Text(
+                                    "by-company",
+                                ),
+                            ],
+                        },
+                        ParameterValue {
+                            parts: [
+                                Var(
+                                    VariableExpression {
+                                        var_path: "$args.company.name",
+                                        batch_separator: None,
+                                        required: true,
+                                    },
+                                ),
+                            ],
+                        },
+                    ],
+                    query: {},
+                },
+                method: Get,
+                headers: [],
+                body: None,
+            },
+        ),
+        selection: Named(
+            SubSelection {
+                selections: [
+                    Field(
+                        None,
+                        "id",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "name",
+                        None,
+                    ),
+                    Field(
+                        None,
+                        "company",
+                        Some(
+                            SubSelection {
+                                selections: [
+                                    Field(
+                                        None,
+                                        "name",
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        "catchPhrase",
+                                        None,
+                                    ),
+                                    Field(
+                                        None,
+                                        "bs",
+                                        None,
+                                    ),
+                                ],
+                                star: None,
+                            },
+                        ),
+                    ),
+                ],
+                star: None,
+            },
+        ),
+        entity_resolver: None,
+    },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
             label: "connectors.example http: Get /{$args.id!}",

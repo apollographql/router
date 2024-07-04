@@ -13,6 +13,16 @@ subgraphs:
           @source(name: "example", http: { baseURL: "http://example" })
 
         type Query {
+          usersByCompany(company: CompanyInput!): [User]
+            @connect(source: "example", http: { GET: "/by-company/{$$args.company.name}" }, selection: """
+              id
+              name
+              company {
+                name
+                catchPhrase
+                bs
+              }""")
+
           user(id: ID!): User
             @connect(source: "example", http: { GET: "/{$$args.id}" }, selection: """
               id
@@ -66,4 +76,9 @@ subgraphs:
           name: String
           catchPhrase: String
           bs: String
+        }
+
+        input CompanyInput {
+          name: String!
+          catchPhrase: String
         }
