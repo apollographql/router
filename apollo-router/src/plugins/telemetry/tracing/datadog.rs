@@ -11,12 +11,13 @@ use opentelemetry::sdk;
 use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
-use opentelemetry_api::trace::SpanContext;
+use opentelemetry_api::trace::{SpanContext, SpanKind};
 use opentelemetry_api::Key;
 use opentelemetry_api::KeyValue;
 use opentelemetry_sdk::export::trace::ExportResult;
 use opentelemetry_sdk::export::trace::SpanData;
 use opentelemetry_sdk::export::trace::SpanExporter;
+use opentelemetry_sdk::trace::EvictedHashMap;
 use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
@@ -237,7 +238,7 @@ impl Debug for ExporterWrapper {
 impl SpanExporter for ExporterWrapper {
     fn export(&mut self, mut batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         // Here we do some special processing of the spans before passing them to the delegate
-        // In particular we default the span.type to the span kind if not set, and also override the trace measure status if we need to.
+        // In particular we default the span.kind to the span kind, and also override the trace measure status if we need to.
         for span in &mut batch {
             // If the span metrics are enabled for this span, set the trace state to measuring.
             // We do all this dancing to avoid allocating.
@@ -266,24 +267,18 @@ impl SpanExporter for ExporterWrapper {
                     new_trace_state,
                 )
             }
-            // If span type is not overridden, use the span kind
-            // Otherwise use the appropriate span types from: https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/app_types.go
-            if span
-                .attributes
-                .get(&Key::from_static_str("span.type"))
-                .is_none()
-            {
-                let kind = match span.name.as_ref() {
-                    ROUTER_SPAN_NAME => "web",
-                    SUPERGRAPH_SPAN_NAME => "graphql",
-                    SUBGRAPH_REQUEST_SPAN_NAME => "graphql",
-                    HTTP_REQUEST_SPAN_NAME => "http",
-                    _ => "",
-                };
-                if !kind.is_empty() {
-                    span.attributes.insert(KeyValue::new("span.type", kind));
-                }
-            }
+            // Set the span kind https://github.com/DataDog/dd-trace-go/blob/main/ddtrace/ext/span_kind.go
+            let span_kind = match &span.span_kind {
+                SpanKind::Client => "client",
+                SpanKind::Server => "server",
+                SpanKind::Producer => "producer",
+                SpanKind::Consumer => "consumer",
+                SpanKind::Internal => "internal",
+            };
+            span.attributes
+                .insert(KeyValue::new("span.kind", span_kind));
+
+            // Note we do NOT set span.type as it isn't a good fit for otel.
         }
         self.delegate.export(batch)
     }
