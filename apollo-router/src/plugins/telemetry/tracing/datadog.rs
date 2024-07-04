@@ -8,8 +8,7 @@ use opentelemetry::sdk::trace::BatchSpanProcessor;
 use opentelemetry::sdk::trace::Builder;
 use opentelemetry::Value;
 use opentelemetry_api::Key;
-use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
-use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
+use opentelemetry_semantic_conventions::resource::{SERVICE_NAME, SERVICE_VERSION};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tower::BoxError;
@@ -169,6 +168,12 @@ impl TracingConfigurator for Config {
                     .get(SERVICE_VERSION)
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
+            )
+            // This prevents spurious errors in the log when talking to the agent
+            .with_http_client(
+                reqwest::Client::builder()
+                    .pool_idle_timeout(std::time::Duration::from_millis(1))
+                    .build()?,
             )
             .with_trace_config(common)
             .build_exporter()?;

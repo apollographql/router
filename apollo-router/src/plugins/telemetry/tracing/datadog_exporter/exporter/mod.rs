@@ -4,30 +4,28 @@ mod model;
 pub use model::ApiVersion;
 pub use model::Error;
 pub use model::FieldMappingFn;
-use opentelemetry::runtime::RuntimeChannel;
 
-use std::borrow::Cow;
-use std::fmt::{Debug, Formatter};
-
-use super::exporter::model::FieldMapping;
+use self::model::unified_tags::UnifiedTags;
+use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::FieldMapping;
 use futures::future::BoxFuture;
 use http::{Method, Request, Uri};
-use itertools::Itertools;
-use opentelemetry::sdk::export::trace;
-use opentelemetry::sdk::export::trace::SpanData;
-use opentelemetry::sdk::resource::ResourceDetector;
-use opentelemetry::sdk::resource::SdkProvidedResourceDetector;
-use opentelemetry::sdk::trace::{BatchMessage, Config};
-use opentelemetry::sdk::Resource;
-use opentelemetry::trace::TraceError;
-use opentelemetry::{global, sdk, trace::TracerProvider, KeyValue};
+use opentelemetry::{global, sdk, trace::TraceError, KeyValue};
+use opentelemetry_api::trace::TracerProvider;
 use opentelemetry_http::{HttpClient, ResponseExt};
+use opentelemetry_sdk::trace::BatchMessage;
+use opentelemetry_sdk::{
+    export::trace::{ExportResult, SpanData, SpanExporter},
+    resource::{ResourceDetector, SdkProvidedResourceDetector},
+    runtime::RuntimeChannel,
+    trace::{Config, Tracer},
+    Resource,
+};
 use opentelemetry_semantic_conventions as semcov;
+use std::borrow::Cow;
+use std::fmt::{Debug, Formatter};
 use std::sync::Arc;
 use std::time::Duration;
 use url::Url;
-
-use self::model::unified_tags::UnifiedTags;
 
 /// Default Datadog collector endpoint
 const DEFAULT_AGENT_ENDPOINT: &str = "http://127.0.0.1:8126";
@@ -92,8 +90,11 @@ impl DatadogExporter {
         }
     }
 
-    fn build_request(&self, batch: Vec<SpanData>) -> Result<http::Request<Vec<u8>>, TraceError> {
-        let traces: Vec<Vec<SpanData>> = group_into_traces(batch);
+    fn build_request(
+        &self,
+        mut batch: Vec<SpanData>,
+    ) -> Result<http::Request<Vec<u8>>, TraceError> {
+        let traces: Vec<&[SpanData]> = group_into_traces(&mut batch);
         let trace_count = traces.len();
         let data = self.api_version.encode(
             &self.model_config,
@@ -143,7 +144,7 @@ pub fn new_pipeline() -> DatadogPipelineBuilder {
 /// Builder for `ExporterConfig` struct.
 pub struct DatadogPipelineBuilder {
     agent_endpoint: String,
-    trace_config: Option<sdk::trace::Config>,
+    trace_config: Option<Config>,
     api_version: ApiVersion,
     client: Option<Arc<dyn HttpClient>>,
     mapping: Mapping,
@@ -214,7 +215,7 @@ impl DatadogPipelineBuilder {
                 cfg.resource = Cow::Owned(Resource::new(
                     cfg.resource
                         .iter()
-                        .filter(|(k, _v)| **k != semcov::resource::SERVICE_NAME)
+                        .filter(|(k, _v)| *k != &semcov::resource::SERVICE_NAME)
                         .map(|(k, v)| KeyValue::new(k.clone(), v.clone())),
                 ));
                 cfg
@@ -228,7 +229,7 @@ impl DatadogPipelineBuilder {
         } else {
             let service_name = SdkProvidedResourceDetector
                 .detect(Duration::from_secs(0))
-                .get(semcov::resource::SERVICE_NAME)
+                .get(semcov::resource::SERVICE_NAME.into())
                 .unwrap()
                 .to_string();
             (
@@ -283,7 +284,7 @@ impl DatadogPipelineBuilder {
     }
 
     /// Install the Datadog trace exporter pipeline using a simple span processor.
-    pub fn install_simple(mut self) -> Result<sdk::trace::Tracer, TraceError> {
+    pub fn install_simple(mut self) -> Result<Tracer, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder =
@@ -305,7 +306,7 @@ impl DatadogPipelineBuilder {
     pub fn install_batch<R: RuntimeChannel<BatchMessage>>(
         mut self,
         runtime: R,
-    ) -> Result<sdk::trace::Tracer, TraceError> {
+    ) -> Result<Tracer, TraceError> {
         let (config, service_name) = self.build_config_and_service_name();
         let exporter = self.build_exporter_with_service_name(service_name)?;
         let mut provider_builder =
@@ -349,16 +350,13 @@ impl DatadogPipelineBuilder {
     }
 
     /// Choose the http client used by uploader
-    pub fn with_http_client<T: HttpClient + 'static>(
-        mut self,
-        client: Arc<dyn HttpClient>,
-    ) -> Self {
-        self.client = Some(client);
+    pub fn with_http_client<T: HttpClient + 'static>(mut self, client: T) -> Self {
+        self.client = Some(Arc::new(client));
         self
     }
 
     /// Assign the SDK trace configuration
-    pub fn with_trace_config(mut self, config: sdk::trace::Config) -> Self {
+    pub fn with_trace_config(mut self, config: Config) -> Self {
         self.trace_config = Some(config);
         self
     }
@@ -400,25 +398,40 @@ impl DatadogPipelineBuilder {
     }
 }
 
-fn group_into_traces(spans: Vec<SpanData>) -> Vec<Vec<SpanData>> {
-    spans
-        .into_iter()
-        .into_group_map_by(|span_data| span_data.span_context.trace_id())
-        .into_values()
-        .collect()
+fn group_into_traces(spans: &mut [SpanData]) -> Vec<&[SpanData]> {
+    if spans.is_empty() {
+        return vec![];
+    }
+
+    spans.sort_by_key(|x| x.span_context.trace_id().to_bytes());
+
+    let mut traces: Vec<&[SpanData]> = Vec::with_capacity(spans.len());
+
+    let mut start = 0;
+    let mut start_trace_id = spans[start].span_context.trace_id();
+    for (idx, span) in spans.iter().enumerate() {
+        let current_trace_id = span.span_context.trace_id();
+        if start_trace_id != current_trace_id {
+            traces.push(&spans[start..idx]);
+            start = idx;
+            start_trace_id = current_trace_id;
+        }
+    }
+    traces.push(&spans[start..]);
+    traces
 }
 
 async fn send_request(
     client: Arc<dyn HttpClient>,
     request: http::Request<Vec<u8>>,
-) -> trace::ExportResult {
+) -> ExportResult {
     let _ = client.send(request).await?.error_for_status()?;
     Ok(())
 }
 
-impl trace::SpanExporter for DatadogExporter {
+impl SpanExporter for DatadogExporter {
     /// Export spans to datadog-agent
-    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, trace::ExportResult> {
+    fn export(&mut self, batch: Vec<SpanData>) -> BoxFuture<'static, ExportResult> {
         let request = match self.build_request(batch) {
             Ok(req) => req,
             Err(err) => return Box::pin(std::future::ready(Err(err))),
@@ -450,19 +463,19 @@ fn mapping_debug(f: &Option<FieldMapping>) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plugins::telemetry::tracing::datadog_exporter::ApiVersion::Version05;
 
     use crate::plugins::telemetry::tracing::datadog_exporter::exporter::model::tests::get_span;
+    use crate::plugins::telemetry::tracing::datadog_exporter::ApiVersion::Version05;
 
     #[test]
     fn test_out_of_order_group() {
-        let batch = vec![get_span(1, 1, 1), get_span(2, 2, 2), get_span(1, 1, 3)];
+        let mut batch = vec![get_span(1, 1, 1), get_span(2, 2, 2), get_span(1, 1, 3)];
         let expected = vec![
             vec![get_span(1, 1, 1), get_span(1, 1, 3)],
             vec![get_span(2, 2, 2)],
         ];
 
-        let mut traces = group_into_traces(batch);
+        let mut traces = group_into_traces(&mut batch);
         // We need to sort the output in order to compare, but this is not required by the Datadog agent
         traces.sort_by_key(|t| u128::from_be_bytes(t[0].span_context.trace_id().to_bytes()));
 
@@ -497,5 +510,44 @@ mod tests {
             "http://localhost:8126/v0.5/traces?api_key=123"
         );
         assert!(invalid.is_err())
+    }
+
+    #[derive(Debug)]
+    struct DummyClient;
+
+    #[async_trait::async_trait]
+    impl HttpClient for DummyClient {
+        async fn send(
+            &self,
+            _request: Request<Vec<u8>>,
+        ) -> Result<http::Response<bytes::Bytes>, opentelemetry_http::HttpError> {
+            Ok(http::Response::new("dummy response".into()))
+        }
+    }
+
+    #[test]
+    fn test_custom_http_client() {
+        new_pipeline()
+            .with_http_client(DummyClient)
+            .build_exporter()
+            .unwrap();
+    }
+
+    #[test]
+    fn test_install_simple() {
+        new_pipeline()
+            .with_service_name("test_service")
+            .with_http_client(DummyClient)
+            .install_simple()
+            .unwrap();
+    }
+
+    #[test]
+    fn test_install_batch() {
+        new_pipeline()
+            .with_service_name("test_service")
+            .with_http_client(DummyClient)
+            .install_batch(opentelemetry_sdk::runtime::AsyncStd {})
+            .unwrap();
     }
 }

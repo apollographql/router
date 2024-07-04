@@ -470,6 +470,7 @@ name = "apollo-router"
 version = "1.50.0"
 dependencies = [
  "access-json",
+ "ahash",
  "anyhow",
  "apollo-compiler",
  "apollo-federation",
@@ -524,6 +525,7 @@ dependencies = [
  "indexmap 2.2.3",
  "insta",
  "itertools 0.12.1",
+ "itoa",
  "jsonpath-rust",
  "jsonpath_lib",
  "jsonschema",
@@ -546,6 +548,7 @@ dependencies = [
  "once_cell",
  "opentelemetry 0.20.0",
  "opentelemetry-aws",
+ "opentelemetry-datadog",
  "opentelemetry-http",
  "opentelemetry-jaeger",
  "opentelemetry-otlp",
@@ -576,6 +579,7 @@ dependencies = [
  "rustls",
  "rustls-native-certs",
  "rustls-pemfile",
+ "ryu",
  "schemars",
  "semver 1.0.22",
  "serde",
@@ -4889,6 +4893,26 @@ checksum = "31120a0109c172a42096766ef10e772f4a89422932be2c3b7f335858ff49380d"
 dependencies = [
  "once_cell",
  "opentelemetry_api",
+]
+
+[[package]]
+name = "opentelemetry-datadog"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b5f4ecf595095d3b641dd2761a0c3d1f175d3d6c28f38e65418d8004ea3255dd"
+dependencies = [
+ "futures-core",
+ "http 0.2.11",
+ "indexmap 1.9.3",
+ "itertools 0.10.5",
+ "once_cell",
+ "opentelemetry 0.20.0",
+ "opentelemetry-http",
+ "opentelemetry-semantic-conventions",
+ "reqwest",
+ "rmp",
+ "thiserror",
+ "url",
 ]
 
 [[package]]
