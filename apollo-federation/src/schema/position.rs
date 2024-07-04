@@ -2758,21 +2758,16 @@ impl ObjectFieldArgumentDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
-        let parent = self.parent();
-        let type_ = parent.get(schema)?;
+        let field = self.parent().get(schema)?;
 
-        type_
-            .arguments
-            .iter()
-            .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                PositionLookupError::MissingFieldArgument(
-                    "Object field",
-                    self.type_name.clone(),
-                    self.field_name.clone(),
-                    self.argument_name.clone(),
-                )
-            })
+        field.argument_by_name(&self.argument_name).ok_or_else(|| {
+            PositionLookupError::MissingFieldArgument(
+                "Object field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+                self.argument_name.clone(),
+            )
+        })
     }
 
     pub(crate) fn try_get<'schema>(
@@ -3862,21 +3857,16 @@ impl InterfaceFieldArgumentDefinitionPosition {
         &self,
         schema: &'schema Schema,
     ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
-        let parent = self.parent();
-        let type_ = parent.get(schema)?;
+        let field = self.parent().get(schema)?;
 
-        type_
-            .arguments
-            .iter()
-            .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                PositionLookupError::MissingFieldArgument(
-                    "Interface field",
-                    self.type_name.clone(),
-                    self.field_name.clone(),
-                    self.argument_name.clone(),
-                )
-            })
+        field.argument_by_name(&self.argument_name).ok_or_else(|| {
+            PositionLookupError::MissingFieldArgument(
+                "Interface field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+                self.argument_name.clone(),
+            )
+        })
     }
 
     pub(crate) fn try_get<'schema>(
