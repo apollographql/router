@@ -179,9 +179,12 @@ fn name_to_otel_string(name: &apollo_compiler::Name) -> opentelemetry::StringVal
     if let Some(static_str) = name.as_static_str() {
         static_str.into()
     } else {
-        // One of `as_static_str` or `to_cloned_arc` always returns `Some`,
-        // so this `unwrap` never panics.
-        name.to_cloned_arc().unwrap().into()
+        name.to_cloned_arc()
+            .expect(
+                "expected `apollo_compiler::Name` to always contain \
+                 either `&'static str` or `Arc<str>` but both conversions failed",
+            )
+            .into()
     }
 }
 
