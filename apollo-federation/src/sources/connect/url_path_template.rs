@@ -464,10 +464,7 @@ impl ParameterValue {
                             field: name,
                             paths: parts.collect(),
                         },
-
-                        other => {
-                            return Err(format!("expected parameter variable to be either $args or $this, found: {other}"));
-                        }
+                        _ => Parameter::Other,
                     });
                 }
             }
@@ -480,6 +477,7 @@ impl ParameterValue {
 /// A parameter to fill
 #[derive(Debug, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Parameter<'a> {
+    Other,
     /// Arguments get their value from a variable marked by `$args`, which is
     /// passed to the GraphQL operation.
     Argument {
@@ -622,7 +620,12 @@ impl Display for VariableExpression {
 }
 
 fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
-    recognize(alt((tag("$args"), tag("$this"), nom_parse_identifier)))(input)
+    recognize(alt((
+        tag("$args"),
+        tag("$this"),
+        tag("$req"),
+        nom_parse_identifier,
+    )))(input)
 }
 
 fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
@@ -636,10 +639,66 @@ fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
 
 fn nom_parse_identifier_path(input: &str) -> IResult<&str, String> {
     let (input, first) = nom_parse_identifier_possible_namespace(input)?;
-    let (input, mut rest) = many0(preceded(char('.'), nom_parse_identifier))(input)?;
-    let mut identifier_path = vec![first];
+    let (input, mut rest) = many0(preceded(
+        char('.'),
+        alt((
+            |x| nom_parse_identifier(x).map(|(s1, s2)| (s1, s2.to_string())),
+            parse_string_literal,
+        )),
+    ))(input)?;
+    let mut identifier_path = vec![first.to_string()];
     identifier_path.append(&mut rest);
     Ok((input, identifier_path.join(".")))
+}
+
+// StringLiteral ::=
+//   | "'" ("\\'" | [^'])* "'"
+//   | '"' ('\\"' | [^"])* '"'
+
+fn parse_string_literal(input: &str) -> IResult<&str, String> {
+    let mut input_char_indices = input.char_indices();
+
+    match input_char_indices.next() {
+        Some((0, quote @ '\'')) | Some((0, quote @ '"')) => {
+            let mut escape_next = false;
+            let mut chars: Vec<char> = vec![];
+            let mut remainder: Option<&str> = None;
+
+            for (i, c) in input_char_indices {
+                if escape_next {
+                    match c {
+                        'n' => chars.push('\n'),
+                        _ => chars.push(c),
+                    }
+                    escape_next = false;
+                    continue;
+                }
+                if c == '\\' {
+                    escape_next = true;
+                    continue;
+                }
+                if c == quote {
+                    remainder = Some(&input[i + 1..]);
+                    break;
+                }
+                chars.push(c);
+            }
+
+            if let Some(remainder) = remainder {
+                Ok((remainder, chars.iter().collect::<String>()))
+            } else {
+                Err(nom::Err::Error(nom::error::Error::new(
+                    input,
+                    nom::error::ErrorKind::Eof,
+                )))
+            }
+        }
+
+        _ => Err(nom::Err::Error(nom::error::Error::new(
+            input,
+            nom::error::ErrorKind::IsNot,
+        ))),
+    }
 }
 
 #[cfg(test)]
@@ -679,6 +738,11 @@ mod tests {
         assert_eq!(
             nom_parse_identifier_path("abc.$this.ghi"),
             Ok((".$this.ghi", "abc".to_string())),
+        );
+
+        assert_eq!(
+            nom_parse_identifier_path("$req.headers.'x-foo'"),
+            Ok(("", "$req.headers.x-foo".to_string())),
         );
     }
 

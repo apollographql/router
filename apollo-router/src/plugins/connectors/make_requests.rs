@@ -24,10 +24,13 @@ struct RequestInputs {
 }
 
 impl RequestInputs {
-    fn merge(self) -> Value {
+    fn merge(self, headers: Map<ByteString, Value>) -> Value {
         json!({
             "$args": self.args,
-            "$this": self.this
+            "$this": self.this,
+            "$req": {
+                "headers": headers,
+            }
         })
     }
 }
@@ -136,10 +139,22 @@ fn request_params_to_requests(
 ) -> Result<Vec<(http::Request<RouterBody>, ResponseKey)>, MakeRequestError> {
     let mut results = vec![];
 
+    let headers = original_request
+        .supergraph_request
+        .headers()
+        .iter()
+        .map(|(k, v)| {
+            (
+                ByteString::from(k.as_str()),
+                Value::String(v.to_str().unwrap_or("").to_string().into()),
+            )
+        })
+        .collect::<Map<_, _>>();
+
     for (response_key, inputs) in request_params {
         let request = match connector.transport {
             apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
-                make_request(transport, inputs.merge(), original_request)?
+                make_request(transport, inputs.merge(headers.clone()), original_request)?
             }
         };
 

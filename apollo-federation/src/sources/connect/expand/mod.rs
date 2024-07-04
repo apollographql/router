@@ -516,6 +516,7 @@ mod helpers {
             let mut keys = Vec::new();
             for parameter in parameters {
                 match parameter {
+                    Parameter::Other => {}
                     // Arguments should be added to the synthesized key, since they are mandatory
                     // to resolving the output type. The synthesized key should only include the portions
                     // of the inputs actually used throughout the selections of the transport.

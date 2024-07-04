@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/steelthread.yaml > apollo-router/src/plugins/connectors/testdata/steelthread.graphql
-federation_version: =2.9.0-connectors.0
+federation_version: =2.9.0-connectors.8
 subgraphs:
   connectors:
     routing_url: none

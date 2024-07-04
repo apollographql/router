@@ -85,6 +85,26 @@ impl JSONSelectionVisitor for ToSchemaVisitor<'_> {
                     .field(field_name.clone())
                     .get(self.original_schema.schema())?;
 
+                match self
+                    .original_schema
+                    .get_type(field.ty.inner_named_type().clone())
+                {
+                    Ok(ty) => match ty {
+                        TypeDefinitionPosition::Scalar(pos) => {
+                            let scalar = pos.get(self.original_schema.schema())?.clone();
+                            pos.pre_insert(self.to_schema)?;
+                            pos.insert(self.to_schema, scalar)?;
+                        }
+                        TypeDefinitionPosition::Enum(pos) => {
+                            let scalar = pos.get(self.original_schema.schema())?.clone();
+                            pos.pre_insert(self.to_schema)?;
+                            pos.insert(self.to_schema, scalar)?;
+                        }
+                        _ => {}
+                    },
+                    Err(_) => todo!(),
+                }
+
                 // Add it to the currently processing object
                 object_type.make_mut().fields.insert(
                     field_name,
