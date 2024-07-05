@@ -1453,6 +1453,7 @@ impl Operation {
 
     /// Used by legacy roundtrip tests.
     /// - This lowers `min_usages_to_optimize` to `1` in order to make it easier to write unit tests.
+    #[cfg(test)]
     fn optimize_for_roundtrip_test(
         &mut self,
         fragments: &NamedFragments,
@@ -1462,6 +1463,7 @@ impl Operation {
 
     // PORT_NOTE: This mirrors the JS version's `Operation.expandAllFragments`. But this method is
     // mainly for unit tests. The actual port of `expandAllFragments` is in `normalize_operation`.
+    #[cfg(test)]
     fn expand_all_fragments_and_normalize(&self) -> Result<Self, FederationError> {
         let selection_set = self
             .selection_set
