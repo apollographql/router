@@ -413,11 +413,13 @@ impl FieldsConflictValidator {
         Self { by_response_name }
     }
 
-    fn for_field(&self, field: &Field) -> Vec<Arc<Self>> {
-        let Some(by_response_name) = self.by_response_name.get(&field.response_name()) else {
-            return Vec::new();
-        };
-        by_response_name.values().flatten().cloned().collect()
+    fn for_field<'v>(&'v self, field: &Field) -> impl Iterator<Item = Arc<Self>> + 'v {
+        self.by_response_name
+            .get(&field.response_name())
+            .into_iter()
+            .flat_map(|by_response_name| by_response_name.values())
+            .flatten()
+            .cloned()
     }
 
     fn has_same_response_shape(
