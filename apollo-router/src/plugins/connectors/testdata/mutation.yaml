@@ -1,0 +1,46 @@
+# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/mutation.yaml > apollo-router/src/plugins/connectors/testdata/mutation.graphql
+federation_version: =2.9.0-connectors.0
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.7")
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+            }
+          )
+
+        type User {
+          id: ID!
+          name: String
+        }
+
+        type Query {
+          users: [User]
+            @connect(source: "json", http: { GET: "/users" }, selection: "id name")
+        }
+
+        type Mutation {
+          createUser(name: String!): User
+            @connect(
+              source: "json"
+              http: {
+                POST: "/user"
+                body: """
+                  username: $$args.name
+                """
+              }
+              selection: """
+                id
+                name: username
+              """
+            )
+        }

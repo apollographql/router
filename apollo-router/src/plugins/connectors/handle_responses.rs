@@ -9,6 +9,7 @@ use crate::graphql;
 use crate::plugins::connectors::make_requests::ResponseKey;
 use crate::plugins::connectors::make_requests::ResponseTypeName;
 use crate::plugins::connectors::plugin::ConnectorContext;
+use crate::plugins::connectors::plugin::SelectionData;
 use crate::services::connect::Response;
 use crate::services::router::body::RouterBody;
 
@@ -71,19 +72,18 @@ pub(crate) async fn handle_responses(
                 let (res, apply_to_errors) = connector.selection.apply_to(&json_data);
 
                 if let Some(ref mut debug) = debug {
-                    debug.push_mapping(
-                        connector.selection.to_string(),
-                        res.clone(),
-                        apply_to_errors,
+                    debug.push_response(
+                        &parts,
+                        &json_data,
+                        Some(SelectionData {
+                            source: connector.selection.to_string(),
+                            result: res.clone(),
+                            errors: apply_to_errors,
+                        }),
                     );
                 }
-
                 res.unwrap_or_else(|| Value::Null)
             };
-
-            if let Some(ref mut debug) = debug {
-                debug.push_response(&parts, &json_data);
-            }
 
             match response_key {
                 // add the response to the "data" using the root field name or alias
@@ -167,7 +167,7 @@ pub(crate) async fn handle_responses(
                     InvalidResponseBody("couldn't deserialize response body".into())
                 })?;
 
-                debug.push_response(&parts, &json_data);
+                debug.push_response(&parts, &json_data, None);
             }
 
             errors.push(

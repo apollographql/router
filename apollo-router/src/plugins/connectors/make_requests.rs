@@ -139,13 +139,9 @@ fn request_params_to_requests(
     for (response_key, inputs) in request_params {
         let request = match connector.transport {
             apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
-                make_request(transport, inputs.merge(), original_request)?
+                make_request(transport, inputs.merge(), original_request, debug)?
             }
         };
-
-        if let Some(ref mut debug) = debug {
-            debug.push_request(&request);
-        }
 
         results.push((request, response_key));
     }

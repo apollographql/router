@@ -98,15 +98,17 @@ impl Connector {
 
                 let parent_type_name = args.position.field.type_name().clone();
                 let schema_def = &schema.schema().schema_definition;
-                let on_root_type = schema_def
+                let on_query = schema_def
                     .query
                     .as_ref()
                     .map(|ty| ty.name == parent_type_name)
-                    .or(schema_def
-                        .mutation
-                        .as_ref()
-                        .map(|ty| ty.name == parent_type_name))
                     .unwrap_or(false);
+                let on_mutation = schema_def
+                    .mutation
+                    .as_ref()
+                    .map(|ty| ty.name == parent_type_name)
+                    .unwrap_or(false);
+                let on_root_type = on_query || on_mutation;
 
                 let id = ConnectId {
                     label: make_label(subgraph_name, &source_name, &transport),

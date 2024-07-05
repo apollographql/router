@@ -11,7 +11,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json_bytes::json;
-use serde_json_bytes::Value;
 use tower::BoxError;
 use tower::ServiceExt as TowerServiceExt;
 
@@ -126,36 +125,27 @@ register_plugin!("apollo", "preview_connectors", Connectors);
 pub(crate) struct ConnectorContext {
     requests: Vec<ConnectorDebugHttpRequest>,
     responses: Vec<ConnectorDebugHttpResponse>,
-    selections: Vec<Option<ConnectorDebugSelection>>,
 }
 
 impl ConnectorContext {
-    pub(crate) fn push_request(&mut self, req: &http::Request<RouterBody>) {
-        self.requests.push(req.into());
+    pub(crate) fn push_request(
+        &mut self,
+        req: &http::Request<RouterBody>,
+        json_body: Option<&serde_json_bytes::Value>,
+        selection_data: Option<SelectionData>,
+    ) {
+        self.requests
+            .push(serialize_request(req, json_body, selection_data));
     }
 
     pub(crate) fn push_response(
         &mut self,
         parts: &http::response::Parts,
         json_body: &serde_json_bytes::Value,
+        selection_data: Option<SelectionData>,
     ) {
-        self.responses.push(ConnectorDebugHttpResponse {
-            status: parts.status.as_u16(),
-            headers: parts
-                .headers
-                .iter()
-                .map(|(name, value)| {
-                    (
-                        name.as_str().to_string(),
-                        value.to_str().unwrap().to_string(),
-                    )
-                })
-                .collect(),
-            body: ConnectorDebugBody {
-                kind: "json".to_string(),
-                content: json_body.clone(),
-            },
-        });
+        self.responses
+            .push(serialize_response(parts, json_body, selection_data));
     }
 
     pub(crate) fn push_invalid_response(&mut self, parts: &http::response::Parts, body: &Bytes) {
@@ -174,43 +164,35 @@ impl ConnectorContext {
             body: ConnectorDebugBody {
                 kind: "invalid".to_string(),
                 content: format!("{:?}", body).into(),
+                selection: None,
             },
         });
-        self.selections.push(None);
     }
 
-    pub(crate) fn push_mapping(
-        &mut self,
-        source: String,
-        result: Option<serde_json_bytes::Value>,
-        errors: Vec<ApplyToError>,
-    ) {
-        self.selections.push(Some(ConnectorDebugSelection {
-            source,
-            result,
-            errors: aggregate_apply_to_errors(&errors),
-        }));
-    }
-
-    fn serialize(self) -> Value {
+    fn serialize(self) -> serde_json_bytes::Value {
         json!(self
             .requests
             .into_iter()
             .zip(self.responses.into_iter())
-            .zip(self.selections.into_iter())
-            .map(|((req, res), sel)| json!({
+            .map(|(req, res)| json!({
                 "request": req,
                 "response": res,
-                "selection": sel,
             }))
             .collect::<Vec<_>>())
     }
+}
+
+pub(crate) struct SelectionData {
+    pub(crate) source: String,
+    pub(crate) result: Option<serde_json_bytes::Value>,
+    pub(crate) errors: Vec<ApplyToError>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ConnectorDebugBody {
     kind: String,
     content: serde_json_bytes::Value,
+    selection: Option<ConnectorDebugSelection>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -228,23 +210,33 @@ struct ConnectorDebugSelection {
     errors: Vec<serde_json_bytes::Value>,
 }
 
-impl From<&http::Request<RouterBody>> for ConnectorDebugHttpRequest {
-    fn from(value: &http::Request<RouterBody>) -> Self {
-        Self {
-            url: value.uri().to_string(),
-            method: value.method().to_string(),
-            headers: value
-                .headers()
-                .iter()
-                .map(|(name, value)| {
-                    (
-                        name.as_str().to_string(),
-                        value.to_str().unwrap().to_string(),
-                    )
-                })
-                .collect(),
-            body: None,
-        }
+fn serialize_request(
+    req: &http::Request<RouterBody>,
+    json_body: Option<&serde_json_bytes::Value>,
+    selection_data: Option<SelectionData>,
+) -> ConnectorDebugHttpRequest {
+    ConnectorDebugHttpRequest {
+        url: req.uri().to_string(),
+        method: req.method().to_string(),
+        headers: req
+            .headers()
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value.to_str().unwrap().to_string(),
+                )
+            })
+            .collect(),
+        body: json_body.map(|body| ConnectorDebugBody {
+            kind: "json".to_string(),
+            content: body.clone(),
+            selection: selection_data.map(|selection| ConnectorDebugSelection {
+                source: selection.source,
+                result: selection.result,
+                errors: aggregate_apply_to_errors(&selection.errors),
+            }),
+        }),
     }
 }
 
@@ -253,6 +245,35 @@ struct ConnectorDebugHttpResponse {
     status: u16,
     headers: Vec<(String, String)>,
     body: ConnectorDebugBody,
+}
+
+fn serialize_response(
+    parts: &http::response::Parts,
+    json_body: &serde_json_bytes::Value,
+    selection_data: Option<SelectionData>,
+) -> ConnectorDebugHttpResponse {
+    ConnectorDebugHttpResponse {
+        status: parts.status.as_u16(),
+        headers: parts
+            .headers
+            .iter()
+            .map(|(name, value)| {
+                (
+                    name.as_str().to_string(),
+                    value.to_str().unwrap().to_string(),
+                )
+            })
+            .collect(),
+        body: ConnectorDebugBody {
+            kind: "json".to_string(),
+            content: json_body.clone(),
+            selection: selection_data.map(|selection| ConnectorDebugSelection {
+                source: selection.source,
+                result: selection.result,
+                errors: aggregate_apply_to_errors(&selection.errors),
+            }),
+        },
+    }
 }
 
 fn aggregate_apply_to_errors(errors: &[ApplyToError]) -> Vec<serde_json_bytes::Value> {
