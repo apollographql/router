@@ -9,10 +9,9 @@ use std::sync::OnceLock;
 use std::time::Instant;
 
 use apollo_compiler::ast;
-use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::QueryPlan;
 use apollo_federation::subgraph::spec::ENTITIES_QUERY;
@@ -39,7 +38,7 @@ const WORKER_THREAD_COUNT: usize = 1;
 pub(crate) struct BothModeComparisonJob {
     pub(crate) rust_planner: Arc<QueryPlanner>,
     pub(crate) document: Arc<Valid<ExecutableDocument>>,
-    pub(crate) operation_name: Option<NodeStr>,
+    pub(crate) operation_name: Option<String>,
     pub(crate) js_result: Result<QueryPlanResult, Arc<Vec<router_bridge::planner::PlanError>>>,
 }
 
@@ -76,7 +75,11 @@ impl BothModeComparisonJob {
         // TODO: once the Rust query planner does not use `todo!()` anymore,
         // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
         let rust_result = std::panic::catch_unwind(|| {
-            let name = self.operation_name.clone().map(Name::new).transpose()?;
+            let name = self
+                .operation_name
+                .clone()
+                .map(Name::try_from)
+                .transpose()?;
             USING_CATCH_UNWIND.set(true);
 
             let start = Instant::now();

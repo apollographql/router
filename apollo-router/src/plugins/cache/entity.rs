@@ -11,6 +11,7 @@ use multimap::MultiMap;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::from_value;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use sha2::Digest;
@@ -24,6 +25,7 @@ use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
+use super::invalidation::Invalidation;
 use super::invalidation_endpoint::InvalidationConfig;
 use super::invalidation_endpoint::InvalidationEndpointConfig;
 use super::invalidation_endpoint::InvalidationService;
@@ -65,6 +67,7 @@ pub(crate) struct EntityCache {
     enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
+    pub(crate) invalidation: Invalidation,
 }
 
 /// Configuration for entity caching
@@ -168,6 +171,8 @@ impl Plugin for EntityCache {
                 .into());
         }
 
+        let invalidation = Invalidation::new(storage.clone()).await?;
+
         Ok(Self {
             storage,
             enabled: init.config.enabled,
@@ -178,6 +183,7 @@ impl Plugin for EntityCache {
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
+            invalidation,
         })
     }
 
@@ -264,6 +270,7 @@ impl Plugin for EntityCache {
                     subgraph_ttl,
                     private_queries,
                     private_id,
+                    invalidation: self.invalidation.clone(),
                 })));
             tower::util::BoxService::new(inner)
         } else {
@@ -316,6 +323,7 @@ impl EntityCache {
     where
         Self: Sized,
     {
+        let invalidation = Invalidation::new(Some(storage.clone())).await?;
         Ok(Self {
             storage: Some(storage),
             enabled: true,
@@ -327,6 +335,7 @@ impl EntityCache {
             metrics: Metrics::default(),
             private_queries: Default::default(),
             endpoint_config: Arc::default(),
+            invalidation,
         })
     }
 }
@@ -339,6 +348,7 @@ struct InnerCacheService {
     subgraph_ttl: Option<Duration>,
     private_queries: Arc<RwLock<HashSet<String>>>,
     private_id: Option<String>,
+    invalidation: Invalidation,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -392,7 +402,7 @@ impl InnerCacheService {
         {
             if request.operation_kind == OperationKind::Query {
                 match cache_lookup_root(
-                    self.name,
+                    self.name.clone(),
                     self.storage.clone(),
                     is_known_private,
                     private_id.as_deref(),
@@ -403,7 +413,7 @@ impl InnerCacheService {
                 {
                     ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, mut root_cache_key)) => {
-                        let response = self.service.call(request).await?;
+                        let mut response = self.service.call(request).await?;
 
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
@@ -428,6 +438,15 @@ impl InnerCacheService {
                             }
                         }
 
+                        if let Some(invalidation_extensions) = response
+                            .response
+                            .body_mut()
+                            .extensions
+                            .remove("invalidation")
+                        {
+                            self.handle_invalidation(invalidation_extensions).await;
+                        }
+
                         if cache_control.should_store() {
                             cache_store_root_from_response(
                                 self.storage,
@@ -443,11 +462,21 @@ impl InnerCacheService {
                     }
                 }
             } else {
-                self.service.call(request).await
+                let mut response = self.service.call(request).await?;
+                if let Some(invalidation_extensions) = response
+                    .response
+                    .body_mut()
+                    .extensions
+                    .remove("invalidation")
+                {
+                    self.handle_invalidation(invalidation_extensions).await;
+                }
+
+                Ok(response)
             }
         } else {
             match cache_lookup_entities(
-                self.name,
+                self.name.clone(),
                 self.storage.clone(),
                 is_known_private,
                 private_id.as_deref(),
@@ -473,6 +502,15 @@ impl InnerCacheService {
 
                     if !is_known_private && cache_control.private() {
                         self.private_queries.write().await.insert(query.to_string());
+                    }
+
+                    if let Some(invalidation_extensions) = response
+                        .response
+                        .body_mut()
+                        .extensions
+                        .remove("invalidation")
+                    {
+                        self.handle_invalidation(invalidation_extensions).await;
                     }
 
                     cache_store_entities_from_response(
@@ -504,6 +542,16 @@ impl InnerCacheService {
                 })
             })
         })
+    }
+
+    async fn handle_invalidation(&mut self, invalidation_extensions: Value) {
+        if let Ok(requests) = from_value(invalidation_extensions) {
+            if let Err(e) = self.invalidation.invalidate(requests).await {
+                tracing::error!(error = %e,
+                   message = "could not invalidate entity cache entries",
+                );
+            }
+        }
     }
 }
 

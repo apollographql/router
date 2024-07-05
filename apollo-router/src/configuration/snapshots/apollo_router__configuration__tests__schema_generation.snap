@@ -1435,7 +1435,7 @@ expression: "&schema"
           "description": "#/definitions/BatchProcessorConfig"
         },
         "enable_span_mapping": {
-          "default": false,
+          "default": true,
           "description": "Enable datadog span mapping for span name and resource name.",
           "type": "boolean"
         },
@@ -1446,6 +1446,19 @@ expression: "&schema"
         "endpoint": {
           "$ref": "#/definitions/UriEndpoint",
           "description": "#/definitions/UriEndpoint"
+        },
+        "fixed_span_names": {
+          "default": true,
+          "description": "Fixes the span names, this means that the APM view will show the original span names in the operation dropdown.",
+          "type": "boolean"
+        },
+        "resource_mapping": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "default": {},
+          "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
+          "type": "object"
         }
       },
       "required": [
@@ -2453,8 +2466,8 @@ expression: "&schema"
           "type": "boolean"
         },
         "format": {
-          "$ref": "#/definitions/TraceIdFormat",
-          "description": "#/definitions/TraceIdFormat"
+          "$ref": "#/definitions/TraceIdFormat2",
+          "description": "#/definitions/TraceIdFormat2"
         },
         "header_name": {
           "description": "Choose the header name to expose trace_id (default: apollo-trace-id)",
@@ -4298,6 +4311,11 @@ expression: "&schema"
           "description": "If cache warm up is configured, this will allow the router to keep a query plan created with the old schema, if it determines that the schema update does not affect the corresponding query",
           "type": "boolean"
         },
+        "legacy_introspection_caching": {
+          "default": true,
+          "description": "Activates introspection response caching Historically, the Router has executed introspection queries in the query planner, and cached their response in its cache because they were expensive. This will change soon as introspection will be removed from the query planner. In the meantime, since storing introspection responses can fill up the cache, this option can be used to deactivate it. Default: true",
+          "type": "boolean"
+        },
         "warmed_up_queries": {
           "default": null,
           "description": "Warms up the cache on reloads by running the query plan over a list of the most used queries (from the in memory cache) Configures the number of queries warmed up. Defaults to 1/3 of the in memory cache",
@@ -4746,6 +4764,11 @@ expression: "&schema"
           "description": "Send the body",
           "type": "boolean"
         },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_RouterSelector",
+          "description": "#/definitions/Condition_for_RouterSelector",
+          "nullable": true
+        },
         "context": {
           "default": false,
           "description": "Send the context",
@@ -4782,6 +4805,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_RouterSelector",
+          "description": "#/definitions/Condition_for_RouterSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -4879,8 +4907,8 @@ expression: "&schema"
           "description": "The trace ID of the request.",
           "properties": {
             "trace_id": {
-              "$ref": "#/definitions/TraceIdFormat2",
-              "description": "#/definitions/TraceIdFormat2"
+              "$ref": "#/definitions/TraceIdFormat",
+              "description": "#/definitions/TraceIdFormat"
             }
           },
           "required": [
@@ -5690,6 +5718,11 @@ expression: "&schema"
           "description": "Send the body",
           "type": "boolean"
         },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SubgraphSelector",
+          "description": "#/definitions/Condition_for_SubgraphSelector",
+          "nullable": true
+        },
         "context": {
           "default": false,
           "description": "Send the context",
@@ -5726,6 +5759,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SubgraphSelector",
+          "description": "#/definitions/Condition_for_SubgraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -6395,6 +6433,11 @@ expression: "&schema"
           "description": "Send the body",
           "type": "boolean"
         },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SupergraphSelector",
+          "description": "#/definitions/Condition_for_SupergraphSelector",
+          "nullable": true
+        },
         "context": {
           "default": false,
           "description": "Send the context",
@@ -6426,6 +6469,11 @@ expression: "&schema"
           "default": false,
           "description": "Send the body",
           "type": "boolean"
+        },
+        "condition": {
+          "$ref": "#/definitions/Condition_for_SupergraphSelector",
+          "description": "#/definitions/Condition_for_SupergraphSelector",
+          "nullable": true
         },
         "context": {
           "default": false,
@@ -6733,6 +6781,20 @@ expression: "&schema"
             "cost"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "description": "Boolean returning true if it's the primary response and not events like subscription events or deferred responses",
+          "properties": {
+            "is_primary_response": {
+              "description": "Boolean returning true if it's the primary response and not events like subscription events or deferred responses",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "is_primary_response"
+          ],
+          "type": "object"
         }
       ]
     },
@@ -6894,6 +6956,24 @@ expression: "&schema"
     "TraceIdFormat": {
       "oneOf": [
         {
+          "description": "Open Telemetry trace ID, a hex string.",
+          "enum": [
+            "open_telemetry"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Datadog trace ID, a u64.",
+          "enum": [
+            "datadog"
+          ],
+          "type": "string"
+        }
+      ]
+    },
+    "TraceIdFormat2": {
+      "oneOf": [
+        {
           "description": "Format the Trace ID as a hexadecimal number\n\n(e.g. Trace ID 16 -> 00000000000000000000000000000010)",
           "enum": [
             "hexadecimal"
@@ -6906,20 +6986,9 @@ expression: "&schema"
             "decimal"
           ],
           "type": "string"
-        }
-      ]
-    },
-    "TraceIdFormat2": {
-      "oneOf": [
-        {
-          "description": "Open Telemetry trace ID, a hex string.",
-          "enum": [
-            "open_telemetry"
-          ],
-          "type": "string"
         },
         {
-          "description": "Datadog trace ID, a u64.",
+          "description": "Datadog",
           "enum": [
             "datadog"
           ],
