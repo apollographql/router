@@ -7,14 +7,14 @@ license = "Elastic-2.0"
 publish = false
 
 [dependencies]
-anyhow = "1.0.80"
-clap = { version = "4.5.1", features = ["derive"] }
+anyhow = "1.0.86"
+clap = { version = "4.5.8", features = ["derive"] }
 cargo-scaffold = { version = "0.14.0", default-features = false }
 regex = "1"
 str_inflector = "0.12.0"
-toml = "0.8.10"
+toml = "0.8.14"
 [dev-dependencies]
-tempfile = "3.10.0"
+tempfile = "3.10.1"
 copy_dir = "0.1.3"
 dircmp = "0.2.0"
 similar = "2.5.0"
