@@ -3042,8 +3042,17 @@ impl SelectionSet {
         })
     }
 
+    /// In a normalized selection set containing only fields and inline fragments,
+    /// iterate over all the fields that may be selected.
+    ///
+    /// # Preconditions
+    /// The selection set must not contain named fragment spreads.
+    pub(crate) fn field_selections(&self) -> FieldSelectionsIter<'_> {
+        FieldSelectionsIter::new(self.selections.values())
+    }
+
     // - `self.selections` must be fragment-spread-free.
-    pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
+    fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
         let mut fields = Vec::new();
 
         for (_key, selection) in self.selections.iter() {
@@ -3196,6 +3205,36 @@ impl IntoIterator for SelectionSet {
 
     fn into_iter(self) -> Self::IntoIter {
         Arc::unwrap_or_clone(self.selections).into_iter()
+    }
+}
+
+struct FieldSelectionsIter<'sel> {
+    stack: Vec<indexmap::map::Values<'sel, SelectionKey, Selection>>,
+}
+
+impl<'sel> FieldSelectionsIter<'sel> {
+    fn new(iter: indexmap::map::Values<'sel, SelectionKey, Selection>) -> Self {
+        Self { stack: vec![iter] }
+    }
+}
+
+impl<'sel> Iterator for FieldSelectionsIter<'sel> {
+    type Item = &'sel Arc<FieldSelection>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.stack.last_mut()?.next() {
+            None if self.stack.len() == 1 => None,
+            None => {
+                self.stack.pop();
+                self.next()
+            }
+            Some(Selection::Field(field)) => Some(field),
+            Some(Selection::InlineFragment(frag)) => {
+                self.stack.push(frag.selection_set.selections.values());
+                self.next()
+            }
+            Some(Selection::FragmentSpread(frag)) => unreachable!(),
+        }
     }
 }
 

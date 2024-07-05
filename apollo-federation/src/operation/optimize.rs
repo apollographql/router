@@ -44,7 +44,6 @@ use apollo_compiler::executable;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 
-use super::CollectedFieldInSet;
 use super::Containment;
 use super::ContainmentOptions;
 use super::Field;
@@ -371,30 +370,28 @@ struct FieldsConflictValidator {
 
 impl FieldsConflictValidator {
     // `selection_set` must be fragment-spread-free.
-    fn from_selection_set(selection_set: &SelectionSet) -> Self {
-        Self::for_level(&selection_set.fields_in_set())
+    fn from_selection_set<'a>(selection_set: &'a SelectionSet) -> Self {
+        Self::for_level(&[selection_set])
     }
 
-    fn for_level(level: &[CollectedFieldInSet]) -> Self {
+    fn for_level<'a>(level: &[&'a SelectionSet]) -> Self {
         // Group `level`'s fields by the response-name/field
-        let mut at_level: HashMap<Name, HashMap<Field, Option<Vec<CollectedFieldInSet>>>> =
-            HashMap::new();
-        for collected_field in level {
-            let response_name = collected_field.field().field.response_name();
-            let at_response_name = at_level.entry(response_name).or_default();
-            if let Some(ref field_selection_set) = collected_field.field().selection_set {
-                at_response_name
-                    .entry(collected_field.field().field.clone())
-                    .or_default()
-                    .get_or_insert_with(Default::default)
-                    .extend(field_selection_set.fields_in_set());
-            } else {
-                // Note that whether a `FieldSelection` has a sub-selection set or not is entirely
-                // determined by whether the field type is a composite type or not, so even if
-                // we've seen a previous version of `field` before, we know it's guaranteed to have
-                // no selection set here, either. So the `set` below may overwrite a previous
-                // entry, but it would be a `None` so no harm done.
-                at_response_name.insert(collected_field.field().field.clone(), None);
+        let mut at_level: HashMap<Name, HashMap<Field, Vec<&'a SelectionSet>>> = HashMap::new();
+        for selection_set in level {
+            for field_selection in selection_set.field_selections() {
+                let response_name = field_selection.field.response_name();
+                let at_response_name = at_level.entry(response_name).or_default();
+                let entry = at_response_name
+                    .entry(field_selection.field.clone())
+                    .or_default();
+                if let Some(ref field_selection_set) = field_selection.selection_set {
+                    entry.push(field_selection_set);
+                } else {
+                    // Note that whether a `FieldSelection` has a sub-selection set or not is entirely
+                    // determined by whether the field type is a composite type or not, so even if
+                    // we've seen a previous version of `field` before, we know it's guaranteed to have
+                    // no selection set here, either.
+                }
             }
         }
 
@@ -403,10 +400,13 @@ impl FieldsConflictValidator {
         for (response_name, fields) in at_level {
             let mut at_response_name: HashMap<Field, Option<Arc<FieldsConflictValidator>>> =
                 HashMap::new();
-            for (field, collected_fields) in fields {
-                let validator = collected_fields
-                    .map(|collected_fields| Arc::new(Self::for_level(&collected_fields)));
-                at_response_name.insert(field, validator);
+            for (field, selection_sets) in fields {
+                if selection_sets.is_empty() {
+                    at_response_name.insert(field, None);
+                } else {
+                    let validator = Arc::new(Self::for_level(&selection_sets));
+                    at_response_name.insert(field, Some(validator));
+                }
             }
             by_response_name.insert(response_name, at_response_name);
         }
