@@ -166,7 +166,7 @@ The default resource mappings are:
 | `subgraph_request`      | `graphql.operation.name`    |
 | `http_request`          | `http.route`                |
 
-You may override these mappings by specifying the `resource_mapping` configuration:
+You may override these mappings by specifying `resource_mapping` configuration:
 
 ```yaml title="router.yaml"
 telemetry:
@@ -185,6 +185,36 @@ telemetry:
           my.span.attribute:
             request_header: x-custom-header
 ```
+If you have introduced a new span in a custom build of the Router you can enable resource mapping for it by adding it to the `resource_mapping` configuration.
+
+### `span_metrics`
+When set, `span_metrics` allows you to specify which spans will show span metrics in the Datadog APM and Trace view.
+By default span metrics are enabled for:
+
+* `request`
+* `router`
+* `supergraph`
+* `subgraph`
+* `subgraph_request`
+* `http_request`
+* `query_planning`
+* `execution`
+* `query_parsing`
+
+You may override these defaults by specifying `span_metrics` configuration:
+
+The following will disable span metrics for the supergraph span.
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    tracing:
+      datadog:
+        enabled: true
+        span_metrics:
+          supergraph: false
+```
+
+If you have introduced a new span in a custom build of the Router you can enable span metrics for it by adding it to the `span_metrics` configuration.
 
 ### `batch_processor`
 
@@ -209,10 +239,12 @@ telemetry:
 
 ## Datadog native configuration reference
 
-| Attribute             | Default                               | Description                     |
-|-----------------------|---------------------------------------|---------------------------------|
-| `enabled`             | `false`                               | Enable the OTLP exporter.       |
-| `enable_span_mapping` | `false`                               | If span mapping should be used. |
-| `endpoint`            | `http://localhost:8126/v0.4/traces`   | The endpoint to send spans to.  |
-| `batch_processor`     |                                       | The batch processor settings.   |
+| Attribute             | Default                             | Description                             |
+|-----------------------|-------------------------------------|-----------------------------------------|
+| `enabled`             | `false`                             | Enable the OTLP exporter.               |
+| `enable_span_mapping` | `false`                             | If span mapping should be used.         |
+| `endpoint`            | `http://localhost:8126/v0.4/traces` | The endpoint to send spans to.          |
+| `batch_processor`     |                                     | The batch processor settings.           |
+| `resource_mapping`    |                                     | A map of span names to attribute names. |
+| `span_metrics`        |                                     | A map of span names to boolean.         |
 
