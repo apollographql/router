@@ -304,7 +304,8 @@ impl Plugin for EntityCache {
             if let Some(invalidation) = self.endpoint_config.as_ref() {
                 let endpoint = Endpoint::from_router_service(
                     invalidation.path.clone(),
-                    InvalidationService::new(self.subgraphs.clone()).boxed(),
+                    InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
+                        .boxed(),
                 );
                 map.insert(invalidation.listen.clone(), endpoint);
             }

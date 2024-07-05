@@ -13,7 +13,9 @@ use tower::Service;
 use tracing_futures::Instrument;
 
 use super::entity::Subgraph;
+use super::invalidation::Invalidation;
 use crate::configuration::subgraph::SubgraphConfiguration;
+use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::services::router;
 use crate::services::router::body::RouterBody;
 use crate::ListenAddr;
@@ -58,32 +60,32 @@ impl TryFrom<InvalidationConfig> for InvalidationEndpointConfig {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct InvalidationPayload {
-    /// required, kind of invalidation event. Can be "Subgraph", "Type", "Key" or "Tag"
-    pub(crate) kind: InvalidationKind,
-    /// optional, invalidate entries from specific subgraph
-    pub(crate) subgraph: Option<String>,
-    #[serde(rename = "type")]
-    pub(crate) type_field: Option<InvalidationType>,
-    /// optional, invalidate entries indexed by this key object
-    pub(crate) key: Option<InvalidationKey>,
-    /// optional, invalidate entries containing types or field marked with the tag
-    pub(crate) tag: Option<String>,
-    /// optional, used to mark an entry as stale if the router is configured with `stale-while-revalidate`
-    #[serde(rename = "mark-stale", default)]
-    pub(crate) mark_stale: bool,
-}
+// #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// #[serde(rename_all = "camelCase")]
+// pub(crate) struct InvalidationPayload {
+//     /// required, kind of invalidation event. Can be "Subgraph", "Type", "Key" or "Tag"
+//     pub(crate) kind: InvalidationKind,
+//     /// optional, invalidate entries from specific subgraph
+//     pub(crate) subgraph: Option<String>,
+//     #[serde(rename = "type")]
+//     pub(crate) type_field: Option<InvalidationType>,
+//     /// optional, invalidate entries indexed by this key object
+//     pub(crate) key: Option<InvalidationKey>,
+//     /// optional, invalidate entries containing types or field marked with the tag
+//     pub(crate) tag: Option<String>,
+//     /// optional, used to mark an entry as stale if the router is configured with `stale-while-revalidate`
+//     #[serde(rename = "mark-stale", default)]
+//     pub(crate) mark_stale: bool,
+// }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub(crate) enum InvalidationKind {
-    Type,
-    Subgraph,
-    Key,
-    Tag,
-}
+// #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+// #[serde(rename_all = "camelCase")]
+// pub(crate) enum InvalidationKind {
+//     Type,
+//     Subgraph,
+//     Key,
+//     Tag,
+// }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -101,11 +103,18 @@ pub(crate) struct InvalidationKey {
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
     config: Arc<SubgraphConfiguration<Subgraph>>,
+    invalidation: Invalidation,
 }
 
 impl InvalidationService {
-    pub(crate) fn new(config: Arc<SubgraphConfiguration<Subgraph>>) -> Self {
-        Self { config }
+    pub(crate) fn new(
+        config: Arc<SubgraphConfiguration<Subgraph>>,
+        invalidation: Invalidation,
+    ) -> Self {
+        Self {
+            config,
+            invalidation,
+        }
     }
 }
 
@@ -119,6 +128,7 @@ impl Service<router::Request> for InvalidationService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
+        let invalidation = self.invalidation.clone();
         Box::pin(
             async move {
                 let (parts, body) = req.router_request.into_parts();
@@ -130,15 +140,15 @@ impl Service<router::Request> for InvalidationService {
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
-                                serde_json::from_reader::<_, InvalidationPayload>(bytes.reader())
+                                serde_json::from_reader::<_, InvalidationRequest>(bytes.reader())
                                     .map_err(|err| {
                                         format!(
                                         "failed to deserialize the request body into JSON: {err}"
                                     )
                                     })
                             });
-                        let body = match body {
-                            Ok(body) => body,
+                        match body {
+                            Ok(body) => invalidation.handle_request(&body).await,
                             Err(err) => {
                                 return Ok(router::Response {
                                     response: http::Response::builder()
@@ -148,7 +158,7 @@ impl Service<router::Request> for InvalidationService {
                                     context: req.context,
                                 });
                             }
-                        };
+                        }
 
                         Ok(router::Response {
                             response: http::Response::builder()

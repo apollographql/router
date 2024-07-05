@@ -19,6 +19,7 @@ use crate::Notify;
 pub(crate) struct Invalidation {
     enabled: bool,
     handle: Handle<InvalidationTopic, Vec<InvalidationRequest>>,
+    storage: Option<RedisCacheStorage>,
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
@@ -29,12 +30,16 @@ impl Invalidation {
         let mut notify = Notify::new(None, None, None);
         let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
         let enabled = storage.is_some();
-        if let Some(storage) = storage {
+        if let Some(storage) = storage.clone() {
             let h = handle.clone();
 
             tokio::task::spawn(async move { start(storage, h.into_stream()).await });
         }
-        Ok(Self { enabled, handle })
+        Ok(Self {
+            enabled,
+            handle,
+            storage,
+        })
     }
 
     pub(crate) async fn invalidate(
@@ -48,34 +53,38 @@ impl Invalidation {
 
         Ok(())
     }
-}
 
-async fn start(
-    storage: RedisCacheStorage,
-    mut handle: HandleStream<InvalidationTopic, Vec<InvalidationRequest>>,
-) {
-    while let Some(requests) = handle.next().await {
-        handle_request_batch(&storage, requests)
-            .instrument(tracing::info_span!("cache.invalidation.batch"))
-            .await
+    pub(super) async fn handle_request(&self, request: &InvalidationRequest) {
+        let key_prefix = request.key_prefix();
+        let storage = match &self.storage {
+            Some(s) => s,
+            None => {
+                tracing::debug!(
+                    "got invalidation request: {request:?}, but no storage, cancelling the request: {}",
+                    key_prefix
+                );
+                return;
+            }
+        };
+        handle_request(storage, request).await;
+    }
+
+    async fn handle_request_batch(&self, requests: Vec<InvalidationRequest>) {
+        for request in requests {
+            let start = Instant::now();
+            self.handle_request(&request)
+                .instrument(tracing::info_span!("cache.invalidation.request"))
+                .await;
+            f64_histogram!(
+                "apollo.router.cache.invalidation.duration",
+                "Duration of the invalidation event execution.",
+                start.elapsed().as_secs_f64()
+            );
+        }
     }
 }
 
-async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<InvalidationRequest>) {
-    for request in requests {
-        let start = Instant::now();
-        handle_request(storage, &request)
-            .instrument(tracing::info_span!("cache.invalidation.request"))
-            .await;
-        f64_histogram!(
-            "apollo.router.cache.invalidation.duration",
-            "Duration of the invalidation event execution.",
-            start.elapsed().as_secs_f64()
-        );
-    }
-}
-
-async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationRequest) {
+pub(super) async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationRequest) {
     let key_prefix = request.key_prefix();
     tracing::debug!(
         "got invalidation request: {request:?}, will scan for: {}",
@@ -118,6 +127,31 @@ async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationReque
         "Number of invalidated keys.",
         count
     );
+}
+
+async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<InvalidationRequest>) {
+    for request in requests {
+        let start = Instant::now();
+        handle_request(storage, &request)
+            .instrument(tracing::info_span!("cache.invalidation.request"))
+            .await;
+        f64_histogram!(
+            "apollo.router.cache.invalidation.duration",
+            "Duration of the invalidation event execution.",
+            start.elapsed().as_secs_f64()
+        );
+    }
+}
+
+async fn start(
+    storage: RedisCacheStorage,
+    mut handle: HandleStream<InvalidationTopic, Vec<InvalidationRequest>>,
+) {
+    while let Some(requests) = handle.next().await {
+        handle_request_batch(&storage, requests)
+            .instrument(tracing::info_span!("cache.invalidation.batch"))
+            .await
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
