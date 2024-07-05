@@ -370,7 +370,7 @@ struct FieldsConflictValidator {
 
 impl FieldsConflictValidator {
     // `selection_set` must be fragment-spread-free.
-    fn from_selection_set<'a>(selection_set: &'a SelectionSet) -> Self {
+    fn from_selection_set(selection_set: &SelectionSet) -> Self {
         Self::for_level(&[selection_set])
     }
 
