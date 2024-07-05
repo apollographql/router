@@ -1263,17 +1263,17 @@ impl FieldSelection {
 
 /// Return type for `InlineFragmentSelection::optimize`.
 #[derive(derive_more::From)]
-enum InlineOrFragmentSelection {
+enum FragmentSelection {
     // Note: Enum variants are named to match those of `Selection`.
     InlineFragment(InlineFragmentSelection),
     FragmentSpread(FragmentSpreadSelection),
 }
 
-impl From<InlineOrFragmentSelection> for Selection {
-    fn from(value: InlineOrFragmentSelection) -> Self {
+impl From<FragmentSelection> for Selection {
+    fn from(value: FragmentSelection) -> Self {
         match value {
-            InlineOrFragmentSelection::InlineFragment(inline_fragment) => inline_fragment.into(),
-            InlineOrFragmentSelection::FragmentSpread(fragment_spread) => fragment_spread.into(),
+            FragmentSelection::InlineFragment(inline_fragment) => inline_fragment.into(),
+            FragmentSelection::FragmentSpread(fragment_spread) => fragment_spread.into(),
         }
     }
 }
@@ -1283,7 +1283,7 @@ impl InlineFragmentSelection {
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
-    ) -> Result<InlineOrFragmentSelection, FederationError> {
+    ) -> Result<FragmentSelection, FederationError> {
         let mut optimized = self.selection_set.clone();
 
         let type_condition_position = &self.inline_fragment.type_condition_position;
@@ -1360,7 +1360,7 @@ impl SelectionSet {
         validator: &mut FieldsConflictMultiBranchValidator,
     ) -> Result<SelectionSet, FederationError> {
         self.lazy_map(fragments, |selection| {
-            Ok(vec![selection.optimize(fragments, validator)?].into())
+            Ok(selection.optimize(fragments, validator)?.into())
         })
     }
 
@@ -1405,19 +1405,12 @@ impl SelectionSet {
         // the named fragment, and in that case we return a singleton selection with just that.
         // Otherwise, it's our wrapping inline fragment with the sub-selections optimized, and we
         // just return that subselection.
-        match optimized {
-            InlineOrFragmentSelection::FragmentSpread(_) => {
-                let self_selections = Arc::make_mut(&mut self.selections);
-                self_selections.clear();
-                self_selections.insert(optimized.into());
+        *self = match optimized {
+            FragmentSelection::FragmentSpread(spread) => {
+                SelectionSet::from_selection(self.type_position.clone(), spread.into())
             }
-
-            InlineOrFragmentSelection::InlineFragment(inline_fragment) => {
-                // Note: `inline_fragment.selection_set` can't be moved (since it's inside Arc).
-                // So, it's cloned.
-                *self = inline_fragment.selection_set.clone();
-            }
-        }
+            FragmentSelection::InlineFragment(inline_fragment) => inline_fragment.selection_set,
+        };
         Ok(())
     }
 }

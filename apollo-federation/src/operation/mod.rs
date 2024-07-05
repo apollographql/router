@@ -3208,7 +3208,7 @@ impl IntoIterator for SelectionSet {
     }
 }
 
-struct FieldSelectionsIter<'sel> {
+pub(crate) struct FieldSelectionsIter<'sel> {
     stack: Vec<indexmap::map::Values<'sel, SelectionKey, Selection>>,
 }
 
@@ -3233,7 +3233,7 @@ impl<'sel> Iterator for FieldSelectionsIter<'sel> {
                 self.stack.push(frag.selection_set.selections.values());
                 self.next()
             }
-            Some(Selection::FragmentSpread(frag)) => unreachable!(),
+            Some(Selection::FragmentSpread(_frag)) => unreachable!(),
         }
     }
 }
