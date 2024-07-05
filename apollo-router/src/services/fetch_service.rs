@@ -5,7 +5,6 @@ use std::sync::Arc;
 use std::task::Poll;
 
 use apollo_compiler::validation::Valid;
-use apollo_federation::sources::connect::Transport;
 use futures::future::BoxFuture;
 use tower::BoxError;
 use tower::ServiceExt;
@@ -19,8 +18,6 @@ use super::ConnectRequest;
 use super::SubgraphRequest;
 use crate::graphql::Request as GraphQLRequest;
 use crate::http_ext;
-use crate::plugins::connectors::tracing::CONNECTOR_TYPE_HTTP;
-use crate::plugins::connectors::tracing::CONNECT_SPAN_NAME;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::query_planner::build_operation_with_aliasing;
 use crate::query_planner::fetch::FetchNode;
@@ -64,40 +61,17 @@ impl tower::Service<FetchRequest> for FetchService {
             .connectors_by_service_name
             .get(service_name.as_ref())
         {
-            let span = tracing::info_span!(
-                CONNECT_SPAN_NAME,
-                "otel.kind" = "INTERNAL",
-                "apollo.connector.type" = CONNECTOR_TYPE_HTTP,
-                "apollo.connector.detail" = tracing::field::Empty,
-                "apollo.connector.field.name" = connector.id.directive.field.to_string(),
-                "apollo.connector.selection" = connector.selection.to_string(),
-                "apollo.connector.source.name" = tracing::field::Empty,
-                "apollo.connector.source.detail" = tracing::field::Empty,
-                "apollo_private.sent_time_offset" = fetch_time_offset,
-            );
-            // TODO: apollo.connector.field.alias
-            // TODO: apollo.connector.field.return_type
-            // TODO: apollo.connector.field.selection_set
-            let Transport::HttpJson(ref http_json) = connector.transport;
-            if let Ok(detail) = serde_json::to_string(
-                &serde_json::json!({ http_json.method.as_str(): http_json.path_template.to_string() }),
-            ) {
-                span.record("apollo.connector.detail", detail);
-            }
-            if let Some(source_name) = connector.id.source_name.as_ref() {
-                span.record("apollo.connector.source.name", source_name);
-                if let Ok(detail) =
-                    serde_json::to_string(&serde_json::json!({ "baseURL": http_json.base_url }))
-                {
-                    span.record("apollo.connector.source.detail", detail);
-                }
-            }
             Self::fetch_with_connector_service(
                 self.schema.clone(),
                 self.connector_service_factory.clone(),
                 request,
             )
-            .instrument(span)
+            .instrument(tracing::info_span!(
+                FETCH_SPAN_NAME,
+                "otel.kind" = "INTERNAL",
+                "apollo.subgraph.name" = connector.id.subgraph_name,
+                "apollo_private.sent_time_offset" = fetch_time_offset
+            ))
         } else {
             Self::fetch_with_subgraph_service(
                 self.schema.clone(),
