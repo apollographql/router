@@ -476,21 +476,21 @@ impl FieldsConflictValidator {
                         {
                             return Ok(false);
                         }
-                        if let Some(self_validator) = self_validator {
-                            if let Some(other_validator) = other_validator {
-                                if !self_validator.do_merge_with(other_validator)? {
-                                    return Ok(false);
-                                }
+                        if let (Some(self_validator), Some(other_validator)) =
+                            (self_validator, other_validator)
+                        {
+                            if !self_validator.do_merge_with(other_validator)? {
+                                return Ok(false);
                             }
                         }
                     } else {
                         // Otherwise, the sub-selection must pass
                         // [SameResponseShape](https://spec.graphql.org/draft/#SameResponseShape()).
-                        if let Some(self_validator) = self_validator {
-                            if let Some(other_validator) = other_validator {
-                                if !self_validator.has_same_response_shape(other_validator)? {
-                                    return Ok(false);
-                                }
+                        if let (Some(self_validator), Some(other_validator)) =
+                            (self_validator, other_validator)
+                        {
+                            if !self_validator.has_same_response_shape(other_validator)? {
+                                return Ok(false);
                             }
                         }
                     }
@@ -504,7 +504,7 @@ impl FieldsConflictValidator {
         &self,
         mut iter: impl Iterator<Item = &'a FieldsConflictValidator>,
     ) -> Result<bool, FederationError> {
-        iter.try_fold(true, |acc, v| Ok(acc && self.do_merge_with(v)?))
+        iter.try_fold(true, |acc, v| Ok(acc && v.do_merge_with(self)?))
     }
 }
 
@@ -633,7 +633,6 @@ impl FragmentRestrictionAtType {
     fn is_useless(&self) -> bool {
         match self.selections.selections.as_slice().split_first() {
             None => true,
-
             Some((first, rest)) => rest.is_empty() && first.0.is_typename_field(),
         }
     }
@@ -870,10 +869,6 @@ impl SelectionSet {
             if at_type.is_useless() {
                 continue;
             }
-            if !validator.check_can_reuse_fragment_and_track_it(&at_type)? {
-                // We cannot use it at all, so no point in adding to `applicable_fragments`.
-                continue;
-            }
 
             // As we check inclusion, we ignore the case where the fragment queries __typename
             // but the `self` does not. The rational is that querying `__typename`
@@ -896,19 +891,25 @@ impl SelectionSet {
                     ignore_missing_typename: true,
                 },
             );
-            if matches!(res, Containment::NotContained) {
-                continue; // Not eligible; Skip it.
+            match res {
+                Containment::Equal if full_match_condition.check(&candidate) => {
+                    if !validator.check_can_reuse_fragment_and_track_it(&at_type)? {
+                        // We cannot use it at all, so no point in adding to `applicable_fragments`.
+                        continue;
+                    }
+                    // Special case: Found a fragment that covers the full selection set.
+                    return Ok(candidate.into());
+                }
+                // Note that if a fragment applies to only a subset of the sub-selections, then we
+                // really only can use it if that fragment is defined _without_ directives.
+                Containment::Equal | Containment::StrictlyContained
+                    if candidate.directives.is_empty() =>
+                {
+                    applicable_fragments.push((candidate, at_type));
+                }
+                // Not eligible; Skip it.
+                _ => (),
             }
-            if matches!(res, Containment::Equal) && full_match_condition.check(&candidate) {
-                // Special case: Found a fragment that covers the full selection set.
-                return Ok(candidate.into());
-            }
-            // Note that if a fragment applies to only a subset of the sub-selections, then we
-            // really only can use it if that fragment is defined _without_ directives.
-            if !candidate.directives.is_empty() {
-                continue; // Not eligible as a partial selection; Skip it.
-            }
-            applicable_fragments.push((candidate, at_type));
         }
 
         if applicable_fragments.is_empty() {
