@@ -128,12 +128,6 @@ fn write_unified_tag<'a>(
     Ok(())
 }
 
-#[cfg(not(feature = "agent-sampling"))]
-fn get_sampling_priority(_span: &SpanData) -> f64 {
-    1.0
-}
-
-#[cfg(feature = "agent-sampling")]
 fn get_sampling_priority(span: &SpanData) -> f64 {
     if span.span_context.trace_state().priority_sampling_enabled() {
         1.0
