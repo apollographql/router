@@ -207,8 +207,15 @@ impl Merger {
                         type_name.clone(),
                         value,
                     ),
-                    ExtendedType::Scalar(_value) => {
-                        // DO NOTHING
+                    ExtendedType::Scalar(value) => {
+                        if !value.is_built_in() {
+                            self.merge_scalar_type(
+                                &mut supergraph.types,
+                                subgraph_name.clone(),
+                                type_name.clone(),
+                                value,
+                            );
+                        }
                     }
                 }
             }
@@ -591,6 +598,25 @@ impl Merger {
             }
         }
     }
+
+    fn merge_scalar_type(
+        &self,
+        types: &mut IndexMap<Name, ExtendedType>,
+        subgraph_name: Name,
+        scalar_name: NamedType,
+        ty: &Node<ScalarType>,
+    ) {
+        let existing_type = types
+            .entry(scalar_name.clone())
+            .or_insert(copy_scalar_type(scalar_name, ty));
+        if let ExtendedType::Scalar(s) = existing_type {
+            let join_type_directives =
+                join_type_applied_directive(subgraph_name.clone(), iter::empty(), false);
+            s.make_mut().directives.extend(join_type_directives);
+        } else {
+            // conflict?
+        }
+    }
 }
 
 const EXECUTABLE_DIRECTIVE_LOCATIONS: [DirectiveLocation; 8] = [
@@ -618,6 +644,14 @@ fn is_mergeable_type(type_name: &str) -> bool {
         return false;
     }
     !FEDERATION_TYPES.contains(&type_name)
+}
+
+fn copy_scalar_type(scalar_name: Name, scalar_type: &Node<ScalarType>) -> ExtendedType {
+    ExtendedType::Scalar(Node::new(ScalarType {
+        description: scalar_type.description.clone(),
+        name: scalar_name,
+        directives: Default::default(),
+    }))
 }
 
 fn copy_enum_type(enum_name: Name, enum_type: &Node<EnumType>) -> ExtendedType {
@@ -1424,6 +1458,42 @@ mod tests {
                 url: "".to_string(),
                 schema: ValidFederationSchema::new(
                     Schema::parse_and_validate(graphql_sdl, "./graphql.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+
+        let result = merge_federation_subgraphs(subgraphs).unwrap();
+
+        let schema = result.schema.into_inner();
+        let validation = schema.clone().validate();
+        assert!(validation.is_ok(), "{:?}", validation);
+
+        assert_snapshot!(schema.serialize());
+    }
+
+    #[test]
+    fn test_basic() {
+        let one_sdl = include_str!("./sources/connect/expand/merge/basic_1.graphql");
+        let two_sdl = include_str!("./sources/connect/expand/merge/basic_2.graphql");
+
+        let mut subgraphs = ValidFederationSubgraphs::new();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "basic_1".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(one_sdl, "./basic_1.graphql").unwrap(),
+                )
+                .unwrap(),
+            })
+            .unwrap();
+        subgraphs
+            .add(ValidFederationSubgraph {
+                name: "basic_2".to_string(),
+                url: "".to_string(),
+                schema: ValidFederationSchema::new(
+                    Schema::parse_and_validate(two_sdl, "./basic_2.graphql").unwrap(),
                 )
                 .unwrap(),
             })

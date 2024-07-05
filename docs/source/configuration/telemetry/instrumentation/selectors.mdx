@@ -56,6 +56,7 @@ The supergraph service is executed after query parsing but before query executio
 | `query_variable`   | Yes         |                                                       | The name of a graphql query variable                                              |
 | `request_header`   | Yes         |                                                       | The name of a request header                                                      |
 | `response_header`  | Yes         |                                                       | The name of a response header                                                     |
+| `is_primary_response` | No       | `true`\|`false`                                       | Boolean returning true if it's the primary response and not events like subscription events or deferred responses |
 | `response_data`    | Yes         |                                                       | Json Path into the supergraph response body data (it might impact performances)   |
 | `response_errors`  | Yes         |                                                       | Json Path into the supergraph response body errors (it might impact performances) |
 | `request_context`  | Yes         |                                                       | The name of a request context key                                                 |
