@@ -189,7 +189,7 @@ If you have introduced a new span in a custom build of the Router you can enable
 
 ### `span_metrics`
 When set, `span_metrics` allows you to specify which spans will show span metrics in the Datadog APM and Trace view.
-By default span metrics are enabled for:
+By default, span metrics are enabled for:
 
 * `request`
 * `router`
@@ -211,7 +211,10 @@ telemetry:
       datadog:
         enabled: true
         span_metrics:
+          # Disable span metrics for supergraph
           supergraph: false
+          # Enable span metrics for my_custom_span
+          my_custom_span: true
 ```
 
 If you have introduced a new span in a custom build of the Router you can enable span metrics for it by adding it to the `span_metrics` configuration.
@@ -245,6 +248,6 @@ telemetry:
 | `enable_span_mapping` | `false`                             | If span mapping should be used.         |
 | `endpoint`            | `http://localhost:8126/v0.4/traces` | The endpoint to send spans to.          |
 | `batch_processor`     |                                     | The batch processor settings.           |
-| `resource_mapping`    |                                     | A map of span names to attribute names. |
-| `span_metrics`        |                                     | A map of span names to boolean.         |
+| `resource_mapping`    | See [config](#resource_mapping)     | A map of span names to attribute names. |
+| `span_metrics`        | See [config](#span_metrics)         | A map of span names to boolean.         |
 
