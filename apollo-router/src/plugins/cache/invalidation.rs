@@ -68,20 +68,6 @@ impl Invalidation {
         };
         handle_request(storage, request).await;
     }
-
-    async fn handle_request_batch(&self, requests: Vec<InvalidationRequest>) {
-        for request in requests {
-            let start = Instant::now();
-            self.handle_request(&request)
-                .instrument(tracing::info_span!("cache.invalidation.request"))
-                .await;
-            f64_histogram!(
-                "apollo.router.cache.invalidation.duration",
-                "Duration of the invalidation event execution.",
-                start.elapsed().as_secs_f64()
-            );
-        }
-    }
 }
 
 pub(super) async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationRequest) {

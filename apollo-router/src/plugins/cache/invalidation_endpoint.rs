@@ -102,6 +102,8 @@ pub(crate) struct InvalidationKey {
 
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
+    // TODO: will be useful when checking the shared_key
+    #[allow(dead_code)]
     config: Arc<SubgraphConfiguration<Subgraph>>,
     invalidation: Invalidation,
 }
@@ -132,7 +134,7 @@ impl Service<router::Request> for InvalidationService {
         Box::pin(
             async move {
                 let (parts, body) = req.router_request.into_parts();
-                dbg!(&parts.method);
+                // TODO: check the shared_key
                 match parts.method {
                     Method::POST => {
                         let body = Into::<RouterBody>::into(body)
