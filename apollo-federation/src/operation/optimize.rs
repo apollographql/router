@@ -924,6 +924,9 @@ impl SelectionSet {
         let mut not_covered_so_far = self.clone();
         let mut optimized = SelectionSet::empty(self.schema.clone(), self.type_position.clone());
         for (fragment, at_type) in applicable_fragments {
+            if !validator.check_can_reuse_fragment_and_track_it(&at_type)? {
+                continue;
+            }
             let not_covered = self.minus(&at_type.selections)?;
             not_covered_so_far = not_covered_so_far.intersection(&not_covered)?;
 
