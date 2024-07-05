@@ -941,13 +941,7 @@ impl SelectionSet {
         }
 
         optimized.add_local_selection_set(&not_covered_so_far)?;
-        Ok(SelectionSet::make_selection_set(
-            &self.schema,
-            parent_type,
-            optimized.selections.values().map(std::iter::once),
-            fragments,
-        )?
-        .into())
+        Ok(optimized.into())
     }
 }
 
