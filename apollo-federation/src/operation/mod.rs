@@ -39,7 +39,6 @@ use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
-use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -3313,9 +3312,10 @@ fn compute_aliases_for_non_merging_fields(
                 if &previous.field_name == field_name
                     && types_can_be_merged(&previous.field_type, field_type, schema.schema())?
                 {
+                    let output_type = schema.get_type(field_type.inner_named_type().clone())?;
                     // If the type is non-composite, then we're all set. But if it is composite, we need to record the sub-selection to that response name
                     // as we need to "recurse" on the merged of both the previous and this new field.
-                    if is_composite_type(field_type.inner_named_type(), schema.schema())? {
+                    if output_type.is_composite_type() {
                         match &previous.selections {
                             None => {
                                 return Err(SingleFederationError::Internal {

@@ -6,15 +6,7 @@ use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::schema::position::TypeDefinitionPosition;
 
-pub(crate) fn is_abstract_type(ty: TypeDefinitionPosition) -> bool {
-    matches!(
-        ty,
-        crate::schema::position::TypeDefinitionPosition::Interface(_)
-            | crate::schema::position::TypeDefinitionPosition::Union(_)
-    )
-}
-
-pub(crate) fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, FederationError> {
+fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, FederationError> {
     Ok(matches!(
         schema
             .types
