@@ -539,6 +539,7 @@ async fn cache_lookup_root(
 
     let key = extract_cache_key_root(
         &name,
+        None,
         &request.query_hash,
         body,
         &request.context,
@@ -830,6 +831,7 @@ pub(crate) fn hash_additional_data(
 // build a cache key for the root operation
 fn extract_cache_key_root(
     subgraph_name: &str,
+    entity_type_opt: Option<&str>,
     query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
@@ -842,14 +844,17 @@ fn extract_cache_key_root(
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(body, context, cache_key);
 
+    let entity_type = entity_type_opt.unwrap_or("Query");
+
     // the cache key is written to easily find keys matching a prefix for deletion:
-    // - subgraph name: caching is done per subgraph
+    // - subgraph name: subgraph name
+    // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"
+        "subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
