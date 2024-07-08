@@ -604,6 +604,29 @@ struct FragmentRestrictionAtType {
     validator: Option<Arc<FieldsConflictValidator>>,
 }
 
+#[derive(Default)]
+struct FragmentRestrictionAtTypeCache {
+    map: HashMap<(Name, CompositeTypeDefinitionPosition), Arc<FragmentRestrictionAtType>>,
+}
+
+impl FragmentRestrictionAtTypeCache {
+    fn expanded_selection_set_at_type(
+        &mut self,
+        fragment: &Fragment,
+        ty: &CompositeTypeDefinitionPosition,
+    ) -> Result<Arc<FragmentRestrictionAtType>, FederationError> {
+        // I would like to avoid the Arc here, it seems unnecessary, but with `.entry()`
+        // the lifetime does not really want to work out.
+        // (&'cache mut self) -> Result<&'cache FragmentRestrictionAtType>
+        match self.map.entry((fragment.name.clone(), ty.clone())) {
+            std::collections::hash_map::Entry::Occupied(entry) => Ok(Arc::clone(entry.get())),
+            std::collections::hash_map::Entry::Vacant(entry) => Ok(Arc::clone(
+                entry.insert(Arc::new(fragment.expanded_selection_set_at_type(ty)?)),
+            )),
+        }
+    }
+}
+
 impl FragmentRestrictionAtType {
     fn new(selections: SelectionSet, validator: Option<FieldsConflictValidator>) -> Self {
         Self {
@@ -641,8 +664,6 @@ impl FragmentRestrictionAtType {
 impl Fragment {
     /// Computes the expanded selection set of this fragment along with its validator to check
     /// against other fragments applied under the same selection set.
-    // PORT_NOTE: The JS version memoizes the result of this function. But, the current Rust port
-    // does not.
     fn expanded_selection_set_at_type(
         &self,
         ty: &CompositeTypeDefinitionPosition,
@@ -817,7 +838,7 @@ impl SelectionSet {
     // technically better to return only `F4`. However, this feels niche, and it might be
     // costly to verify such inclusions, so not doing it for now.
     fn reduce_applicable_fragments(
-        applicable_fragments: &mut Vec<(Node<Fragment>, FragmentRestrictionAtType)>,
+        applicable_fragments: &mut Vec<(Node<Fragment>, Arc<FragmentRestrictionAtType>)>,
     ) {
         // Note: It's not possible for two fragments to include each other. So, we don't need to
         //       worry about inclusion cycles.
@@ -845,6 +866,7 @@ impl SelectionSet {
         parent_type: &CompositeTypeDefinitionPosition,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
+        fragments_at_type: &mut FragmentRestrictionAtTypeCache,
         full_match_condition: FullMatchingFragmentCondition,
     ) -> Result<SelectionSetOrFragment, FederationError> {
         // We limit to fragments whose selection could be applied "directly" at `parent_type`,
@@ -865,7 +887,8 @@ impl SelectionSet {
         // that applies to a subset.
         let mut applicable_fragments = Vec::new();
         for candidate in candidates {
-            let at_type = candidate.expanded_selection_set_at_type(parent_type)?;
+            let at_type =
+                fragments_at_type.expanded_selection_set_at_type(&candidate, parent_type)?;
             if at_type.is_useless() {
                 continue;
             }
@@ -1204,13 +1227,16 @@ impl Selection {
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
+        fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<Selection, FederationError> {
         match self {
-            Selection::Field(field) => Ok(field.optimize(fragments, validator)?.into()),
+            Selection::Field(field) => Ok(field
+                .optimize(fragments, validator, fragments_at_type)?
+                .into()),
             Selection::FragmentSpread(_) => Ok(self.clone()), // Do nothing
-            Selection::InlineFragment(inline_fragment) => {
-                Ok(inline_fragment.optimize(fragments, validator)?.into())
-            }
+            Selection::InlineFragment(inline_fragment) => Ok(inline_fragment
+                .optimize(fragments, validator, fragments_at_type)?
+                .into()),
         }
     }
 }
@@ -1220,6 +1246,7 @@ impl FieldSelection {
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
+        fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<Self, FederationError> {
         let Some(base_composite_type): Option<CompositeTypeDefinitionPosition> =
             self.field.output_base_type()?.try_into().ok()
@@ -1237,6 +1264,7 @@ impl FieldSelection {
             &base_composite_type,
             fragments,
             &mut field_validator,
+            fragments_at_type,
             FullMatchingFragmentCondition::ForFieldSelection,
         )?;
 
@@ -1254,7 +1282,7 @@ impl FieldSelection {
                 optimized = selection_set;
             }
         }
-        optimized = optimized.optimize(fragments, &mut field_validator)?;
+        optimized = optimized.optimize(fragments, &mut field_validator, fragments_at_type)?;
         Ok(self.with_updated_selection_set(Some(optimized)))
     }
 }
@@ -1281,6 +1309,7 @@ impl InlineFragmentSelection {
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
+        fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<FragmentSelection, FederationError> {
         let mut optimized = self.selection_set.clone();
 
@@ -1290,6 +1319,7 @@ impl InlineFragmentSelection {
                 type_condition_position,
                 fragments,
                 validator,
+                fragments_at_type,
                 FullMatchingFragmentCondition::ForInlineFragmentSelection {
                     type_condition_position,
                     directives: &self.inline_fragment.directives,
@@ -1345,7 +1375,7 @@ impl InlineFragmentSelection {
         // Then, recurse inside the field sub-selection (note that if we matched some fragments
         // above, this recursion will "ignore" those as `FragmentSpreadSelection`'s `optimize()` is
         // a no-op).
-        optimized = optimized.optimize(fragments, validator)?;
+        optimized = optimized.optimize(fragments, validator, fragments_at_type)?;
         Ok(InlineFragmentSelection::new(self.inline_fragment.clone(), optimized).into())
     }
 }
@@ -1356,9 +1386,12 @@ impl SelectionSet {
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
+        fragments_at_type: &mut FragmentRestrictionAtTypeCache,
     ) -> Result<SelectionSet, FederationError> {
         self.lazy_map(fragments, |selection| {
-            Ok(selection.optimize(fragments, validator)?.into())
+            Ok(selection
+                .optimize(fragments, validator, fragments_at_type)?
+                .into())
         })
     }
 
@@ -1397,7 +1430,11 @@ impl SelectionSet {
         let mut validator = FieldsConflictMultiBranchValidator::from_initial_validator(
             FieldsConflictValidator::from_selection_set(self),
         );
-        let optimized = wrapped.optimize(fragments, &mut validator)?;
+        let optimized = wrapped.optimize(
+            fragments,
+            &mut validator,
+            &mut FragmentRestrictionAtTypeCache::default(),
+        )?;
 
         // Now, it's possible we matched a full fragment, in which case `optimized` will be just
         // the named fragment, and in that case we return a singleton selection with just that.
