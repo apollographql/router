@@ -347,7 +347,7 @@ By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router
 
 ## 🧪 Experimental
 
-### Add experimental extended reference reporting configuration ([Issue #ROUTER-360](https://apollographql.atlassian.net/browse/ROUTER-360))
+### Add experimental extended reference reporting configuration ([PR #5331](https://github.com/apollographql/router/pull/5331))
 
 Adds an experimental configuration to turn on extended references in Apollo usage reports, including references to input object fields and enum values.
 
