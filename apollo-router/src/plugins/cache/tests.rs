@@ -398,6 +398,7 @@ async fn private() {
         (
             "user".to_string(),
             Subgraph {
+                redis: redis_cache.clone(),
                 private_id: Some("sub".to_string()),
                 enabled: Some(true),
                 ttl: None,
@@ -406,6 +407,7 @@ async fn private() {
         (
             "orga".to_string(),
             Subgraph {
+                redis: redis_cache.clone(),
                 private_id: Some("sub".to_string()),
                 enabled: Some(true),
                 ttl: None,

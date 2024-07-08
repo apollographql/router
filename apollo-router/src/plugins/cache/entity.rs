@@ -68,7 +68,6 @@ pub(crate) struct EntityCache {
 #[derive(Clone, Debug, JsonSchema, Deserialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Config {
-    redis: RedisCache,
     /// Enable or disable the entity caching feature
     #[serde(default)]
     enabled: bool,
@@ -84,6 +83,9 @@ pub(crate) struct Config {
 #[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Subgraph {
+    /// Redis configuration
+    pub(crate) redis: Option<RedisCache>,
+
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
     pub(crate) ttl: Option<Ttl>,
 
