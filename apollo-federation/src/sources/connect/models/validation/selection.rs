@@ -10,16 +10,15 @@ use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
 use itertools::Itertools;
 
-use crate::sources::connect::json_selection::JSONSelectionVisitor;
-use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
-use crate::sources::connect::JSONSelection;
-
 use super::require_value_is_str;
 use super::Code;
 use super::Location;
 use super::Message;
 use super::Name;
 use super::Value;
+use crate::sources::connect::json_selection::JSONSelectionVisitor;
+use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
+use crate::sources::connect::JSONSelection;
 
 pub(super) fn validate_selection(
     field: &Component<FieldDefinition>,

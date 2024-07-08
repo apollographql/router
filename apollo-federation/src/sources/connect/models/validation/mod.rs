@@ -63,7 +63,12 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
+use entities::validate_entity_arg;
+use http_headers::validate_headers_arg;
+use http_method::validate_http_method;
 use itertools::Itertools;
+use selection::validate_selection;
+use source_name::validate_source_name_arg;
 use url::Url;
 
 use crate::link::Import;
@@ -87,12 +92,6 @@ use crate::subgraph::database::federation_link_identity;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
-
-use entities::validate_entity_arg;
-use http_headers::validate_headers_arg;
-use http_method::validate_http_method;
-use selection::validate_selection;
-use source_name::validate_source_name_arg;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///

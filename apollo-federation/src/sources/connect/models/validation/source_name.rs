@@ -4,13 +4,12 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::SourceMap;
 
-use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-
 use super::source_name_value_coordinate;
 use super::Code;
 use super::Location;
 use super::Message;
 use super::SourceName;
+use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 
 pub(super) fn validate_source_name_arg(
     field_name: &Name,

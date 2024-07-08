@@ -6,14 +6,13 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
 
-use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
-
 use super::Code;
 use super::Location;
 use super::Message;
 use super::Name;
 use super::ObjectCategory;
 use super::Value;
+use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 
 pub(super) fn validate_entity_arg(
     field: &Component<FieldDefinition>,
