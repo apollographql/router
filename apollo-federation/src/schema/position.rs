@@ -78,8 +78,9 @@ impl From<PositionLookupError> for FederationError {
     }
 }
 
+/// The error type returned when a position conversion fails.
 #[derive(Debug, thiserror::Error)]
-#[error("Type {actual:?} was unexpectedly not {expected}")]
+#[error("Type `{actual}` was unexpectedly not {expected}")]
 pub(crate) struct PositionConvertError<T: Debug + Display> {
     actual: T,
     expected: &'static str,
@@ -91,8 +92,15 @@ impl<T: Debug + Display> From<PositionConvertError<T>> for FederationError {
     }
 }
 
+/// To declare a conversion for a `Position::Branch(T) -> T`:
+/// ```no_compile
 /// fallible_conversions!(TypeDefinition::Scalar -> ScalarTypeDefinition);
+/// ```
+///
+/// To declare a conversion from one enum to another, with a different set of branches:
+/// ```no_compile
 /// fallible_conversions!(TypeDefinition::{Scalar, Enum, InputObject} -> InputObjectTypeDefinition)
+/// ```
 macro_rules! fallible_conversions {
     ( $from:ident :: $branch:ident -> $to:ident ) => {
         impl TryFrom<$from> for $to {
@@ -128,16 +136,11 @@ macro_rules! fallible_conversions {
     }
 }
 
-/// infallible_conversions!(ScalarTypeDefinition -> TypeDefinition::Scalar);
+/// To declare a conversion from a type to a superset type:
+/// ```no_compile
 /// infallible_conversions!(InputObjectTypeDefinition::{Scalar, Enum, InputObject} -> TypeDefinition)
+/// ```
 macro_rules! infallible_conversions {
-    ( $from:ident -> $to:ident :: $branch:ident ) => {
-        impl From<$from> for $to {
-            fn from(value: $from) -> Self {
-                $to::$branch(value)
-            }
-        }
-    };
     ( $from:ident :: { $($branch:ident),+ } -> $to:ident ) => {
         impl From<$from> for $to {
             fn from(value: $from) -> Self {
