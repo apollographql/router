@@ -389,11 +389,13 @@ impl InnerCacheService {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
                                 self.private_queries.write().await.insert(query.to_string());
+
+                                if let Some(s) = private_id.as_ref() {
+                                    root_cache_key = format!("{root_cache_key}:{s}");
+                                }
                             }
 
-                            if let Some(s) = private_id.as_ref() {
-                                root_cache_key = format!("{root_cache_key}:{s}");
-                            } else {
+                            if private_id.is_none() {
                                 // the response has a private scope but we don't have a way to differentiate users, so we do not store the response in cache
                                 return Ok(response);
                             }
