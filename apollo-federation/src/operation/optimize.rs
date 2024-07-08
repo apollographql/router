@@ -1391,6 +1391,16 @@ impl SelectionSet {
         })
     }
 
+    fn contains_fragment_spread(&self) -> bool {
+        self.iter().any(|selection| {
+            matches!(selection, Selection::FragmentSpread(_))
+                || selection
+                    .try_selection_set()
+                    .map(|subselection| subselection.contains_fragment_spread())
+                    .unwrap_or(false)
+        })
+    }
+
     // Specialized version of `optimize` for top-level sub-selections under Operation
     // or Fragment.
     // - `self` must be fragment-spread-free.
@@ -1400,6 +1410,10 @@ impl SelectionSet {
     ) -> Result<(), FederationError> {
         if fragments.is_empty() {
             return Ok(());
+        }
+
+        if self.contains_fragment_spread() {
+            return Err(FederationError::internal("optimize() must only be used on selection sets that do not contain named fragment spreads"));
         }
 
         // Calling optimize() will not match a fragment that would have expanded at
