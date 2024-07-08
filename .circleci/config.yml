@@ -6,7 +6,7 @@ orbs:
   gh: circleci/github-cli@2.3.0
   slack: circleci/slack@4.12.6
   secops: apollo/circleci-secops-orb@2.0.7
-
+  codecov: codecov/codecov@4.0.1
 executors:
   amd_linux_build: &amd_linux_build_executor
     docker:
@@ -515,6 +515,8 @@ commands:
                 key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
                 paths:
                   - target
+            # Only run Codecov on Dev right now.  It does take a little bit of time to run.
+            - codecov/upload
       - store_test_results:
           # The results from nextest that power the CircleCI Insights.
           path: ./target/nextest/ci/junit.xml
