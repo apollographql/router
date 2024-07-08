@@ -384,11 +384,6 @@ impl FieldsConflictValidator {
                     .or_default();
                 if let Some(ref field_selection_set) = field_selection.selection_set {
                     entry.push(field_selection_set);
-                } else {
-                    // Note that whether a `FieldSelection` has a sub-selection set or not is entirely
-                    // determined by whether the field type is a composite type or not, so even if
-                    // we've seen a previous version of `field` before, we know it's guaranteed to have
-                    // no selection set here, either.
                 }
             }
         }
