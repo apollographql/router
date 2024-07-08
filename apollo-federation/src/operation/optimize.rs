@@ -18,7 +18,7 @@
 //! conflicts.
 //!
 //! ## Matching fragments with selection set
-//! `try_optimize_with_fragments` tries to match all applicable fragments one by one.
+//! `try_apply_fragments` tries to match all applicable fragments one by one.
 //! They are expanded into selection sets in order to match against given selection set.
 //! Set-intersection/-minus/-containment operations are used to narrow down to fewer number of
 //! fragments that can be used to optimize the selection set. If there is a single fragment that
@@ -32,7 +32,7 @@
 //! Optimization of named fragment definitions in query documents based on the usage of
 //! fragments in (optimized) operations.
 //!
-//! ## `optimize` methods (putting everything together)
+//! ## `reuse_fragments` methods (putting everything together)
 //! Recursive optimization of selection and selection sets.
 
 use std::collections::HashMap;
@@ -86,7 +86,7 @@ impl NamedFragments {
                 )?;
             let mut mapped_selection_set = mapper(&expanded_selection_set)?;
             // `mapped_selection_set` must be fragment-spread-free.
-            mapped_selection_set.optimize_at_root(&result)?;
+            mapped_selection_set.reuse_fragments(&result)?;
             let updated = Fragment {
                 selection_set: mapped_selection_set,
                 schema: fragment.schema.clone(),
@@ -128,7 +128,7 @@ impl NamedFragments {
         //     }
         //   }
         // but that's not ideal because the inner-most `__typename` is already within `InnerX`. And that
-        // gets in the way to re-adding fragments (the `SelectionSet.optimize` method) because if we start
+        // gets in the way to re-adding fragments (the `SelectionSet::reuse_fragments` method) because if we start
         // with:
         //   {
         //     a {
@@ -853,13 +853,14 @@ impl SelectionSet {
         applicable_fragments.retain(|(fragment, _)| !included_fragments.contains(&fragment.name));
     }
 
-    /// Try to optimize the selection set by re-using existing fragments.
+    /// Try to reuse existing fragments to optimize this selection set.
     /// Returns either
     /// - a new selection set partially optimized by re-using given `fragments`, or
     /// - a single fragment that covers the full selection set.
     // PORT_NOTE: Moved from `Selection` class in JS code to SelectionSet struct in Rust.
     // PORT_NOTE: `parent_type` argument seems always to be the same as `self.type_position`.
-    fn try_optimize_with_fragments(
+    // PORT_NOTE: In JS, this was called `tryOptimizeWithFragments`.
+    fn try_apply_fragments(
         &self,
         parent_type: &CompositeTypeDefinitionPosition,
         fragments: &NamedFragments,
@@ -1216,10 +1217,10 @@ impl NamedFragments {
 }
 
 //=============================================================================
-// `optimize` methods (putting everything together)
+// `reuse_fragments` methods (putting everything together)
 
 impl Selection {
-    fn optimize(
+    fn reuse_fragments_inner(
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
@@ -1227,18 +1228,18 @@ impl Selection {
     ) -> Result<Selection, FederationError> {
         match self {
             Selection::Field(field) => Ok(field
-                .optimize(fragments, validator, fragments_at_type)?
+                .reuse_fragments_inner(fragments, validator, fragments_at_type)?
                 .into()),
             Selection::FragmentSpread(_) => Ok(self.clone()), // Do nothing
             Selection::InlineFragment(inline_fragment) => Ok(inline_fragment
-                .optimize(fragments, validator, fragments_at_type)?
+                .reuse_fragments_inner(fragments, validator, fragments_at_type)?
                 .into()),
         }
     }
 }
 
 impl FieldSelection {
-    fn optimize(
+    fn reuse_fragments_inner(
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
@@ -1256,7 +1257,7 @@ impl FieldSelection {
         let mut field_validator = validator.for_field(&self.field);
 
         // First, see if we can reuse fragments for the selection of this field.
-        let opt = selection_set.try_optimize_with_fragments(
+        let opt = selection_set.try_apply_fragments(
             &base_composite_type,
             fragments,
             &mut field_validator,
@@ -1278,12 +1279,13 @@ impl FieldSelection {
                 optimized = selection_set;
             }
         }
-        optimized = optimized.optimize(fragments, &mut field_validator, fragments_at_type)?;
+        optimized =
+            optimized.reuse_fragments_inner(fragments, &mut field_validator, fragments_at_type)?;
         Ok(self.with_updated_selection_set(Some(optimized)))
     }
 }
 
-/// Return type for `InlineFragmentSelection::optimize`.
+/// Return type for `InlineFragmentSelection::reuse_fragments`.
 #[derive(derive_more::From)]
 enum FragmentSelection {
     // Note: Enum variants are named to match those of `Selection`.
@@ -1301,7 +1303,7 @@ impl From<FragmentSelection> for Selection {
 }
 
 impl InlineFragmentSelection {
-    fn optimize(
+    fn reuse_fragments_inner(
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
@@ -1311,7 +1313,7 @@ impl InlineFragmentSelection {
 
         let type_condition_position = &self.inline_fragment.type_condition_position;
         if let Some(type_condition_position) = type_condition_position {
-            let opt = self.selection_set.try_optimize_with_fragments(
+            let opt = self.selection_set.try_apply_fragments(
                 type_condition_position,
                 fragments,
                 validator,
@@ -1369,16 +1371,15 @@ impl InlineFragmentSelection {
         }
 
         // Then, recurse inside the field sub-selection (note that if we matched some fragments
-        // above, this recursion will "ignore" those as `FragmentSpreadSelection`'s `optimize()` is
-        // a no-op).
-        optimized = optimized.optimize(fragments, validator, fragments_at_type)?;
+        // above, this recursion will "ignore" those as `FragmentSpreadSelection`'s
+        // `reuse_fragments()` is a no-op).
+        optimized = optimized.reuse_fragments_inner(fragments, validator, fragments_at_type)?;
         Ok(InlineFragmentSelection::new(self.inline_fragment.clone(), optimized).into())
     }
 }
 
 impl SelectionSet {
-    /// Recursively call `optimize` on each selection in the selection set.
-    fn optimize(
+    fn reuse_fragments_inner(
         &self,
         fragments: &NamedFragments,
         validator: &mut FieldsConflictMultiBranchValidator,
@@ -1386,7 +1387,7 @@ impl SelectionSet {
     ) -> Result<SelectionSet, FederationError> {
         self.lazy_map(fragments, |selection| {
             Ok(selection
-                .optimize(fragments, validator, fragments_at_type)?
+                .reuse_fragments_inner(fragments, validator, fragments_at_type)?
                 .into())
         })
     }
@@ -1401,13 +1402,9 @@ impl SelectionSet {
         })
     }
 
-    // Specialized version of `optimize` for top-level sub-selections under Operation
-    // or Fragment.
-    // - `self` must be fragment-spread-free.
-    pub(crate) fn optimize_at_root(
-        &mut self,
-        fragments: &NamedFragments,
-    ) -> Result<(), FederationError> {
+    /// ## Errors
+    /// Returns an error if the selection set contains a named fragment spread.
+    fn reuse_fragments(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
         if fragments.is_empty() {
             return Ok(());
         }
@@ -1440,7 +1437,7 @@ impl SelectionSet {
         let mut validator = FieldsConflictMultiBranchValidator::from_initial_validator(
             FieldsConflictValidator::from_selection_set(self),
         );
-        let optimized = wrapped.optimize(
+        let optimized = wrapped.reuse_fragments_inner(
             fragments,
             &mut validator,
             &mut FragmentRestrictionAtTypeCache::default(),
@@ -1467,7 +1464,7 @@ impl Operation {
 
     // `fragments` - rebased fragment definitions for the operation's subgraph
     // - `self.selection_set` must be fragment-spread-free.
-    fn optimize_internal(
+    fn reuse_fragments_inner(
         &mut self,
         fragments: &NamedFragments,
         min_usages_to_optimize: u32,
@@ -1478,7 +1475,7 @@ impl Operation {
 
         // Optimize the operation's selection set by re-using existing fragments.
         let before_optimization = self.selection_set.clone();
-        self.selection_set.optimize_at_root(fragments)?;
+        self.selection_set.reuse_fragments(fragments)?;
         if before_optimization == self.selection_set {
             return Ok(());
         }
@@ -1493,19 +1490,27 @@ impl Operation {
         Ok(())
     }
 
+    /// Optimize the parsed size of the operation by applying fragment spreads. Fragment spreads
+    /// are reused from the original user-provided fragments.
+    ///
     /// `fragments` - rebased fragment definitions for the operation's subgraph
-    pub(crate) fn optimize(&mut self, fragments: &NamedFragments) -> Result<(), FederationError> {
-        self.optimize_internal(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
+    ///
+    // PORT_NOTE: In JS, this function was called "optimize".
+    pub(crate) fn reuse_fragments(
+        &mut self,
+        fragments: &NamedFragments,
+    ) -> Result<(), FederationError> {
+        self.reuse_fragments_inner(fragments, Self::DEFAULT_MIN_USAGES_TO_OPTIMIZE)
     }
 
     /// Used by legacy roundtrip tests.
     /// - This lowers `min_usages_to_optimize` to `1` in order to make it easier to write unit tests.
     #[cfg(test)]
-    fn optimize_for_roundtrip_test(
+    fn reuse_fragments_for_roundtrip_test(
         &mut self,
         fragments: &NamedFragments,
     ) -> Result<(), FederationError> {
-        self.optimize_internal(fragments, /*min_usages_to_optimize*/ 1)
+        self.reuse_fragments_inner(fragments, /*min_usages_to_optimize*/ 1)
     }
 
     // PORT_NOTE: This mirrors the JS version's `Operation.expandAllFragments`. But this method is
@@ -1547,7 +1552,7 @@ mod tests {
     macro_rules! assert_optimized {
         ($operation: expr, $named_fragments: expr, @$expected: literal) => {{
             let mut optimized = $operation.clone();
-            optimized.optimize(&$named_fragments).unwrap();
+            optimized.reuse_fragments(&$named_fragments).unwrap();
             validate_operation(&$operation.schema, &optimized.to_string());
             insta::assert_snapshot!(optimized, @$expected)
         }};
@@ -1925,14 +1930,14 @@ mod tests {
             insta::assert_snapshot!(without_fragments, @$expanded);
 
             let mut optimized = without_fragments;
-            optimized.optimize(&operation.named_fragments).unwrap();
+            optimized.reuse_fragments(&operation.named_fragments).unwrap();
             validate_operation(&operation.schema, &optimized.to_string());
             assert_eq!(optimized.to_string(), operation.to_string());
         }};
     }
 
     /// Tests ported from JS codebase rely on special behavior of
-    /// `Operation::optimize_for_roundtrip_test` that is specific for testing, since it makes it
+    /// `Operation::reuse_fragments_for_roundtrip_test` that is specific for testing, since it makes it
     /// easier to write tests.
     macro_rules! test_fragments_roundtrip_legacy {
         ($schema_doc: expr, $query: expr, @$expanded: literal) => {{
@@ -1942,7 +1947,7 @@ mod tests {
             insta::assert_snapshot!(without_fragments, @$expanded);
 
             let mut optimized = without_fragments;
-            optimized.optimize_for_roundtrip_test(&operation.named_fragments).unwrap();
+            optimized.reuse_fragments_for_roundtrip_test(&operation.named_fragments).unwrap();
             validate_operation(&operation.schema, &optimized.to_string());
             assert_eq!(optimized.to_string(), operation.to_string());
         }};
