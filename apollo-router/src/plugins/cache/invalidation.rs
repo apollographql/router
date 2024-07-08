@@ -18,11 +18,17 @@ use crate::Notify;
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     enabled: bool,
-    handle: Handle<InvalidationTopic, Vec<InvalidationRequest>>,
+    handle: Handle<InvalidationTopic, (InvalidationOrigin, Vec<InvalidationRequest>)>,
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
+
+#[derive(Clone)]
+pub(crate) enum InvalidationOrigin {
+    Endpoint,
+    Extensions,
+}
 
 impl Invalidation {
     pub(crate) async fn new(storage: Option<RedisCacheStorage>) -> Result<Self, BoxError> {
@@ -39,11 +45,12 @@ impl Invalidation {
 
     pub(crate) async fn invalidate(
         &mut self,
+        origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<(), BoxError> {
         if self.enabled {
             let mut sink = self.handle.clone().into_sink();
-            sink.send(requests).await.map_err(|e| e.message)?;
+            sink.send((origin, requests)).await.map_err(|e| e.message)?;
         }
 
         Ok(())
@@ -52,11 +59,24 @@ impl Invalidation {
 
 async fn start(
     storage: RedisCacheStorage,
-    mut handle: HandleStream<InvalidationTopic, Vec<InvalidationRequest>>,
+    mut handle: HandleStream<InvalidationTopic, (InvalidationOrigin, Vec<InvalidationRequest>)>,
 ) {
-    while let Some(requests) = handle.next().await {
+    while let Some((origin, requests)) = handle.next().await {
+        let origin = match origin {
+            InvalidationOrigin::Endpoint => "endpoint",
+            InvalidationOrigin::Extensions => "extensions",
+        };
+        u64_counter!(
+            "apollo.router.operations.entity.invalidation.event",
+            "Entity cache received a batch of invalidation requests",
+            1u64,
+            "origin" = origin
+        );
         handle_request_batch(&storage, requests)
-            .instrument(tracing::info_span!("cache.invalidation.batch"))
+            .instrument(tracing::info_span!(
+                "cache.invalidation.batch",
+                "origin" = origin
+            ))
             .await
     }
 }
