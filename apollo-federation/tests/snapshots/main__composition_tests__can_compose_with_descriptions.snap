@@ -32,6 +32,8 @@ enum E @join__type(graph: SUBGRAPH2) {
   B @join__enumValue(graph: SUBGRAPH2)
 }
 
+scalar Import @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2)
+
 """
 Available queries
 Not much yet
