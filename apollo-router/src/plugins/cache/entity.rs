@@ -26,6 +26,7 @@ use tracing::Level;
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
 use super::metrics::CacheMetricsService;
+use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
@@ -340,6 +341,17 @@ impl InnerCacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
+        // Check if the request is part of a batch. If it is, completely bypass entity caching since it
+        // will break any request batches which this request is part of.
+        // This check is what enables Batching and entity caching to work together, so be very careful
+        // before making any changes to it.
+        if request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+        {
+            return self.service.call(request).await;
+        }
         let query = request
             .subgraph_request
             .body()

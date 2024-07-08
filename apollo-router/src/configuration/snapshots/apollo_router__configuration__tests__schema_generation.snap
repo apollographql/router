@@ -6085,6 +6085,19 @@ expression: "&schema"
         {
           "additionalProperties": false,
           "properties": {
+            "subgraph_on_graphql_error": {
+              "description": "Boolean set to true if the response body contains graphql error",
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "subgraph_on_graphql_error"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
             "baggage": {
               "description": "The name of the baggage item.",
               "type": "string"
