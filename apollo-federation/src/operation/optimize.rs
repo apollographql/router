@@ -884,7 +884,7 @@ impl SelectionSet {
         for candidate in candidates {
             let candidate = candidate?;
             let at_type =
-                fragments_at_type.expanded_selection_set_at_type(&candidate, parent_type)?;
+                fragments_at_type.expanded_selection_set_at_type(candidate, parent_type)?;
             if at_type.is_useless() {
                 continue;
             }
@@ -911,7 +911,7 @@ impl SelectionSet {
                 },
             );
             match res {
-                Containment::Equal if full_match_condition.check(&candidate) => {
+                Containment::Equal if full_match_condition.check(candidate) => {
                     if !validator.check_can_reuse_fragment_and_track_it(&at_type)? {
                         // We cannot use it at all, so no point in adding to `applicable_fragments`.
                         continue;
