@@ -586,6 +586,10 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        subgraph_on_graphql_error: bool,
+    },
     Baggage {
         /// The name of the baggage item.
         baggage: String,
@@ -1363,6 +1367,9 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::OnGraphQLError {
+                subgraph_on_graphql_error: on_graphql_error,
+            } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
             SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
@@ -2918,6 +2925,41 @@ mod test {
                 ]
                 .into()
             )
+        );
+    }
+
+    #[test]
+    fn subgraph_on_graphql_error() {
+        let selector = SubgraphSelector::OnGraphQLError {
+            subgraph_on_graphql_error: true,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .error(
+                            graphql::Error::builder()
+                                .message("not found")
+                                .extension_code("NOT_FOUND")
+                                .build()
+                        )
+                        .build()
+                )
+                .unwrap(),
+            opentelemetry::Value::Bool(true)
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .data(serde_json_bytes::json!({
+                            "hello": ["bonjour", "hello", "ciao"]
+                        }))
+                        .build()
+                )
+                .unwrap(),
+            opentelemetry::Value::Bool(false)
         );
     }
 
