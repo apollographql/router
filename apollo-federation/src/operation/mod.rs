@@ -3466,8 +3466,10 @@ impl FieldSelection {
         // Operation creation and the creation of the ValidFederationSchema, it's safer to just
         // confirm it exists in this schema.
         field_position.get(schema.schema())?;
-        let field_composite_type_result: Result<CompositeTypeDefinitionPosition, FederationError> =
-            schema.get_type(field.selection_set.ty.clone())?.try_into();
+        let is_composite = CompositeTypeDefinitionPosition::try_from(
+            schema.get_type(field.selection_set.ty.clone())?,
+        )
+        .is_ok();
 
         Ok(Some(FieldSelection {
             field: Field::new(FieldData {
@@ -3478,7 +3480,7 @@ impl FieldSelection {
                 directives: Arc::new(field.directives.clone()),
                 sibling_typename: None,
             }),
-            selection_set: if field_composite_type_result.is_ok() {
+            selection_set: if is_composite {
                 Some(SelectionSet::from_selection_set(
                     &field.selection_set,
                     fragments,

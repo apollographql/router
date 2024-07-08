@@ -886,9 +886,10 @@ impl FetchDependencyGraph {
         &self,
         type_name: &Name,
     ) -> Result<CompositeTypeDefinitionPosition, FederationError> {
-        self.supergraph_schema
+        Ok(self
+            .supergraph_schema
             .get_type(type_name.clone())?
-            .try_into()
+            .try_into()?)
     }
 
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
@@ -3564,8 +3565,8 @@ fn create_fetch_initial_path(
     // supergraph). Doing this make sure we can rely on things like checking subtyping between
     // the types of a given path.
     let rebased_type: CompositeTypeDefinitionPosition = supergraph_schema
-        .get_type(dest_type.type_name().clone())
-        .and_then(|res| res.try_into())?;
+        .get_type(dest_type.type_name().clone())?
+        .try_into()?;
     Ok(Arc::new(wrap_selection_with_type_and_conditions(
         supergraph_schema,
         &rebased_type,
