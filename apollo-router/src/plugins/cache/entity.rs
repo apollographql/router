@@ -381,7 +381,7 @@ impl InnerCacheService {
                     private_id.as_deref(),
                     request,
                 )
-                .instrument(tracing::info_span!("cache_lookup"))
+                .instrument(tracing::info_span!("cache.entity.lookup"))
                 .await?
                 {
                     ControlFlow::Break(response) => Ok(response),
@@ -455,7 +455,7 @@ impl InnerCacheService {
                 private_id.as_deref(),
                 request,
             )
-            .instrument(tracing::info_span!("cache_lookup"))
+            .instrument(tracing::info_span!("cache.entity.lookup"))
             .await?
             {
                 ControlFlow::Break(response) => Ok(response),
@@ -689,7 +689,7 @@ async fn cache_store_root_from_response(
             .or(subgraph_ttl);
 
         if response.response.body().errors.is_empty() && cache_control.should_store() {
-            let span = tracing::info_span!("cache_store");
+            let span = tracing::info_span!("cache.entity.store");
             let data = data.clone();
             tokio::spawn(async move {
                 cache
@@ -984,23 +984,21 @@ fn filter_representations(
     }
 
     for (ty, (hit, miss)) in cache_hit {
-        tracing::info!(
-            monotonic_counter.apollo.router.operations.entity.cache = hit as u64,
-            entity_type = ty.as_str(),
-            hit = %true,
-            %subgraph_name
+        u64_counter!(
+            "apollo.router.operations.entity.cache",
+            "Entity cache hit or miss operations",
+            hit as u64,
+            "entity.type" = ty.as_str().to_string(),
+            "hit" = true,
+            "subgraph.name" = subgraph_name
         );
-        tracing::info!(
-            monotonic_counter.apollo.router.operations.entity.cache = miss as u64,
-            entity_type = ty.as_str(),
-            miss = %true,
-            %subgraph_name
-        );
-        tracing::event!(
-            Level::TRACE,
-            entity_type = ty.as_str(),
-            cache_hit = hit,
-            cache_miss = miss
+        u64_counter!(
+            "apollo.router.operations.entity.cache",
+            "Entity cache hit or miss operations",
+            miss as u64,
+            "entity.type" = ty.as_str().to_string(),
+            "hit" = false,
+            "subgraph.name" = subgraph_name
         );
     }
 
