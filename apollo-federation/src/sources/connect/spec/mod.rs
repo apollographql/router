@@ -18,8 +18,6 @@ mod directives;
 pub(crate) mod schema;
 mod type_and_directive_specifications;
 
-use std::sync::Arc;
-
 use apollo_compiler::ast::Directive;
 use apollo_compiler::name;
 use apollo_compiler::Name;
@@ -34,7 +32,6 @@ pub(crate) use schema::SourceHTTPArguments;
 use self::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use self::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::error::FederationError;
-use crate::link::database::links_metadata;
 use crate::link::spec::Identity;
 use crate::link::spec::Url;
 use crate::link::spec::Version;
@@ -81,16 +78,10 @@ impl ConnectSpecDefinition {
 
     pub(crate) fn get_from_schema(
         schema: &Schema,
-    ) -> Result<Option<(&'static ConnectSpecDefinition, Arc<Link>)>, FederationError> {
-        let metadata = links_metadata(schema)?;
-        Ok(metadata
-            .as_ref()
-            .and_then(|metadata| metadata.for_identity(&ConnectSpecDefinition::identity()))
-            .and_then(|link| {
-                CONNECT_VERSIONS
-                    .find(&link.url.version)
-                    .map(|v| (v, link.clone()))
-            }))
+    ) -> Option<(&'static ConnectSpecDefinition, Link)> {
+        let (link, _) = Link::for_identity(schema, &ConnectSpecDefinition::identity())?;
+        let connect_spec = CONNECT_VERSIONS.find(&link.url.version)?;
+        Some((connect_spec, link))
     }
 
     pub(crate) fn get_from_federation_schema(
