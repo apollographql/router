@@ -78,6 +78,79 @@ impl From<PositionLookupError> for FederationError {
     }
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("Type {actual:?} was unexpectedly not {expected}")]
+pub(crate) struct PositionConvertError<T: Debug + Display> {
+    actual: T,
+    expected: &'static str,
+}
+
+impl<T: Debug + Display> From<PositionConvertError<T>> for FederationError {
+    fn from(value: PositionConvertError<T>) -> Self {
+        FederationError::internal(value.to_string())
+    }
+}
+
+/// fallible_conversions!(TypeDefinition::Scalar -> ScalarTypeDefinition);
+/// fallible_conversions!(TypeDefinition::{Scalar, Enum, InputObject} -> InputObjectTypeDefinition)
+macro_rules! fallible_conversions {
+    ( $from:ident :: $branch:ident -> $to:ident ) => {
+        impl TryFrom<$from> for $to {
+            type Error = PositionConvertError<$from>;
+
+            fn try_from(value: $from) -> Result<Self, Self::Error> {
+                match value {
+                    $from::$branch(value) => Ok(value),
+                    _ => Err(PositionConvertError {
+                        actual: value,
+                        expected: $to::EXPECTED,
+                    }),
+                }
+            }
+        }
+    };
+    ( $from:ident :: { $($branch:ident),+ } -> $to:ident ) => {
+        impl TryFrom<$from> for $to {
+            type Error = PositionConvertError<$from>;
+
+            fn try_from(value: $from) -> Result<Self, Self::Error> {
+                match value {
+                    $(
+                        $from::$branch(value) => Ok($to::$branch(value)),
+                    )+
+                    _ => Err(PositionConvertError {
+                        actual: value,
+                        expected: $to::EXPECTED,
+                    }),
+                }
+            }
+        }
+    }
+}
+
+/// infallible_conversions!(ScalarTypeDefinition -> TypeDefinition::Scalar);
+/// infallible_conversions!(InputObjectTypeDefinition::{Scalar, Enum, InputObject} -> TypeDefinition)
+macro_rules! infallible_conversions {
+    ( $from:ident -> $to:ident :: $branch:ident ) => {
+        impl From<$from> for $to {
+            fn from(value: $from) -> Self {
+                $to::$branch(value)
+            }
+        }
+    };
+    ( $from:ident :: { $($branch:ident),+ } -> $to:ident ) => {
+        impl From<$from> for $to {
+            fn from(value: $from) -> Self {
+                match value {
+                    $(
+                        $from::$branch(value) => $to::$branch(value)
+                    ),+
+                }
+            }
+        }
+    }
+}
+
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
@@ -155,123 +228,17 @@ impl TypeDefinitionPosition {
     }
 }
 
-impl TryFrom<TypeDefinitionPosition> for ScalarTypeDefinitionPosition {
-    type Error = FederationError;
+fallible_conversions!(TypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Enum -> EnumTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::InputObject -> InputObjectTypeDefinitionPosition);
 
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Scalar(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a scalar type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for EnumTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Enum(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an enum type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for InputObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::InputObject(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an input object type"#
-            ))),
-        }
-    }
-}
-
-impl From<OutputTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: OutputTypeDefinitionPosition) -> Self {
-        match value {
-            OutputTypeDefinitionPosition::Scalar(value) => value.into(),
-            OutputTypeDefinitionPosition::Object(value) => value.into(),
-            OutputTypeDefinitionPosition::Interface(value) => value.into(),
-            OutputTypeDefinitionPosition::Union(value) => value.into(),
-            OutputTypeDefinitionPosition::Enum(value) => value.into(),
-        }
-    }
-}
-
-impl From<CompositeTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: CompositeTypeDefinitionPosition) -> Self {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => value.into(),
-            CompositeTypeDefinitionPosition::Interface(value) => value.into(),
-            CompositeTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<AbstractTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: AbstractTypeDefinitionPosition) -> Self {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
-            AbstractTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<ObjectOrInterfaceTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
+infallible_conversions!(OutputTypeDefinitionPosition::{Scalar, Object, Interface, Union, Enum} -> TypeDefinitionPosition);
+infallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface, Union} -> TypeDefinitionPosition);
+infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> TypeDefinitionPosition);
+infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> TypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum OutputTypeDefinitionPosition {
@@ -295,6 +262,8 @@ impl Debug for OutputTypeDefinitionPosition {
 }
 
 impl OutputTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an output type";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             OutputTypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -345,115 +314,16 @@ impl OutputTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<OutputTypeDefinitionPosition> for ScalarTypeDefinitionPosition {
-    type Error = FederationError;
+fallible_conversions!(OutputTypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Enum -> EnumTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::{Scalar, Object, Interface, Enum, Union} -> OutputTypeDefinitionPosition);
 
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Scalar(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a scalar type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for EnumTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Enum(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an enum type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Scalar(value) => Ok(value.into()),
-            TypeDefinitionPosition::Object(value) => Ok(value.into()),
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            TypeDefinitionPosition::Enum(value) => Ok(value.into()),
-            TypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an output type"#
-            ))),
-        }
-    }
-}
-
-impl From<CompositeTypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    fn from(value: CompositeTypeDefinitionPosition) -> Self {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => value.into(),
-            CompositeTypeDefinitionPosition::Interface(value) => value.into(),
-            CompositeTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<AbstractTypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    fn from(value: AbstractTypeDefinitionPosition) -> Self {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
-            AbstractTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<ObjectOrInterfaceTypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
+infallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface, Union} -> OutputTypeDefinitionPosition);
+infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> OutputTypeDefinitionPosition);
+infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> OutputTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum CompositeTypeDefinitionPosition {
@@ -473,6 +343,8 @@ impl Debug for CompositeTypeDefinitionPosition {
 }
 
 impl CompositeTypeDefinitionPosition {
+    const EXPECTED: &'static str = "a composite type";
+
     pub(crate) fn is_object_type(&self) -> bool {
         matches!(self, CompositeTypeDefinitionPosition::Object(_))
     }
@@ -569,92 +441,14 @@ impl CompositeTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<CompositeTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
+fallible_conversions!(CompositeTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
 
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Object(value) => Ok(value.into()),
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            TypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a composite type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Object(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a composite type"#
-            ))),
-        }
-    }
-}
-
-impl From<AbstractTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    fn from(value: AbstractTypeDefinitionPosition) -> Self {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
-            AbstractTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<ObjectOrInterfaceTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
+fallible_conversions!(TypeDefinitionPosition::{Object, Interface, Union} -> CompositeTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::{Object, Interface, Union} -> CompositeTypeDefinitionPosition);
+infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> CompositeTypeDefinitionPosition);
+infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> CompositeTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum AbstractTypeDefinitionPosition {
@@ -672,6 +466,8 @@ impl Debug for AbstractTypeDefinitionPosition {
 }
 
 impl AbstractTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an abstract type";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             AbstractTypeDefinitionPosition::Interface(type_) => &type_.type_name,
@@ -745,86 +541,12 @@ impl AbstractTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<AbstractTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<AbstractTypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            AbstractTypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            TypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            CompositeTypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
+fallible_conversions!(AbstractTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(AbstractTypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::{Interface, Union} -> AbstractTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::{Interface, Union} -> AbstractTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::{Interface, Union} -> AbstractTypeDefinitionPosition);
+fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Interface} -> AbstractTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceTypeDefinitionPosition {
@@ -842,6 +564,8 @@ impl Debug for ObjectOrInterfaceTypeDefinitionPosition {
 }
 
 impl ObjectOrInterfaceTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an object/interface type";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => &type_.type_name,
@@ -924,86 +648,12 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Object(value) => Ok(value.into()),
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Object(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => Ok(value.into()),
-            CompositeTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<AbstractTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
+fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
+fallible_conversions!(AbstractTypeDefinitionPosition::{Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum FieldDefinitionPosition {
@@ -1070,14 +720,7 @@ impl FieldDefinitionPosition {
     }
 }
 
-impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition {
-    fn from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceFieldDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
+infallible_conversions!(ObjectOrInterfaceFieldDefinitionPosition::{Object, Interface} -> FieldDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceFieldDefinitionPosition {
@@ -1095,6 +738,8 @@ impl Debug for ObjectOrInterfaceFieldDefinitionPosition {
 }
 
 impl ObjectOrInterfaceFieldDefinitionPosition {
+    const EXPECTED: &'static str = "an object/interface field";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.type_name,
@@ -1169,19 +814,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     }
 }
 
-impl TryFrom<FieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            FieldDefinitionPosition::Object(value) => Ok(value.into()),
-            FieldDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface field"#
-            ))),
-        }
-    }
-}
+fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct SchemaDefinitionPosition;
@@ -1572,6 +1205,8 @@ pub(crate) struct ScalarTypeDefinitionPosition {
 }
 
 impl ScalarTypeDefinitionPosition {
+    const EXPECTED: &'static str = "a scalar type";
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
@@ -1883,6 +1518,8 @@ pub(crate) struct ObjectTypeDefinitionPosition {
 }
 
 impl ObjectTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an object type";
+
     pub(crate) fn new(type_name: Name) -> Self {
         Self { type_name }
     }
@@ -3062,6 +2699,8 @@ pub(crate) struct InterfaceTypeDefinitionPosition {
 }
 
 impl InterfaceTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an interface type";
+
     pub(crate) fn new(type_name: Name) -> Self {
         Self { type_name }
     }
@@ -4166,6 +3805,8 @@ pub(crate) struct UnionTypeDefinitionPosition {
 }
 
 impl UnionTypeDefinitionPosition {
+    const EXPECTED: &'static str = "a union type";
+
     pub(crate) fn new(type_name: Name) -> Self {
         Self { type_name }
     }
@@ -4608,6 +4249,8 @@ pub(crate) struct EnumTypeDefinitionPosition {
 }
 
 impl EnumTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an enum type";
+
     pub(crate) fn value(&self, value_name: Name) -> EnumValueDefinitionPosition {
         EnumValueDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5173,6 +4816,8 @@ pub(crate) struct InputObjectTypeDefinitionPosition {
 }
 
 impl InputObjectTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an input object type";
+
     pub(crate) fn field(&self, field_name: Name) -> InputObjectFieldDefinitionPosition {
         InputObjectFieldDefinitionPosition {
             type_name: self.type_name.clone(),
