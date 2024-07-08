@@ -431,12 +431,13 @@ async fn defer_if_condition() {
             }
           }"#;
 
-    let schema = Schema::parse(
-        include_str!("testdata/defer_clause.graphql"),
-        &Configuration::default(),
-    )
-    .unwrap();
-    let api_schema = schema.api_schema();
+    let schema = Arc::new(
+        Schema::parse(
+            include_str!("testdata/defer_clause.graphql"),
+            &Configuration::default(),
+        )
+        .unwrap(),
+    );
 
     let root: Arc<PlanNode> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -452,7 +453,7 @@ async fn defer_if_condition() {
             Query::parse(
                 query,
                 Some("Me"),
-                &api_schema,
+                &schema,
                 &Configuration::fake_builder().build().unwrap(),
             )
             .unwrap(),
@@ -500,7 +501,7 @@ async fn defer_if_condition() {
                     )
                     .unwrap(),
             ),
-            &api_schema,
+            &schema,
             &Default::default(),
             sender,
             None,
@@ -523,7 +524,7 @@ async fn defer_if_condition() {
             &Context::new(),
             &service_factory,
             &Default::default(),
-            &api_schema,
+            &schema,
             &Default::default(),
             default_sender,
             None,
@@ -555,7 +556,7 @@ async fn defer_if_condition() {
                     )
                     .unwrap(),
             ),
-            &api_schema,
+            &schema,
             &Default::default(),
             sender,
             None,
