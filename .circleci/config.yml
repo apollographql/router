@@ -515,11 +515,10 @@ commands:
                 key: "<< pipeline.parameters.merge_version >>-test-<< parameters.variant >>"
                 paths:
                   - target
-            # Only run Codecov on Dev right now.  It does take a little bit of time to run.
-            - codecov/upload
       - store_test_results:
           # The results from nextest that power the CircleCI Insights.
           path: ./target/nextest/ci/junit.xml
+      - codecov/upload
   fuzz_build:
     steps:
       - run: cargo +nightly fuzz build
