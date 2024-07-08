@@ -25,6 +25,7 @@ use tracing::Level;
 
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
+use super::invalidation::InvalidationOrigin;
 use super::metrics::CacheMetricsService;
 use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
@@ -417,7 +418,11 @@ impl InnerCacheService {
                             .extensions
                             .remove("invalidation")
                         {
-                            self.handle_invalidation(invalidation_extensions).await;
+                            self.handle_invalidation(
+                                InvalidationOrigin::Extensions,
+                                invalidation_extensions,
+                            )
+                            .await;
                         }
 
                         if cache_control.should_store() {
@@ -442,7 +447,11 @@ impl InnerCacheService {
                     .extensions
                     .remove("invalidation")
                 {
-                    self.handle_invalidation(invalidation_extensions).await;
+                    self.handle_invalidation(
+                        InvalidationOrigin::Extensions,
+                        invalidation_extensions,
+                    )
+                    .await;
                 }
 
                 Ok(response)
@@ -483,7 +492,11 @@ impl InnerCacheService {
                         .extensions
                         .remove("invalidation")
                     {
-                        self.handle_invalidation(invalidation_extensions).await;
+                        self.handle_invalidation(
+                            InvalidationOrigin::Extensions,
+                            invalidation_extensions,
+                        )
+                        .await;
                     }
 
                     cache_store_entities_from_response(
@@ -517,9 +530,13 @@ impl InnerCacheService {
         })
     }
 
-    async fn handle_invalidation(&mut self, invalidation_extensions: Value) {
+    async fn handle_invalidation(
+        &mut self,
+        origin: InvalidationOrigin,
+        invalidation_extensions: Value,
+    ) {
         if let Ok(requests) = from_value(invalidation_extensions) {
-            if let Err(e) = self.invalidation.invalidate(requests).await {
+            if let Err(e) = self.invalidation.invalidate(origin, requests).await {
                 tracing::error!(error = %e,
                    message = "could not invalidate entity cache entries",
                 );

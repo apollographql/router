@@ -24,7 +24,7 @@ pub(crate) struct Invalidation {
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub(crate) enum InvalidationOrigin {
     Endpoint,
     Extensions,
