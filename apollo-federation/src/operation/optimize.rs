@@ -342,18 +342,16 @@ impl Fragment {
 
 impl NamedFragments {
     /// Returns a list of fragments that can be applied directly at the given type.
-    fn get_all_may_apply_directly_at_type(
-        &self,
-        ty: &CompositeTypeDefinitionPosition,
-    ) -> Result<Vec<Node<Fragment>>, FederationError> {
-        self.iter()
-            .filter_map(|fragment| {
-                fragment
-                    .can_apply_directly_at_type(ty)
-                    .map(|can_apply| can_apply.then_some(fragment.clone()))
-                    .transpose()
-            })
-            .collect::<Result<Vec<_>, _>>()
+    fn get_all_may_apply_directly_at_type<'a>(
+        &'a self,
+        ty: &'a CompositeTypeDefinitionPosition,
+    ) -> impl Iterator<Item = Result<&'a Node<Fragment>, FederationError>> + 'a {
+        self.iter().filter_map(|fragment| {
+            fragment
+                .can_apply_directly_at_type(ty)
+                .map(|can_apply| can_apply.then_some(fragment))
+                .transpose()
+        })
     }
 }
 
@@ -876,10 +874,7 @@ impl SelectionSet {
         // fragment whose type _is_ the fragment condition (at which point, this
         // `can_apply_directly_at_type` method will apply. Also note that this is because we have
         // this restriction that calling `expanded_selection_set_at_type` is ok.
-        let candidates = fragments.get_all_may_apply_directly_at_type(parent_type)?;
-        if candidates.is_empty() {
-            return Ok(self.clone().into()); // Not optimizable
-        }
+        let candidates = fragments.get_all_may_apply_directly_at_type(parent_type);
 
         // First, we check which of the candidates do apply inside the selection set, if any. If we
         // find a candidate that applies to the whole selection set, then we stop and only return
@@ -887,6 +882,7 @@ impl SelectionSet {
         // that applies to a subset.
         let mut applicable_fragments = Vec::new();
         for candidate in candidates {
+            let candidate = candidate?;
             let at_type =
                 fragments_at_type.expanded_selection_set_at_type(&candidate, parent_type)?;
             if at_type.is_useless() {
@@ -921,14 +917,14 @@ impl SelectionSet {
                         continue;
                     }
                     // Special case: Found a fragment that covers the full selection set.
-                    return Ok(candidate.into());
+                    return Ok(candidate.clone().into());
                 }
                 // Note that if a fragment applies to only a subset of the sub-selections, then we
                 // really only can use it if that fragment is defined _without_ directives.
                 Containment::Equal | Containment::StrictlyContained
                     if candidate.directives.is_empty() =>
                 {
-                    applicable_fragments.push((candidate, at_type));
+                    applicable_fragments.push((candidate.clone(), at_type));
                 }
                 // Not eligible; Skip it.
                 _ => (),
