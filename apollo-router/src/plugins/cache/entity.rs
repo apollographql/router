@@ -829,6 +829,7 @@ pub(crate) fn hash_additional_data(
 }
 
 // build a cache key for the root operation
+#[allow(clippy::too_many_arguments)]
 fn extract_cache_key_root(
     subgraph_name: &str,
     entity_type_opt: Option<&str>,
