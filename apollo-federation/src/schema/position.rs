@@ -58,7 +58,7 @@ pub(crate) enum PositionLookupError {
     DirectiveMissing(DirectiveDefinitionPosition),
     #[error("Schema has no type `{0}`")]
     TypeMissing(Name),
-    #[error("Schema type `{0}` is not a(n) {1}")]
+    #[error("Schema type `{0}` is not {1}")]
     TypeWrongKind(Name, &'static str),
     #[error("{0} type `{1}` has no field `{2}`")]
     MissingField(&'static str, Name, Name),
@@ -191,12 +191,12 @@ impl TypeDefinitionPosition {
 
     fn describe(&self) -> &'static str {
         match self {
-            TypeDefinitionPosition::Scalar(_) => "scalar",
-            TypeDefinitionPosition::Object(_) => "object",
-            TypeDefinitionPosition::Interface(_) => "interface",
-            TypeDefinitionPosition::Union(_) => "union",
-            TypeDefinitionPosition::Enum(_) => "enum",
-            TypeDefinitionPosition::InputObject(_) => "input object",
+            TypeDefinitionPosition::Scalar(_) => ScalarTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Object(_) => ObjectTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Interface(_) => InterfaceTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Enum(_) => EnumTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::InputObject(_) => InputObjectTypeDefinitionPosition::EXPECTED,
         }
     }
 
@@ -279,11 +279,11 @@ impl OutputTypeDefinitionPosition {
 
     fn describe(&self) -> &'static str {
         match self {
-            OutputTypeDefinitionPosition::Scalar(_) => "scalar",
-            OutputTypeDefinitionPosition::Object(_) => "object",
-            OutputTypeDefinitionPosition::Interface(_) => "interface",
-            OutputTypeDefinitionPosition::Union(_) => "union",
-            OutputTypeDefinitionPosition::Enum(_) => "enum",
+            OutputTypeDefinitionPosition::Scalar(_) => ScalarTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Object(_) => ObjectTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Interface(_) => InterfaceTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Enum(_) => EnumTypeDefinitionPosition::EXPECTED,
         }
     }
 
@@ -374,9 +374,11 @@ impl CompositeTypeDefinitionPosition {
 
     fn describe(&self) -> &'static str {
         match self {
-            CompositeTypeDefinitionPosition::Object(_) => "object",
-            CompositeTypeDefinitionPosition::Interface(_) => "interface",
-            CompositeTypeDefinitionPosition::Union(_) => "union",
+            CompositeTypeDefinitionPosition::Object(_) => ObjectTypeDefinitionPosition::EXPECTED,
+            CompositeTypeDefinitionPosition::Interface(_) => {
+                InterfaceTypeDefinitionPosition::EXPECTED
+            }
+            CompositeTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
         }
     }
 
@@ -480,8 +482,10 @@ impl AbstractTypeDefinitionPosition {
 
     fn describe(&self) -> &'static str {
         match self {
-            AbstractTypeDefinitionPosition::Interface(_) => "interface",
-            AbstractTypeDefinitionPosition::Union(_) => "union",
+            AbstractTypeDefinitionPosition::Interface(_) => {
+                InterfaceTypeDefinitionPosition::EXPECTED
+            }
+            AbstractTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
         }
     }
 
@@ -578,8 +582,12 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
 
     fn describe(&self) -> &'static str {
         match self {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(_) => "object",
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(_) => "interface",
+            ObjectOrInterfaceTypeDefinitionPosition::Object(_) => {
+                ObjectTypeDefinitionPosition::EXPECTED
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(_) => {
+                InterfaceTypeDefinitionPosition::EXPECTED
+            }
         }
     }
 
