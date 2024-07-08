@@ -10,6 +10,7 @@ use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
 use itertools::Itertools;
 
+use super::coordinates::connect_directive_selection_coordinate;
 use super::require_value_is_str;
 use super::Code;
 use super::Location;
@@ -97,14 +98,6 @@ fn get_json_selection<'a>(
             .collect(),
     })?;
     Ok((&selection_arg.value, selection))
-}
-
-fn connect_directive_selection_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on `{object_name}.{field}`", object_name = object.name)
 }
 
 struct SelectionValidator<'schema> {

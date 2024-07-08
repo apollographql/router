@@ -42,14 +42,15 @@
 - Missing $this
 
 */
-mod entities;
+mod coordinates;
+mod entity;
 mod http_headers;
 mod http_method;
+mod http_url;
 mod selection;
 mod source_name;
 
 use std::collections::HashMap;
-use std::fmt::Display;
 use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
@@ -63,12 +64,18 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
-use entities::validate_entity_arg;
+use coordinates::connect_directive_coordinate;
+use coordinates::connect_directive_http_coordinate;
+use coordinates::connect_directive_url_coordinate;
+use coordinates::source_base_url_argument_coordinate;
+use coordinates::source_http_argument_coordinate;
+use entity::validate_entity_arg;
 use http_headers::validate_headers_arg;
 use http_method::validate_http_method;
 use itertools::Itertools;
 use selection::validate_selection;
 use source_name::validate_source_name_arg;
+use source_name::SourceName;
 use url::Url;
 
 use crate::link::Import;
@@ -80,7 +87,6 @@ use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
-use crate::sources::connect::spec::schema::CONNECT_SELECTION_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
@@ -554,209 +560,8 @@ fn require_value_is_str<'a>(
     })
 }
 
-fn connect_directive_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!(
-        "`@{connect_directive_name}` on `{object_name}.{field}`",
-        object_name = object.name
-    )
-}
-
-fn connect_directive_http_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!(
-        "`@{connect_directive_name}({CONNECT_HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field}`",
-        object_name = object.name
-    )
-}
-
-fn connect_directive_url_coordinate(
-    connect_directive_name: &Name,
-    http_method: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`{http_method}` in `@{connect_directive_name}({CONNECT_HTTP_ARGUMENT_NAME}:)` on `{object_name}.{field}`", object_name = object.name)
-}
-
-fn connect_directive_selection_coordinate(
-    connect_directive_name: &Name,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`@{connect_directive_name}({CONNECT_SELECTION_ARGUMENT_NAME}:)` on `{object_name}.{field}`", object_name = object.name)
-}
-
-fn directive_http_header_coordinate(
-    directive_name: &Name,
-    argument_name: &str,
-    object: Option<&Name>,
-    field: Option<&Name>,
-) -> String {
-    match (object, field) {
-        (Some(object), Some(field)) => {
-            format!(
-                "`@{directive_name}({argument_name}:)` on `{}.{}`",
-                object, field
-            )
-        }
-        _ => {
-            format!("`@{directive_name}({argument_name}:)`")
-        }
-    }
-}
-
-fn source_http_argument_coordinate(source_directive_name: &DirectiveName) -> String {
-    format!("`@{source_directive_name}({SOURCE_HTTP_ARGUMENT_NAME}:)`")
-}
-
-fn source_name_argument_coordinate(source_directive_name: &DirectiveName) -> String {
-    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}:)`")
-}
-
-fn source_name_value_coordinate(
-    source_directive_name: &DirectiveName,
-    value: &Node<Value>,
-) -> String {
-    format!("`@{source_directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`")
-}
-
-fn source_base_url_argument_coordinate(source_directive_name: &DirectiveName) -> String {
-    format!("`@{source_directive_name}({SOURCE_BASE_URL_ARGUMENT_NAME}:)`")
-}
-
-/// The `name` argument of a `@source` directive.
-#[derive(Clone, Debug)]
-enum SourceName {
-    /// A perfectly reasonable source name.
-    Valid {
-        value: Node<Value>,
-        directive_name: DirectiveName,
-    },
-    /// Contains invalid characters, so it will have to be renamed. This means certain checks
-    /// (like uniqueness) should be skipped. However, we have _a_ name, so _other_ checks on the
-    /// `@source` directive can continue.
-    Invalid {
-        value: Node<Value>,
-        directive_name: DirectiveName,
-    },
-    /// The name was an empty string
-    Empty {
-        directive_name: DirectiveName,
-        value: Node<Value>,
-    },
-    /// No `name` argument was defined
-    Missing {
-        directive_name: DirectiveName,
-        ast_node: Node<Directive>,
-    },
-}
-
 type DirectiveName = Name;
 
-impl SourceName {
-    fn from_directive(directive: &Component<Directive>) -> Self {
-        let directive_name = directive.name.clone();
-        let Some(arg) = directive
-            .arguments
-            .iter()
-            .find(|arg| arg.name == SOURCE_NAME_ARGUMENT_NAME)
-        else {
-            return Self::Missing {
-                directive_name,
-                ast_node: directive.node.clone(),
-            };
-        };
-        let Some(str_value) = arg.value.as_str() else {
-            return Self::Invalid {
-                value: arg.value.clone(),
-                directive_name,
-            };
-        };
-        if str_value.is_empty() {
-            Self::Empty {
-                directive_name,
-                value: arg.value.clone(),
-            }
-        } else if str_value.chars().all(|c| c.is_alphanumeric() || c == '_') {
-            Self::Valid {
-                value: arg.value.clone(),
-                directive_name,
-            }
-        } else {
-            Self::Invalid {
-                value: arg.value.clone(),
-                directive_name,
-            }
-        }
-    }
-
-    pub fn into_value_or_error(self, sources: &SourceMap) -> Result<Node<Value>, Message> {
-        match self {
-            Self::Valid { value, ..} => Ok(value),
-            Self::Invalid {
-                value,
-                directive_name,
-            } => Err(Message {
-                message: format!("There are invalid characters in {coordinate}. Only alphanumeric and underscores are allowed.", coordinate = source_name_value_coordinate(&directive_name, &value)),
-                code: Code::InvalidSourceName,
-                locations: Location::from_node(value.location(), sources).into_iter().collect(),
-            }),
-            Self::Empty { directive_name, value } => {
-                Err(Message {
-                    code: Code::EmptySourceName,
-                    message: format!("The value for {coordinate} can't be empty.", coordinate = source_name_argument_coordinate(&directive_name))   ,
-                    locations: Location::from_node(value.location(), sources).into_iter().collect(),
-                })
-            }
-            Self::Missing { directive_name, ast_node } => Err(Message {
-                code: Code::GraphQLError,
-                message: format!("The {coordinate} argument is required.", coordinate = source_name_argument_coordinate(&directive_name)),
-                locations: Location::from_node(ast_node.location(), sources).into_iter().collect()
-            }),
-        }
-    }
-}
-
-impl Display for SourceName {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Valid {
-                value,
-                directive_name,
-            }
-            | Self::Invalid {
-                value,
-                directive_name,
-            } => write!(
-                f,
-                "`@{directive_name}({SOURCE_NAME_ARGUMENT_NAME}: {value})`"
-            ),
-            Self::Empty { directive_name, .. } | Self::Missing { directive_name, .. } => {
-                write!(f, "unnamed `@{directive_name}`")
-            }
-        }
-    }
-}
-
-impl PartialEq<Node<Value>> for SourceName {
-    fn eq(&self, other: &Node<Value>) -> bool {
-        match self {
-            Self::Valid { value, .. } | Self::Invalid { value, .. } => value == other,
-            Self::Empty { .. } | Self::Missing { .. } => {
-                other.as_str().unwrap_or_default().is_empty()
-            }
-        }
-    }
-}
-
-/// A problem was found when validating the connectors directives.
 #[derive(Debug)]
 pub struct Message {
     /// A unique, per-error code to allow consuming tools to take specific actions. These codes

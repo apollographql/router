@@ -8,8 +8,8 @@ use apollo_compiler::SourceMap;
 use http::HeaderName;
 use itertools::Itertools;
 
+use super::coordinates::http_header_argument_coordinate;
 use super::Code;
-use super::DirectiveName;
 use super::Location;
 use super::Message;
 
@@ -204,27 +204,4 @@ fn validate_header_name<'a>(
     })?;
 
     Ok(s)
-}
-
-fn http_argument_coordinate(directive_name: &DirectiveName, argument_name: &Name) -> String {
-    format!("`@{directive_name}({argument_name}:)`")
-}
-
-fn http_header_argument_coordinate(
-    directive_name: &Name,
-    argument_name: &str,
-    object: Option<&Name>,
-    field: Option<&Name>,
-) -> String {
-    match (object, field) {
-        (Some(object), Some(field)) => {
-            format!(
-                "`@{directive_name}({argument_name}:)` on `{}.{}`",
-                object, field
-            )
-        }
-        _ => {
-            format!("`@{directive_name}({argument_name}:)`")
-        }
-    }
 }

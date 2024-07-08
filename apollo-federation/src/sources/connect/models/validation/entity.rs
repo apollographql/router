@@ -6,12 +6,11 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
 
+use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::Code;
 use super::Location;
 use super::Message;
-use super::Name;
 use super::ObjectCategory;
-use super::Value;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 
 pub(super) fn validate_entity_arg(
@@ -69,13 +68,4 @@ pub(super) fn validate_entity_arg(
     }
 
     messages
-}
-
-fn connect_directive_entity_argument_coordinate(
-    connect_directive_entity_argument: &Name,
-    value: &Value,
-    object: &Node<ObjectType>,
-    field: &Name,
-) -> String {
-    format!("`@{connect_directive_entity_argument}({CONNECT_ENTITY_ARGUMENT_NAME}: {value})` on `{object_name}.{field}`", object_name = object.name)
 }
