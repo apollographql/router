@@ -1232,7 +1232,7 @@ impl ScalarTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "scalar",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -1259,7 +1259,7 @@ impl ScalarTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "scalar",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -1585,7 +1585,7 @@ impl ObjectTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "object",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -1612,7 +1612,7 @@ impl ObjectTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "object",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -2758,7 +2758,7 @@ impl InterfaceTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "interface",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -2785,7 +2785,7 @@ impl InterfaceTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "interface",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -3842,7 +3842,7 @@ impl UnionTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "union",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -3869,7 +3869,7 @@ impl UnionTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "union",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -4283,7 +4283,7 @@ impl EnumTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "enum",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -4310,7 +4310,7 @@ impl EnumTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "enum",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -4850,7 +4850,7 @@ impl InputObjectTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "input object",
+                        Self::EXPECTED,
                     ))
                 }
             })
@@ -4877,7 +4877,7 @@ impl InputObjectTypeDefinitionPosition {
                 } else {
                     Err(PositionLookupError::TypeWrongKind(
                         self.type_name.clone(),
-                        "input object",
+                        Self::EXPECTED,
                     ))
                 }
             })
