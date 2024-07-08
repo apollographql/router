@@ -4,7 +4,6 @@ use apollo_compiler::Schema;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::schema::position::TypeDefinitionPosition;
 
 fn is_composite_type(ty: &NamedType, schema: &Schema) -> Result<bool, FederationError> {
     Ok(matches!(
