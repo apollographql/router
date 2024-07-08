@@ -26,7 +26,6 @@ use crate::plugin::test::MockSubgraph;
 use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
-use crate::query_planner::BridgeQueryPlanner;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::services::SubgraphResponse;
@@ -432,14 +431,12 @@ async fn defer_if_condition() {
             }
           }"#;
 
-    let schema = include_str!("testdata/defer_clause.graphql");
-    // we need to use the planner here instead of Schema::parse because that one uses the router bridge's api_schema function
-    // does not keep the defer directive definition
-    let planner =
-        BridgeQueryPlanner::new(schema.to_string(), Arc::new(Configuration::default()), None)
-            .await
-            .unwrap();
-    let schema = planner.schema();
+    let schema = Schema::parse(
+        include_str!("testdata/defer_clause.graphql"),
+        &Configuration::default(),
+    )
+    .unwrap();
+    let api_schema = schema.api_schema();
 
     let root: Arc<PlanNode> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
@@ -455,7 +452,7 @@ async fn defer_if_condition() {
             Query::parse(
                 query,
                 Some("Me"),
-                &schema,
+                &api_schema,
                 &Configuration::fake_builder().build().unwrap(),
             )
             .unwrap(),
@@ -503,7 +500,7 @@ async fn defer_if_condition() {
                     )
                     .unwrap(),
             ),
-            &schema,
+            &api_schema,
             &Default::default(),
             sender,
             None,
@@ -526,7 +523,7 @@ async fn defer_if_condition() {
             &Context::new(),
             &service_factory,
             &Default::default(),
-            &schema,
+            &api_schema,
             &Default::default(),
             default_sender,
             None,
@@ -558,7 +555,7 @@ async fn defer_if_condition() {
                     )
                     .unwrap(),
             ),
-            &schema,
+            &api_schema,
             &Default::default(),
             sender,
             None,
