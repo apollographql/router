@@ -7,8 +7,13 @@ use super::Location;
 use super::Message;
 use super::Name;
 use super::Value;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
 
-pub(super) fn validate_http_method(
+pub(super) fn validate_http_method_arg(
     http_methods: &[&(Name, Node<Value>)],
     connect_directive_http_coordinate: String,
     http_arg_location: Option<NodeLocation>,
@@ -38,4 +43,22 @@ pub(super) fn validate_http_method(
     }
 
     messages
+}
+
+pub(super) fn get_http_methods_arg<'a>(
+    http_arg: &'a [(Name, Node<Value>)],
+) -> Vec<&'a (Name, Node<Value>)> {
+    http_arg
+        .iter()
+        .filter(|(method, _)| {
+            [
+                CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME,
+                CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME,
+            ]
+            .contains(method)
+        })
+        .collect()
 }

@@ -205,3 +205,12 @@ fn validate_header_name<'a>(
 
     Ok(s)
 }
+
+pub(super) fn get_http_headers_arg<'a>(
+    http_arg: &'a [(Name, Node<Value>)],
+    arg_name: &Name,
+) -> Option<&'a Node<Value>> {
+    http_arg
+        .iter()
+        .find_map(|(key, value)| (key == arg_name).then_some(value))
+}

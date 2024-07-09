@@ -70,8 +70,10 @@ use coordinates::connect_directive_url_coordinate;
 use coordinates::source_base_url_argument_coordinate;
 use coordinates::source_http_argument_coordinate;
 use entity::validate_entity_arg;
+use http_headers::get_http_headers_arg;
 use http_headers::validate_headers_arg;
-use http_method::validate_http_method;
+use http_method::get_http_methods_arg;
+use http_method::validate_http_method_arg;
 use itertools::Itertools;
 use selection::validate_selection;
 use source_name::validate_source_name_arg;
@@ -81,12 +83,7 @@ use url::Url;
 use crate::link::Import;
 use crate::link::Link;
 use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
@@ -257,10 +254,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
         }
 
         // Validate headers argument
-        if let Some(headers) = http_arg
-            .iter()
-            .find_map(|(key, value)| (key == &SOURCE_HEADERS_ARGUMENT_NAME).then_some(value))
-        {
+        if let Some(headers) = get_http_headers_arg(http_arg, &SOURCE_HEADERS_ARGUMENT_NAME) {
             let header_errors = validate_headers_arg(
                 &directive.name,
                 &format!(
@@ -418,21 +412,9 @@ fn validate_field(
         return errors;
     };
 
-    let http_methods: Vec<_> = http_arg
-        .iter()
-        .filter(|(method, _)| {
-            [
-                CONNECT_HTTP_ARGUMENT_GET_METHOD_NAME,
-                CONNECT_HTTP_ARGUMENT_POST_METHOD_NAME,
-                CONNECT_HTTP_ARGUMENT_PUT_METHOD_NAME,
-                CONNECT_HTTP_ARGUMENT_PATCH_METHOD_NAME,
-                CONNECT_HTTP_ARGUMENT_DELETE_METHOD_NAME,
-            ]
-            .contains(method)
-        })
-        .collect();
+    let http_methods: Vec<_> = get_http_methods_arg(http_arg);
 
-    errors.extend(validate_http_method(
+    errors.extend(validate_http_method_arg(
         &http_methods,
         connect_directive_http_coordinate(connect_directive_name, object, &field.name),
         http_arg_location,
@@ -498,11 +480,7 @@ fn validate_field(
         }
     }
 
-    if let Some(headers) = http_arg
-        .iter()
-        .find(|(key, _)| key == &CONNECT_HEADERS_ARGUMENT_NAME)
-        .map(|(_, value)| value)
-    {
+    if let Some(headers) = get_http_headers_arg(http_arg, &CONNECT_HEADERS_ARGUMENT_NAME) {
         errors.extend(validate_headers_arg(
             connect_directive_name,
             &format!("{CONNECT_HTTP_ARGUMENT_NAME}.{CONNECT_HEADERS_ARGUMENT_NAME}"),
