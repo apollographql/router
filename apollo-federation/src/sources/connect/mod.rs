@@ -21,6 +21,7 @@ pub use models::validate;
 pub use models::Location;
 pub use models::ValidationCode;
 pub use models::ValidationMessage;
+pub use models::ValidationSeverity;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 
