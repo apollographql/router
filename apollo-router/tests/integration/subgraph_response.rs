@@ -139,11 +139,7 @@ async fn test_invalid_error_locations_with_single_negative_one_location() -> Res
             "data": { "me": null },
             "errors": [{
                 "message": "Some error on subgraph",
-                "locations": [
-                    { "line": 0, "column": 1 },
-                    { "line": -1, "column": -1 },
-                    { "line": 2, "column": 3 },
-                ],
+                "locations": [{ "line": -1, "column": -1 }],
                 "path": ["topProducts"]
             }]
         })))
@@ -163,10 +159,6 @@ async fn test_invalid_error_locations_with_single_negative_one_location() -> Res
             "data": { "topProducts": null },
             "errors": [{
                 "message":"Some error on subgraph",
-                "locations": [
-                    { "line": 0, "column": 1 },
-                    { "line": 2, "column": 3 },
-                ],
                 "path":["topProducts"]
             }]
         })
