@@ -283,6 +283,40 @@ where
             })
     }
 
+    pub(crate) fn concat(self: &Arc<Self>, other: &Arc<Self>) -> Arc<Self> {
+        if Arc::ptr_eq(self, other) {
+            return self.clone();
+        }
+        assert!(
+            Arc::ptr_eq(&self.graph, &other.graph),
+            "Cannot merge path tree build on another graph"
+        );
+        assert_eq!(
+            self.node, other.node,
+            "Cannot merge path trees rooted different nodes"
+        );
+        if other.childs.is_empty() {
+            return self.clone();
+        }
+        if self.childs.is_empty() {
+            return other.clone();
+        }
+        let mut childs = Vec::with_capacity(self.childs.len() + other.childs.len());
+        childs.extend_from_slice(&self.childs);
+        childs.extend_from_slice(&other.childs);
+        Arc::new(Self {
+            graph: self.graph.clone(),
+            node: self.node,
+            local_selection_sets: self
+                .local_selection_sets
+                .iter()
+                .chain(&other.local_selection_sets)
+                .cloned()
+                .collect(),
+            childs,
+        })
+    }
+
     pub(crate) fn merge(self: &Arc<Self>, other: &Arc<Self>) -> Arc<Self> {
         if Arc::ptr_eq(self, other) {
             return self.clone();

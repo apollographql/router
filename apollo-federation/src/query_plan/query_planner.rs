@@ -560,7 +560,7 @@ fn compute_root_serial_dependency_graph(
             // }
             // then we should _not_ merge the 2 `mut1` fields (contrarily to what happens on queried fields).
 
-            prev_path = OpPathTree::merge(&prev_path, &new_path);
+            prev_path = OpPathTree::concat(&prev_path, &new_path);
             fetch_dependency_graph = FetchDependencyGraph::new(
                 supergraph_schema.clone(),
                 federated_query_graph.clone(),
