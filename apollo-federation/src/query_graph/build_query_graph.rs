@@ -1926,7 +1926,7 @@ impl FederatedQueryGraphBuilder {
                         // since we can do "start of query" -> C and that's always better.
                         if matches!(
                             followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
                         ) {
                             continue;
                         }
