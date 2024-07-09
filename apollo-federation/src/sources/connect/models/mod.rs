@@ -5,6 +5,7 @@ pub use validation::validate;
 pub use validation::Code as ValidationCode;
 pub use validation::Location;
 pub use validation::Message as ValidationMessage;
+pub use validation::Severity as ValidationSeverity;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;
