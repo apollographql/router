@@ -90,7 +90,6 @@ async fn test_empty_error_locations() -> Result<(), BoxError> {
     Ok(())
 }
 
-
 #[tokio::test(flavor = "multi_thread")]
 async fn test_invalid_error_locations() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()

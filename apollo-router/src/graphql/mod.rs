@@ -171,11 +171,11 @@ impl Error {
 // if they can't determine error location inside query.
 // This function removes such locations from suplied value.
 fn skip_invalid_locations(mut value: Value) -> Value {
-    value.as_array_mut().map(|array| {
+    if let Some(array) = value.as_array_mut() {
         array.retain(|location| {
             location.get("line") != Some(&json!(-1)) || location.get("column") != Some(&json!(-1))
         })
-    });
+    }
     value
 }
 
