@@ -12,7 +12,6 @@ use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
 use tokio::task;
-use tracing::Instrument;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
@@ -85,13 +84,19 @@ impl QueryAnalysisLayer {
         let schema = self.schema.clone();
         let conf = self.configuration.clone();
 
+        // Must be created *outside* of the spawn_blocking or the span is not connected to the
+        // parent
+        let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
+
         task::spawn_blocking(move || {
-            Query::parse_document(
-                &query,
-                operation_name.as_deref(),
-                schema.as_ref(),
-                conf.as_ref(),
-            )
+            span.in_scope(|| {
+                Query::parse_document(
+                    &query,
+                    operation_name.as_deref(),
+                    schema.as_ref(),
+                    conf.as_ref(),
+                )
+            })
         })
         .await
         .expect("parse_document task panicked")
@@ -143,13 +148,7 @@ impl QueryAnalysisLayer {
 
         let res = match entry {
             None => {
-                let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
-                let result = self
-                    .parse_document(&query, op_name.as_deref())
-                    .instrument(span.or_current())
-                    .await;
-
-                match result {
+                match self.parse_document(&query, op_name.as_deref()).await {
                     Err(errors) => {
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {
