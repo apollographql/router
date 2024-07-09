@@ -1,6 +1,6 @@
 [package]
 name = "apollo-federation"
-version = "1.49.1"
+version = "1.50.0"
 authors = ["The Apollo GraphQL Contributors"]
 edition = "2021"
 description = "Apollo Federation"
@@ -15,7 +15,7 @@ time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
 ] }
 derive_more = "0.99.17"
-indexmap = "2.2.3"
+indexmap = "2.2.6"
 itertools = "0.13.0"
 lazy_static = "1.4.0"
 multimap = "0.10.0"

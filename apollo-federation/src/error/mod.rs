@@ -35,6 +35,9 @@ pub enum SingleFederationError {
         "An internal error has occurred, please report this bug to Apollo.\n\nDetails: {message}"
     )]
     Internal { message: String },
+    #[error("An internal error has occurred, please report this bug to Apollo. Details: {0}")]
+    #[allow(private_interfaces)] // users should not inspect this.
+    InternalRebaseError(#[from] crate::operation::RebaseError),
     #[error("{message}")]
     InvalidGraphQL { message: String },
     #[error("{message}")]
@@ -199,6 +202,7 @@ impl SingleFederationError {
     pub fn code(&self) -> ErrorCode {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
+            SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
             SingleFederationError::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
@@ -433,7 +437,7 @@ impl Display for MultipleFederationErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "The following errors occurred:")?;
         for error in &self.errors {
-            write!(f, "\n\n  - ")?;
+            write!(f, "\n  - ")?;
             for c in error.to_string().chars() {
                 if c == '\n' {
                     write!(f, "\n    ")?;
