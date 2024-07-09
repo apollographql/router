@@ -546,9 +546,10 @@ impl InlineFragmentData {
         };
         match schema
             .get_type(ty.type_name().clone())
-            .and_then(CompositeTypeDefinitionPosition::try_from)
+            .ok()
+            .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())
         {
-            Ok(ty) if runtime_types_intersect(parent_type, &ty, schema) => (true, Some(ty)),
+            Some(ty) if runtime_types_intersect(parent_type, &ty, schema) => (true, Some(ty)),
             _ => (false, None),
         }
     }
@@ -798,9 +799,10 @@ impl NamedFragments {
     ) -> Result<NamedFragments, FederationError> {
         let mut rebased_fragments = NamedFragments::default();
         for fragment in self.fragments.values() {
-            if let Ok(rebased_type) = schema
+            if let Some(rebased_type) = schema
                 .get_type(fragment.type_condition_position.type_name().clone())
-                .and_then(CompositeTypeDefinitionPosition::try_from)
+                .ok()
+                .and_then(|ty| CompositeTypeDefinitionPosition::try_from(ty).ok())
             {
                 if let Ok(mut rebased_selection) = fragment.selection_set.rebase_inner(
                     &rebased_type,
