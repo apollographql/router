@@ -125,6 +125,10 @@ This entry contains an object with the `all` field to affect all subgraph reques
 
 ```
 
+### Entity cache invalidation
+
+Entity cache invalidation support was added in release {TBD}
+
 ## Implementation notes
 
 ### Cache-Control header requirement
@@ -142,7 +146,3 @@ When used alongside the router's [authorization directives](./authorization), ca
 ### Schema updates and entity caching
 
 On schema updates, the router ensures that queries unaffected by the changes keep their cache entries. Queries with affected fields need to be cached again to ensure the router doesn't serve invalid data from before the update.
-
-### Entity cache invalidation not supported
-
-Cache invalidation is not yet supported and is planned for a future release.
