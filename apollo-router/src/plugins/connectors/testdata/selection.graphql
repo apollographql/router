@@ -5,7 +5,6 @@ schema
   @join__directive(graphs: [CONNECTORS], name: "source", args: {name: "json", http: {baseURL: "https://jsonplaceholder.typicode.com/"}})
 {
   query: Query
-  mutation: Mutation
 }
 
 directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
@@ -23,6 +22,34 @@ directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boole
 directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+
+type Author
+  @join__type(graph: CONNECTORS)
+{
+  login: String
+}
+
+type Commit
+  @join__type(graph: CONNECTORS)
+{
+  author: Author!
+  commit: CommitDetail
+}
+
+type CommitAuthor
+  @join__type(graph: CONNECTORS)
+{
+  name: String
+  email: String
+  owner: String
+}
+
+type CommitDetail
+  @join__type(graph: CONNECTORS)
+{
+  name_from_path: String
+  author: CommitAuthor
+}
 
 input join__ContextArgument {
   name: String!
@@ -55,21 +82,8 @@ enum link__Purpose {
   EXECUTION
 }
 
-type Mutation
-  @join__type(graph: CONNECTORS)
-{
-  createUser(name: String!): User @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {POST: "/user", body: "username: $args.name"}, selection: "id\nname: username"})
-}
-
 type Query
   @join__type(graph: CONNECTORS)
 {
-  users: [User] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/users"}, selection: "id name"})
-}
-
-type User
-  @join__type(graph: CONNECTORS)
-{
-  id: ID!
-  name: String
+  commits(owner: String!, repo: String!): [Commit] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/repos/{$args.owner}/{$args.repo}/commits"}, selection: "commit {\n  name_from_path: .author.name\n  author {\n    name\n    email\n    owner: $args.owner\n  }\n}"})
 }

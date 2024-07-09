@@ -3,6 +3,7 @@ mod graphql;
 mod helpers;
 mod parser;
 mod pretty;
+mod selection_set;
 mod visitor;
 
 pub use apply_to::*;

@@ -67,9 +67,14 @@ pub(crate) async fn handle_responses(
             };
 
             let mut res_data = {
-                // TODO use response_key.selection_set() to use the operation selection set for alias/typename/field selection
-                // TODO use apply_with_args after passing the inputs to this function
-                let (res, apply_to_errors) = connector.selection.apply_to(&json_data);
+                // TODO: caching of the transformed JSONSelection with the selection set applied?
+                let transformed_selection = connector
+                    .selection
+                    .apply_selection_set(response_key.selection_set())
+                    .unwrap(); // TODO: error handling
+
+                let (res, apply_to_errors) =
+                    transformed_selection.apply_with_vars(&json_data, &response_key.inputs());
 
                 if let Some(ref mut debug) = debug {
                     debug.push_response(
@@ -77,6 +82,7 @@ pub(crate) async fn handle_responses(
                         &json_data,
                         Some(SelectionData {
                             source: connector.selection.to_string(),
+                            transformed: transformed_selection.to_string(),
                             result: res.clone(),
                             errors: apply_to_errors,
                         }),
@@ -218,8 +224,14 @@ fn inject_typename(data: &mut Value, typename: &str) {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::ast::Type;
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::executable::Selection;
     use apollo_compiler::executable::SelectionSet;
     use apollo_compiler::name;
+    use apollo_compiler::Name;
+    use apollo_compiler::Node;
     use apollo_compiler::Schema;
     use apollo_federation::sources::connect::ConnectId;
     use apollo_federation::sources::connect::Connector;
@@ -230,6 +242,7 @@ mod tests {
     use apollo_federation::sources::connect::Transport;
     use apollo_federation::sources::connect::URLPathTemplate;
     use insta::assert_debug_snapshot;
+    use serde_json_bytes::json;
 
     use crate::plugins::connectors::make_requests::ResponseKey;
     use crate::plugins::connectors::make_requests::ResponseTypeName;
@@ -259,6 +272,7 @@ mod tests {
         let response1 = http::Response::builder()
             .extension(ResponseKey::RootField {
                 name: "hello".to_string(),
+                inputs: json!({}),
                 typename: ResponseTypeName::Concrete("String".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -271,6 +285,7 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::RootField {
                 name: "hello2".to_string(),
+                inputs: json!({}),
                 typename: ResponseTypeName::Concrete("String".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -340,13 +355,22 @@ mod tests {
             entity_resolver: Some(EntityResolver::Explicit),
         };
 
+        let id_field_definition = FieldDefinition {
+            description: None,
+            name: Name::new("id").unwrap(),
+            arguments: Default::default(),
+            ty: Type::Named(Name::new("String").unwrap()),
+            directives: Default::default(),
+        };
+        let id_field = Field::new(Name::new("id").unwrap(), Node::from(id_field_definition));
         let response1 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 0,
+                inputs: json!({}),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
-                    selections: Default::default(),
+                    selections: vec![Selection::Field(Node::new(id_field.clone()))],
                 },
             })
             .body(hyper::Body::from(r#"{"data":{"id": "1"}}"#).into())
@@ -355,10 +379,11 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 1,
+                inputs: json!({}),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
-                    selections: Default::default(),
+                    selections: vec![Selection::Field(Node::new(id_field.clone()))],
                 },
             })
             .body(hyper::Body::from(r#"{"data":{"id": "2"}}"#).into())
@@ -444,6 +469,7 @@ mod tests {
         let response1 = http::Response::builder()
             .extension(ResponseKey::EntityField {
                 index: 0,
+                inputs: json!({}),
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
@@ -457,6 +483,7 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::EntityField {
                 index: 1,
+                inputs: json!({}),
                 field_name: "field".to_string(),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
@@ -547,6 +574,7 @@ mod tests {
         let response1 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 0,
+                inputs: json!({}),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -560,6 +588,7 @@ mod tests {
         let response2 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 1,
+                inputs: json!({}),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO
@@ -572,6 +601,7 @@ mod tests {
         let response3 = http::Response::builder()
             .extension(ResponseKey::Entity {
                 index: 2,
+                inputs: json!({}),
                 typename: ResponseTypeName::Concrete("User".to_string()),
                 selection_set: SelectionSet {
                     ty: name!(Todo), // TODO

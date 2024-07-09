@@ -1,0 +1,52 @@
+# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/selection.yaml > apollo-router/src/plugins/connectors/testdata/selection.graphql
+federation_version: =2.9.0-connectors.8
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.7")
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+          @source(
+            name: "json"
+            http: {
+              baseURL: "https://jsonplaceholder.typicode.com/"
+            }
+          )
+
+        type Commit {
+          commit: CommitDetail
+        }
+        
+        type CommitDetail {
+          name_from_path: String
+          author: CommitAuthor
+        }
+          
+        type CommitAuthor {
+          name: String
+          email: String
+          owner: String
+        }
+          
+        type Query {
+          commits(owner: String!, repo: String!): [Commit]
+            @connect(
+              source: "json"
+                http: { GET: "/repos/{$$args.owner}/{$$args.repo}/commits" }
+                selection: """
+                commit {
+                  name_from_path: .author.name
+                  author {
+                    name
+                    email
+                    owner: $$args.owner
+                  }
+                }
+            """
+          )
+        }

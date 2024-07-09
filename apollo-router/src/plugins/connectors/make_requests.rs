@@ -1,6 +1,7 @@
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::EntityResolver;
+use indexmap::IndexMap;
 use itertools::Itertools;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
@@ -24,7 +25,7 @@ struct RequestInputs {
 }
 
 impl RequestInputs {
-    fn merge(self) -> Value {
+    fn merge(&self) -> Value {
         json!({
             "$args": self.args,
             "$this": self.this
@@ -37,31 +38,45 @@ pub(crate) enum ResponseKey {
     RootField {
         name: String,
         typename: ResponseTypeName,
-        #[allow(dead_code)]
         selection_set: apollo_compiler::executable::SelectionSet,
+        inputs: Value,
     },
     Entity {
         index: usize,
         typename: ResponseTypeName,
-        #[allow(dead_code)]
         selection_set: apollo_compiler::executable::SelectionSet,
+        inputs: Value,
     },
     EntityField {
         index: usize,
         field_name: String,
         typename: ResponseTypeName,
-        #[allow(dead_code)]
         selection_set: apollo_compiler::executable::SelectionSet,
+        inputs: Value,
     },
 }
 
 impl ResponseKey {
-    #[allow(dead_code)]
     pub(crate) fn selection_set(&self) -> &apollo_compiler::executable::SelectionSet {
         match self {
             ResponseKey::RootField { selection_set, .. } => selection_set,
             ResponseKey::Entity { selection_set, .. } => selection_set,
             ResponseKey::EntityField { selection_set, .. } => selection_set,
+        }
+    }
+
+    pub(crate) fn inputs(&self) -> IndexMap<String, Value> {
+        if let Value::Object(ref inputs_map) = match self {
+            ResponseKey::RootField { inputs, .. } => inputs,
+            ResponseKey::Entity { inputs, .. } => inputs,
+            ResponseKey::EntityField { inputs, .. } => inputs,
+        } {
+            inputs_map
+                .iter()
+                .map(|(k, v)| (k.as_str().to_string(), v.clone()))
+                .collect()
+        } else {
+            Default::default()
         }
     }
 }
@@ -176,7 +191,7 @@ pub(crate) enum MakeRequestError {
 /// used multiple times with aliases.
 ///
 /// Root fields exist in the supergraph schema so we can parse the operation
-/// using the schema. (This isn't true for _entities oeprations.)
+/// using the schema. (This isn't true for _entities operations.)
 ///
 /// Example:
 /// ```graphql
@@ -211,14 +226,6 @@ fn root_fields(
                     .unwrap_or_else(|| &field.name)
                     .to_string();
 
-                let response_key = ResponseKey::RootField {
-                    name: response_name,
-                    typename: ResponseTypeName::Concrete(
-                        field.definition.ty.inner_named_type().to_string(),
-                    ),
-                    selection_set: field.selection_set.clone(),
-                };
-
                 let args = graphql_utils::field_arguments_map(field, &request.variables.variables)
                     .map_err(|_| {
                         MakeRequestError::InvalidArguments(
@@ -229,6 +236,15 @@ fn root_fields(
                 let request_inputs = RequestInputs {
                     args,
                     this: Default::default(),
+                };
+
+                let response_key = ResponseKey::RootField {
+                    name: response_name,
+                    typename: ResponseTypeName::Concrete(
+                        field.definition.ty.inner_named_type().to_string(),
+                    ),
+                    selection_set: field.selection_set.clone(),
+                    inputs: request_inputs.merge(),
                 };
 
                 Ok((response_key, request_inputs))
@@ -307,23 +323,26 @@ fn entities_from_request(
                 ResponseTypeName::Omitted
             };
 
+            let request_inputs = RequestInputs {
+                args: rep
+                    .as_object()
+                    .ok_or_else(|| {
+                        InvalidRepresentations("representation is not an object".into())
+                    })?
+                    .clone(),
+                // entity connectors are always on Query fields, so they cannot use
+                // sibling fields with $this
+                this: Default::default(),
+            };
+
             Ok((
                 ResponseKey::Entity {
                     index: i,
                     typename,
                     selection_set: entities_field.selection_set.clone(),
+                    inputs: request_inputs.merge(),
                 },
-                RequestInputs {
-                    args: rep
-                        .as_object()
-                        .ok_or_else(|| {
-                            InvalidRepresentations("representation is not an object".into())
-                        })?
-                        .clone(),
-                    // entity connectors are always on Query fields, so they cannot use
-                    // sibling fields with $this
-                    this: Default::default(),
-                },
+                request_inputs,
             ))
         })
         .collect::<Result<Vec<_>, _>>()
@@ -434,22 +453,24 @@ fn entities_with_fields_from_request(
                     .unwrap_or_else(|| &field.name)
                     .to_string();
 
+                let request_inputs = RequestInputs {
+                    args,
+                    this: representation
+                        .as_object()
+                        .ok_or_else(|| {
+                            InvalidRepresentations("representation is not an object".into())
+                        })?
+                        .clone(),
+                };
                 Ok::<_, MakeRequestError>((
                     ResponseKey::EntityField {
                         index: *i,
                         field_name: response_name.to_string(),
                         typename,
                         selection_set: field.selection_set.clone(),
+                        inputs: request_inputs.merge(),
                     },
-                    RequestInputs {
-                        args,
-                        this: representation
-                            .as_object()
-                            .ok_or_else(|| {
-                                InvalidRepresentations("representation is not an object".into())
-                            })?
-                            .clone(),
-                    },
+                    request_inputs,
                 ))
             })
         })
