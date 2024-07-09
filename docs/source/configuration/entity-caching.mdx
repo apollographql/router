@@ -85,16 +85,14 @@ For example:
 # Enable entity caching globally
 preview_entity_cache:
   enabled: true
-
-  # Configure Redis
-  redis:
-    urls: ["redis://..."]
-    timeout: 5ms # Optional, by default: 2ms
-    ttl: 24h # Optional, by default no expiration
-
   subgraph:
     all:
       enabled: true
+      # Configure Redis
+      redis:
+        urls: ["redis://..."]
+        timeout: 5ms # Optional, by default: 2ms
+        ttl: 24h # Optional, by default no expiration
     # Configure entity caching per subgraph, overrides options from the "all" section
     subgraphs:
       products:

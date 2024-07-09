@@ -54,11 +54,11 @@ plugins:
 
 preview_entity_cache:
   enabled: true
-  redis:
-    urls:
-      - https://example.com
   subgraph:
     all:
+      redis:
+        urls:
+          - https://example.com
       enabled: false
     subgraphs:
       product:
