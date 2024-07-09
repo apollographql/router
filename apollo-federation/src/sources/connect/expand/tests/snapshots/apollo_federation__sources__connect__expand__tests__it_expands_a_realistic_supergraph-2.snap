@@ -5,7 +5,7 @@ expression: connectors.by_service_name
 {
     "connectors_Query_usersByCompany_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: Get /by-company/{$args.company.name!}",
+            label: "connectors.example http: GET /by-company/{$args.company.name!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -94,7 +94,7 @@ expression: connectors.by_service_name
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: Get /{$args.id!}",
+            label: "connectors.example http: GET /{$args.id!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",

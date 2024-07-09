@@ -198,7 +198,7 @@ impl HttpJsonTransport {
     }
 
     fn label(&self) -> String {
-        format!("http: {} {}", self.method, self.path_template)
+        format!("http: {} {}", self.method.as_str(), self.path_template)
     }
 }
 
@@ -288,7 +288,7 @@ mod tests {
         assert_debug_snapshot!(&connectors, @r###"
         {
             ConnectId {
-                label: "connectors.json http: Get /users",
+                label: "connectors.json http: GET /users",
                 subgraph_name: "connectors",
                 source_name: Some(
                     "json",
@@ -300,7 +300,7 @@ mod tests {
                 },
             }: Connector {
                 id: ConnectId {
-                    label: "connectors.json http: Get /users",
+                    label: "connectors.json http: GET /users",
                     subgraph_name: "connectors",
                     source_name: Some(
                         "json",
@@ -363,7 +363,7 @@ mod tests {
                 entity_resolver: None,
             },
             ConnectId {
-                label: "connectors.json http: Get /posts",
+                label: "connectors.json http: GET /posts",
                 subgraph_name: "connectors",
                 source_name: Some(
                     "json",
@@ -375,7 +375,7 @@ mod tests {
                 },
             }: Connector {
                 id: ConnectId {
-                    label: "connectors.json http: Get /posts",
+                    label: "connectors.json http: GET /posts",
                     subgraph_name: "connectors",
                     source_name: Some(
                         "json",
