@@ -1902,7 +1902,7 @@ impl FederatedQueryGraphBuilder {
                                 }
                                 .into());
                             };
-                            if conditions.selections == followup_conditions.selections {
+                            if conditions == followup_conditions {
                                 continue;
                             }
                         }
