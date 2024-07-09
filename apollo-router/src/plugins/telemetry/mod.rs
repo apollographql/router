@@ -9,6 +9,7 @@ use std::time::Instant;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use config_new::instruments::StaticInstrument;
 use config_new::Selectors;
 use dashmap::DashMap;
 use futures::future::ready;
@@ -42,6 +43,7 @@ use opentelemetry::KeyValue;
 use opentelemetry_api::trace::TraceId;
 use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
 use parking_lot::Mutex;
+use parking_lot::RwLock;
 use rand::Rng;
 use router_bridge::planner::UsageReporting;
 use serde_json_bytes::json;
@@ -197,7 +199,10 @@ pub(crate) struct Telemetry {
     apollo_metrics_sender: apollo_exporter::Sender,
     field_level_instrumentation_ratio: f64,
     sampling_filter_ratio: SamplerOption,
-
+    pub(crate) graphql_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    subgraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     activation: Mutex<TelemetryActivation>,
 }
 
@@ -285,6 +290,47 @@ impl Plugin for Telemetry {
             ::tracing::warn!("telemetry.instrumentation.spans.mode is currently set to 'deprecated', either explicitly or via defaulting. Set telemetry.instrumentation.spans.mode explicitly in your router.yaml to 'spec_compliant' for log and span attributes that follow OpenTelemetry semantic conventions. This option will be defaulted to 'spec_compliant' in a future release and eventually removed altogether");
         }
 
+        let graphql_custom_instruments = if cfg!(test) {
+            RwLock::new(Arc::new(
+                config
+                    .instrumentation
+                    .instruments
+                    .new_static_graphql_instruments(),
+            ))
+        } else {
+            RwLock::default()
+        };
+        let router_custom_instruments = if cfg!(test) {
+            RwLock::new(Arc::new(
+                config
+                    .instrumentation
+                    .instruments
+                    .new_static_router_instruments(),
+            ))
+        } else {
+            RwLock::default()
+        };
+        let supergraph_custom_instruments = if cfg!(test) {
+            RwLock::new(Arc::new(
+                config
+                    .instrumentation
+                    .instruments
+                    .new_static_supergraph_instruments(),
+            ))
+        } else {
+            RwLock::default()
+        };
+        let subgraph_custom_instruments = if cfg!(test) {
+            RwLock::new(Arc::new(
+                config
+                    .instrumentation
+                    .instruments
+                    .new_static_subgraph_instruments(),
+            ))
+        } else {
+            RwLock::default()
+        };
+
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
             apollo_metrics_sender: metrics_builder.apollo_metrics_sender,
@@ -302,6 +348,10 @@ impl Plugin for Telemetry {
                     .map(FilterMeterProvider::public),
                 is_active: false,
             }),
+            graphql_custom_instruments,
+            router_custom_instruments,
+            supergraph_custom_instruments,
+            subgraph_custom_instruments,
             sampling_filter_ratio,
             config: Arc::new(config),
         })
@@ -316,6 +366,7 @@ impl Plugin for Telemetry {
             matches!(config.instrumentation.spans.mode, SpanMode::Deprecated);
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
         let metrics_sender = self.apollo_metrics_sender.clone();
+        let static_router_instruments = self.router_custom_instruments.read().clone();
 
         ServiceBuilder::new()
             .map_response(move |response: router::Response| {
@@ -410,7 +461,7 @@ impl Plugin for Telemetry {
                     let custom_instruments: RouterInstruments = config_request
                         .instrumentation
                         .instruments
-                        .new_router_instruments();
+                        .new_router_instruments(static_router_instruments.clone());
                     custom_instruments.on_request(request);
 
                     let custom_events: RouterEvents =
@@ -537,6 +588,8 @@ impl Plugin for Telemetry {
         let config_map_res_first = config.clone();
         let config_map_res = config.clone();
         let field_level_instrumentation_ratio = self.field_level_instrumentation_ratio;
+        let static_supergraph_instruments = self.supergraph_custom_instruments.read().clone();
+        let static_graphql_instruments = self.graphql_custom_instruments.read().clone();
         ServiceBuilder::new()
             .instrument(move |supergraph_req: &SupergraphRequest| span_mode.create_supergraph(
                 &config_instrument.apollo,
@@ -601,11 +654,11 @@ impl Plugin for Telemetry {
                     let custom_instruments = config
                         .instrumentation
                         .instruments
-                        .new_supergraph_instruments();
+                        .new_supergraph_instruments(static_supergraph_instruments.clone());
                     custom_instruments.on_request(req);
-                    let custom_graphql_instruments:GraphQLInstruments = (&config
+                    let custom_graphql_instruments: GraphQLInstruments = config
                         .instrumentation
-                        .instruments).into();
+                        .instruments.new_graphql_instruments(static_graphql_instruments.clone());
                     custom_graphql_instruments.on_request(req);
 
                     let supergraph_events = config.instrumentation.events.new_supergraph_events();
@@ -700,6 +753,7 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
+        let static_subgraph_instruments = self.subgraph_custom_instruments.read().clone();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
@@ -720,7 +774,7 @@ impl Plugin for Telemetry {
                     let custom_instruments = config
                         .instrumentation
                         .instruments
-                        .new_subgraph_instruments();
+                        .new_subgraph_instruments(static_subgraph_instruments.clone());
                     custom_instruments.on_request(sub_request);
                     let custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
@@ -838,6 +892,31 @@ impl Telemetry {
         }
 
         activation.reload_metrics();
+
+        *self.graphql_custom_instruments.write() = Arc::new(
+            self.config
+                .instrumentation
+                .instruments
+                .new_static_graphql_instruments(),
+        );
+        *self.router_custom_instruments.write() = Arc::new(
+            self.config
+                .instrumentation
+                .instruments
+                .new_static_router_instruments(),
+        );
+        *self.supergraph_custom_instruments.write() = Arc::new(
+            self.config
+                .instrumentation
+                .instruments
+                .new_static_supergraph_instruments(),
+        );
+        *self.subgraph_custom_instruments.write() = Arc::new(
+            self.config
+                .instrumentation
+                .instruments
+                .new_static_subgraph_instruments(),
+        );
 
         reload_fmt(create_fmt_layer(&self.config));
         activation.is_active = true;

@@ -1,32 +1,20 @@
-use std::sync::Arc;
-
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::ExecutableDocument;
-use opentelemetry::metrics::MeterProvider;
-use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json_bytes::Value;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
-use super::instruments::CustomCounterInner;
 use super::instruments::CustomInstruments;
-use super::instruments::Increment;
-use super::instruments::InstrumentsConfig;
-use super::instruments::METER_NAME;
 use crate::graphql::ResponseVisitor;
-use crate::metrics;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
-use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
 use crate::plugins::telemetry::config_new::graphql::attributes::GraphQLAttributes;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
-use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
 use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -37,8 +25,8 @@ use crate::Context;
 pub(crate) mod attributes;
 pub(crate) mod selectors;
 
-static FIELD_LENGTH: &str = "graphql.field.list.length";
-static FIELD_EXECUTION: &str = "graphql.field.execution";
+pub(crate) const FIELD_LENGTH: &str = "graphql.field.list.length";
+pub(crate) const FIELD_EXECUTION: &str = "graphql.field.execution";
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -96,67 +84,6 @@ pub(crate) struct GraphQLInstruments {
         >,
     >,
     pub(crate) custom: GraphQLCustomInstruments,
-}
-
-impl From<&InstrumentsConfig> for GraphQLInstruments {
-    fn from(value: &InstrumentsConfig) -> Self {
-        let meter = metrics::meter_provider().meter(METER_NAME);
-        GraphQLInstruments {
-            list_length: value.graphql.attributes.list_length.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &value.graphql.attributes.list_length {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomHistogram {
-                    inner: Mutex::new(CustomHistogramInner {
-                        increment: Increment::FieldCustom(None),
-                        condition: Condition::True,
-                        histogram: Some(meter.f64_histogram(FIELD_LENGTH).init()),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(GraphQLSelector::ListLength {
-                            list_length: ListLength::Value,
-                        })),
-                        selectors,
-                        updated: false,
-                    }),
-                }
-            }),
-            field_execution: value
-                .graphql
-                .attributes
-                .field_execution
-                .is_enabled()
-                .then(|| {
-                    let mut nb_attributes = 0;
-                    let selectors = match &value.graphql.attributes.field_execution {
-                        DefaultedStandardInstrument::Bool(_)
-                        | DefaultedStandardInstrument::Unset => None,
-                        DefaultedStandardInstrument::Extendable { attributes } => {
-                            nb_attributes = attributes.custom.len();
-                            Some(attributes.clone())
-                        }
-                    };
-                    CustomCounter {
-                        inner: Mutex::new(CustomCounterInner {
-                            increment: Increment::FieldUnit,
-                            condition: Condition::True,
-                            counter: Some(meter.f64_counter(FIELD_EXECUTION).init()),
-                            attributes: Vec::with_capacity(nb_attributes),
-                            selector: None,
-                            selectors,
-                            incremented: false,
-                        }),
-                    }
-                }),
-            custom: CustomInstruments::new(&value.graphql.custom),
-        }
-    }
 }
 
 impl Instrumented for GraphQLInstruments {
@@ -327,12 +254,11 @@ pub(crate) mod test {
                 .build()
                 .unwrap();
 
-            let harness = PluginTestHarness::<Telemetry>::builder()
+            let harness: PluginTestHarness<Telemetry> = PluginTestHarness::<Telemetry>::builder()
                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
                 .schema(schema_str)
                 .build()
                 .await;
-
             harness
                 .call_supergraph(request, |req| {
                     let response: serde_json::Value = serde_json::from_str(include_str!(

@@ -62,7 +62,7 @@ use crate::Notify;
 ///
 ///
 pub(crate) struct PluginTestHarness<T: Plugin> {
-    plugin: Box<dyn DynPlugin>,
+    pub(crate) plugin: Box<dyn DynPlugin>,
     phantom: std::marker::PhantomData<T>,
 }
 #[buildstructor::buildstructor]
