@@ -65,6 +65,7 @@ use http::HeaderName;
 use itertools::Itertools;
 use url::Url;
 
+use crate::link::Import;
 use crate::link::Link;
 use crate::sources::connect::json_selection::JSONSelectionVisitor;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
@@ -84,6 +85,10 @@ use crate::sources::connect::spec::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::sources::connect::JSONSelection;
+use crate::subgraph::database::federation_link_identity;
+use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
+use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
+use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
 
 /// Validate the connectors-related directives `@source` and `@connect`.
 ///
@@ -91,22 +96,12 @@ use crate::sources::connect::JSONSelection;
 /// out as soon as it encounters one.
 pub fn validate(schema: Schema) -> Vec<Message> {
     let connect_identity = ConnectSpecDefinition::identity();
-    let Some((link, link_directive)) =
-        schema
-            .schema_definition
-            .directives
-            .iter()
-            .find_map(|directive| {
-                let link = Link::from_directive_application(directive).ok()?;
-                if link.url.identity == connect_identity {
-                    Some((link, directive))
-                } else {
-                    None
-                }
-            })
-    else {
-        return vec![]; // There are no connectors-related directives to validate
+    let Some((link, link_directive)) = Link::for_identity(&schema, &connect_identity) else {
+        return Vec::new(); // There are no connectors-related directives to validate
     };
+
+    let mut messages = check_conflicting_directives(&schema);
+
     let source_map = &schema.sources;
     let source_directive_name = ConnectSpecDefinition::source_directive_name(&link);
     let connect_directive_name = ConnectSpecDefinition::connect_directive_name(&link);
@@ -118,7 +113,6 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         .map(|directive| validate_source(directive, source_map))
         .collect();
 
-    let mut messages = Vec::new();
     let mut valid_source_names = HashMap::new();
     let all_source_names = source_directives
         .iter()
@@ -177,6 +171,53 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         });
     }
     messages
+}
+
+fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
+    let Some((fed_link, fed_link_directive)) =
+        Link::for_identity(schema, &federation_link_identity())
+    else {
+        return Vec::new();
+    };
+
+    // TODO: make the `Link` code retain locations directly instead of reparsing stuff for validation
+    let imports = fed_link_directive
+        .argument_by_name(&name!("import"))
+        .and_then(|arg| arg.as_list())
+        .into_iter()
+        .flatten()
+        .filter_map(|value| Import::from_value(value).ok().map(|import| (value, import)))
+        .collect_vec();
+
+    let disallowed_imports = [
+        INTF_OBJECT_DIRECTIVE_NAME,
+        CONTEXT_DIRECTIVE_NAME,
+        FROM_CONTEXT_DIRECTIVE_NAME,
+    ];
+    fed_link
+        .imports
+        .into_iter()
+        .filter_map(|import| {
+            disallowed_imports
+                .contains(&import.element)
+                .then(|| Message {
+                    code: Code::UnsupportedFederationDirective,
+                    message: format!(
+                        "The directive `@{import}` is not supported when using connectors.",
+                        import = import.alias.as_ref().unwrap_or(&import.element)
+                    ),
+                    locations: imports
+                        .iter()
+                        .find_map(|(value, reparsed)| {
+                            (*reparsed == *import)
+                                .then(|| Location::from_node(value.location(), &schema.sources))
+                        })
+                        .flatten()
+                        .into_iter()
+                        .collect(),
+                })
+        })
+        .collect()
 }
 
 const DEFAULT_SOURCE_DIRECTIVE_NAME: &str = "connect__source";
@@ -1262,6 +1303,8 @@ pub enum Code {
     HttpHeaderNameCollision,
     /// Header mappings cannot include both `as` and `value` properties.
     InvalidHttpHeaderMapping,
+    /// Certain directives are not allowed when using connectors
+    UnsupportedFederationDirective,
 }
 
 impl Code {

@@ -70,7 +70,7 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
         .into_iter()
         .partition_map(|(_, sub)| {
             match ConnectSpecDefinition::get_from_schema(sub.schema.schema()) {
-                Ok(Some((_, link))) if contains_connectors(&link, &sub) => {
+                Some((_, link)) if contains_connectors(&link, &sub) => {
                     either::Either::Left((link, sub))
                 }
                 _ => either::Either::Right(ValidSubgraph::from(sub)),
