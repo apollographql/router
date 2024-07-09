@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Instant;
 
 use fred::types::Scanner;
@@ -9,6 +10,7 @@ use serde_json_bytes::Value;
 use tower::BoxError;
 use tracing::Instrument;
 
+use super::entity::Storage as EntityStorage;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::notification::Handle;
@@ -17,7 +19,6 @@ use crate::Notify;
 
 #[derive(Clone)]
 pub(crate) struct Invalidation {
-    enabled: bool,
     handle: Handle<InvalidationTopic, Vec<InvalidationRequest>>,
 }
 
@@ -25,33 +26,29 @@ pub(crate) struct Invalidation {
 pub(crate) struct InvalidationTopic;
 
 impl Invalidation {
-    pub(crate) async fn new(storage: Option<RedisCacheStorage>) -> Result<Self, BoxError> {
+    pub(crate) async fn new(storage: Arc<EntityStorage>) -> Result<Self, BoxError> {
         let mut notify = Notify::new(None, None, None);
         let (handle, _b) = notify.create_or_subscribe(InvalidationTopic, false).await?;
-        let enabled = storage.is_some();
-        if let Some(storage) = storage {
-            let h = handle.clone();
+        let h = handle.clone();
 
-            tokio::task::spawn(async move { start(storage, h.into_stream()).await });
-        }
-        Ok(Self { enabled, handle })
+        tokio::task::spawn(async move { start(storage, h.into_stream()).await });
+
+        Ok(Self { handle })
     }
 
     pub(crate) async fn invalidate(
         &mut self,
         requests: Vec<InvalidationRequest>,
     ) -> Result<(), BoxError> {
-        if self.enabled {
-            let mut sink = self.handle.clone().into_sink();
-            sink.send(requests).await.map_err(|e| e.message)?;
-        }
+        let mut sink = self.handle.clone().into_sink();
+        sink.send(requests).await.map_err(|e| e.message)?;
 
         Ok(())
     }
 }
 
 async fn start(
-    storage: RedisCacheStorage,
+    storage: Arc<EntityStorage>,
     mut handle: HandleStream<InvalidationTopic, Vec<InvalidationRequest>>,
 ) {
     while let Some(requests) = handle.next().await {
@@ -61,10 +58,14 @@ async fn start(
     }
 }
 
-async fn handle_request_batch(storage: &RedisCacheStorage, requests: Vec<InvalidationRequest>) {
+async fn handle_request_batch(storage: &EntityStorage, requests: Vec<InvalidationRequest>) {
     for request in requests {
         let start = Instant::now();
-        handle_request(storage, &request)
+        let redis_storage = match storage.get(request.subgraph()) {
+            Some(s) => s,
+            None => continue,
+        };
+        handle_request(redis_storage, &request)
             .instrument(tracing::info_span!("cache.invalidation.request"))
             .await;
         f64_histogram!(
@@ -146,6 +147,14 @@ impl InvalidationRequest {
             _ => {
                 todo!()
             }
+        }
+    }
+
+    fn subgraph(&self) -> &str {
+        match self {
+            InvalidationRequest::Subgraph { subgraph } => subgraph,
+            InvalidationRequest::Type { subgraph, .. } => subgraph,
+            InvalidationRequest::Entity { subgraph, .. } => subgraph,
         }
     }
 }
