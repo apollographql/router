@@ -44,7 +44,7 @@ fn adjacent_mutations_get_merged() {
           }
           updateInATwo: updateFooInA {
             id
-            baz
+            bar
           }
         }
         "#,
@@ -57,10 +57,6 @@ fn adjacent_mutations_get_merged() {
                   id
                   bar
                 }
-                updateInATwo: updateFooInA {
-                  id
-                  bar
-                }
               }
             },
             Fetch(service: "SubgraphB") {
@@ -68,6 +64,14 @@ fn adjacent_mutations_get_merged() {
                 updateInBOne: updateFooInB {
                   id
                   baz
+                }
+              }
+            },
+            Fetch(service: "SubgraphA") {
+              {
+                updateInATwo: updateFooInA {
+                  id
+                  bar
                 }
               }
             },
