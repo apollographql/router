@@ -32,6 +32,23 @@ pub(crate) mod spec_definition;
 pub const DEFAULT_LINK_NAME: Name = name!("link");
 pub const DEFAULT_IMPORT_SCALAR_NAME: Name = name!("Import");
 pub const DEFAULT_PURPOSE_ENUM_NAME: Name = name!("Purpose");
+const WELL_KNOWN_KEYS: &[&str] = &[
+    "key",
+    "shareable",
+    "provides",
+    "interfaceObject",
+    "requires",
+    "graph",
+    "Graph",
+    "type",
+    "external",
+    "extends",
+    "field",
+    "implements",
+    "override",
+    "unionMember",
+    "enumValue",
+];
 
 // TODO: we should provide proper "diagnostic" here, linking to ast, accumulating more than one
 // error and whatnot.
@@ -238,6 +255,7 @@ pub struct Link {
     pub spec_alias: Option<Name>,
     pub imports: Vec<Arc<Import>>,
     pub purpose: Option<Purpose>,
+    well_known_names: HashMap<&'static str, Name>,
 }
 
 impl Link {
@@ -256,7 +274,12 @@ impl Link {
             self.spec_name_in_schema().clone()
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
-            Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
+            self.well_known_names
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or_else(|| {
+                    Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
+                })
         }
     }
 
@@ -267,7 +290,12 @@ impl Link {
             import.alias.clone().unwrap_or_else(|| name.clone())
         } else {
             // Both sides are `Name`s and we just add valid characters in between.
-            Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
+            self.well_known_names
+                .get(name.as_str())
+                .cloned()
+                .unwrap_or_else(|| {
+                    Name::new_unchecked(&format!("{}__{}", self.spec_name_in_schema(), name))
+                })
         }
     }
 
@@ -322,12 +350,46 @@ impl Link {
             Default::default()
         };
 
+        let spec_name_in_schema = spec_alias.as_ref().unwrap_or(&url.identity.name);
+        let well_known_names = Self::well_known_names(spec_name_in_schema.clone());
+
         Ok(Link {
             url,
             spec_alias,
             imports,
             purpose,
+            well_known_names,
         })
+    }
+
+    pub fn new(
+        url: Url,
+        imports: Vec<Arc<Import>>,
+        purpose: Option<Purpose>,
+        spec_alias: Option<Name>,
+    ) -> Self {
+        let spec_name_in_schema = spec_alias.as_ref().unwrap_or(&url.identity.name);
+        let well_known_names = Self::well_known_names(spec_name_in_schema.clone());
+
+        Self {
+            url,
+            imports,
+            purpose,
+            spec_alias,
+            well_known_names,
+        }
+    }
+
+    fn well_known_names(spec_name_in_schema: Name) -> HashMap<&'static str, Name> {
+        WELL_KNOWN_KEYS
+            .iter()
+            .map(|name| {
+                (
+                    *name,
+                    Name::new_unchecked(&format!("{}__{}", spec_name_in_schema, name)),
+                )
+            })
+            .collect()
     }
 }
 

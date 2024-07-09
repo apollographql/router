@@ -3,7 +3,6 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
-use indexmap::map::Entry;
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -231,8 +230,8 @@ where
             sub_paths_and_selections: Vec<(GraphPathIter, Option<&'inputs Arc<SelectionSet>>)>,
         }
 
-        let mut local_selection_sets = Vec::new();
-
+        let mut local_selection_sets = Vec::with_capacity(graph_paths_and_selections.len());
+        let mut unique_trigger_count = 0;
         for (mut graph_path_iter, selection) in graph_paths_and_selections {
             let Some((generic_edge, trigger, conditions)) = graph_path_iter.next() else {
                 // End of an input `GraphPath`
@@ -241,10 +240,10 @@ where
                 }
                 continue;
             };
-            let for_edge = match merged.entry(generic_edge) {
-                Entry::Occupied(entry) => entry.into_mut(),
-                Entry::Vacant(entry) => {
-                    entry.insert(ByUniqueEdge {
+            if merged.get(&generic_edge).is_none() {
+                merged.insert(
+                    generic_edge,
+                    ByUniqueEdge {
                         target_node: if let Some(edge) = generic_edge.into() {
                             let (_source, target) = graph.edge_endpoints(edge)?;
                             target
@@ -253,28 +252,29 @@ where
                             node
                         },
                         by_unique_trigger: IndexMap::new(),
-                    })
-                }
-            };
-            match for_edge.by_unique_trigger.entry(trigger) {
-                Entry::Occupied(entry) => {
-                    let existing = entry.into_mut();
-                    existing.conditions = merge_conditions(&existing.conditions, conditions);
-                    existing
-                        .sub_paths_and_selections
-                        .push((graph_path_iter, selection))
-                    // Note that as we merge, we don't create a new child
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(PathTreeChildInputs {
+                    },
+                );
+            }
+            let for_edge = merged.get_mut(&generic_edge).expect("inserted above; qed");
+            if let Some(existing) = for_edge.by_unique_trigger.get_mut(&trigger) {
+                existing.conditions = merge_conditions(&existing.conditions, conditions);
+                existing
+                    .sub_paths_and_selections
+                    .push((graph_path_iter, selection))
+                // Note that as we merge, we don't create a new child
+            } else {
+                unique_trigger_count += 1;
+                for_edge.by_unique_trigger.insert(
+                    trigger,
+                    PathTreeChildInputs {
                         conditions: conditions.clone(),
                         sub_paths_and_selections: vec![(graph_path_iter, selection)],
-                    });
-                }
+                    },
+                );
             }
         }
 
-        let mut childs = Vec::new();
+        let mut childs = Vec::with_capacity(unique_trigger_count);
         for (edge, by_unique_edge) in merged {
             for (trigger, child) in by_unique_edge.by_unique_trigger {
                 childs.push(Arc::new(PathTreeChild {

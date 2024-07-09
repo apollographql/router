@@ -2164,7 +2164,7 @@ impl SelectionSet {
         &mut self,
         others: impl Iterator<Item = &'op SelectionSet>,
     ) -> Result<(), FederationError> {
-        let mut selections_to_merge = vec![];
+        let mut selections_to_merge: Vec<&Selection> = vec![];
         for other in others {
             if other.schema != self.schema {
                 return Err(FederationError::internal(
@@ -2192,68 +2192,72 @@ impl SelectionSet {
         &mut self,
         others: impl Iterator<Item = &'op Selection>,
     ) -> Result<(), FederationError> {
-        let mut fields = IndexMap::new();
-        let mut fragment_spreads = IndexMap::new();
-        let mut inline_fragments = IndexMap::new();
+        let mut fields: IndexMap<SelectionKey, Vec<&Arc<FieldSelection>>> = IndexMap::new();
+        let mut fragment_spreads: IndexMap<SelectionKey, Vec<&Arc<FragmentSpreadSelection>>> =
+            IndexMap::new();
+        let mut inline_fragments: IndexMap<SelectionKey, Vec<&Arc<InlineFragmentSelection>>> =
+            IndexMap::new();
         let target = Arc::make_mut(&mut self.selections);
         for other_selection in others {
             let other_key = other_selection.key();
-            match target.entry(other_key.clone()) {
-                selection_map::Entry::Occupied(existing) => match existing.get() {
-                    Selection::Field(self_field_selection) => {
-                        let Selection::Field(other_field_selection) = other_selection else {
-                            return Err(Internal {
-                                    message: format!(
-                                        "Field selection key for field \"{}\" references non-field selection",
-                                        self_field_selection.field.field_position,
-                                    ),
-                                }.into());
-                        };
-                        fields
-                            .entry(other_key)
-                            .or_insert_with(Vec::new)
-                            .push(other_field_selection);
+            match target.get_mut(&other_key) {
+                None => {
+                    target.insert(other_selection.clone());
+                }
+                Some(SelectionValue::Field(self_field_selection)) => {
+                    let Selection::Field(other_field_selection) = other_selection else {
+                        return Err(Internal {
+                                message: format!(
+                                    "Field selection key for field \"{}\" references non-field selection",
+                                    self_field_selection.get().field.field_position,
+                                ),
+                            }.into());
+                    };
+                    if let Some(fs) = fields.get_mut(&other_key) {
+                        fs.push(other_field_selection);
+                    } else {
+                        fields.insert(other_key, vec![other_field_selection]);
                     }
-                    Selection::FragmentSpread(self_fragment_spread_selection) => {
-                        let Selection::FragmentSpread(other_fragment_spread_selection) =
-                            other_selection
-                        else {
-                            return Err(Internal {
-                                    message: format!(
-                                        "Fragment spread selection key for fragment \"{}\" references non-field selection",
-                                        self_fragment_spread_selection.spread.fragment_name,
-                                    ),
-                                }.into());
-                        };
-                        fragment_spreads
-                            .entry(other_key)
-                            .or_insert_with(Vec::new)
-                            .push(other_fragment_spread_selection);
+                }
+                Some(SelectionValue::FragmentSpread(self_fragment_spread_selection)) => {
+                    let Selection::FragmentSpread(other_fragment_spread_selection) =
+                        other_selection
+                    else {
+                        return Err(Internal {
+                                message: format!(
+                                    "Fragment spread selection key for fragment \"{}\" references non-field selection",
+                                    self_fragment_spread_selection.get().spread.fragment_name,
+                                ),
+                            }.into());
+                    };
+                    if let Some(fss) = fragment_spreads.get_mut(&other_key) {
+                        fss.push(other_fragment_spread_selection);
+                    } else {
+                        fragment_spreads.insert(other_key, vec![other_fragment_spread_selection]);
                     }
-                    Selection::InlineFragment(self_inline_fragment_selection) => {
-                        let Selection::InlineFragment(other_inline_fragment_selection) =
-                            other_selection
-                        else {
-                            return Err(Internal {
-                                    message: format!(
-                                        "Inline fragment selection key under parent type \"{}\" {}references non-field selection",
-                                        self_inline_fragment_selection.inline_fragment.parent_type_position,
-                                        self_inline_fragment_selection.inline_fragment.type_condition_position.clone()
-                                            .map_or_else(
-                                                String::new,
-                                                |cond| format!("(type condition: {}) ", cond),
-                                            ),
-                                    ),
-                                }.into());
-                        };
-                        inline_fragments
-                            .entry(other_key)
-                            .or_insert_with(Vec::new)
-                            .push(other_inline_fragment_selection);
+                }
+                Some(SelectionValue::InlineFragment(self_inline_fragment_selection)) => {
+                    let Selection::InlineFragment(other_inline_fragment_selection) =
+                        other_selection
+                    else {
+                        return Err(Internal {
+                                message: format!(
+                                    "Inline fragment selection key under parent type \"{}\" {}references non-field selection",
+                                    self_inline_fragment_selection.get().inline_fragment.parent_type_position,
+                                    self_inline_fragment_selection.get().inline_fragment.type_condition_position.clone()
+                                        .map_or_else(
+                                            String::new,
+                                            |cond| format!("(type condition: {}) ", cond),
+                                        ),
+                                ),
+                            }.into());
+                    };
+
+                    if let Some(ifs) = inline_fragments.get_mut(&other_key) {
+                        ifs.push(other_inline_fragment_selection);
+                    } else {
+                        inline_fragments.insert(other_key, vec![other_inline_fragment_selection]);
                     }
-                },
-                selection_map::Entry::Vacant(vacant) => {
-                    vacant.insert(other_selection.clone())?;
                 }
             }
         }
@@ -2261,15 +2265,17 @@ impl SelectionSet {
         for (key, self_selection) in target.iter_mut() {
             match self_selection {
                 SelectionValue::Field(mut self_field_selection) => {
-                    if let Some(other_field_selections) = fields.shift_remove(key) {
+                    // todo: ask Renée why it used shift remove
+                    if let Some(other_field_selections) = fields.swap_remove(key) {
                         self_field_selection.merge_into(
                             other_field_selections.iter().map(|selection| &***selection),
                         )?;
                     }
                 }
                 SelectionValue::FragmentSpread(mut self_fragment_spread_selection) => {
+                    // todo: ask Renée why it used shift remove
                     if let Some(other_fragment_spread_selections) =
-                        fragment_spreads.shift_remove(key)
+                        fragment_spreads.swap_remove(key)
                     {
                         self_fragment_spread_selection.merge_into(
                             other_fragment_spread_selections
@@ -2279,8 +2285,9 @@ impl SelectionSet {
                     }
                 }
                 SelectionValue::InlineFragment(mut self_inline_fragment_selection) => {
+                    // todo: ask Renée why it used shift remove
                     if let Some(other_inline_fragment_selections) =
-                        inline_fragments.shift_remove(key)
+                        inline_fragments.swap_remove(key)
                     {
                         self_inline_fragment_selection.merge_into(
                             other_inline_fragment_selections

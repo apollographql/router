@@ -1,8 +1,10 @@
+use std::collections::HashMap;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
@@ -56,6 +58,13 @@ pub struct FederationSchema {
     /// This is only populated for valid subgraphs, and can only be accessed if you have a
     /// `ValidFederationSchema`.
     subgraph_metadata: Option<Box<SubgraphMetadata>>,
+    union_members: HashMap<NamedType, IndexSet<ObjectTypeDefinitionPosition>>,
+}
+
+#[derive(Debug)]
+pub(crate) enum PossibleRuntimeTypes<'a> {
+    Single(&'a ObjectTypeDefinitionPosition),
+    Many(&'a IndexSet<ObjectTypeDefinitionPosition>),
 }
 
 impl FederationSchema {
@@ -160,6 +169,26 @@ impl FederationSchema {
                     type_name: t.name.clone(),
                 })
                 .collect::<IndexSet<_>>(),
+        })
+    }
+
+    pub(crate) fn possible_runtime_types_ref<'a>(
+        &'a self,
+        composite_type_definition_position: &'a CompositeTypeDefinitionPosition,
+    ) -> Result<PossibleRuntimeTypes, FederationError> {
+        Ok(match composite_type_definition_position {
+            CompositeTypeDefinitionPosition::Object(pos) => PossibleRuntimeTypes::Single(pos),
+            CompositeTypeDefinitionPosition::Interface(pos) => PossibleRuntimeTypes::Many(
+                &self
+                    .referencers()
+                    .get_interface_type(&pos.type_name)?
+                    .object_types,
+            ),
+            CompositeTypeDefinitionPosition::Union(pos) => PossibleRuntimeTypes::Many(
+                self.union_members
+                    .get(&pos.type_name)
+                    .expect("Union member should exist"),
+            ),
         })
     }
 

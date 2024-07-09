@@ -241,12 +241,12 @@ impl FederationSpecDefinitions {
     // The Default trait doesn't allow for returning Results, so we ignore the clippy warning here.
     #[allow(clippy::should_implement_trait)]
     pub fn default() -> Result<Self, FederationSpecError> {
-        Self::from_link(Link {
-            url: Url {
+        Self::from_link(Link::new(
+            Url {
                 identity: Identity::federation_identity(),
                 version: MAX_FEDERATION_VERSION,
             },
-            imports: FEDERATION_V1_DIRECTIVE_NAMES
+            FEDERATION_V1_DIRECTIVE_NAMES
                 .iter()
                 .map(|i| {
                     Arc::new(Import {
@@ -256,9 +256,9 @@ impl FederationSpecDefinitions {
                     })
                 })
                 .collect::<Vec<Arc<Import>>>(),
-            purpose: None,
-            spec_alias: None,
-        })
+            None,
+            None,
+        ))
     }
 
     pub fn namespaced_type_name(&self, name: &Name, is_directive: bool) -> Name {
@@ -699,19 +699,19 @@ impl LinkSpecDefinitions {
 
 impl Default for LinkSpecDefinitions {
     fn default() -> Self {
-        let link = Link {
-            url: Url {
+        let link = Link::new(
+            Url {
                 identity: Identity::link_identity(),
                 version: Version { major: 1, minor: 0 },
             },
-            imports: vec![Arc::new(Import {
+            vec![Arc::new(Import {
                 element: name!("Import"),
                 is_directive: false,
                 alias: None,
             })],
-            purpose: None,
-            spec_alias: None,
-        };
+            None,
+            None,
+        );
         Self::new(link)
     }
 }
@@ -723,18 +723,18 @@ mod tests {
 
     #[test]
     fn handle_unsupported_federation_version() {
-        FederationSpecDefinitions::from_link(Link {
-            url: Url {
+        FederationSpecDefinitions::from_link(Link::new(
+            Url {
                 identity: federation_link_identity(),
                 version: Version {
                     major: 99,
                     minor: 99,
                 },
             },
-            spec_alias: None,
-            imports: vec![],
-            purpose: None,
-        })
+            vec![],
+            None,
+            None,
+        ))
         .expect_err("federation version 99 is not yet supported");
     }
 }

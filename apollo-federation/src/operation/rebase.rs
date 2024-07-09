@@ -25,6 +25,7 @@ use super::TYPENAME_FIELD;
 use crate::error::FederationError;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::OutputTypeDefinitionPosition;
+use crate::schema::PossibleRuntimeTypes;
 use crate::schema::ValidFederationSchema;
 
 fn print_possible_runtimes(
@@ -177,12 +178,15 @@ impl Field {
 
         if self.name() == &TYPENAME_FIELD {
             // TODO interface object info should be precomputed in QP constructor
-            return if schema
-                .possible_runtime_types(parent_type.clone())?
-                .iter()
-                .map(|t| schema.is_interface_object_type(t.clone().into()))
-                .process_results(|mut iter| iter.any(|b| b))?
-            {
+            return if match schema.possible_runtime_types_ref(parent_type)? {
+                PossibleRuntimeTypes::Single(otdp) => {
+                    schema.is_interface_object_type(otdp.clone().into())?
+                }
+                PossibleRuntimeTypes::Many(otdps) => otdps
+                    .iter()
+                    .map(|t| schema.is_interface_object_type(t.clone().into()))
+                    .process_results(|mut iter| iter.any(|b| b))?,
+            } {
                 Err(RebaseError::InterfaceObjectTypename {
                     field_position: self.field_position.clone(),
                     parent_type: parent_type.clone(),
