@@ -4,6 +4,7 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 
 use apollo_compiler::ast;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -23,7 +24,6 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use indexmap::IndexSet;
 use lazy_static::lazy_static;
 use serde::Serialize;
 use strum::IntoEnumIterator;
@@ -5990,7 +5990,7 @@ pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
 
 lazy_static! {
     static ref GRAPHQL_BUILTIN_SCALAR_NAMES: IndexSet<Name> = {
-        IndexSet::from([
+        IndexSet::from_iter([
             name!("Int"),
             name!("Float"),
             name!("String"),
@@ -5999,7 +5999,7 @@ lazy_static! {
         ])
     };
     static ref GRAPHQL_BUILTIN_DIRECTIVE_NAMES: IndexSet<Name> = {
-        IndexSet::from([
+        IndexSet::from_iter([
             name!("include"),
             name!("skip"),
             name!("deprecated"),

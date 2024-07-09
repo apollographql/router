@@ -1,4 +1,4 @@
-use apollo_compiler::Parser;
+use apollo_compiler::parser::Parser;
 use insta::assert_json_snapshot;
 use serde_json_bytes::json;
 use test_log::test;

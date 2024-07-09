@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use indexmap::IndexSet;
+use apollo_compiler::collections::IndexSet;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
@@ -436,7 +436,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         }
 
         if let Some(selection_set) = selection.selection_set()? {
-            let mut all_tail_nodes = IndexSet::new();
+            let mut all_tail_nodes = IndexSet::default();
             for option in &new_options {
                 for path in &option.paths.0 {
                     all_tail_nodes.insert(path.tail);

@@ -351,10 +351,10 @@ impl StaticCostCalculator {
         should_estimate_requires: bool,
     ) -> Result<f64, DemandControlError> {
         let mut cost = 0.0;
-        if let Some(op) = &query.anonymous_operation {
+        if let Some(op) = &query.operations.anonymous {
             cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
-        for (_name, op) in query.named_operations.iter() {
+        for (_name, op) in query.operations.named.iter() {
             cost += self.score_operation(op, schema, query, should_estimate_requires)?;
         }
         Ok(cost)
