@@ -541,75 +541,25 @@ fn key_where_at_external_is_not_at_top_level_of_selection_of_requires() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "A") {
-              {
-                u {
-                  __typename
-                  k1 {
-                    id
-                  }
-                }
+    QueryPlan {
+      Fetch(service: "A") {
+        {
+          u {
+            __typename
+            k1 {
+              id
+            }
+            ... {
+              __typename
+              k1 {
+                id
               }
-            },
-            Flatten(path: "u") {
-              Fetch(service: "B") {
-                {
-                  ... on U {
-                    __typename
-                    k1 {
-                      id
-                    }
-                  }
-                } =>
-                {
-                  ... on U {
-                    k2
-                  }
-                }
-              },
-            },
-            Flatten(path: "u") {
-              Fetch(service: "C") {
-                {
-                  ... on U {
-                    __typename
-                    k2
-                  }
-                } =>
-                {
-                  ... on U {
-                    v {
-                      v
-                    }
-                  }
-                }
-              },
-            },
-            Flatten(path: "u") {
-              Fetch(service: "B") {
-                {
-                  ... on U {
-                    __typename
-                    v {
-                      v
-                    }
-                    k1 {
-                      id
-                    }
-                  }
-                } =>
-                {
-                  ... on U {
-                    f
-                  }
-                }
-              },
-            },
-          },
+            }
+          }
         }
-      "###
+      },
+    }
+    "###
     );
 }
 

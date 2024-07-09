@@ -55,6 +55,7 @@ use std::ops::Range;
 
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
+use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ExtendedType;

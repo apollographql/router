@@ -45,9 +45,7 @@ pub(super) fn validate_http_method_arg(
     messages
 }
 
-pub(super) fn get_http_methods_arg<'a>(
-    http_arg: &'a [(Name, Node<Value>)],
-) -> Vec<&'a (Name, Node<Value>)> {
+pub(super) fn get_http_methods_arg(http_arg: &[(Name, Node<Value>)]) -> Vec<&(Name, Node<Value>)> {
     http_arg
         .iter()
         .filter(|(method, _)| {
