@@ -341,7 +341,7 @@ impl Fragment {
 }
 
 impl NamedFragments {
-    /// Returns a list of fragments that can be applied directly at the given type.
+    /// Returns fragments that can be applied directly at the given type.
     fn get_all_may_apply_directly_at_type<'a>(
         &'a self,
         ty: &'a CompositeTypeDefinitionPosition,
@@ -367,7 +367,10 @@ struct FieldsConflictValidator {
 }
 
 impl FieldsConflictValidator {
-    // `selection_set` must be fragment-spread-free.
+    /// Build a field merging validator for a selection set.
+    ///
+    /// # Preconditions
+    /// The selection set must not contain named fragment spreads.
     fn from_selection_set(selection_set: &SelectionSet) -> Self {
         Self::for_level(&[selection_set])
     }

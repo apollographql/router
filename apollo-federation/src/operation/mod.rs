@@ -3056,7 +3056,8 @@ impl SelectionSet {
         FieldSelectionsIter::new(self.selections.values())
     }
 
-    // - `self.selections` must be fragment-spread-free.
+    /// # Preconditions
+    /// The selection set must not contain named fragment spreads.
     fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
         let mut fields = Vec::new();
 
