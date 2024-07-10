@@ -14,7 +14,7 @@ async fn test_valid_error_locations() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
         .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": { "me": null },
+            "data": { "topProducts": null },
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [
@@ -58,7 +58,7 @@ async fn test_empty_error_locations() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
         .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": { "me": null },
+            "data": { "topProducts": null },
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [],
@@ -95,7 +95,7 @@ async fn test_invalid_error_locations() -> Result<(), BoxError> {
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
         .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": { "me": null },
+            "data": { "topProducts": null },
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [{ "line": true }],
@@ -136,7 +136,7 @@ async fn test_invalid_error_locations_with_single_negative_one_location() -> Res
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
         .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": { "me": null },
+            "data": { "topProducts": null },
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [{ "line": -1, "column": -1 }],
@@ -173,7 +173,7 @@ async fn test_invalid_error_locations_contains_negative_one_location() -> Result
     let mut router = IntegrationTest::builder()
         .config(CONFIG)
         .responder(ResponseTemplate::new(200).set_body_json(json!({
-            "data": { "me": null },
+            "data": { "topProducts": null },
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [
