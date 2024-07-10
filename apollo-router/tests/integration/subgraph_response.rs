@@ -18,8 +18,8 @@ async fn test_valid_error_locations() -> Result<(), BoxError> {
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [
-                    { "line": 0, "column": 1 },
-                    { "line": 2, "column": 3 },
+                    { "line": 1, "column": 2 },
+                    { "line": 3, "column": 4 },
                 ],
                 "path": ["topProducts"]
             }]
@@ -41,8 +41,8 @@ async fn test_valid_error_locations() -> Result<(), BoxError> {
             "errors": [{
                 "message":"Some error on subgraph",
                 "locations": [
-                    { "line": 0, "column": 1 },
-                    { "line": 2, "column": 3 },
+                    { "line": 1, "column": 2 },
+                    { "line": 3, "column": 4 },
                 ],
                 "path":["topProducts"]
             }]
@@ -177,9 +177,9 @@ async fn test_invalid_error_locations_contains_negative_one_location() -> Result
             "errors": [{
                 "message": "Some error on subgraph",
                 "locations": [
-                    { "line": 0, "column": 1 },
+                    { "line": 1, "column": 2 },
                     { "line": -1, "column": -1 },
-                    { "line": 2, "column": 3 },
+                    { "line": 3, "column": 4 },
                 ],
                 "path": ["topProducts"]
             }]
@@ -201,8 +201,8 @@ async fn test_invalid_error_locations_contains_negative_one_location() -> Result
             "errors": [{
                 "message":"Some error on subgraph",
                 "locations": [
-                    { "line": 0, "column": 1 },
-                    { "line": 2, "column": 3 },
+                    { "line": 1, "column": 2 },
+                    { "line": 3, "column": 4 },
                 ],
                 "path":["topProducts"]
             }]
