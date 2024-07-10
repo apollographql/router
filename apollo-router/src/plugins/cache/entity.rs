@@ -400,17 +400,6 @@ impl InnerCacheService {
                 .await?
                 {
                     ControlFlow::Break(response) => {
-                        // u64_counter!(
-                        //     "apollo.router.operations.entity.cache",
-                        //     "Entity cache hit or miss operations",
-                        //     1u64,
-                        //     //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
-                        //     "entity.type" = "Query",
-                        //     "hit" = true,
-                        //     "subgraph.name" = self.name.clone()
-                        // );
-                        println!("added 1 !!!!");
-
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
                         let _ = response.context.insert(
                             format!(
@@ -422,16 +411,6 @@ impl InnerCacheService {
                         Ok(response)
                     }
                     ControlFlow::Continue((request, mut root_cache_key)) => {
-                        // u64_counter!(
-                        //     "apollo.router.operations.entity.cache",
-                        //     "Entity cache hit or miss operations",
-                        //     1u64,
-                        //     //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
-                        //     "entity.type" = "Query",
-                        //     "hit" = false,
-                        //     "subgraph.name" = self.name.clone()
-                        // );
-                        println!("added 2 !!!!");
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
                             format!(
@@ -1031,7 +1010,6 @@ fn filter_representations(
         if let Some(false) = cache_entry.as_ref().map(|c| c.control.can_use()) {
             cache_entry = None;
         }
-        dbg!(cache_entry.is_some());
         match cache_entry.as_ref() {
             None => {
                 cache_hit.entry(typename.clone()).or_default().miss += 1;
@@ -1049,8 +1027,6 @@ fn filter_representations(
                 }
             }
         }
-        dbg!(&cache_hit);
-        dbg!(&subgraph_name);
 
         result.push(IntermediateResult {
             key,
@@ -1059,48 +1035,10 @@ fn filter_representations(
         });
     }
 
-    println!("added !!!!");
     let _ = context.insert(
         format!("{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{subgraph_name}"),
         CacheSubgraph(cache_hit),
     );
-
-    // for (ty, CacheHitMiss { hit, miss }) in cache_hit {
-    //     u64_counter!(
-    //         "apollo.router.operations.entity.cache",
-    //         "Entity cache hit or miss operations",
-    //         hit as u64,
-    //         "entity.type" = ty.as_str().to_string(),
-    //         "hit" = true,
-    //         "subgraph.name" = subgraph_name
-    //     );
-    //     u64_counter!(
-    //         "apollo.router.operations.entity.cache",
-    //         "Entity cache hit or miss operations",
-    //         miss as u64,
-    //         "entity.type" = ty.as_str().to_string(),
-    //         "hit" = false,
-    //         "subgraph.name" = subgraph_name
-    //     );
-    // }
-    // for (ty, (hit, miss)) in cache_hit {
-    //     u64_counter!(
-    //         "apollo.router.operations.entity.cache",
-    //         "Entity cache hit or miss operations",
-    //         hit as u64,
-    //         "entity.type" = ty.as_str().to_string(),
-    //         "hit" = true,
-    //         "subgraph.name" = subgraph_name.to_string()
-    //     );
-    //     u64_counter!(
-    //         "apollo.router.operations.entity.cache",
-    //         "Entity cache hit or miss operations",
-    //         miss as u64,
-    //         "entity.type" = ty.as_str().to_string(),
-    //         "hit" = false,
-    //         "subgraph.name" = subgraph_name.to_string()
-    //     );
-    // }
 
     Ok((new_representations, result, cache_control))
 }
