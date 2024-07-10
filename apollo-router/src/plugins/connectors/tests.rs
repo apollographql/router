@@ -270,7 +270,7 @@ async fn basic_errors() {
         {
           "message": "http error: 404 Not Found",
           "extensions": {
-            "connector": "connectors.json http: Get /users",
+            "connector": "connectors.json http: GET /users",
             "code": "404"
           }
         }
