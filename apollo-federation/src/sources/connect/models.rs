@@ -1,5 +1,3 @@
-mod validation;
-
 use indexmap::IndexMap;
 pub use validation::validate;
 pub use validation::Code as ValidationCode;
@@ -10,6 +8,7 @@ pub use validation::Severity as ValidationSeverity;
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;
 use super::spec::SourceHTTPArguments;
+use super::validation;
 use super::ConnectId;
 use super::JSONSelection;
 use super::URLPathTemplate;
@@ -272,7 +271,7 @@ mod tests {
     use crate::schema::FederationSchema;
     use crate::ValidFederationSubgraphs;
 
-    static SIMPLE_SUPERGRAPH: &str = include_str!("../tests/schemas/simple.graphql");
+    static SIMPLE_SUPERGRAPH: &str = include_str!("./tests/schemas/simple.graphql");
 
     fn get_subgraphs(supergraph_sdl: &str) -> ValidFederationSubgraphs {
         let schema = Schema::parse(supergraph_sdl, "supergraph.graphql").unwrap();
