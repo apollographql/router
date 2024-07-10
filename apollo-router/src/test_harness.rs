@@ -15,6 +15,7 @@ use crate::axum_factory::span_mode;
 use crate::axum_factory::utils::PropagatingMakeSpan;
 use crate::configuration::Configuration;
 use crate::configuration::ConfigurationError;
+use crate::graphql;
 use crate::plugin::test::canned;
 use crate::plugin::test::MockSubgraph;
 use crate::plugin::DynPlugin;
@@ -487,4 +488,45 @@ impl Plugin for MockedSubgraphs {
             .map(|service| service.clone().boxed())
             .unwrap_or(default)
     }
+}
+
+// This function takes a valid request and duplicates it (with a new operation
+// name) to create an array (batch) request.
+//
+// Note: It's important to make the operation name different to prevent race conditions in testing
+// where various tests assume the presence (or absence) of a test span.
+//
+// Detailed Explanation
+//
+// A batch sends a series of requests concurrently through a router. If we
+// simply duplicate the request, then there is not insignificant chance that spans such as
+// "parse_query" won't appear because the document has already been parsed and is now in a cache.
+//
+// To explicitly avoid this, we add an operation name which will force the router to re-parse the
+// document since operation name is part of the parsed document cache key.
+//
+// This has been a significant cause of racy/flaky tests in the past, so only tamper with this
+// function if you understand what the impact will be.
+
+///
+/// Convert a graphql request into a batch of requests
+///
+/// This is helpful for testing batching functionality.
+pub fn make_fake_batch(
+    input: http::Request<graphql::Request>,
+) -> http::Request<crate::services::router::Body> {
+    input.map(|req| {
+        // Modify the request so that it is a valid array of requests.
+        let mut req_value = serde_json::to_value(&req).unwrap();
+        req_value["operation"] = "two".into();
+        let new_req: graphql::Request = serde_json::from_value(req_value).unwrap();
+        let mut json_bytes_req = serde_json::to_vec(&req).unwrap();
+        let mut json_bytes_new_req = serde_json::to_vec(&new_req).unwrap();
+        let mut result = vec![b'['];
+        result.append(&mut json_bytes_req);
+        result.push(b',');
+        result.append(&mut json_bytes_new_req);
+        result.push(b']');
+        hyper::Body::from(result)
+    })
 }

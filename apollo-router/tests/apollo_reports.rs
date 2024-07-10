@@ -23,7 +23,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::anyhow;
-use apollo_router::graphql;
+use apollo_router::make_fake_batch;
 use apollo_router::services::router;
 use apollo_router::services::router::BoxCloneService;
 use apollo_router::services::supergraph;
@@ -50,23 +50,6 @@ static ROUTER_SERVICE_RUNTIME: Lazy<Arc<tokio::runtime::Runtime>> = Lazy::new(||
     Arc::new(tokio::runtime::Runtime::new().expect("must be able to create tokio runtime"))
 });
 static TEST: Lazy<Arc<Mutex<()>>> = Lazy::new(Default::default);
-
-fn make_fake_batch(input: http::Request<graphql::Request>) -> http::Request<hyper::Body> {
-    input.map(|req| {
-        // Modify the request so that it is a valid array of requests.
-        let mut req_value = serde_json::to_value(&req).unwrap();
-        req_value["operation"] = "two".into();
-        let new_req: graphql::Request = serde_json::from_value(req_value).unwrap();
-        let mut json_bytes_req = serde_json::to_vec(&req).unwrap();
-        let mut json_bytes_new_req = serde_json::to_vec(&new_req).unwrap();
-        let mut result = vec![b'['];
-        result.append(&mut json_bytes_req);
-        result.push(b',');
-        result.append(&mut json_bytes_new_req);
-        result.push(b']');
-        hyper::Body::from(result)
-    })
-}
 
 async fn config(
     use_legacy_request_span: bool,

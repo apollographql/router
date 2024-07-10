@@ -23,6 +23,7 @@ use crate::services::supergraph;
 use crate::services::SupergraphRequest;
 use crate::services::SupergraphResponse;
 use crate::services::MULTIPART_DEFER_CONTENT_TYPE;
+use crate::test_harness::make_fake_batch;
 use crate::Context;
 
 // Test Vary processing
@@ -227,24 +228,6 @@ async fn test_http_max_request_bytes() {
     // Send a request just over the limit
     let response = with_config(CANNED_REQUEST_LEN - 1).await.response;
     assert_eq!(response.status(), http::StatusCode::PAYLOAD_TOO_LARGE);
-}
-
-//  Test query batching
-fn make_fake_batch(input: http::Request<graphql::Request>) -> http::Request<hyper::Body> {
-    input.map(|req| {
-        // Modify the request so that it is a valid array of requests.
-        let mut req_value = serde_json::to_value(&req).unwrap();
-        req_value["operation"] = "two".into();
-        let new_req: graphql::Request = serde_json::from_value(req_value).unwrap();
-        let mut json_bytes_req = serde_json::to_vec(&req).unwrap();
-        let mut json_bytes_new_req = serde_json::to_vec(&new_req).unwrap();
-        let mut result = vec![b'['];
-        result.append(&mut json_bytes_req);
-        result.push(b',');
-        result.append(&mut json_bytes_new_req);
-        result.push(b']');
-        hyper::Body::from(result)
-    })
 }
 
 #[tokio::test]
