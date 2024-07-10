@@ -399,8 +399,28 @@ impl InnerCacheService {
                 .instrument(tracing::info_span!("cache.entity.lookup"))
                 .await?
                 {
-                    ControlFlow::Break(response) => Ok(response),
+                    ControlFlow::Break(response) => {
+                        u64_counter!(
+                            "apollo.router.operations.entity.cache",
+                            "Entity cache hit or miss operations",
+                            1u64,
+                            //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
+                            "entity.type" = "Query",
+                            "hit" = true,
+                            "subgraph.name" = self.name.clone()
+                        );
+                        Ok(response)
+                    }
                     ControlFlow::Continue((request, mut root_cache_key)) => {
+                        u64_counter!(
+                            "apollo.router.operations.entity.cache",
+                            "Entity cache hit or miss operations",
+                            1u64,
+                            //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
+                            "entity.type" = "Query",
+                            "hit" = false,
+                            "subgraph.name" = self.name.clone()
+                        );
                         let mut response = self.service.call(request).await?;
 
                         let cache_control =
@@ -1036,6 +1056,24 @@ fn filter_representations(
     //         "entity.type" = ty.as_str().to_string(),
     //         "hit" = false,
     //         "subgraph.name" = subgraph_name
+    //     );
+    // }
+    // for (ty, (hit, miss)) in cache_hit {
+    //     u64_counter!(
+    //         "apollo.router.operations.entity.cache",
+    //         "Entity cache hit or miss operations",
+    //         hit as u64,
+    //         "entity.type" = ty.as_str().to_string(),
+    //         "hit" = true,
+    //         "subgraph.name" = subgraph_name.to_string()
+    //     );
+    //     u64_counter!(
+    //         "apollo.router.operations.entity.cache",
+    //         "Entity cache hit or miss operations",
+    //         miss as u64,
+    //         "entity.type" = ty.as_str().to_string(),
+    //         "hit" = false,
+    //         "subgraph.name" = subgraph_name.to_string()
     //     );
     // }
 
