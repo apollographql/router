@@ -3,7 +3,6 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use indexmap::IndexMap;
 
@@ -33,7 +32,7 @@ fn check_absence_of_aliases(
         let OpPathElement::Field(field) = elem else {
             return Ok(());
         };
-        let Some(alias) = &field.data().alias else {
+        let Some(alias) = &field.alias else {
             return Ok(());
         };
         alias_errors.push(SingleFederationError::UnsupportedFeature {
@@ -99,16 +98,12 @@ pub(crate) fn parse_field_set_without_normalization(
 pub(crate) fn collect_target_fields_from_field_set(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
-    value: NodeStr,
+    value: &str,
 ) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
-    let field_set = FieldSet::parse_and_validate(
-        schema,
-        parent_type_name,
-        value.as_str(),
-        "field_set.graphql",
-    )?;
+    let field_set =
+        FieldSet::parse_and_validate(schema, parent_type_name, value, "field_set.graphql")?;
     let mut stack = vec![&field_set.selection_set];
     let mut fields = vec![];
     while let Some(selection_set) = stack.pop() {
@@ -193,7 +188,7 @@ pub(crate) fn add_interface_field_implementations(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::schema::Name;
+    use apollo_compiler::Name;
 
     use crate::error::FederationError;
     use crate::query_graph::build_federated_query_graph;
@@ -243,9 +238,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             r#"The following errors occurred:
-
   - Cannot use alias "r1" in "r1: r s q1: q": aliases are not currently supported in the used directive
-
   - Cannot use alias "q1" in "r1: r s q1: q": aliases are not currently supported in the used directive"#
         );
         Ok(())

@@ -281,7 +281,7 @@ impl ExternalMetadata {
     ) -> Result<bool, FederationError> {
         for selection in selection_set.selections.values() {
             if let Selection::Field(field_selection) = selection {
-                if self.is_external(&field_selection.field.data().field_position)? {
+                if self.is_external(&field_selection.field.field_position)? {
                     return Ok(true);
                 }
             }

@@ -1,5 +1,5 @@
-use apollo_compiler::ast;
 use apollo_compiler::schema;
+use apollo_compiler::Name;
 use serde::de::Error as _;
 use serde::Deserialize;
 use serde::Serialize;
@@ -160,7 +160,7 @@ fn validate_input_value(
 }
 
 impl FieldType {
-    pub(crate) fn new_named(name: ast::Name) -> Self {
+    pub(crate) fn new_named(name: Name) -> Self {
         Self(schema::Type::Named(name))
     }
 

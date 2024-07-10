@@ -13,7 +13,7 @@ use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use tower::BoxError;
 
@@ -26,7 +26,7 @@ use crate::spec::TYPENAME;
 
 pub(crate) struct PolicyExtractionVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
+    fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     pub(crate) extracted_policies: HashSet<String>,
     policy_directive_name: String,
     entity_query: bool,
@@ -187,7 +187,7 @@ impl<'a> traverse::Visitor for PolicyExtractionVisitor<'a> {
 
 pub(crate) struct PolicyFilteringVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
     implementers_map: &'a HashMap<Name, Implementers>,
     dry_run: bool,
     request_policies: HashSet<String>,
@@ -195,7 +195,7 @@ pub(crate) struct PolicyFilteringVisitor<'a> {
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
     // the point of application
-    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
+    fragments_unauthorized_paths: HashMap<&'a Name, Vec<Path>>,
     current_path: Path,
     policy_directive_name: String,
 }

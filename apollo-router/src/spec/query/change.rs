@@ -6,14 +6,13 @@ use std::hash::Hasher;
 use apollo_compiler::ast;
 use apollo_compiler::ast::Argument;
 use apollo_compiler::ast::FieldDefinition;
-use apollo_compiler::ast::Name;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::DirectiveList;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Parser;
 use sha2::Digest;
 use sha2::Sha256;
@@ -38,7 +37,7 @@ pub(crate) struct QueryHashVisitor<'a> {
     // introspection query is hashed, it should take the whole schema into account
     schema_str: &'a str,
     hasher: Sha256,
-    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
+    fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     hashed_types: HashSet<String>,
     // name, field
     hashed_fields: HashSet<(String, String)>,
@@ -319,7 +318,7 @@ impl<'a> QueryHashVisitor<'a> {
                     .argument_by_name("requires")
                     .and_then(|arg| arg.as_str())
                 {
-                    if let Ok(parent_type) = Name::new(NodeStr::new(parent_type)) {
+                    if let Ok(parent_type) = Name::new(parent_type) {
                         let mut parser = Parser::new();
 
                         if let Ok(field_set) = parser.parse_field_set(

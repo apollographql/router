@@ -15,7 +15,7 @@ time = { version = "0.3.34", default-features = false, features = [
     "local-offset",
 ] }
 derive_more = "0.99.17"
-indexmap = "2.2.3"
+indexmap = "2.2.6"
 itertools = "0.13.0"
 lazy_static = "1.4.0"
 multimap = "0.10.0"
