@@ -527,6 +527,6 @@ pub fn make_fake_batch(
         result.push(b',');
         result.append(&mut json_bytes_new_req);
         result.push(b']');
-        hyper::Body::from(result)
+        crate::services::router::Body::from(result)
     })
 }
