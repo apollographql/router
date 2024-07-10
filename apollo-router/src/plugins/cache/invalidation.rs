@@ -13,6 +13,7 @@ use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::notification::Handle;
 use crate::notification::HandleStream;
+use crate::plugins::cache::entity::hash_entity_key;
 use crate::Notify;
 
 #[derive(Clone)]
@@ -142,6 +143,15 @@ impl InvalidationRequest {
         match self {
             InvalidationRequest::Subgraph { subgraph } => {
                 format!("subgraph:{subgraph}*",)
+            }
+            InvalidationRequest::Entity {
+                subgraph,
+                r#type,
+                key,
+            } => {
+                let entity_key = hash_entity_key(&key);
+                let ty = r#type;
+                format!("subgraph:{subgraph}:type:{ty}:entity:{entity_key}*")
             }
             _ => {
                 todo!()

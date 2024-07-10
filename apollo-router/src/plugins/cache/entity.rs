@@ -849,7 +849,7 @@ fn extract_cache_key_root(
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"
+        "subgraph:{subgraph_name}:type:Query:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
@@ -892,10 +892,7 @@ fn extract_cache_keys(
 
         let typename = opt_type.as_str().unwrap_or("-");
 
-        // We have to hash the representation because it can contains PII
-        let mut digest = Sha256::new();
-        digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
-        let hashed_entity_key = hex::encode(digest.finalize().as_slice());
+        let hashed_entity_key = hash_entity_key(&representation);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
         // - subgraph name: caching is done per subgraph
@@ -904,7 +901,7 @@ fn extract_cache_keys(
         // - query hash: invalidate the entry for a specific query and operation name
         // - additional data: separate cache entries depending on info like authorization status
         let mut key = String::new();
-        let _ = write!(&mut key,  "subgraph:{subgraph_name}:{typename}:{hashed_entity_key}:{query_hash}:{additional_data_hash}");
+        let _ = write!(&mut key, "subgraph:{subgraph_name}:type:{typename}:entity:{hashed_entity_key}:hash:{query_hash}:data:{additional_data_hash}");
         if is_known_private {
             if let Some(id) = private_id {
                 let _ = write!(&mut key, ":{id}");
@@ -917,6 +914,13 @@ fn extract_cache_keys(
         res.push(key);
     }
     Ok(res)
+}
+
+pub(crate) fn hash_entity_key(representation: &Value) -> String {
+    // We have to hash the representation because it can contains PII
+    let mut digest = Sha256::new();
+    digest.update(serde_json::to_string(&representation).unwrap().as_bytes());
+    hex::encode(digest.finalize().as_slice())
 }
 
 /// represents the result of a cache lookup for an entity type and key
