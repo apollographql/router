@@ -1,8 +1,5 @@
 use std::sync::Arc;
 
-use apollo_compiler::ast::NamedType;
-use apollo_compiler::executable::Field;
-use apollo_compiler::ExecutableDocument;
 use attributes::CacheAttributes;
 use opentelemetry::metrics::MeterProvider;
 use opentelemetry::Key;
@@ -10,58 +7,39 @@ use opentelemetry::KeyValue;
 use parking_lot::Mutex;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 
 use super::instruments::CustomCounter;
 use super::instruments::CustomCounterInner;
-use super::instruments::CustomInstruments;
 use super::instruments::Increment;
 use super::instruments::InstrumentsConfig;
 use super::instruments::METER_NAME;
 use super::selectors::CacheKind;
-use super::selectors::EntityType;
 use super::selectors::SubgraphSelector;
-use super::selectors::SubgraphValue;
-use super::Selectors;
-use crate::graphql::ResponseVisitor;
 use crate::metrics;
 use crate::plugins::cache::entity::CacheHitMiss;
 use crate::plugins::cache::entity::CacheSubgraph;
+use crate::plugins::cache::entity::CACHE_INFO_SUBGRAPH_CONTEXT_KEY;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
 use crate::plugins::telemetry::config_new::extendable::Extendable;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLValue;
-use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogram;
-use crate::plugins::telemetry::config_new::instruments::CustomHistogramInner;
 use crate::plugins::telemetry::config_new::instruments::DefaultedStandardInstrument;
 use crate::plugins::telemetry::config_new::instruments::Instrumented;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
-use crate::services::supergraph;
-use crate::Context;
 
 pub(crate) mod attributes;
-pub(crate) mod selectors;
 
-static CACHE_HIT_METRIC: &str = "apollo.router.operations.entity.cache.hit";
-static CACHE_MISS_METRIC: &str = "apollo.router.operations.entity.cache.miss";
+static CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CacheInstrumentsConfig {
-    /// A counter of times we have a cache hit
-    #[serde(rename = "apollo.router.operations.entity.cache.hit")]
-    pub(crate) cache_hit:
-        DefaultedStandardInstrument<Extendable<CacheAttributes, SubgraphSelector>>,
-
-    /// A counter of the number of times we have a cache miss
-    #[serde(rename = "apollo.router.operations.entity.cache.miss")]
-    pub(crate) cache_miss:
-        DefaultedStandardInstrument<Extendable<CacheAttributes, SubgraphSelector>>,
+    /// A counter of times we have a cache hit or cache miss
+    #[serde(rename = "apollo.router.operations.entity.cache")]
+    pub(crate) cache: DefaultedStandardInstrument<Extendable<CacheAttributes, SubgraphSelector>>,
 }
 
 impl DefaultForLevel for CacheInstrumentsConfig {
@@ -70,40 +48,25 @@ impl DefaultForLevel for CacheInstrumentsConfig {
         requirement_level: DefaultAttributeRequirementLevel,
         kind: TelemetryDataKind,
     ) {
-        if self.cache_hit.is_enabled() {
-            self.cache_hit.defaults_for_level(requirement_level, kind);
-        }
-        if self.cache_miss.is_enabled() {
-            self.cache_miss.defaults_for_level(requirement_level, kind);
+        if self.cache.is_enabled() {
+            self.cache.defaults_for_level(requirement_level, kind);
         }
     }
 }
-
-pub(crate) type CacheCustomInstruments = CustomInstruments<
-    subgraph::Request,
-    subgraph::Response,
-    CacheAttributes,
-    SubgraphSelector,
-    SubgraphValue,
->;
 
 pub(crate) struct CacheInstruments {
     pub(crate) cache_hit: Option<
         CustomCounter<subgraph::Request, subgraph::Response, CacheAttributes, SubgraphSelector>,
     >,
-    pub(crate) cache_miss: Option<
-        CustomCounter<subgraph::Request, subgraph::Response, CacheAttributes, SubgraphSelector>,
-    >,
-    // pub(crate) custom: CacheCustomInstruments,
 }
 
 impl From<&InstrumentsConfig> for CacheInstruments {
     fn from(value: &InstrumentsConfig) -> Self {
         let meter = metrics::meter_provider().meter(METER_NAME);
         CacheInstruments {
-            cache_hit: value.cache.attributes.cache_hit.is_enabled().then(|| {
+            cache_hit: value.cache.attributes.cache.is_enabled().then(|| {
                 let mut nb_attributes = 0;
-                let selectors = match &value.cache.attributes.cache_hit {
+                let selectors = match &value.cache.attributes.cache {
                     DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
                         None
                     }
@@ -118,56 +81,22 @@ impl From<&InstrumentsConfig> for CacheInstruments {
                         condition: Condition::True,
                         counter: Some(
                             meter
-                                .f64_counter(CACHE_HIT_METRIC)
+                                .f64_counter(CACHE_METRIC)
                                 .with_description(
-                                    "Entity cache hit operations at the subgraph level",
+                                    "Entity cache hit/miss operations at the subgraph level",
                                 )
                                 .init(),
                         ),
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: Some(Arc::new(SubgraphSelector::Cache {
                             cache: CacheKind::Hit,
-                            entity_type: EntityType::default(),
+                            entity_type: None,
                         })),
                         selectors,
                         incremented: false,
                     }),
                 }
             }),
-            cache_miss: value.cache.attributes.cache_miss.is_enabled().then(|| {
-                let mut nb_attributes = 0;
-                let selectors = match &value.cache.attributes.cache_miss {
-                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
-                        None
-                    }
-                    DefaultedStandardInstrument::Extendable { attributes } => {
-                        nb_attributes = attributes.custom.len();
-                        Some(attributes.clone())
-                    }
-                };
-                CustomCounter {
-                    inner: Mutex::new(CustomCounterInner {
-                        increment: Increment::Unit,
-                        condition: Condition::True,
-                        counter: Some(
-                            meter
-                                .f64_counter(CACHE_MISS_METRIC)
-                                .with_description(
-                                    "Entity cache miss operations at the subgraph level",
-                                )
-                                .init(),
-                        ),
-                        attributes: Vec::with_capacity(nb_attributes),
-                        selector: Some(Arc::new(SubgraphSelector::Cache {
-                            cache: CacheKind::Miss,
-                            entity_type: EntityType::default(),
-                        })),
-                        selectors,
-                        incremented: false,
-                    }),
-                }
-            }),
-            // custom: CustomInstruments::new(&value.graphql.custom),
         }
     }
 }
@@ -178,13 +107,9 @@ impl Instrumented for CacheInstruments {
     type EventResponse = ();
 
     fn on_request(&self, request: &Self::Request) {
-        if let Some(field_length) = &self.cache_hit {
-            field_length.on_request(request);
+        if let Some(cache_hit) = &self.cache_hit {
+            cache_hit.on_request(request);
         }
-        if let Some(field_execution) = &self.cache_miss {
-            field_execution.on_request(request);
-        }
-        // self.custom.on_request(request);
     }
 
     fn on_response(&self, response: &Self::Response) {
@@ -194,93 +119,81 @@ impl Instrumented for CacheInstruments {
                 return;
             }
         };
-        let cache_info: CacheSubgraph = match response.context.get(subgraph_name).ok().flatten() {
+        let cache_info: CacheSubgraph = match dbg!(response
+            .context
+            .get(&format!(
+                "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{subgraph_name}"
+            ))
+            .ok()
+            .flatten())
+        {
             Some(cache_info) => cache_info,
             None => {
                 return;
             }
         };
 
-        dbg!(&cache_info);
-
         if let Some(cache_hit) = &self.cache_hit {
-            // Clone but set incremented to true on the current one to make sure it's not incremented again
-            for (entity_type, CacheHitMiss { hit, .. }) in &cache_info.0 {
-                let cache_hit = cache_hit.clone();
+            for (entity_type, CacheHitMiss { hit, miss }) in &cache_info.0 {
+                // Cache hit
                 {
-                    let mut inner_cache_hit = cache_hit.inner.lock();
-                    inner_cache_hit.selector = Some(Arc::new(SubgraphSelector::StaticField {
-                        r#static: AttributeValue::I64(*hit as i64),
-                    }));
-                    if inner_cache_hit
-                        .selectors
-                        .as_ref()
-                        .map(|s| s.attributes.entity_type == Some(true))
-                        .unwrap_or_default()
+                    let cache_hit = cache_hit.clone();
                     {
-                        inner_cache_hit.attributes.push(KeyValue::new(
-                            Key::from_static_str("entity.type"),
-                            opentelemetry::Value::String(entity_type.to_string().into()),
-                        ));
-                    }
-                    if inner_cache_hit
-                        .selectors
-                        .as_ref()
-                        .map(|s| s.attributes.hit == Some(true))
-                        .unwrap_or_default()
-                    {
+                        let mut inner_cache_hit = cache_hit.inner.lock();
+                        inner_cache_hit.selector = Some(Arc::new(SubgraphSelector::StaticField {
+                            r#static: AttributeValue::I64(*hit as i64),
+                        }));
+                        if inner_cache_hit
+                            .selectors
+                            .as_ref()
+                            .map(|s| s.attributes.entity_type == Some(true))
+                            .unwrap_or_default()
+                        {
+                            inner_cache_hit.attributes.push(KeyValue::new(
+                                Key::from_static_str("entity.type"),
+                                opentelemetry::Value::String(entity_type.to_string().into()),
+                            ));
+                        }
                         inner_cache_hit.attributes.push(KeyValue::new(
                             Key::from_static_str("cache.hit"),
                             opentelemetry::Value::Bool(true),
                         ));
                     }
+                    cache_hit.on_response(response);
                 }
-                cache_hit.on_response(response);
+                // Cache miss
+                {
+                    let cache_miss = cache_hit.clone();
+                    {
+                        let mut inner_cache_miss = cache_miss.inner.lock();
+                        inner_cache_miss.selector = Some(Arc::new(SubgraphSelector::StaticField {
+                            r#static: AttributeValue::I64(*miss as i64),
+                        }));
+                        if inner_cache_miss
+                            .selectors
+                            .as_ref()
+                            .map(|s| s.attributes.entity_type == Some(true))
+                            .unwrap_or_default()
+                        {
+                            inner_cache_miss.attributes.push(KeyValue::new(
+                                Key::from_static_str("entity.type"),
+                                opentelemetry::Value::String(entity_type.to_string().into()),
+                            ));
+                        }
+                        inner_cache_miss.attributes.push(KeyValue::new(
+                            Key::from_static_str("cache.hit"),
+                            opentelemetry::Value::Bool(false),
+                        ));
+                    }
+                    cache_miss.on_response(response);
+                }
             }
         }
-        if let Some(field_execution) = &self.cache_miss {
-            field_execution.on_response(response);
-        }
-        // self.custom.on_response(response);
     }
 
     fn on_error(&self, error: &BoxError, ctx: &crate::Context) {
         if let Some(field_length) = &self.cache_hit {
             field_length.on_error(error, ctx);
-        }
-        if let Some(field_execution) = &self.cache_miss {
-            field_execution.on_error(error, ctx);
-        }
-        // self.custom.on_error(error, ctx);
-    }
-}
-
-struct CacheInstrumentsVisitor<'a> {
-    ctx: &'a Context,
-    instruments: &'a CacheInstruments,
-}
-
-impl<'a> ResponseVisitor for CacheInstrumentsVisitor<'a> {
-    fn visit_field(
-        &mut self,
-        request: &ExecutableDocument,
-        ty: &NamedType,
-        field: &Field,
-        value: &Value,
-    ) {
-        self.instruments
-            .on_response_field(ty, field, value, self.ctx);
-
-        match value {
-            Value::Array(items) => {
-                for item in items {
-                    self.visit_list_item(request, field.ty().inner_named_type(), field, item);
-                }
-            }
-            Value::Object(children) => {
-                self.visit_selections(request, &field.selection_set, children);
-            }
-            _ => {}
         }
     }
 }

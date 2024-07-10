@@ -13,6 +13,7 @@ use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::cache::entity::CacheSubgraph;
+use crate::plugins::cache::entity::CACHE_INFO_SUBGRAPH_CONTEXT_KEY;
 use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
@@ -438,6 +439,10 @@ pub(crate) enum SubgraphSelector {
         #[allow(dead_code)]
         subgraph_operation_kind: OperationKind,
     },
+    SubgraphName {
+        /// The subgraph name
+        subgraph_name: bool,
+    },
     SubgraphQuery {
         /// The graphql query to the subgraph.
         subgraph_query: SubgraphQuery,
@@ -625,7 +630,7 @@ pub(crate) enum SubgraphSelector {
         /// Select if you want to get cache hit or cache miss
         cache: CacheKind,
         /// Specify the entity type on which you want the cache data. (default: all)
-        entity_type: EntityType,
+        entity_type: Option<EntityType>,
     },
 }
 
@@ -1192,6 +1197,10 @@ impl Selector for SubgraphSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => request
+                .subgraph_name
+                .clone()
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphOperationKind { .. } => request
                 .context
                 .get::<_, String>(OPERATION_KIND)
@@ -1396,11 +1405,15 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::Cache { cache, entity_type } => {
                 let cache_info: CacheSubgraph = response
                     .context
-                    .get(response.subgraph_name.as_ref()?.as_str())
+                    .get(format!(
+                        "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}",
+                        response.subgraph_name.as_ref()?
+                    ))
                     .ok()
                     .flatten()?;
+                dbg!(&cache_info);
                 match entity_type {
-                    EntityType::All => Some(
+                    Some(EntityType::All) | None => Some(
                         (cache_info
                             .0
                             .iter()
@@ -1410,7 +1423,7 @@ impl Selector for SubgraphSelector {
                             }) as i64)
                             .into(),
                     ),
-                    EntityType::Named(entity_type_name) => {
+                    Some(EntityType::Named(entity_type_name)) => {
                         let res = cache_info.0.iter().fold(
                             0usize,
                             |acc, (entity_type, cache_hit_miss)| {
@@ -2514,6 +2527,23 @@ mod test {
                     .build(),
             ),
             Some("query".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_name() {
+        let selector = SubgraphSelector::SubgraphName {
+            subgraph_name: true,
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context)
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            Some("test".into())
         );
     }
 

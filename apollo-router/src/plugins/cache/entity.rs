@@ -42,7 +42,6 @@ use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
-use crate::plugins::telemetry::config_new::Selector;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -410,6 +409,8 @@ impl InnerCacheService {
                         //     "hit" = true,
                         //     "subgraph.name" = self.name.clone()
                         // );
+                        println!("added 1 !!!!");
+
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
                         let _ = response.context.insert(
                             format!(
@@ -430,6 +431,7 @@ impl InnerCacheService {
                         //     "hit" = false,
                         //     "subgraph.name" = self.name.clone()
                         // );
+                        println!("added 2 !!!!");
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
                             format!(
@@ -631,6 +633,7 @@ async fn cache_lookup_root(
                     .data(value.0.data)
                     .extensions(Object::new())
                     .context(request.context)
+                    .and_subgraph_name(request.subgraph_name.clone())
                     .build();
 
                 value
@@ -716,6 +719,7 @@ async fn cache_lookup_entities(
         let mut response = subgraph::Response::builder()
             .data(data)
             .extensions(Object::new())
+            .and_subgraph_name(request.subgraph_name)
             .context(request.context)
             .build();
 
@@ -1027,7 +1031,7 @@ fn filter_representations(
         if let Some(false) = cache_entry.as_ref().map(|c| c.control.can_use()) {
             cache_entry = None;
         }
-
+        dbg!(cache_entry.is_some());
         match cache_entry.as_ref() {
             None => {
                 cache_hit.entry(typename.clone()).or_default().miss += 1;
@@ -1045,6 +1049,8 @@ fn filter_representations(
                 }
             }
         }
+        dbg!(&cache_hit);
+        dbg!(&subgraph_name);
 
         result.push(IntermediateResult {
             key,
@@ -1053,6 +1059,7 @@ fn filter_representations(
         });
     }
 
+    println!("added !!!!");
     let _ = context.insert(
         format!("{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{subgraph_name}"),
         CacheSubgraph(cache_hit),

@@ -311,6 +311,7 @@ impl tower::Service<SubgraphRequest> for SubgraphService {
                             );
                             // Dedup happens here
                             return Ok(SubgraphResponse::builder()
+                                .subgraph_name(service_name.clone())
                                 .context(context)
                                 .extensions(Object::default())
                                 .build());
@@ -521,6 +522,7 @@ async fn call_websocket(
         // Dedup happens here
         return Ok(SubgraphResponse::builder()
             .context(context)
+            .subgraph_name(service_name.clone())
             .extensions(Object::default())
             .build());
     }

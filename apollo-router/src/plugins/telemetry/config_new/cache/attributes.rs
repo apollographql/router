@@ -1,33 +1,18 @@
-use apollo_compiler::executable::Field;
-use apollo_compiler::executable::NamedType;
 use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use serde_json_bytes::Value;
 use tower::BoxError;
 
-use crate::plugins::cache::entity::CacheSubgraph;
-use crate::plugins::telemetry::config_new::graphql::selectors::FieldName;
-use crate::plugins::telemetry::config_new::graphql::selectors::FieldType;
-use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
-use crate::plugins::telemetry::config_new::graphql::selectors::ListLength;
-use crate::plugins::telemetry::config_new::graphql::selectors::TypeName;
-use crate::plugins::telemetry::config_new::selectors::OperationName;
 use crate::plugins::telemetry::config_new::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::DefaultForLevel;
-use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::Selectors;
 use crate::plugins::telemetry::otlp::TelemetryDataKind;
 use crate::services::subgraph;
-use crate::services::supergraph;
 use crate::Context;
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug, PartialEq)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct CacheAttributes {
-    /// Boolean if we have a cache hit or not
-    #[serde(rename = "cache.hit")]
-    pub(crate) hit: Option<bool>,
     /// Entity type
     #[serde(rename = "entity.type")]
     pub(crate) entity_type: Option<bool>,
@@ -41,13 +26,14 @@ impl DefaultForLevel for CacheAttributes {
     ) {
         if let TelemetryDataKind::Metrics = kind {
             if let DefaultAttributeRequirementLevel::Required = requirement_level {
-                self.hit.get_or_insert(true);
-                self.entity_type.get_or_insert(true);
+                self.entity_type.get_or_insert(false);
             }
         }
     }
 }
 
+// Nothing to do here because we're using a trick as basically entity_type is related to CacheControl data we put in the context and for one request we have several entity type
+// and so several metrics to generate it can't be done here
 impl Selectors for CacheAttributes {
     type Request = subgraph::Request;
     type Response = subgraph::Response;
@@ -57,44 +43,7 @@ impl Selectors for CacheAttributes {
         Vec::default()
     }
 
-    fn on_response(&self, response: &Self::Response) -> Vec<KeyValue> {
-        // let mut attrs = Vec::new();
-        // let is_enabled = self.entity_type == Some(true) || self.hit == Some(true);
-        // if !is_enabled {
-        //     return attrs;
-        // }
-        // let subgraph_name = match &response.subgraph_name {
-        //     Some(subgraph_name) => subgraph_name,
-        //     None => {
-        //         return attrs;
-        //     }
-        // };
-        // let cache_info: CacheSubgraph = match response.context.get(subgraph_name).ok().flatten() {
-        //     Some(cache_info) => cache_info,
-        //     None => {
-        //         return attrs;
-        //     }
-        // };
-
-        // if let Some(true) = self.hit {
-        //     if let Some(name) = (GraphQLSelector::FieldName {
-        //         field_name: FieldName::String,
-        //     })
-        //     .on_response_field(ty, field, value, ctx)
-        //     {
-        //         attrs.push(KeyValue::new("graphql.field.name", name));
-        //     }
-        // }
-        // if let Some(true) = self.entity_type {
-        //     if let Some(ty) = (GraphQLSelector::FieldType {
-        //         field_type: FieldType::Name,
-        //     })
-        //     .on_response_field(ty, field, value, ctx)
-        //     {
-        //         attrs.push(KeyValue::new("graphql.field.type", ty));
-        //     }
-        // }
-
+    fn on_response(&self, _response: &Self::Response) -> Vec<KeyValue> {
         Vec::default()
     }
 
