@@ -261,54 +261,6 @@ resourceSpans:
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 0
-            name: parse_query
-            kind: 1
-            startTimeUnixNano: "[start_time]"
-            endTimeUnixNano: "[end_time]"
-            attributes: []
-            droppedAttributesCount: 0
-            events: []
-            droppedEventsCount: 0
-            links: []
-            droppedLinksCount: 0
-            status:
-              message: ""
-              code: 0
-        schemaUrl: ""
-    schemaUrl: ""
-  - resource:
-      attributes:
-        - key: apollo.client.host
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.client.uname
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.graph.ref
-          value:
-            stringValue: test
-        - key: apollo.router.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.schema.id
-          value:
-            stringValue: "[redacted]"
-        - key: apollo.user.agent
-          value:
-            stringValue: "[redacted]"
-      droppedAttributesCount: 0
-    scopeSpans:
-      - scope:
-          name: apollo-router
-          version: "[version]"
-          attributes: []
-          droppedAttributesCount: 0
-        spans:
-          - traceId: "[trace_id]"
-            spanId: "[span_id]"
-            traceState: ""
-            parentSpanId: "[span_id]"
-            flags: 0
             name: supergraph
             kind: 1
             startTimeUnixNano: "[start_time]"
