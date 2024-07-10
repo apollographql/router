@@ -166,14 +166,15 @@ impl Error {
     }
 }
 
-// GraphQL spec require that both "line" and "column" are positive numbers.
-// However GraphQL Java and GraphQL Kotlin return `{ "line": -1, "column": -1 }`
-// if they can't determine error location inside query.
-// This function removes such locations from suplied value.
+/// GraphQL spec require that both "line" and "column" are positive numbers.
+/// However GraphQL Java and GraphQL Kotlin return `{ "line": -1, "column": -1 }`
+/// if they can't determine error location inside query.
+/// This function removes such locations from suplied value.
 fn skip_invalid_locations(mut value: Value) -> Value {
     if let Some(array) = value.as_array_mut() {
         array.retain(|location| {
-            location.get("line") != Some(&json!(-1)) || location.get("column") != Some(&json!(-1))
+            location.get("line") != Some(&Value::from(-1))
+                || location.get("column") != Some(&Value::from(-1))
         })
     }
     value
