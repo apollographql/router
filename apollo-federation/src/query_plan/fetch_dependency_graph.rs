@@ -2351,7 +2351,7 @@ impl FetchDependencyGraphNode {
         if let Some(fragments) = fragments
             .map(|rebased| rebased.for_subgraph(self.subgraph_name.clone(), subgraph_schema))
         {
-            operation.optimize(fragments)?;
+            operation.reuse_fragments(fragments)?;
         }
         let operation_document = operation.try_into()?;
 
