@@ -58,6 +58,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
+    entity_type: Option<String>,
     enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
@@ -125,6 +126,12 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
+        let entity_type = init
+            .supergraph_schema
+            .schema_definition
+            .query
+            .as_ref()
+            .map(|q| q.name.to_string());
         let required_to_start = init.config.redis.required_to_start;
         // we need to explicitely disable TTL reset because it is managed directly by this plugin
         let mut redis_config = init.config.redis.clone();
@@ -161,6 +168,7 @@ impl Plugin for EntityCache {
 
         Ok(Self {
             storage,
+            entity_type,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
@@ -252,6 +260,7 @@ impl Plugin for EntityCache {
                 })
                 .service(CacheService(Some(InnerCacheService {
                     service,
+                    entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,
                     subgraph_ttl,
@@ -290,6 +299,7 @@ impl EntityCache {
         let invalidation = Invalidation::new(Some(storage.clone())).await?;
         Ok(Self {
             storage: Some(storage),
+            entity_type: None,
             enabled: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph::default(),
@@ -306,6 +316,7 @@ struct CacheService(Option<InnerCacheService>);
 struct InnerCacheService {
     service: subgraph::BoxService,
     name: String,
+    entity_type: Option<String>,
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     private_queries: Arc<RwLock<HashSet<String>>>,
@@ -376,6 +387,7 @@ impl InnerCacheService {
             if request.operation_kind == OperationKind::Query {
                 match cache_lookup_root(
                     self.name.clone(),
+                    self.entity_type.as_deref(),
                     self.storage.clone(),
                     is_known_private,
                     private_id.as_deref(),
@@ -530,6 +542,7 @@ impl InnerCacheService {
 
 async fn cache_lookup_root(
     name: String,
+    entity_type_opt: Option<&str>,
     cache: RedisCacheStorage,
     is_known_private: bool,
     private_id: Option<&str>,
@@ -539,7 +552,7 @@ async fn cache_lookup_root(
 
     let key = extract_cache_key_root(
         &name,
-        None,
+        entity_type_opt,
         &request.query_hash,
         body,
         &request.context,
