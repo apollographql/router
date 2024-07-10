@@ -121,11 +121,11 @@ struct Metrics {
     pub(crate) separate_per_type: bool,
 }
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub(crate) struct CacheSubgraph(pub(crate) HashMap<String, CacheHitMiss>);
 
-#[derive(Default, Serialize, Deserialize)]
+#[derive(Default, Serialize, Deserialize, Debug)]
 #[serde(default)]
 pub(crate) struct CacheHitMiss {
     pub(crate) hit: usize,
@@ -389,6 +389,7 @@ impl InnerCacheService {
             .contains_key(REPRESENTATIONS)
         {
             if request.operation_kind == OperationKind::Query {
+                let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
                 match cache_lookup_root(
                     self.name.clone(),
                     self.storage.clone(),
@@ -400,27 +401,44 @@ impl InnerCacheService {
                 .await?
                 {
                     ControlFlow::Break(response) => {
-                        u64_counter!(
-                            "apollo.router.operations.entity.cache",
-                            "Entity cache hit or miss operations",
-                            1u64,
-                            //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
-                            "entity.type" = "Query",
-                            "hit" = true,
-                            "subgraph.name" = self.name.clone()
+                        // u64_counter!(
+                        //     "apollo.router.operations.entity.cache",
+                        //     "Entity cache hit or miss operations",
+                        //     1u64,
+                        //     //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
+                        //     "entity.type" = "Query",
+                        //     "hit" = true,
+                        //     "subgraph.name" = self.name.clone()
+                        // );
+                        cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
+                        let _ = response.context.insert(
+                            format!(
+                                "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}",
+                                response.subgraph_name.clone().unwrap_or_default()
+                            ),
+                            CacheSubgraph(cache_hit),
                         );
                         Ok(response)
                     }
                     ControlFlow::Continue((request, mut root_cache_key)) => {
-                        u64_counter!(
-                            "apollo.router.operations.entity.cache",
-                            "Entity cache hit or miss operations",
-                            1u64,
-                            //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
-                            "entity.type" = "Query",
-                            "hit" = false,
-                            "subgraph.name" = self.name.clone()
+                        // u64_counter!(
+                        //     "apollo.router.operations.entity.cache",
+                        //     "Entity cache hit or miss operations",
+                        //     1u64,
+                        //     //FIXME: get the actual Query type from the schema (will be done in https://github.com/apollographql/router/pull/5621)
+                        //     "entity.type" = "Query",
+                        //     "hit" = false,
+                        //     "subgraph.name" = self.name.clone()
+                        // );
+                        cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
+                        let _ = request.context.insert(
+                            format!(
+                                "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}",
+                                request.subgraph_name.clone().unwrap_or_default()
+                            ),
+                            CacheSubgraph(cache_hit),
                         );
+
                         let mut response = self.service.call(request).await?;
 
                         let cache_control =

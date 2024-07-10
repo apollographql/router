@@ -629,17 +629,17 @@ pub(crate) enum SubgraphSelector {
     },
 }
 
-#[derive(Deserialize, JsonSchema, Clone, PartialEq, Default)]
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Default, Debug)]
 #[serde(rename_all = "snake_case")]
-enum EntityType {
+pub(crate) enum EntityType {
     #[default]
     All,
     Named(String),
 }
 
-#[derive(Deserialize, JsonSchema, Clone, PartialEq)]
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
-enum CacheKind {
+pub(crate) enum CacheKind {
     Hit,
     Miss,
 }
