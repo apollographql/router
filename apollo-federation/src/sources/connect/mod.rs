@@ -9,6 +9,7 @@ mod json_selection;
 mod models;
 pub(crate) mod spec;
 mod url_path_template;
+mod validation;
 
 use apollo_compiler::name;
 pub use json_selection::ApplyTo;
