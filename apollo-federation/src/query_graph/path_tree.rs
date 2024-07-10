@@ -329,7 +329,7 @@ where
     /// Like `Self::merge`, this method will panic if the graphs of the two `OpTree`s below to
     /// different allocations (i.e. they don't below to the same graph) or if they below to
     /// different root nodes.
-    pub(crate) fn concat(&mut self, other: &Self) {
+    pub(crate) fn extend(&mut self, other: &Self) {
         assert!(
             Arc::ptr_eq(&self.graph, &other.graph),
             "Cannot merge path tree build on another graph"
