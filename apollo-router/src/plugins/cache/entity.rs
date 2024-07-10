@@ -42,6 +42,7 @@ use crate::json_ext::PathElement;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
 use crate::plugins::authorization::CacheKeyMetadata;
+use crate::plugins::telemetry::config_new::Selector;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::subgraph;
@@ -52,6 +53,8 @@ use crate::Context;
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
+pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
+    "apollo::router::entity_cache_info_subgraph";
 
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
@@ -116,6 +119,17 @@ struct Metrics {
     /// Adds the entity type name to attributes. This can greatly increase the cardinality
     #[serde(default)]
     pub(crate) separate_per_type: bool,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct CacheSubgraph(pub(crate) HashMap<String, CacheHitMiss>);
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(default)]
+pub(crate) struct CacheHitMiss {
+    pub(crate) hit: usize,
+    pub(crate) miss: usize,
 }
 
 #[async_trait::async_trait]
@@ -642,7 +656,7 @@ async fn cache_lookup_entities(
         .expect("we already checked that representations exist");
     // remove from representations the entities we already obtained from the cache
     let (new_representations, cache_result, cache_control) =
-        filter_representations(&name, representations, keys, cache_result)?;
+        filter_representations(&name, representations, keys, cache_result, &request.context)?;
 
     if !new_representations.is_empty() {
         body.variables
@@ -950,10 +964,11 @@ fn filter_representations(
     representations: &mut Vec<Value>,
     keys: Vec<String>,
     mut cache_result: Vec<Option<CacheEntry>>,
+    context: &Context,
 ) -> Result<(Vec<Value>, Vec<IntermediateResult>, Option<CacheControl>), BoxError> {
     let mut new_representations: Vec<Value> = Vec::new();
     let mut result = Vec::new();
-    let mut cache_hit: HashMap<String, (usize, usize)> = HashMap::new();
+    let mut cache_hit: HashMap<String, CacheHitMiss> = HashMap::new();
     let mut cache_control = None;
 
     for ((mut representation, key), mut cache_entry) in representations
@@ -977,7 +992,7 @@ fn filter_representations(
 
         match cache_entry.as_ref() {
             None => {
-                cache_hit.entry(typename.clone()).or_default().1 += 1;
+                cache_hit.entry(typename.clone()).or_default().miss += 1;
 
                 representation
                     .as_object_mut()
@@ -985,7 +1000,7 @@ fn filter_representations(
                 new_representations.push(representation);
             }
             Some(entry) => {
-                cache_hit.entry(typename.clone()).or_default().0 += 1;
+                cache_hit.entry(typename.clone()).or_default().hit += 1;
                 match cache_control.as_mut() {
                     None => cache_control = Some(entry.control.clone()),
                     Some(c) => *c = c.merge(&entry.control),
@@ -1000,24 +1015,29 @@ fn filter_representations(
         });
     }
 
-    for (ty, (hit, miss)) in cache_hit {
-        u64_counter!(
-            "apollo.router.operations.entity.cache",
-            "Entity cache hit or miss operations",
-            hit as u64,
-            "entity.type" = ty.as_str().to_string(),
-            "hit" = true,
-            "subgraph.name" = subgraph_name
-        );
-        u64_counter!(
-            "apollo.router.operations.entity.cache",
-            "Entity cache hit or miss operations",
-            miss as u64,
-            "entity.type" = ty.as_str().to_string(),
-            "hit" = false,
-            "subgraph.name" = subgraph_name
-        );
-    }
+    let _ = context.insert(
+        format!("{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{subgraph_name}"),
+        CacheSubgraph(cache_hit),
+    );
+
+    // for (ty, CacheHitMiss { hit, miss }) in cache_hit {
+    //     u64_counter!(
+    //         "apollo.router.operations.entity.cache",
+    //         "Entity cache hit or miss operations",
+    //         hit as u64,
+    //         "entity.type" = ty.as_str().to_string(),
+    //         "hit" = true,
+    //         "subgraph.name" = subgraph_name
+    //     );
+    //     u64_counter!(
+    //         "apollo.router.operations.entity.cache",
+    //         "Entity cache hit or miss operations",
+    //         miss as u64,
+    //         "entity.type" = ty.as_str().to_string(),
+    //         "hit" = false,
+    //         "subgraph.name" = subgraph_name
+    //     );
+    // }
 
     Ok((new_representations, result, cache_control))
 }
