@@ -144,6 +144,9 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { subgraph } => {
                 format!("subgraph:{subgraph}*",)
             }
+            InvalidationRequest::Type { subgraph, r#type } => {
+                format!("subgraph:{subgraph}:type:{type}*",)
+            }
             InvalidationRequest::Entity {
                 subgraph,
                 r#type,
@@ -152,9 +155,6 @@ impl InvalidationRequest {
                 let entity_key = hash_entity_key(&key);
                 let ty = r#type;
                 format!("subgraph:{subgraph}:type:{ty}:entity:{entity_key}*")
-            }
-            _ => {
-                todo!()
             }
         }
     }
