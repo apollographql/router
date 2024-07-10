@@ -1,5 +1,6 @@
 use apollo_compiler::executable::Selection;
 use apollo_federation::sources::connect::Connector;
+use apollo_federation::sources::connect::CustomConfiguration;
 use apollo_federation::sources::connect::EntityResolver;
 use itertools::Itertools;
 use serde_json_bytes::json;
@@ -24,11 +25,12 @@ struct RequestInputs {
 }
 
 impl RequestInputs {
-    fn merge(self) -> Value {
-        json!({
-            "$args": self.args,
-            "$this": self.this
-        })
+    fn merge(self, config: &CustomConfiguration) -> Map<ByteString, Value> {
+        let mut map = Map::with_capacity(2);
+        map.insert(ByteString::from("$args"), Value::Object(self.args));
+        map.insert(ByteString::from("$this"), Value::Object(self.this));
+        map.insert(ByteString::from("$config"), json!(config));
+        map
     }
 }
 
@@ -139,7 +141,12 @@ fn request_params_to_requests(
     for (response_key, inputs) in request_params {
         let request = match connector.transport {
             apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
-                make_request(transport, inputs.merge(), original_request, debug)?
+                make_request(
+                    transport,
+                    inputs.merge(connector.config.as_ref()),
+                    original_request,
+                    debug,
+                )?
             }
         };
 
@@ -1299,6 +1306,7 @@ mod tests {
             ),
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
+            config: Default::default(),
         };
 
         let requests = super::make_requests(req, &connector, &mut None).unwrap();

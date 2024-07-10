@@ -436,6 +436,7 @@ dependencies = [
  "multimap 0.10.0",
  "nom",
  "petgraph",
+ "schemars",
  "serde",
  "serde_json",
  "serde_json_bytes",

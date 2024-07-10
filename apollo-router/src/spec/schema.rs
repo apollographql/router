@@ -23,6 +23,7 @@ use crate::configuration::QueryPlannerMode;
 use crate::error::ParseErrors;
 use crate::error::SchemaError;
 use crate::plugins::connectors::configuration::override_connector_base_urls;
+use crate::plugins::connectors::plugin::ConnectorsConfig;
 use crate::query_planner::OperationKind;
 use crate::Configuration;
 
@@ -84,7 +85,14 @@ impl Schema {
 
         let mut api_schema: Option<_> = None;
         let mut connectors: Option<_> = None;
-        let expansion = expand_connectors(sdl).map_err(SchemaError::Connector)?;
+        let connectors_config = config
+            .apollo_plugins
+            .plugins
+            .get("preview_connectors")
+            .and_then(|value| serde_json::from_value::<ConnectorsConfig>(value.clone()).ok())
+            .map(|config| config.subgraphs);
+        let expansion =
+            expand_connectors(sdl, connectors_config).map_err(SchemaError::Connector)?;
         let sdl = match expansion {
             ExpansionResult::Expanded {
                 ref raw_sdl,

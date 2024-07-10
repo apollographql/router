@@ -68,7 +68,7 @@ askama = "0.12.1"
 access-json = "0.1.0"
 anyhow = "1.0.80"
 apollo-compiler.workspace = true
-apollo-federation = { path = "../apollo-federation", version = "=1.50.0" }
+apollo-federation = { path = "../apollo-federation", version = "=1.50.0", features = ["schemars"] }
 arc-swap = "1.6.0"
 async-channel = "1.9.0"
 async-compression = { version = "0.4.6", features = [

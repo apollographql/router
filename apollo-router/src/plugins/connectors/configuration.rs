@@ -1,30 +1,8 @@
-use std::collections::HashMap;
-
 use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::Transport;
-use schemars::JsonSchema;
-use serde::Deserialize;
-use serde::Serialize;
-use url::Url;
 
 use super::plugin::ConnectorsConfig;
 use crate::Configuration;
-
-/// Configuration for a connector subgraph
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct SubgraphConnectorConfiguration {
-    /// Per API configuration
-    pub(crate) apis: HashMap<String, SourceApiConfiguration>,
-}
-
-/// Configuration for a source API
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct SourceApiConfiguration {
-    /// Override the base URL for the API
-    pub(crate) override_url: Option<Url>,
-}
 
 /// If a base URL override is specified for a source API, apply it to the connectors using that
 /// source.
@@ -42,8 +20,12 @@ where
     for connector in connectors {
         if let Some(url) = config
             .subgraphs
-            .get(&connector.id.subgraph_name.to_string())
-            .and_then(|map| map.get(&connector.id.source_name.clone()?.to_string()))
+            .get(&connector.id.subgraph_name)
+            .and_then(|subgraph_config| {
+                subgraph_config
+                    .sources
+                    .get(connector.id.source_name.as_ref()?)
+            })
             .and_then(|api_config| api_config.override_url.as_ref())
         {
             match &mut connector.transport {

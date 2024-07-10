@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
@@ -15,6 +16,7 @@ use crate::merge::merge_subgraphs;
 use crate::schema::FederationSchema;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::sources::connect::Connector;
+use crate::sources::connect::SubgraphConnectorConfiguration;
 use crate::subgraph::Subgraph;
 use crate::subgraph::ValidSubgraph;
 use crate::ApiSchemaOptions;
@@ -50,7 +52,10 @@ pub enum ExpansionResult {
 /// each connector is separated into its own unique subgraph with relevant GraphQL directives to enforce
 /// field dependencies and response structures. This allows for satisfiability and validation to piggy-back
 /// off of existing functionality in a reproducable way.
-pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, FederationError> {
+pub fn expand_connectors(
+    supergraph_str: &str,
+    mut config_per_subgraph: Option<HashMap<String, SubgraphConnectorConfiguration>>,
+) -> Result<ExpansionResult, FederationError> {
     // TODO: Don't rely on finding the URL manually to short out
     let connect_url = ConnectSpecDefinition::identity();
     let connect_url = format!("{}/{}/v", connect_url.domain, connect_url.name);
@@ -80,7 +85,12 @@ pub fn expand_connectors(supergraph_str: &str) -> Result<ExpansionResult, Federa
     // Expand just the connector subgraphs
     let connect_subgraphs = connect_subgraphs
         .into_iter()
-        .map(|(link, sub)| split_subgraph(&link, sub))
+        .map(|(link, sub)| {
+            let config = config_per_subgraph
+                .as_mut()
+                .and_then(|config| config.remove(&sub.name));
+            split_subgraph(&link, sub, config)
+        })
         .collect::<Result<Vec<_>, _>>()?
         .into_iter()
         .flatten()
@@ -137,8 +147,9 @@ fn contains_connectors(link: &Link, subgraph: &ValidFederationSubgraph) -> bool 
 fn split_subgraph(
     link: &Link,
     subgraph: ValidFederationSubgraph,
+    config: Option<SubgraphConnectorConfiguration>,
 ) -> Result<Vec<(Connector, ValidSubgraph)>, FederationError> {
-    let connector_map = Connector::from_valid_schema(&subgraph.schema, &subgraph.name)?;
+    let connector_map = Connector::from_valid_schema(&subgraph.schema, &subgraph.name, config)?;
 
     let expander = helpers::Expander::new(link, &subgraph);
     connector_map

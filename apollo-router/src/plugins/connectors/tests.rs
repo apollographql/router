@@ -426,8 +426,10 @@ async fn execute(
         serde_json::json!({
           "subgraphs": {
             "connectors": {
-              "json": {
-                "override_url": connector_uri
+              "sources": {
+                "json": {
+                  "override_url": connector_uri
+                }
               }
             }
           }

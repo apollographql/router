@@ -17,6 +17,7 @@ use nom::IResult;
 use serde::Serialize;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Map;
+use serde_json_bytes::Value;
 use serde_json_bytes::Value as JSON;
 
 /// A parser accepting URLPathTemplate syntax, which is useful both for
@@ -97,36 +98,32 @@ impl URLPathTemplate {
     // into its {...} expressions, generate a new URL path String.
     // Guaranteed to return a "/"-prefixed string to make appending to the
     // base url easier.
-    pub fn generate_path(&self, vars: &JSON) -> Result<String, String> {
+    pub fn generate_path(&self, vars: &Map<ByteString, Value>) -> Result<String, String> {
         let mut path = String::new();
-        if let Some(var_map) = vars.as_object() {
-            for (path_position, param_value) in self.path.iter().enumerate() {
-                path.push('/');
+        for (path_position, param_value) in self.path.iter().enumerate() {
+            path.push('/');
 
-                if let Some(value) = param_value.interpolate(var_map)? {
-                    path.push_str(value.as_str());
-                } else {
-                    return Err(format!(
-                        "Incomplete path parameter {} at position {} with variables {}",
-                        param_value,
-                        path_position,
-                        JSON::Object(var_map.clone()),
-                    ));
-                }
+            if let Some(value) = param_value.interpolate(vars)? {
+                path.push_str(value.as_str());
+            } else {
+                return Err(format!(
+                    "Incomplete path parameter {} at position {} with variables {}",
+                    param_value,
+                    path_position,
+                    JSON::Object(vars.clone()),
+                ));
             }
+        }
 
-            let mut params = vec![];
-            for (key, param_value) in &self.query {
-                if let Some(value) = param_value.interpolate(var_map)? {
-                    params.push(format!("{}={}", key, value));
-                }
+        let mut params = vec![];
+        for (key, param_value) in &self.query {
+            if let Some(value) = param_value.interpolate(vars)? {
+                params.push(format!("{}={}", key, value));
             }
-            if !params.is_empty() {
-                path.push('?');
-                path.push_str(&params.join("&"));
-            }
-        } else {
-            return Err(format!("Expected object, got {}", vars));
+        }
+        if !params.is_empty() {
+            path.push('?');
+            path.push_str(&params.join("&"));
         }
 
         if path.is_empty() {
@@ -464,9 +461,9 @@ impl ParameterValue {
                             field: name,
                             paths: parts.collect(),
                         },
-
+                        "$config" => continue,  // Config is valid, just not needed in this code path
                         other => {
-                            return Err(format!("expected parameter variable to be either $args or $this, found: {other}"));
+                            return Err(format!("expected parameter variable to be $args, $this or $config, found: {other}"));
                         }
                     });
                 }
@@ -622,7 +619,12 @@ impl Display for VariableExpression {
 }
 
 fn nom_parse_identifier_possible_namespace(input: &str) -> IResult<&str, &str> {
-    recognize(alt((tag("$args"), tag("$this"), nom_parse_identifier)))(input)
+    recognize(alt((
+        tag("$args"),
+        tag("$this"),
+        tag("$config"),
+        nom_parse_identifier,
+    )))(input)
 }
 
 fn nom_parse_identifier(input: &str) -> IResult<&str, &str> {
@@ -929,42 +931,47 @@ mod tests {
         let template = URLPathTemplate::parse("/users/{user_id}?a={b}&c={d!}&e={f.g}").unwrap();
 
         assert_eq!(
-            template.generate_path(&json!("not an object")),
-            Err(r#"Expected object, got "not an object""#.to_string()),
-        );
-
-        assert_eq!(
-            template.generate_path(&json!({
-                // A variables object without any properties
-            })),
+            template.generate_path(&Map::new()),
             Err("Missing required variable user_id in {}".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "user_id": 123,
-                "b": "456",
-                "d": 789,
-                "f.g": "abc",
-            })),
+            template.generate_path(
+                json!({
+                    "user_id": 123,
+                    "b": "456",
+                    "d": 789,
+                    "f.g": "abc",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users/123?a=456&c=789&e=abc".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "user_id": 123,
-                "d": 789,
-                "f": "not an object",
-            })),
+            template.generate_path(
+                json!({
+                    "user_id": 123,
+                    "d": 789,
+                    "f": "not an object",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users/123?c=789".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "b": "456",
-                "f.g": "abc",
-                "user_id": "123",
-            })),
+            template.generate_path(
+                json!({
+                    "b": "456",
+                    "f.g": "abc",
+                    "user_id": "123",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Err(
                 r#"Missing required variable d in {"b":"456","f.g":"abc","user_id":"123"}"#
                     .to_string()
@@ -972,24 +979,32 @@ mod tests {
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                // The order of the variables should not matter.
-                "d": "789",
-                "b": "456",
-                "user_id": "123",
-            })),
+            template.generate_path(
+                json!({
+                    // The order of the variables should not matter.
+                    "d": "789",
+                    "b": "456",
+                    "user_id": "123",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users/123?a=456&c=789".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "user_id": "123",
-                "b": "a",
-                "d": "c",
-                "f.g": "e",
-                // Extra variables should be ignored.
-                "extra": "ignored",
-            })),
+            template.generate_path(
+                json!({
+                    "user_id": "123",
+                    "b": "a",
+                    "d": "c",
+                    "f.g": "e",
+                    // Extra variables should be ignored.
+                    "extra": "ignored",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users/123?a=a&c=c&e=e".to_string()),
         );
 
@@ -998,10 +1013,14 @@ mod tests {
                 .unwrap();
 
         assert_eq!(
-            template_with_nested_required_var.generate_path(&json!({
-                "repo.name": "repo",
-                "user.login": "user",
-            })),
+            template_with_nested_required_var.generate_path(
+                json!({
+                    "repo.name": "repo",
+                    "user.login": "user",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Err(
                 r#"Missing required variable a.b.c in {"repo.name":"repo","user.login":"user"}"#
                     .to_string()
@@ -1009,11 +1028,15 @@ mod tests {
         );
 
         assert_eq!(
-            template_with_nested_required_var.generate_path(&json!({
-                "user.login": "user",
-                "repo.name": "repo",
-                "a.b.c": "value",
-            })),
+            template_with_nested_required_var.generate_path(
+                json!({
+                    "user.login": "user",
+                    "repo.name": "repo",
+                    "a.b.c": "value",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/repositories/user/repo?testing=value".to_string()),
         );
     }
@@ -1023,7 +1046,7 @@ mod tests {
         assert_eq!(
             URLPathTemplate::parse("")
                 .unwrap()
-                .generate_path(&json!({}))
+                .generate_path(&Map::new())
                 .unwrap(),
             "/".to_string()
         );
@@ -1031,7 +1054,7 @@ mod tests {
         assert_eq!(
             URLPathTemplate::parse("/")
                 .unwrap()
-                .generate_path(&json!({}))
+                .generate_path(&Map::new())
                 .unwrap(),
             "/".to_string()
         );
@@ -1039,7 +1062,7 @@ mod tests {
         assert_eq!(
             URLPathTemplate::parse("?foo=bar")
                 .unwrap()
-                .generate_path(&json!({}))
+                .generate_path(&Map::new())
                 .unwrap(),
             "/?foo=bar".to_string()
         );
@@ -1197,49 +1220,73 @@ mod tests {
         let template = URLPathTemplate::parse("/users?ids={id,...}").unwrap();
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [1, 2, 3],
-            })),
+            template.generate_path(
+                json!({
+                    "id": [1, 2, 3],
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users?ids=1,2,3".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [1],
-            })),
+            template.generate_path(
+                json!({
+                    "id": [1],
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users?ids=1".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [],
-            })),
+            template.generate_path(
+                json!({
+                    "id": [],
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [1, 2, 3],
-                "extra": "ignored",
-            })),
+            template.generate_path(
+                json!({
+                    "id": [1, 2, 3],
+                    "extra": "ignored",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users?ids=1,2,3".to_string()),
         );
 
         let template = URLPathTemplate::parse("/users?ids={id;...}&names={name|...}").unwrap();
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": [1, 2, 3],
-                "name": ["a", "b", "c"],
-            })),
+            template.generate_path(
+                json!({
+                    "id": [1, 2, 3],
+                    "name": ["a", "b", "c"],
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users?ids=1;2;3&names=a|b|c".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "id": 123,
-                "name": "456",
-            })),
+            template.generate_path(
+                json!({
+                    "id": 123,
+                    "name": "456",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/users?ids=123&names=456".to_string()),
         );
     }
@@ -1326,10 +1373,14 @@ mod tests {
         );
 
         assert_eq!(
-            template_with_constant_query_param.generate_path(&json!({
-                "cid": "123",
-                "a": "456",
-            })),
+            template_with_constant_query_param.generate_path(
+                json!({
+                    "cid": "123",
+                    "a": "456",
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/contacts/123?constant=asdf&required=456".to_string()),
         );
 
@@ -1383,110 +1434,138 @@ mod tests {
         .unwrap();
 
         assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-                "e": 7,
-                "f": 8,
-            })),
+            template.generate_path(
+                json!({
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6,
+                    "e": 7,
+                    "f": 8,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/locations/xyz(1,2,3)?required=4,5;6&optional=[7,8]".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-                "e": 7,
-                // "f": 8,
-            })),
+            template.generate_path(
+                json!({
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6,
+                    "e": 7,
+                    // "f": 8,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/locations/xyz(1,2,3)?required=4,5;6".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-                // "e": 7,
-                "f": 8,
-            })),
+            template.generate_path(
+                json!({
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6,
+                    // "e": 7,
+                    "f": 8,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/locations/xyz(1,2,3)?required=4,5;6".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                "b": 4,
-                "c": 5,
-                "d": 6,
-            })),
+            template.generate_path(
+                json!({
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    "b": 4,
+                    "c": 5,
+                    "d": 6,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/locations/xyz(1,2,3)?required=4,5;6".to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                // "x": 1,
-                "y": 2,
-                "z": 3,
-            })),
+            template.generate_path(
+                json!({
+                    // "x": 1,
+                    "y": 2,
+                    "z": 3,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Err(r#"Missing required variable x in {"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "x": 1,
-                "y": 2,
-                // "z": 3,
-            })),
+            template.generate_path(
+                json!({
+                    "x": 1,
+                    "y": 2,
+                    // "z": 3,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Err(r#"Missing required variable z in {"x":1,"y":2}"#.to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
-                "b": 4,
-                "c": 5,
-                "x": 1,
-                "y": 2,
-                "z": 3,
-                // "d": 6,
-            })),
+            template.generate_path(
+                json!({
+                    "b": 4,
+                    "c": 5,
+                    "x": 1,
+                    "y": 2,
+                    "z": 3,
+                    // "d": 6,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Err(r#"Missing required variable d in {"b":4,"c":5,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
+            template.generate_path(json!({
                 "b": 4,
                 // "c": 5,
                 "d": 6,
                 "x": 1,
                 "y": 2,
                 "z": 3,
-            })),
+            }).as_object().unwrap()),
             Err(r#"Missing variable c for required parameter {b},{c};{d!} given variables {"b":4,"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
         assert_eq!(
-            template.generate_path(&json!({
+            template.generate_path(json!({
                 // "b": 4,
                 // "c": 5,
                 "d": 6,
                 "x": 1,
                 "y": 2,
                 "z": 3,
-            })),
+            }).as_object().unwrap()),
             Err(r#"Missing variable b for required parameter {b},{c};{d!} given variables {"d":6,"x":1,"y":2,"z":3}"#.to_string()),
         );
 
@@ -1601,38 +1680,42 @@ mod tests {
             URLPathTemplate::parse("/line/{p1.x},{p1.y},{p1.z}/{p2.x},{p2.y},{p2.z}").unwrap();
 
         assert_eq!(
-            line_template.generate_path(&json!({
-                "p1.x": 1,
-                "p1.y": 2,
-                "p1.z": 3,
-                "p2.x": 4,
-                "p2.y": 5,
-                "p2.z": 6,
-            })),
+            line_template.generate_path(
+                json!({
+                    "p1.x": 1,
+                    "p1.y": 2,
+                    "p1.z": 3,
+                    "p2.x": 4,
+                    "p2.y": 5,
+                    "p2.z": 6,
+                })
+                .as_object()
+                .unwrap()
+            ),
             Ok("/line/1,2,3/4,5,6".to_string()),
         );
 
         assert_eq!(
-            line_template.generate_path(&json!({
+            line_template.generate_path(json!({
                 "p1.x": 1,
                 "p1.y": 2,
                 "p1.z": 3,
                 "p2.x": 4,
                 "p2.y": 5,
                 // "p2.z": 6,
-            })),
+            }).as_object().unwrap()),
             Err(r#"Missing required variable p2.z in {"p1.x":1,"p1.y":2,"p1.z":3,"p2.x":4,"p2.y":5}"#.to_string()),
         );
 
         assert_eq!(
-            line_template.generate_path(&json!({
+            line_template.generate_path(json!({
                 "p1.x": 1,
                 // "p1.y": 2,
                 "p1.z": 3,
                 "p2.x": 4,
                 "p2.y": 5,
                 "p2.z": 6,
-            })),
+            }).as_object().unwrap()),
             Err(r#"Missing required variable p1.y in {"p1.x":1,"p1.z":3,"p2.x":4,"p2.y":5,"p2.z":6}"#.to_string()),
         );
 

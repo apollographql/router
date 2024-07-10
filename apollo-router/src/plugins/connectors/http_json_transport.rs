@@ -27,6 +27,7 @@ use lazy_static::lazy_static;
 use percent_encoding::percent_decode_str;
 use serde_json_bytes::json;
 use serde_json_bytes::ByteString;
+use serde_json_bytes::Map;
 use serde_json_bytes::Value;
 use thiserror::Error;
 use url::Url;
@@ -66,19 +67,17 @@ lazy_static! {
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
-    inputs: Value,
+    inputs: Map<ByteString, Value>,
     original_request: &connect::Request,
     debug: &mut Option<ConnectorContext>,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
-    let Value::Object(ref inputs_map) = inputs else {
-        return Err(HttpJsonTransportError::InvalidArguments(
-            "inputs must be a JSON object".to_string(),
-        ));
-    };
+    let uri =
+        make_uri(transport, &inputs).map_err(HttpJsonTransportError::ConnectorDirectiveError)?;
+
     let (json_body, body, apply_to_errors) = if let Some(ref selection) = transport.body {
-        let inputs = inputs_map
-            .iter()
-            .map(|(k, v)| (k.as_str().to_string(), v.clone()))
+        let inputs = inputs
+            .into_iter()
+            .map(|(k, v)| (k.as_str().to_string(), v))
             .collect();
         let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
         let body = if let Some(json_body) = json_body.as_ref() {
@@ -93,11 +92,7 @@ pub(crate) fn make_request(
 
     let mut request = http::Request::builder()
         .method(transport.method.as_str())
-        .uri(
-            make_uri(transport, &inputs)
-                .map_err(HttpJsonTransportError::ConnectorDirectiveError)?
-                .as_str(),
-        )
+        .uri(uri.as_str())
         .header("content-type", "application/json")
         .body(body.into())
         .map_err(HttpJsonTransportError::InvalidNewRequest)?;
@@ -123,11 +118,14 @@ pub(crate) fn make_request(
     Ok(request)
 }
 
-fn make_uri(transport: &HttpJsonTransport, inputs: &Value) -> Result<Url, ConnectorDirectiveError> {
+fn make_uri(
+    transport: &HttpJsonTransport,
+    inputs: &Map<ByteString, Value>,
+) -> Result<Url, ConnectorDirectiveError> {
     let flat_inputs = flatten_keys(inputs);
     let path = transport
         .path_template
-        .generate_path(&Value::Object(flat_inputs))
+        .generate_path(&flat_inputs)
         .map_err(ConnectorDirectiveError::PathGenerationError)?;
     append_path(Url::parse(transport.base_url.as_ref()).unwrap(), &path)
 }
@@ -197,26 +195,25 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError
 }
 
 // URLPathTemplate expects a map with flat dot-delimited keys.
-fn flatten_keys(inputs: &Value) -> serde_json_bytes::Map<ByteString, Value> {
+fn flatten_keys(inputs: &Map<ByteString, Value>) -> Map<ByteString, Value> {
     let mut flat = serde_json_bytes::Map::new();
-    flatten_keys_recursive(inputs, &mut flat, ByteString::from(""));
+    for (key, value) in inputs {
+        flatten_keys_recursive(value, &mut flat, key.clone());
+    }
     flat
 }
 
-fn flatten_keys_recursive(
-    inputs: &Value,
-    flat: &mut serde_json_bytes::Map<ByteString, Value>,
-    prefix: ByteString,
-) {
+fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, prefix: ByteString) {
     match inputs {
         Value::Object(map) => {
             for (key, value) in map {
-                let mut new_prefix = prefix.as_str().to_string();
-                if !new_prefix.is_empty() {
-                    new_prefix += ".";
-                }
-                new_prefix += key.as_str();
-                flatten_keys_recursive(value, flat, ByteString::from(new_prefix));
+                let new_prefix = format!(
+                    "{prefix}.{key}",
+                    prefix = prefix.as_str(),
+                    key = key.as_str()
+                )
+                .into();
+                flatten_keys_recursive(value, flat, new_prefix);
             }
         }
         _ => {
@@ -312,8 +309,6 @@ pub(crate) enum HttpJsonTransportError {
     BodySerialization(#[from] serde_json::Error),
     /// Invalid connector directive. This error should have been caught earlier: {0}
     ConnectorDirectiveError(#[source] ConnectorDirectiveError),
-    /// Invalid arguments
-    InvalidArguments(String),
 }
 
 #[cfg(test)]
@@ -462,7 +457,7 @@ mod tests {
                 }
             }
         });
-        let flat = super::flatten_keys(&inputs);
+        let flat = super::flatten_keys(inputs.as_object().unwrap());
         assert_eq!(
             flat,
             serde_json_bytes::json!({

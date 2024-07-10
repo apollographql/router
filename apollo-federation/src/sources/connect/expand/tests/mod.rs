@@ -7,7 +7,7 @@ use crate::sources::connect::expand::ExpansionResult;
 #[test]
 fn it_skips_non_connector_supergraphs() {
     let to_ignore = include_str!("./schemas/ignored.graphql");
-    let ExpansionResult::Unchanged = expand_connectors(to_ignore).unwrap() else {
+    let ExpansionResult::Unchanged = expand_connectors(to_ignore, None).unwrap() else {
         panic!("expected expansion to ignore non-connector supergraph");
     };
 }
@@ -19,7 +19,7 @@ fn it_expands_a_supergraph() {
         raw_sdl,
         api_schema,
         connectors,
-    } = expand_connectors(to_expand).unwrap()
+    } = expand_connectors(to_expand, None).unwrap()
     else {
         panic!("expected expansion to actually expand subgraphs");
     };
@@ -36,7 +36,7 @@ fn it_expands_a_realistic_supergraph() {
         raw_sdl,
         api_schema,
         connectors,
-    } = expand_connectors(to_expand).unwrap()
+    } = expand_connectors(to_expand, None).unwrap()
     else {
         panic!("expected expansion to actually expand subgraphs");
     };
@@ -53,7 +53,7 @@ fn it_expands_steelthread_supergraph() {
         raw_sdl,
         api_schema,
         connectors,
-    } = expand_connectors(to_expand).unwrap()
+    } = expand_connectors(to_expand, None).unwrap()
     else {
         panic!("expected expansion to actually expand subgraphs");
     };

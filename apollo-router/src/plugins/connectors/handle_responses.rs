@@ -254,6 +254,7 @@ mod tests {
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
+            config: Default::default(),
         };
 
         let response1 = http::Response::builder()
@@ -338,6 +339,7 @@ mod tests {
             }),
             selection: JSONSelection::parse(".data { id }").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
+            config: Default::default(),
         };
 
         let response1 = http::Response::builder()
@@ -439,6 +441,7 @@ mod tests {
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Implicit),
+            config: Default::default(),
         };
 
         let response1 = http::Response::builder()
@@ -542,6 +545,7 @@ mod tests {
             }),
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
+            config: Default::default(),
         };
 
         let response1 = http::Response::builder()

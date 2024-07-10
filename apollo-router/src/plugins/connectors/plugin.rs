@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use apollo_federation::sources::connect::ApplyToError;
+use apollo_federation::sources::connect::SubgraphConnectorConfiguration;
 use bytes::Bytes;
 use futures::future::ready;
 use futures::stream::once;
@@ -14,7 +15,6 @@ use serde_json_bytes::json;
 use tower::BoxError;
 use tower::ServiceExt as TowerServiceExt;
 
-use super::configuration::SourceApiConfiguration;
 use crate::layers::ServiceExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
@@ -33,9 +33,9 @@ struct Connectors {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct ConnectorsConfig {
-    /// Per subgraph configuration
+    /// A map of subgraph name to connectors config for that subgraph
     #[serde(default)]
-    pub(crate) subgraphs: HashMap<String, HashMap<String, SourceApiConfiguration>>,
+    pub(crate) subgraphs: HashMap<String, SubgraphConnectorConfiguration>,
 
     /// Enables connector debugging information on response extensions if the feature is enabled
     #[serde(default)]
