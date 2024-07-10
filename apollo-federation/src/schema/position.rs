@@ -178,6 +178,15 @@ impl Debug for TypeDefinitionPosition {
 }
 
 impl TypeDefinitionPosition {
+    pub(crate) fn is_composite_type(&self) -> bool {
+        matches!(
+            self,
+            TypeDefinitionPosition::Object(_)
+                | TypeDefinitionPosition::Interface(_)
+                | TypeDefinitionPosition::Union(_)
+        )
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             TypeDefinitionPosition::Scalar(type_) => &type_.type_name,

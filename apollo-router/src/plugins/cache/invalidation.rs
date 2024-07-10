@@ -144,6 +144,9 @@ impl InvalidationRequest {
             InvalidationRequest::Subgraph { subgraph } => {
                 format!("subgraph:{subgraph}*",)
             }
+            InvalidationRequest::Type { subgraph, r#type } => {
+                format!("subgraph:{subgraph}:type:{type}*",)
+            }
             _ => {
                 todo!()
             }

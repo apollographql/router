@@ -58,6 +58,7 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 pub(crate) struct EntityCache {
     storage: Arc<Storage>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
+    entity_type: Option<String>,
     enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
@@ -138,6 +139,13 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
+        let entity_type = init
+            .supergraph_schema
+            .schema_definition
+            .query
+            .as_ref()
+            .map(|q| q.name.to_string());
+
         let mut all = None;
 
         if let Some(redis) = &init.config.subgraph.all.redis {
@@ -216,6 +224,7 @@ impl Plugin for EntityCache {
 
         Ok(Self {
             storage,
+            entity_type,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
@@ -307,6 +316,7 @@ impl Plugin for EntityCache {
                 })
                 .service(CacheService(Some(InnerCacheService {
                     service,
+                    entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,
                     subgraph_ttl,
@@ -349,6 +359,7 @@ impl EntityCache {
         let invalidation = Invalidation::new(storage.clone()).await?;
         Ok(Self {
             storage,
+            entity_type: None,
             enabled: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph::default(),
@@ -365,6 +376,7 @@ struct CacheService(Option<InnerCacheService>);
 struct InnerCacheService {
     service: subgraph::BoxService,
     name: String,
+    entity_type: Option<String>,
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     private_queries: Arc<RwLock<HashSet<String>>>,
@@ -435,6 +447,7 @@ impl InnerCacheService {
             if request.operation_kind == OperationKind::Query {
                 match cache_lookup_root(
                     self.name.clone(),
+                    self.entity_type.as_deref(),
                     self.storage.clone(),
                     is_known_private,
                     private_id.as_deref(),
@@ -589,6 +602,7 @@ impl InnerCacheService {
 
 async fn cache_lookup_root(
     name: String,
+    entity_type_opt: Option<&str>,
     cache: RedisCacheStorage,
     is_known_private: bool,
     private_id: Option<&str>,
@@ -598,6 +612,7 @@ async fn cache_lookup_root(
 
     let key = extract_cache_key_root(
         &name,
+        entity_type_opt,
         &request.query_hash,
         body,
         &request.context,
@@ -887,8 +902,10 @@ pub(crate) fn hash_additional_data(
 }
 
 // build a cache key for the root operation
+#[allow(clippy::too_many_arguments)]
 fn extract_cache_key_root(
     subgraph_name: &str,
+    entity_type_opt: Option<&str>,
     query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
@@ -901,14 +918,17 @@ fn extract_cache_key_root(
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(body, context, cache_key);
 
+    let entity_type = entity_type_opt.unwrap_or("Query");
+
     // the cache key is written to easily find keys matching a prefix for deletion:
-    // - subgraph name: caching is done per subgraph
+    // - subgraph name: subgraph name
+    // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"
+        "subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
