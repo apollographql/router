@@ -92,12 +92,15 @@ preview_entity_cache:
     timeout: 5ms # Optional, by default: 2ms
     ttl: 24h # Optional, by default no expiration
 
-  # Configure entity caching per subgraph
-  subgraphs:
-    products:
-      ttl: 120s # overrides the global TTL
-    inventory:
-      enabled: false # disable for a specific subgraph
+  subgraph:
+    all:
+      enabled: true
+    # Configure entity caching per subgraph, overrides options from the "all" section
+    subgraphs:
+      products:
+        ttl: 120s # overrides the global TTL
+      inventory:
+        enabled: false # disable for a specific subgraph
 ```
 
 ### Configure time to live (TTL)

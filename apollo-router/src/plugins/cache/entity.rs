@@ -27,6 +27,7 @@ use super::metrics::CacheMetricsService;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
+use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::configuration::RedisCache;
 use crate::error::FetchError;
 use crate::graphql;
@@ -53,8 +54,8 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 #[derive(Clone)]
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
-    subgraphs: Arc<HashMap<String, Subgraph>>,
-    enabled: Option<bool>,
+    subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
+    enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
 }
@@ -64,12 +65,11 @@ pub(crate) struct EntityCache {
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Config {
     redis: RedisCache,
-    /// activates caching for all subgraphs, unless overriden in subgraph specific configuration
+    /// Enable or disable the entity caching feature
     #[serde(default)]
-    enabled: Option<bool>,
-    /// Per subgraph configuration
-    #[serde(default)]
-    subgraphs: HashMap<String, Subgraph>,
+    enabled: bool,
+
+    subgraph: SubgraphConfiguration<Subgraph>,
 
     /// Entity caching evaluation metrics
     #[serde(default)]
@@ -77,24 +77,21 @@ pub(crate) struct Config {
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, Default, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Subgraph {
     /// expiration for all keys for this subgraph, unless overriden by the `Cache-Control` header in subgraph responses
-    #[serde(default)]
     pub(crate) ttl: Option<Ttl>,
 
     /// activates caching for this subgraph, overrides the global configuration
-    #[serde(default)]
     pub(crate) enabled: Option<bool>,
 
     /// Context key used to separate cache sections per user
-    #[serde(default)]
     pub(crate) private_id: Option<String>,
 }
 
 /// Per subgraph configuration for entity caching
-#[derive(Clone, Debug, JsonSchema, Deserialize)]
+#[derive(Clone, Debug, JsonSchema, Deserialize, Serialize)]
 #[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct Ttl(
     #[serde(deserialize_with = "humantime_serde::deserialize")]
@@ -144,7 +141,12 @@ impl Plugin for EntityCache {
         };
 
         if init.config.redis.ttl.is_none()
-            && init.config.subgraphs.values().any(|s| s.ttl.is_none())
+            && init
+                .config
+                .subgraph
+                .subgraphs
+                .values()
+                .any(|s| s.ttl.is_none())
         {
             return Err("a TTL must be configured for all subgraphs or globally"
                 .to_string()
@@ -154,7 +156,7 @@ impl Plugin for EntityCache {
         Ok(Self {
             storage,
             enabled: init.config.enabled,
-            subgraphs: Arc::new(init.config.subgraphs),
+            subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
         })
@@ -163,11 +165,11 @@ impl Plugin for EntityCache {
     fn supergraph_service(&self, service: supergraph::BoxService) -> supergraph::BoxService {
         ServiceBuilder::new()
             .map_response(|mut response: supergraph::Response| {
-                if let Some(cache_control) = {
-                    let lock = response.context.extensions().lock();
-                    let cache_control = lock.get::<CacheControl>().cloned();
-                    cache_control
-                } {
+                if let Some(cache_control) = response
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<CacheControl>().cloned())
+                {
                     let _ = cache_control.to_headers(response.response.headers_mut());
                 }
 
@@ -184,19 +186,39 @@ impl Plugin for EntityCache {
     ) -> subgraph::BoxService {
         let storage = match self.storage.clone() {
             Some(storage) => storage,
-            None => return service,
+            None => {
+                return ServiceBuilder::new()
+                    .map_response(move |response: subgraph::Response| {
+                        update_cache_control(
+                            &response.context,
+                            &CacheControl::new(response.response.headers(), None)
+                                .ok()
+                                .unwrap_or_else(CacheControl::no_store),
+                        );
+
+                        response
+                    })
+                    .service(service)
+                    .boxed();
+            }
         };
 
-        let (subgraph_ttl, subgraph_enabled, private_id) =
-            if let Some(config) = self.subgraphs.get(name) {
-                (
-                    config.ttl.clone().map(|t| t.0).or_else(|| storage.ttl()),
-                    config.enabled.or(self.enabled).unwrap_or(false),
-                    config.private_id.clone(),
-                )
-            } else {
-                (storage.ttl(), self.enabled.unwrap_or(false), None)
-            };
+        let subgraph_ttl = self
+            .subgraphs
+            .get(name)
+            .ttl
+            .clone()
+            .map(|t| t.0)
+            .or_else(|| storage.ttl());
+        let subgraph_enabled = self.enabled
+            && self
+                .subgraphs
+                .get(name)
+                .enabled
+                // if the top level `enabled` is true but there is no other configuration, caching is enabled for this plugin
+                .unwrap_or(true);
+        let private_id = self.subgraphs.get(name).private_id.clone();
+
         let name = name.to_string();
 
         if self.metrics.enabled {
@@ -210,16 +232,40 @@ impl Plugin for EntityCache {
 
         if subgraph_enabled {
             let private_queries = self.private_queries.clone();
-            tower::util::BoxService::new(CacheService(Some(InnerCacheService {
-                service,
-                name: name.to_string(),
-                storage,
-                subgraph_ttl,
-                private_queries,
-                private_id,
-            })))
+            let inner = ServiceBuilder::new()
+                .map_response(move |response: subgraph::Response| {
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(CacheService(Some(InnerCacheService {
+                    service,
+                    name: name.to_string(),
+                    storage,
+                    subgraph_ttl,
+                    private_queries,
+                    private_id,
+                })));
+            tower::util::BoxService::new(inner)
         } else {
-            service
+            ServiceBuilder::new()
+                .map_response(move |response: subgraph::Response| {
+                    update_cache_control(
+                        &response.context,
+                        &CacheControl::new(response.response.headers(), None)
+                            .ok()
+                            .unwrap_or_else(CacheControl::no_store),
+                    );
+
+                    response
+                })
+                .service(service)
+                .boxed()
         }
     }
 }
@@ -235,8 +281,11 @@ impl EntityCache {
     {
         Ok(Self {
             storage: Some(storage),
-            enabled: Some(true),
-            subgraphs: Arc::new(subgraphs),
+            enabled: true,
+            subgraphs: Arc::new(SubgraphConfiguration {
+                all: Subgraph::default(),
+                subgraphs,
+            }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
         })
@@ -326,8 +375,6 @@ impl InnerCacheService {
                                 c
                             };
 
-                        update_cache_control(&response.context, &cache_control);
-
                         if cache_control.private() {
                             // we did not know in advance that this was a query with a private scope, so we update the cache key
                             if !is_known_private {
@@ -342,14 +389,16 @@ impl InnerCacheService {
                             }
                         }
 
-                        cache_store_root_from_response(
-                            self.storage,
-                            self.subgraph_ttl,
-                            &response,
-                            cache_control,
-                            root_cache_key,
-                        )
-                        .await?;
+                        if cache_control.should_store() {
+                            cache_store_root_from_response(
+                                self.storage,
+                                self.subgraph_ttl,
+                                &response,
+                                cache_control,
+                                root_cache_key,
+                            )
+                            .await?;
+                        }
 
                         Ok(response)
                     }
@@ -372,14 +421,16 @@ impl InnerCacheService {
                 ControlFlow::Continue((request, cache_result)) => {
                     let mut response = self.service.call(request).await?;
 
-                    let cache_control = if response.response.headers().contains_key(CACHE_CONTROL) {
-                        CacheControl::new(response.response.headers(), self.storage.ttl)?
-                    } else {
-                        let mut c = CacheControl::default();
-                        c.no_store = true;
-                        c
-                    };
-                    update_cache_control(&response.context, &cache_control);
+                    let mut cache_control =
+                        if response.response.headers().contains_key(CACHE_CONTROL) {
+                            CacheControl::new(response.response.headers(), self.storage.ttl)?
+                        } else {
+                            CacheControl::no_store()
+                        };
+
+                    if let Some(control_from_cached) = cache_result.1 {
+                        cache_control = cache_control.merge(&control_from_cached);
+                    }
 
                     if !is_known_private && cache_control.private() {
                         self.private_queries.write().await.insert(query.to_string());
@@ -389,12 +440,15 @@ impl InnerCacheService {
                         self.storage,
                         self.subgraph_ttl,
                         &mut response,
-                        cache_control,
+                        cache_control.clone(),
                         cache_result.0,
                         is_known_private,
                         private_id,
                     )
                     .await?;
+
+                    cache_control.to_headers(response.response.headers_mut())?;
+
                     Ok(response)
                 }
             }
@@ -437,21 +491,33 @@ async fn cache_lookup_root(
 
     match cache_result {
         Some(value) => {
-            request.context.extensions().lock().insert(value.0.control);
+            if value.0.control.can_use() {
+                let control = value.0.control.clone();
+                request
+                    .context
+                    .extensions()
+                    .with_lock(|mut lock| lock.insert(control));
 
-            Ok(ControlFlow::Break(
-                subgraph::Response::builder()
+                let mut response = subgraph::Response::builder()
                     .data(value.0.data)
                     .extensions(Object::new())
                     .context(request.context)
-                    .build(),
-            ))
+                    .build();
+
+                value
+                    .0
+                    .control
+                    .to_headers(response.response.headers_mut())?;
+                Ok(ControlFlow::Break(response))
+            } else {
+                Ok(ControlFlow::Continue((request, key)))
+            }
         }
         None => Ok(ControlFlow::Continue((request, key))),
     }
 }
 
-struct EntityCacheResults(Vec<IntermediateResult>);
+struct EntityCacheResults(Vec<IntermediateResult>, Option<CacheControl>);
 
 async fn cache_lookup_entities(
     name: String,
@@ -475,7 +541,21 @@ async fn cache_lookup_entities(
     let cache_result: Vec<Option<CacheEntry>> = cache
         .get_multiple(keys.iter().map(|k| RedisKey(k.clone())).collect::<Vec<_>>())
         .await
-        .map(|res| res.into_iter().map(|r| r.map(|v| v.0)).collect())
+        .map(|res| {
+            res.into_iter()
+                .map(|r| r.map(|v: RedisValue<CacheEntry>| v.0))
+                .map(|v| match v {
+                    None => None,
+                    Some(v) => {
+                        if v.control.can_use() {
+                            Some(v)
+                        } else {
+                            None
+                        }
+                    }
+                })
+                .collect()
+        })
         .unwrap_or_else(|| std::iter::repeat(None).take(keys.len()).collect());
 
     let representations = body
@@ -487,17 +567,13 @@ async fn cache_lookup_entities(
     let (new_representations, cache_result, cache_control) =
         filter_representations(&name, representations, keys, cache_result)?;
 
-    if let Some(control) = cache_control {
-        update_cache_control(&request.context, &control);
-    }
-
     if !new_representations.is_empty() {
         body.variables
             .insert(REPRESENTATIONS, new_representations.into());
 
         Ok(ControlFlow::Continue((
             request,
-            EntityCacheResults(cache_result),
+            EntityCacheResults(cache_result, cache_control),
         )))
     } else {
         let entities = cache_result
@@ -508,23 +584,29 @@ async fn cache_lookup_entities(
         let mut data = Object::default();
         data.insert(ENTITIES, entities.into());
 
-        Ok(ControlFlow::Break(
-            subgraph::Response::builder()
-                .data(data)
-                .extensions(Object::new())
-                .context(request.context)
-                .build(),
-        ))
+        let mut response = subgraph::Response::builder()
+            .data(data)
+            .extensions(Object::new())
+            .context(request.context)
+            .build();
+
+        cache_control
+            .unwrap_or_default()
+            .to_headers(response.response.headers_mut())?;
+
+        Ok(ControlFlow::Break(response))
     }
 }
 
 fn update_cache_control(context: &Context, cache_control: &CacheControl) {
-    if let Some(c) = context.extensions().lock().get_mut::<CacheControl>() {
-        *c = c.merge(cache_control);
-        return;
-    }
-    //FIXME: race condition. We need an Entry API for private entries
-    context.extensions().lock().insert(cache_control.clone());
+    context.extensions().with_lock(|mut lock| {
+        if let Some(c) = lock.get_mut::<CacheControl>() {
+            *c = c.merge(cache_control);
+        } else {
+            //FIXME: race condition. We need an Entry API for private entries
+            lock.insert(cache_control.clone());
+        }
+    })
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -577,8 +659,6 @@ async fn cache_store_entities_from_response(
     is_known_private: bool,
     private_id: Option<String>,
 ) -> Result<(), BoxError> {
-    update_cache_control(&response.context, &cache_control);
-
     let mut data = response.response.body_mut().data.take();
 
     if let Some(mut entities) = data

@@ -10,12 +10,12 @@ use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 
 use crate::error::FederationError;
+use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::GraphPathItem;
 use crate::query_graph::graph_path::OpGraphPath;
 use crate::query_graph::graph_path::OpGraphPathTrigger;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphNode;
-use crate::query_plan::operation::SelectionSet;
 
 /// A "merged" tree representation for a vector of `GraphPath`s that start at a common query graph
 /// node, in which each node of the tree corresponds to a node in the query graph, and a tree's node
@@ -392,6 +392,9 @@ mod tests {
     use petgraph::visit::EdgeRef;
 
     use crate::error::FederationError;
+    use crate::operation::normalize_operation;
+    use crate::operation::Field;
+    use crate::operation::FieldData;
     use crate::query_graph::build_query_graph::build_query_graph;
     use crate::query_graph::condition_resolver::ConditionResolution;
     use crate::query_graph::graph_path::OpGraphPath;
@@ -400,9 +403,6 @@ mod tests {
     use crate::query_graph::path_tree::OpPathTree;
     use crate::query_graph::QueryGraph;
     use crate::query_graph::QueryGraphEdgeTransition;
-    use crate::query_plan::operation::normalize_operation;
-    use crate::query_plan::operation::Field;
-    use crate::query_plan::operation::FieldData;
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::ValidFederationSchema;
 
@@ -420,7 +420,7 @@ mod tests {
 
     fn trivial_condition() -> ConditionResolution {
         ConditionResolution::Satisfied {
-            cost: 0,
+            cost: 0.0,
             path_tree: None,
         }
     }
@@ -513,7 +513,7 @@ mod tests {
             build_graph_path(&query_graph, SchemaRootDefinitionKind::Query, &["t", "id"]).unwrap();
         assert_eq!(
             path1.to_string(),
-            "Query(Test)* --[t]--> T(Test) --[id]--> ID(Test)"
+            "Query(Test) --[t]--> T(Test) --[id]--> ID(Test)"
         );
 
         let path2 = build_graph_path(
@@ -524,7 +524,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             path2.to_string(),
-            "Query(Test)* --[t]--> T(Test) --[otherId]--> ID(Test)"
+            "Query(Test) --[t]--> T(Test) --[otherId]--> ID(Test)"
         );
 
         let normalized_operation =
@@ -539,7 +539,7 @@ mod tests {
         let path_tree =
             OpPathTree::from_op_paths(query_graph.to_owned(), NodeIndex::new(0), &paths).unwrap();
         let computed = path_tree.to_string();
-        let expected = r#"Query(Test)*:
+        let expected = r#"Query(Test):
  -> [3] t = T(Test):
    -> [1] id = ID(Test)
    -> [0] otherId = ID(Test)"#;

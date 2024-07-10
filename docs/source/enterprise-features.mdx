@@ -104,7 +104,12 @@ Follow these steps to configure an GraphOS Router to use an offline Enterprise l
     1. [`APOLLO_ROUTER_LICENSE_PATH`](./configuration/overview/#--license) environment variable, containing an absolute or relative path to an offline license file 
     1. [`APOLLO_ROUTER_LICENSE`](./configuration/overview/#--license) environment variable, containing the stringified contents of an offline license file
 
-    The router checks the CLI option and environment variables in the listed order, then it uses the value of the first option or variable that is set.
+    <Note>
+
+    - The router checks the CLI option and environment variables in the listed order, then it uses the value of the first option or variable that is set.
+    - The `--license <license_path>` option is only available when running the router binary. When running a router with `rover dev`, you must use environment variables to provide your offline license.
+    
+    </Note>
 
 1. Configure the router to use a local supergraph schema by setting one of the following:
 

@@ -29,4 +29,7 @@ pub(crate) struct OtelData {
 
     /// Forced status in case it's coming from the custom attributes
     pub(crate) forced_status: Option<opentelemetry::trace::Status>,
+
+    /// Forced span name in case it's coming from the custom attributes
+    pub(crate) forced_span_name: Option<String>,
 }

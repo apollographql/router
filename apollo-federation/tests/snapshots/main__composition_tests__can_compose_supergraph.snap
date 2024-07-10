@@ -1,6 +1,6 @@
 ---
-source: tests/composition_tests.rs
-expression: print_sdl(&supergraph.schema)
+source: apollo-federation/tests/composition_tests.rs
+expression: print_sdl(supergraph.schema.schema())
 ---
 schema @link(url: "https://specs.apollo.dev/link/v1.0") @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION) {
   query: Query
@@ -30,11 +30,11 @@ type Query @join__type(graph: SUBGRAPH1) @join__type(graph: SUBGRAPH2) {
 }
 
 type S @join__type(graph: SUBGRAPH1) {
-  x: Int
+  x: Int @join__field(graph: SUBGRAPH1)
 }
 
 type T @join__type(graph: SUBGRAPH1, key: "k") @join__type(graph: SUBGRAPH2, key: "k") {
-  k: ID
+  k: ID @join__field(graph: SUBGRAPH1) @join__field(graph: SUBGRAPH2)
   a: Int @join__field(graph: SUBGRAPH2)
   b: String @join__field(graph: SUBGRAPH2)
 }
@@ -58,4 +58,3 @@ enum link__Purpose {
   """EXECUTION features provide metadata necessary for operation execution."""
   EXECUTION
 }
-

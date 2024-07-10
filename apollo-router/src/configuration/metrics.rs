@@ -303,9 +303,11 @@ impl InstrumentData {
             opt.enabled,
             "$[?(@.enabled)]",
             opt.subgraph.enabled,
-            "$[?(@.subgraphs..enabled)]",
+            "$[?(@.subgraph.all.enabled)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.subgraphs..enabled)]",
             opt.subgraph.ttl,
-            "$[?(@.subgraphs..ttl)]"
+            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]"
         );
         populate_config_instrument!(
             apollo.router.config.telemetry,
@@ -379,6 +381,15 @@ impl InstrumentData {
             "$.preview_demand_control[?(@.enabled == true)]",
             opt.mode,
             "$.mode"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.apollo_telemetry_options,
+            "$.telemetry.apollo",
+            opt.signature_normalization_algorithm,
+            "$.experimental_apollo_signature_normalization_algorithm",
+            opt.metrics_reference_mode,
+            "$.experimental_apollo_metrics_reference_mode"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.

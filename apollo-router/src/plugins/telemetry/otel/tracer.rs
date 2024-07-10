@@ -188,6 +188,7 @@ mod tests {
             parent_cx,
             event_attributes: None,
             forced_status: None,
+            forced_span_name: None,
         });
         let span = cx.span();
         let span_context = span.span_context();
@@ -232,6 +233,7 @@ mod tests {
                 parent_cx,
                 event_attributes: None,
                 forced_status: None,
+                forced_span_name: None,
             });
 
             assert_eq!(

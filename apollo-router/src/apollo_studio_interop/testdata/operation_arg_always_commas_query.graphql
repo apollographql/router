@@ -1,0 +1,5 @@
+query QueryArgLength($enumInputWithAVerrrrrrrrrrrryLongNameSoLineLengthIsOver80: SomeEnum, $enumInputType: EnumInputType) {
+    enumInputQuery (enumInput:$enumInputWithAVerrrrrrrrrrrryLongNameSoLineLengthIsOver80,inputType:$enumInputType) {
+        enumResponse
+    }
+}

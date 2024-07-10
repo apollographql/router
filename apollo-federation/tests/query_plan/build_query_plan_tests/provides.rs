@@ -112,7 +112,6 @@ fn it_works_with_nested_provides() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")] // TODO: fix bug FED-230
 fn it_works_on_interfaces() {
     let planner = planner!(
         Subgraph1: r#"
@@ -247,8 +246,6 @@ fn it_works_on_interfaces() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_works_on_unions() {
     let planner = planner!(
         Subgraph1: r#"
@@ -307,6 +304,7 @@ fn it_works_on_unions() {
         Fetch(service: "Subgraph1") {
           {
             noProvides {
+              __typename
               ... on T1 {
                 __typename
                 id
@@ -319,36 +317,26 @@ fn it_works_on_unions() {
             }
           }
         },
-        Parallel {
-          Flatten(path: "noProvides") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on T2 {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on T2 {
-                  b
-                }
+        Flatten(path: "noProvides") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T1 {
+                __typename
+                id
               }
-            },
-          },
-          Flatten(path: "noProvides") {
-            Fetch(service: "Subgraph2") {
-              {
-                ... on T1 {
-                  __typename
-                  id
-                }
-              } =>
-              {
-                ... on T1 {
-                  a
-                }
+              ... on T2 {
+                __typename
+                id
               }
-            },
+            } =>
+            {
+              ... on T1 {
+                a
+              }
+              ... on T2 {
+                b
+              }
+            }
           },
         },
       },
@@ -376,6 +364,7 @@ fn it_works_on_unions() {
       Fetch(service: "Subgraph1") {
         {
           withProvidesForT1 {
+            __typename
             ... on T1 {
               a
             }
@@ -411,6 +400,7 @@ fn it_works_on_unions() {
         Fetch(service: "Subgraph1") {
           {
             withProvidesForT1 {
+              __typename
               ... on T1 {
                 a
               }
@@ -480,8 +470,6 @@ fn it_works_on_unions() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")]
-// TODO: investigate this failure
 fn it_allow_providing_fields_for_only_some_subtype() {
     let planner = planner!(
         Subgraph1: r#"
@@ -688,8 +676,6 @@ fn it_allow_providing_fields_for_only_some_subtype() {
 }
 
 #[test]
-#[should_panic(expected = "Subgraph unexpectedly does not use federation spec")]
-// TODO: investigate this failure
 fn it_works_with_type_condition_even_for_types_only_reachable_by_the_at_provides() {
     let planner = planner!(
         Subgraph1: r#"

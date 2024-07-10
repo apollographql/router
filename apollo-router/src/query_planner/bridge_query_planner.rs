@@ -4,11 +4,12 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::fmt::Write;
 use std::sync::Arc;
+use std::time::Instant;
 
 use apollo_compiler::ast;
 use apollo_compiler::ast::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::ExecutableDocument;
+use apollo_compiler::NodeStr;
 use apollo_federation::error::FederationError;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use futures::future::BoxFuture;
@@ -35,7 +36,6 @@ use crate::error::QueryPlannerError;
 use crate::error::SchemaError;
 use crate::error::ServiceBuildError;
 use crate::error::ValidationErrors;
-use crate::executable::USING_CATCH_UNWIND;
 use crate::graphql;
 use crate::introspection::Introspection;
 use crate::json_ext::Object;
@@ -45,19 +45,26 @@ use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::authorization::CacheKeyMetadata;
 use crate::plugins::authorization::UnauthorizedPaths;
 use crate::plugins::progressive_override::LABELS_TO_OVERRIDE_KEY;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::query_planner::convert::convert_root_query_plan_node;
+use crate::query_planner::dual_query_planner::BothModeComparisonJob;
 use crate::query_planner::fetch::QueryHash;
-use crate::query_planner::fetch::SubgraphSchemas;
 use crate::query_planner::labeler::add_defer_labels;
 use crate::services::layers::query_analysis::ParsedDocument;
 use crate::services::layers::query_analysis::ParsedDocumentInner;
 use crate::services::QueryPlannerContent;
 use crate::services::QueryPlannerRequest;
 use crate::services::QueryPlannerResponse;
+use crate::spec::operation_limits::OperationLimits;
 use crate::spec::query::change::QueryHashVisitor;
 use crate::spec::Query;
 use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
+
+pub(crate) const RUST_QP_MODE: &str = "rust";
+const JS_QP_MODE: &str = "js";
 
 #[derive(Clone)]
 /// A query planner that calls out to the nodejs router-bridge query planner.
@@ -71,6 +78,7 @@ pub(crate) struct BridgeQueryPlanner {
     configuration: Arc<Configuration>,
     enable_authorization_directives: bool,
     _federation_instrument: ObservableGauge<u64>,
+    signature_normalization_algorithm: ApolloSignatureNormalizationAlgorithm,
 }
 
 #[derive(Clone)]
@@ -139,6 +147,7 @@ impl PlannerMode {
                 .reuse_query_fragments
                 .unwrap_or(true),
             subgraph_graphql_validation: false,
+            generate_query_fragments: false,
             incremental_delivery:
                 apollo_federation::query_plan::query_planner::QueryPlanIncrementalDeliveryConfig {
                     enable_defer: configuration.supergraph.defer_support,
@@ -183,33 +192,48 @@ impl PlannerMode {
 
     async fn plan(
         &self,
-        schema: &Schema,
+        doc: &ParsedDocument,
         filtered_query: String,
         operation: Option<String>,
         plan_options: PlanOptions,
+        // Initialization code that needs mutable access to the plan,
+        // before we potentially share it in Arc with a background thread
+        // for "both" mode.
+        init_query_plan_root_node: impl Fn(&mut PlanNode) -> Result<(), ValidationErrors>,
     ) -> Result<PlanSuccess<QueryPlanResult>, QueryPlannerError> {
         match self {
-            PlannerMode::Js(js) => js
-                .plan(filtered_query, operation, plan_options)
-                .await
-                .map_err(QueryPlannerError::RouterBridgeError)?
-                .into_result()
-                .map_err(|err| QueryPlannerError::from(PlanErrors::from(err))),
-            PlannerMode::Rust { rust, .. } => {
-                // TODO: avoid reparsing and revalidating
-                let document = ExecutableDocument::parse_and_validate(
-                    schema.api_schema(),
-                    &filtered_query,
-                    "query.graphql",
-                )
-                .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
+            PlannerMode::Js(js) => {
+                let start = Instant::now();
 
-                let plan = operation
+                let result = js.plan(filtered_query, operation, plan_options).await;
+
+                metric_query_planning_plan_duration(JS_QP_MODE, start);
+
+                let mut success = result
+                    .map_err(QueryPlannerError::RouterBridgeError)?
+                    .into_result()
+                    .map_err(PlanErrors::from)?;
+
+                if let Some(root_node) = &mut success.data.query_plan.node {
+                    // Arc freshly deserialized from Deno should be unique, so this doesn’t clone:
+                    let root_node = Arc::make_mut(root_node);
+                    init_query_plan_root_node(root_node)?;
+                }
+                Ok(success)
+            }
+            PlannerMode::Rust { rust, .. } => {
+                let start = Instant::now();
+
+                let result = operation
                     .as_deref()
                     .map(|n| Name::new(n).map_err(FederationError::from))
                     .transpose()
-                    .and_then(|operation| rust.build_query_plan(&document, operation))
-                    .map_err(|e| QueryPlannerError::FederationError(e.to_string()))?;
+                    .and_then(|operation| rust.build_query_plan(&doc.executable, operation))
+                    .map_err(|e| QueryPlannerError::FederationError(e.to_string()));
+
+                metric_query_planning_plan_duration(RUST_QP_MODE, start);
+
+                let plan = result?;
 
                 // Dummy value overwritten below in `BrigeQueryPlanner::plan`
                 // `Configuration::validate` ensures that we only take this path
@@ -219,91 +243,53 @@ impl PlannerMode {
                     referenced_fields_by_type: Default::default(),
                 };
 
+                let mut root_node = convert_root_query_plan_node(&plan);
+                if let Some(node) = &mut root_node {
+                    init_query_plan_root_node(node)?;
+                }
                 Ok(PlanSuccess {
                     usage_reporting,
                     data: QueryPlanResult {
-                        formatted_query_plan: Some(plan.to_string()),
-                        query_plan: (&plan).into(),
+                        formatted_query_plan: Some(Arc::new(plan.to_string())),
+                        query_plan: QueryPlan {
+                            node: root_node.map(Arc::new),
+                        },
                     },
                 })
             }
             PlannerMode::Both { js, rust } => {
-                // TODO: avoid reparsing and revalidating
-                let document = ExecutableDocument::parse_and_validate(
-                    schema.api_schema(),
-                    &filtered_query,
-                    "query.graphql",
-                )
-                .map_err(|e| QueryPlannerError::OperationValidationErrors(e.errors.into()))?;
+                let operation_name = operation.as_deref().map(NodeStr::from);
 
-                // TODO: once the Rust query planner does not use `todo!()` anymore,
-                // remove `USING_CATCH_UNWIND` and this use of `catch_unwind`.
-                let rust_result = std::panic::catch_unwind(|| {
-                    USING_CATCH_UNWIND.set(true);
-                    let operation = operation.as_deref().map(Name::new).transpose()?;
-                    let result = rust.build_query_plan(&document, operation);
-                    USING_CATCH_UNWIND.set(false);
-                    result
-                })
-                .unwrap_or_else(|panic| {
-                    USING_CATCH_UNWIND.set(false);
-                    Err(apollo_federation::error::FederationError::internal(
-                        format!(
-                            "query planner panicked: {}",
-                            panic
-                                .downcast_ref::<String>()
-                                .map(|s| s.as_str())
-                                .or_else(|| panic.downcast_ref::<&str>().copied())
-                                .unwrap_or_default()
-                        ),
-                    ))
-                });
+                let start = Instant::now();
 
-                let js_result = js
-                    .plan(filtered_query, operation, plan_options)
-                    .await
+                let result = js.plan(filtered_query, operation, plan_options).await;
+
+                metric_query_planning_plan_duration(JS_QP_MODE, start);
+
+                let mut js_result = result
                     .map_err(QueryPlannerError::RouterBridgeError)?
                     .into_result()
                     .map_err(PlanErrors::from);
 
-                let is_matched;
-                match (&js_result, &rust_result) {
-                    (Err(js_error), Ok(_)) => {
-                        tracing::warn!("JS query planner error: {}", js_error);
-                        is_matched = false;
-                    }
-                    (Ok(_), Err(rust_error)) => {
-                        tracing::warn!("Rust query planner error: {}", rust_error);
-                        is_matched = false;
-                    }
-                    (Err(_), Err(_)) => {
-                        is_matched = true;
-                    }
-
-                    (Ok(js_plan), Ok(rust_plan)) => {
-                        is_matched = js_plan.data.query_plan == rust_plan.into();
-                        if is_matched {
-                            tracing::debug!("JS and Rust query plans match! 🎉");
-                        } else {
-                            tracing::warn!("JS v.s. Rust query plan mismatch");
-                            if let Some(formatted) = &js_plan.data.formatted_query_plan {
-                                tracing::debug!(
-                                    "Diff:\n{}",
-                                    render_diff(&diff::lines(formatted, &rust_plan.to_string()))
-                                );
-                            }
-                        }
+                if let Ok(success) = &mut js_result {
+                    if let Some(root_node) = &mut success.data.query_plan.node {
+                        // Arc freshly deserialized from Deno should be unique, so this doesn’t clone:
+                        let root_node = Arc::make_mut(root_node);
+                        init_query_plan_root_node(root_node)?;
                     }
                 }
 
-                u64_counter!(
-                    "apollo.router.operations.query_planner.both",
-                    "Comparing JS v.s. Rust query plans",
-                    1,
-                    "generation.is_matched" = is_matched,
-                    "generation.js_error" = js_result.is_err(),
-                    "generation.rust_error" = rust_result.is_err()
-                );
+                BothModeComparisonJob {
+                    rust_planner: rust.clone(),
+                    document: doc.executable.clone(),
+                    operation_name,
+                    // Exclude usage reporting from the Result sent for comparison
+                    js_result: js_result
+                        .as_ref()
+                        .map(|success| success.data.clone())
+                        .map_err(|e| e.errors.clone()),
+                }
+                .schedule();
 
                 Ok(js_result?)
             }
@@ -436,6 +422,9 @@ impl BridgeQueryPlanner {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema)?;
         let federation_instrument = federation_version_instrument(schema.federation_version());
+        let signature_normalization_algorithm =
+            TelemetryConfig::signature_normalization_algorithm(&configuration);
+
         Ok(Self {
             planner,
             schema,
@@ -444,6 +433,7 @@ impl BridgeQueryPlanner {
             enable_authorization_directives,
             configuration,
             _federation_instrument: federation_instrument,
+            signature_normalization_algorithm,
         })
     }
 
@@ -468,9 +458,11 @@ impl BridgeQueryPlanner {
         query: String,
         operation_name: Option<&str>,
         doc: &ParsedDocument,
+        query_metrics_in: &mut OperationLimits<u32>,
     ) -> Result<Query, QueryPlannerError> {
         let executable = &doc.executable;
         crate::spec::operation_limits::check(
+            query_metrics_in,
             &self.configuration,
             &query,
             executable,
@@ -528,27 +520,25 @@ impl BridgeQueryPlanner {
         selections: Query,
         plan_options: PlanOptions,
         doc: &ParsedDocument,
+        query_metrics: OperationLimits<u32>,
     ) -> Result<QueryPlannerContent, QueryPlannerError> {
-        let mut plan_success = self
+        let plan_success = self
             .planner
             .plan(
-                &self.schema,
+                doc,
                 filtered_query.clone(),
                 operation.clone(),
                 plan_options,
+                |root_node| {
+                    root_node.init_parsed_operations_and_hash_subqueries(
+                        &self.subgraph_schemas,
+                        &self.schema.raw_sdl,
+                    )?;
+                    root_node.extract_authorization_metadata(self.schema.supergraph_schema(), &key);
+                    Ok(())
+                },
             )
             .await?;
-        plan_success
-            .data
-            .query_plan
-            .init_parsed_operations_and_hash_subqueries(
-                &self.subgraph_schemas,
-                &self.schema.raw_sdl,
-            )?;
-        plan_success
-            .data
-            .query_plan
-            .extract_authorization_metadata(self.schema.supergraph_schema(), &key);
 
         // the `statsReportKey` field should match the original query instead of the filtered query, to index them all under the same query
         let operation_signature = if matches!(
@@ -605,6 +595,7 @@ impl BridgeQueryPlanner {
                         &doc.executable,
                         &operation,
                         self.schema.supergraph_schema(),
+                        &self.signature_normalization_algorithm,
                     );
 
                     // Ignore comparison if the operation name is an empty string since there is a known issue where
@@ -688,6 +679,7 @@ impl BridgeQueryPlanner {
                         root: node,
                         formatted_query_plan,
                         query: Arc::new(selections),
+                        query_metrics,
                     }),
                 })
             }
@@ -734,13 +726,13 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
 
         let metadata = context
             .extensions()
-            .lock()
-            .get::<CacheKeyMetadata>()
-            .cloned()
-            .unwrap_or_default();
+            .with_lock(|lock| lock.get::<CacheKeyMetadata>().cloned().unwrap_or_default());
         let this = self.clone();
         let fut = async move {
-            let mut doc = match context.extensions().lock().get::<ParsedDocument>().cloned() {
+            let mut doc = match context
+                .extensions()
+                .with_lock(|lock| lock.get::<ParsedDocument>().cloned())
+            {
                 None => return Err(QueryPlannerError::SpecError(SpecError::UnknownFileId)),
                 Some(d) => d,
             };
@@ -771,8 +763,7 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                     });
                     context
                         .extensions()
-                        .lock()
-                        .insert::<ParsedDocument>(doc.clone());
+                        .with_lock(|mut lock| lock.insert::<ParsedDocument>(doc.clone()));
                 }
             }
 
@@ -804,16 +795,17 @@ impl Service<QueryPlannerRequest> for BridgeQueryPlanner {
                 Err(e) => {
                     match &e {
                         QueryPlannerError::PlanningErrors(pe) => {
-                            context
-                                .extensions()
-                                .lock()
-                                .insert(Arc::new(pe.usage_reporting.clone()));
+                            context.extensions().with_lock(|mut lock| {
+                                lock.insert(Arc::new(pe.usage_reporting.clone()))
+                            });
                         }
                         QueryPlannerError::SpecError(e) => {
-                            context.extensions().lock().insert(Arc::new(UsageReporting {
-                                stats_report_key: e.get_error_key().to_string(),
-                                referenced_fields_by_type: HashMap::new(),
-                            }));
+                            context.extensions().with_lock(|mut lock| {
+                                lock.insert(Arc::new(UsageReporting {
+                                    stats_report_key: e.get_error_key().to_string(),
+                                    referenced_fields_by_type: HashMap::new(),
+                                }))
+                            });
                         }
                         _ => (),
                     }
@@ -864,11 +856,13 @@ impl BridgeQueryPlanner {
             None
         };
 
+        let mut query_metrics = Default::default();
         let mut selections = self
             .parse_selections(
                 key.original_query.clone(),
                 key.operation_name.as_deref(),
                 &doc,
+                &mut query_metrics,
             )
             .await?;
 
@@ -936,6 +930,7 @@ impl BridgeQueryPlanner {
                     key.filtered_query.clone(),
                     key.operation_name.as_deref(),
                     &doc,
+                    &mut query_metrics,
                 )
                 .await?;
             filtered.is_original = false;
@@ -950,51 +945,27 @@ impl BridgeQueryPlanner {
             selections,
             key.plan_options,
             &doc,
+            query_metrics,
         )
         .await
     }
 }
 
 /// Data coming from the `plan` method on the router_bridge
-#[derive(Debug, PartialEq, Deserialize)]
+// Note: Reexported under `apollo_compiler::_private`
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub(crate) struct QueryPlanResult {
-    pub(super) formatted_query_plan: Option<String>,
+pub struct QueryPlanResult {
+    pub(super) formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
 }
 
-#[derive(Debug, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 /// The root query plan container.
 pub(super) struct QueryPlan {
     /// The hierarchical nodes that make up the query plan
-    pub(super) node: Option<PlanNode>,
-}
-
-impl QueryPlan {
-    fn init_parsed_operations_and_hash_subqueries(
-        &mut self,
-        subgraph_schemas: &SubgraphSchemas,
-        supergraph_schema_hash: &str,
-    ) -> Result<(), ValidationErrors> {
-        if let Some(node) = self.node.as_mut() {
-            node.init_parsed_operations_and_hash_subqueries(
-                subgraph_schemas,
-                supergraph_schema_hash,
-            )?;
-        }
-        Ok(())
-    }
-
-    fn extract_authorization_metadata(
-        &mut self,
-        schema: &Valid<apollo_compiler::Schema>,
-        key: &CacheKeyMetadata,
-    ) {
-        if let Some(node) = self.node.as_mut() {
-            node.extract_authorization_metadata(schema, key);
-        }
-    }
+    pub(super) node: Option<Arc<PlanNode>>,
 }
 
 fn standardize_schema(mut schema: apollo_compiler::Schema) -> apollo_compiler::Schema {
@@ -1127,7 +1098,7 @@ fn standardize_schema(mut schema: apollo_compiler::Schema) -> apollo_compiler::S
     schema
 }
 
-fn render_diff(differences: &[diff::Result<&str>]) -> String {
+pub(crate) fn render_diff(differences: &[diff::Result<&str>]) -> String {
     let mut output = String::new();
     for diff_line in differences {
         match diff_line {
@@ -1153,6 +1124,15 @@ fn render_diff(differences: &[diff::Result<&str>]) -> String {
     output
 }
 
+pub(crate) fn metric_query_planning_plan_duration(planner: &'static str, start: Instant) {
+    f64_histogram!(
+        "apollo.router.query_planning.plan.duration",
+        "Duration of the query planning.",
+        start.elapsed().as_secs_f64(),
+        "planner" = planner
+    );
+}
+
 #[cfg(test)]
 mod tests {
     use std::fs;
@@ -1165,6 +1145,7 @@ mod tests {
 
     use super::*;
     use crate::metrics::FutureMetricsExt as _;
+    use crate::services::subgraph;
     use crate::services::supergraph;
     use crate::spec::query::subselections::SubSelectionKey;
     use crate::spec::query::subselections::SubSelectionValue;
@@ -1251,8 +1232,9 @@ mod tests {
 
         let doc = Query::parse_document(query, None, &schema, &Configuration::default()).unwrap();
 
+        let mut query_metrics = Default::default();
         let selections = planner
-            .parse_selections(query.to_string(), None, &doc)
+            .parse_selections(query.to_string(), None, &doc, &mut query_metrics)
             .await
             .unwrap();
         let err =
@@ -1268,6 +1250,7 @@ mod tests {
                 selections,
                 PlanOptions::default(),
                 &doc,
+                query_metrics
             )
             .await
             .unwrap_err();
@@ -1720,5 +1703,77 @@ mod tests {
         assert!(response.response.status().is_success());
         let response = response.next_response().await.unwrap();
         assert!(response.errors.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_rust_mode_subgraph_operation_serialization() {
+        let subgraph_queries = Arc::new(tokio::sync::Mutex::new(String::new()));
+        let subgraph_queries2 = Arc::clone(&subgraph_queries);
+        let mut harness = crate::TestHarness::builder()
+            // auth is not relevant here, but supergraph.graphql uses join/v0.1
+            // which is not supported by the Rust query planner
+            .schema(include_str!("../../tests/fixtures/supergraph-auth.graphql"))
+            .configuration_json(serde_json::json!({
+                "experimental_query_planner_mode": "new",
+            }))
+            .unwrap()
+            .subgraph_hook(move |_name, _default| {
+                let subgraph_queries = Arc::clone(&subgraph_queries);
+                tower::service_fn(move |request: subgraph::Request| {
+                    let subgraph_queries = Arc::clone(&subgraph_queries);
+                    async move {
+                        let query = request
+                            .subgraph_request
+                            .body()
+                            .query
+                            .as_deref()
+                            .unwrap_or_default();
+                        let mut queries = subgraph_queries.lock().await;
+                        queries.push_str(query);
+                        queries.push('\n');
+                        Ok(subgraph::Response::builder()
+                            .extensions(crate::json_ext::Object::new())
+                            .context(request.context)
+                            .build())
+                    }
+                })
+                .boxed()
+            })
+            .build_supergraph()
+            .await
+            .unwrap();
+
+        let request = supergraph::Request::fake_builder()
+            .query("{ topProducts { name }}")
+            .build()
+            .unwrap();
+        let mut response = harness.ready().await.unwrap().call(request).await.unwrap();
+        assert!(response.response.status().is_success());
+        let response = response.next_response().await.unwrap();
+        assert!(response.errors.is_empty());
+
+        let subgraph_queries = subgraph_queries2.lock().await;
+        insta::assert_snapshot!(*subgraph_queries, @r###"
+        { topProducts { name } }
+        "###)
+    }
+
+    #[test]
+    fn test_metric_query_planning_plan_duration() {
+        let start = Instant::now();
+        metric_query_planning_plan_duration(RUST_QP_MODE, start);
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "rust"
+        );
+
+        let start = Instant::now();
+        metric_query_planning_plan_duration(JS_QP_MODE, start);
+        assert_histogram_exists!(
+            "apollo.router.query_planning.plan.duration",
+            f64,
+            "planner" = "js"
+        );
     }
 }
