@@ -38,6 +38,59 @@ fn adjacent_mutations_get_merged() {
             id
             bar
           }
+          updateInATwo: updateFooInA {
+            id
+            bar
+          }
+          updateInBOne: updateFooInB {
+            id
+            baz
+          }
+        }
+        "#,
+        @r###"
+        QueryPlan {
+          Sequence {
+            Fetch(service: "SubgraphA") {
+              {
+                updateInAOne: updateFooInA {
+                  id
+                  bar
+                }
+                updateInATwo: updateFooInA {
+                  id
+                  bar
+                }
+              }
+            },
+            Fetch(service: "SubgraphB") {
+              {
+                updateInBOne: updateFooInB {
+                  id
+                  baz
+                }
+              }
+            },
+          },
+        }
+        "###
+    );
+}
+
+#[test]
+fn non_adjacent_mutations_do_not_get_merged() {
+    let planner = planner!(
+        SubgraphA: SUBGRAPH_A,
+        SubgraphB: SUBGRAPH_B,
+    );
+    assert_plan!(
+        &planner,
+        r#"
+        mutation TestMutation {
+          updateInAOne: updateFooInA {
+            id
+            bar
+          }
           updateInBOne: updateFooInB {
             id
             baz
