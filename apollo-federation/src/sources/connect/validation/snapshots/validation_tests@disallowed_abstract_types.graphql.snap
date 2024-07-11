@@ -1,0 +1,6 @@
+---
+source: apollo-federation/src/sources/connect/validation/mod.rs
+expression: "format!(\"{:?}\", errors)"
+input_file: apollo-federation/src/sources/connect/validation/test_data/validation/disallowed_abstract_types.graphql
+---
+[Message { code: UnsupportedAbstractType, message: "Abstract schema types, such as `interface`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/patterns#abstract-types.", locations: [Location { line: 20, column: 0 }..Location { line: 22, column: 1 }] }, Message { code: UnsupportedAbstractType, message: "Abstract schema types, such as `union`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/patterns#abstract-types.", locations: [Location { line: 24, column: 0 }..Location { line: 24, column: 33 }] }]

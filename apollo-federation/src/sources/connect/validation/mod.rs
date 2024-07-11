@@ -147,23 +147,38 @@ pub fn validate(schema: Schema) -> Vec<Message> {
             });
         }
     }
-    let connect_errors = schema
+
+    let mut connect_errors: Vec<Message> = vec![];
+    schema
         .types
         .values()
-        .filter_map(|extended_type| match extended_type {
-            ExtendedType::Object(object) => Some(object),
-            _ => None,
-        })
-        .flat_map(|object| {
-            validate_object_fields(
+        .for_each(|extended_type| match extended_type {
+            ExtendedType::Object(object) => connect_errors.extend(validate_object_fields(
                 object,
                 &schema,
                 &connect_directive_name,
                 &source_directive_name,
                 &all_source_names,
-            )
+            )),
+            ExtendedType::Union(union_type) => connect_errors.push(Message {
+                code: Code::UnsupportedAbstractType,
+                message: format!("Abstract schema types, such as `union`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/#abstract-schema-types."),
+                locations: Location::from_node(union_type.location(), source_map)
+                    .into_iter()
+                    .collect(),
+            }),
+            ExtendedType::Interface(interface) => connect_errors.push(Message {
+                code: Code::UnsupportedAbstractType,
+                message: format!("Abstract schema types, such as `interface`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/#abstract-schema-types."),
+                locations: Location::from_node(interface.location(), source_map)
+                    .into_iter()
+                    .collect(),
+            }),
+            _ => (),
         });
+
     messages.extend(connect_errors);
+
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME
         && messages
             .iter()
@@ -325,6 +340,7 @@ fn validate_object_fields(
                 .collect(),
         }];
     }
+
     let object_category = if schema
         .schema_definition
         .query
@@ -636,6 +652,8 @@ pub enum Code {
     InvalidHttpHeaderMapping,
     /// Certain directives are not allowed when using connectors
     UnsupportedFederationDirective,
+    /// TODO: update
+    UnsupportedAbstractType,
 }
 
 impl Code {
