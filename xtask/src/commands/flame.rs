@@ -22,7 +22,6 @@ impl Flame {
             .arg("record")
             .arg(format!("./target/profiling/{PROJECT_NAME}"))
             .args(&self.subargs)
-            .env("CARGO_PROFILE_RELEASE_DEBUG", "true")
             .output()?;
 
         Ok(())
