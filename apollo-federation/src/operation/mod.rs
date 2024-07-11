@@ -39,9 +39,8 @@ use crate::query_plan::conditions::Conditions;
 use crate::query_plan::FetchDataKeyRenamer;
 use crate::query_plan::FetchDataPathElement;
 use crate::query_plan::FetchDataRewrite;
-use crate::schema::definitions::is_composite_type;
 use crate::schema::definitions::types_can_be_merged;
-use crate::schema::definitions::AbstractType;
+use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -783,6 +782,10 @@ impl Selection {
                 Some(&inline_fragment_selection.selection_set)
             }
         }
+    }
+
+    fn sub_selection_type_position(&self) -> Option<CompositeTypeDefinitionPosition> {
+        Some(self.try_selection_set()?.type_position.clone())
     }
 
     pub(crate) fn conditions(&self) -> Result<Conditions, FederationError> {
@@ -2683,7 +2686,7 @@ impl SelectionSet {
 
     pub(crate) fn add_typename_field_for_abstract_types(
         &self,
-        parent_type_if_abstract: Option<AbstractType>,
+        parent_type_if_abstract: Option<AbstractTypeDefinitionPosition>,
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
@@ -2697,7 +2700,9 @@ impl SelectionSet {
         }
         for selection in self.selections.values() {
             selection_map.insert(if let Some(selection_set) = selection.selection_set()? {
-                let type_if_abstract = subselection_type_if_abstract(selection)?;
+                let type_if_abstract = selection
+                    .sub_selection_type_position()
+                    .and_then(|ty| ty.try_into().ok());
                 let updated_selection_set =
                     selection_set.add_typename_field_for_abstract_types(type_if_abstract)?;
 
@@ -3042,8 +3047,18 @@ impl SelectionSet {
         })
     }
 
-    // - `self.selections` must be fragment-spread-free.
-    pub(crate) fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
+    /// In a normalized selection set containing only fields and inline fragments,
+    /// iterate over all the fields that may be selected.
+    ///
+    /// # Preconditions
+    /// The selection set must not contain named fragment spreads.
+    pub(crate) fn field_selections(&self) -> FieldSelectionsIter<'_> {
+        FieldSelectionsIter::new(self.selections.values())
+    }
+
+    /// # Preconditions
+    /// The selection set must not contain named fragment spreads.
+    fn fields_in_set(&self) -> Vec<CollectedFieldInSet> {
         let mut fields = Vec::new();
 
         for (_key, selection) in self.selections.iter() {
@@ -3199,6 +3214,36 @@ impl IntoIterator for SelectionSet {
     }
 }
 
+pub(crate) struct FieldSelectionsIter<'sel> {
+    stack: Vec<indexmap::map::Values<'sel, SelectionKey, Selection>>,
+}
+
+impl<'sel> FieldSelectionsIter<'sel> {
+    fn new(iter: indexmap::map::Values<'sel, SelectionKey, Selection>) -> Self {
+        Self { stack: vec![iter] }
+    }
+}
+
+impl<'sel> Iterator for FieldSelectionsIter<'sel> {
+    type Item = &'sel Arc<FieldSelection>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match self.stack.last_mut()?.next() {
+            None if self.stack.len() == 1 => None,
+            None => {
+                self.stack.pop();
+                self.next()
+            }
+            Some(Selection::Field(field)) => Some(field),
+            Some(Selection::InlineFragment(frag)) => {
+                self.stack.push(frag.selection_set.selections.values());
+                self.next()
+            }
+            Some(Selection::FragmentSpread(_frag)) => unreachable!(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub(crate) struct SelectionSetAtPath {
     path: Vec<FetchDataPathElement>,
@@ -3268,9 +3313,10 @@ fn compute_aliases_for_non_merging_fields(
                 if &previous.field_name == field_name
                     && types_can_be_merged(&previous.field_type, field_type, schema.schema())?
                 {
+                    let output_type = schema.get_type(field_type.inner_named_type().clone())?;
                     // If the type is non-composite, then we're all set. But if it is composite, we need to record the sub-selection to that response name
                     // as we need to "recurse" on the merged of both the previous and this new field.
-                    if is_composite_type(field_type.inner_named_type(), schema.schema())? {
+                    if output_type.is_composite_type() {
                         match &previous.selections {
                             None => {
                                 return Err(SingleFederationError::Internal {
@@ -3379,21 +3425,6 @@ fn gen_alias_name(base_name: &Name, unavailable_names: &HashMap<Name, SeenRespon
             }
         }
         counter += 1;
-    }
-}
-
-pub(crate) fn subselection_type_if_abstract(
-    selection: &Selection,
-) -> Result<Option<AbstractType>, FederationError> {
-    let Some(sub_selection_type) = selection.element()?.sub_selection_type_position()? else {
-        return Ok(None);
-    };
-    match sub_selection_type {
-        CompositeTypeDefinitionPosition::Interface(interface_type) => {
-            Ok(Some(interface_type.into()))
-        }
-        CompositeTypeDefinitionPosition::Union(union_type) => Ok(Some(union_type.into())),
-        CompositeTypeDefinitionPosition::Object(_) => Ok(None),
     }
 }
 
