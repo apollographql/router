@@ -1,3 +1,6 @@
+use std::process::Command;
+use std::process::Stdio;
+
 use anyhow::Result;
 use xtask::*;
 
@@ -18,11 +21,14 @@ impl Flame {
         })?;
 
         cargo!(["build", "--profile", "profiling", "-p", PROJECT_NAME]);
-        std::process::Command::new(samply)
+        let status = Command::new(samply)
             .arg("record")
             .arg(format!("./target/profiling/{PROJECT_NAME}"))
             .args(&self.subargs)
-            .output()?;
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .status()?;
+        anyhow::ensure!(status.success(), "samply exited with {status}");
 
         Ok(())
     }
