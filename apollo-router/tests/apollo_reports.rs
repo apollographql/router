@@ -359,7 +359,6 @@ async fn get_report<Fut, T: Fn(&&Report) -> bool + Send + Sync + Copy + 'static>
 where
     Fut: Future<Output = (JoinHandle<()>, BoxCloneService)>,
 {
-    let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) = service_fn(
         reports.clone(),
@@ -415,7 +414,6 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
     request: router::Request,
     filter: T,
 ) -> u64 {
-    let _guard = TEST.lock().await;
     reports.lock().await.clear();
     let (task, mut service) =
         get_batch_router_service(reports.clone(), mocked, false, false, false).await;
@@ -455,6 +453,7 @@ async fn get_batch_stats_report<T: Fn(&&Report) -> bool + Send + Sync + Copy + '
 
 #[tokio::test(flavor = "multi_thread")]
 async fn non_defer() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -469,6 +468,7 @@ async fn non_defer() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_if() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
@@ -485,6 +485,7 @@ async fn test_condition_if() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_condition_else() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
         .query("query($if: Boolean!) {topProducts {  name    ... @defer(if: $if) {  reviews {    author {      name    }  }  reviews {    author {      name    }  }    }}}")
@@ -501,6 +502,7 @@ async fn test_condition_else() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_trace_id() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -515,6 +517,7 @@ async fn test_trace_id() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_trace_id() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = make_fake_batch(
             supergraph::Request::fake_builder()
@@ -538,6 +541,7 @@ async fn test_batch_trace_id() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_client_name() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -553,6 +557,7 @@ async fn test_client_name() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_client_version() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -568,6 +573,7 @@ async fn test_client_version() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_header() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -584,6 +590,7 @@ async fn test_send_header() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_send_header() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = make_fake_batch(
             supergraph::Request::fake_builder()
@@ -609,6 +616,7 @@ async fn test_batch_send_header() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_send_variable_value() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
         .query("query($sendValue:Boolean!, $dontSendValue: Boolean!){topProducts{name reviews @include(if: $sendValue) {author{name}} reviews @include(if: $dontSendValue){author{name}}}}")
@@ -625,6 +633,7 @@ async fn test_send_variable_value() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_stats() {
+    let _guard = TEST.lock().await;
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
@@ -637,6 +646,7 @@ async fn test_stats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_batch_stats() {
+    let _guard = TEST.lock().await;
     let request = make_fake_batch(
         supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -655,6 +665,7 @@ async fn test_batch_stats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_stats_mocked() {
+    let _guard = TEST.lock().await;
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
@@ -673,6 +684,7 @@ async fn test_stats_mocked() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_new_field_stats() {
+    let _guard = TEST.lock().await;
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
@@ -685,6 +697,7 @@ async fn test_new_field_stats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_stats() {
+    let _guard = TEST.lock().await;
     let request = supergraph::Request::fake_builder()
         .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
         .build()
@@ -697,6 +710,7 @@ async fn test_demand_control_stats() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_trace() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = supergraph::Request::fake_builder()
             .query("query{topProducts{name reviews {author{name}} reviews{author{name}}}}")
@@ -711,6 +725,7 @@ async fn test_demand_control_trace() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_demand_control_trace_batched() {
+    let _guard = TEST.lock().await;
     for use_legacy_request_span in [true, false] {
         let request = make_fake_batch(
             supergraph::Request::fake_builder()
