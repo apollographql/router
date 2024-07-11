@@ -44,6 +44,7 @@ With `enable_span_mapping` set to `true` (now default), the following resource m
 You can override the default resource mappings by specifying the `resource_mapping` configuration:
 
 ```yaml
+telemetry:
   exporters:
     tracing:
       datadog:
