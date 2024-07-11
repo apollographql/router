@@ -512,16 +512,37 @@ impl Plugin for MockedSubgraphs {
 /// Convert a graphql request into a batch of requests
 ///
 /// This is helpful for testing batching functionality.
+/// Given a GraphQL request, generate an array containing the request and it's duplicate.
+///
+/// If an op_from_to is supplied, this will modify the duplicated request so that it uses the new
+/// operation name.
+///
 pub fn make_fake_batch(
     input: http::Request<graphql::Request>,
+    op_from_to: Option<(&str, &str)>,
 ) -> http::Request<crate::services::router::Body> {
     input.map(|req| {
         // Modify the request so that it is a valid array of requests.
-        let mut req_value = serde_json::to_value(&req).unwrap();
-        req_value["operation"] = "two".into();
-        let new_req: graphql::Request = serde_json::from_value(req_value).unwrap();
+        let mut new_req = req.clone();
+
+        // This "magical" section is looking to see if we have an operation named "one", which many
+        // of our batching tests do have. If so, replace the operation name "one" with "two".
+        // If our test doesn't have an operation name of one, then we just duplicate the existing
+        // request without modifying it.
+        // If we were provided an operation name transform, op_from_to, then try to modify the
+        // query and operation_name to match the supplied transform.
+        if let Some((from, to)) = op_from_to {
+            if let Some(operation_name) = &req.operation_name {
+                if operation_name == from {
+                    new_req.query = req.query.clone().map(|q| q.replace(from, to));
+                    new_req.operation_name = Some(to.to_string());
+                }
+            }
+        }
+
         let mut json_bytes_req = serde_json::to_vec(&req).unwrap();
         let mut json_bytes_new_req = serde_json::to_vec(&new_req).unwrap();
+
         let mut result = vec![b'['];
         result.append(&mut json_bytes_req);
         result.push(b',');

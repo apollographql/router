@@ -243,6 +243,7 @@ async fn it_only_accepts_batch_http_link_mode_for_query_batch() {
                 .build()
                 .unwrap()
                 .supergraph_request,
+            None,
         );
         let config = serde_json::json!({});
         crate::TestHarness::builder()
@@ -332,6 +333,7 @@ async fn it_will_not_process_a_query_batch_without_enablement() {
                 .build()
                 .unwrap()
                 .supergraph_request,
+            None,
         );
         let config = serde_json::json!({});
         crate::TestHarness::builder()
@@ -478,6 +480,7 @@ async fn it_will_not_process_a_batched_deferred_query() {
                 .build()
                 .unwrap()
                 .supergraph_request,
+            None,
         );
         let config = serde_json::json!({
             "batching": {
