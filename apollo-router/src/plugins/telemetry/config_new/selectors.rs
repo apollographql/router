@@ -1408,7 +1408,7 @@ impl Selector for SubgraphSelector {
                     .get(CacheMetricContextKey::new(response.subgraph_name.clone()?))
                     .ok()
                     .flatten()?;
-                dbg!(&cache_info);
+
                 match entity_type {
                     Some(EntityType::All) | None => Some(
                         (cache_info
@@ -1497,7 +1497,12 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
+    use crate::plugins::cache::entity::CacheHitMiss;
+    use crate::plugins::cache::entity::CacheSubgraph;
+    use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::selectors::CacheKind;
+    use crate::plugins::telemetry::config_new::selectors::EntityType;
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::Query;
@@ -2571,6 +2576,82 @@ mod test {
                     .unwrap(),
             ),
             Some("topProducts".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_cache_hit_all_entities() {
+        let selector = SubgraphSelector::Cache {
+            cache: CacheKind::Hit,
+            entity_type: Some(EntityType::All),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            None
+        );
+        let cache_info = CacheSubgraph(
+            [
+                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
+                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let _ = context
+            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
+            .unwrap();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(5))
+        );
+    }
+
+    #[test]
+    fn subgraph_cache_hit_one_entity() {
+        let selector = SubgraphSelector::Cache {
+            cache: CacheKind::Hit,
+            entity_type: Some(EntityType::Named("Reviews".to_string())),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            None
+        );
+        let cache_info = CacheSubgraph(
+            [
+                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
+                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let _ = context
+            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
+            .unwrap();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(2))
         );
     }
 

@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use attributes::CacheAttributes;
 use opentelemetry::metrics::MeterProvider;
+use opentelemetry::metrics::Unit;
 use opentelemetry::Key;
 use opentelemetry::KeyValue;
 use parking_lot::Mutex;
@@ -33,6 +34,8 @@ use crate::services::subgraph;
 pub(crate) mod attributes;
 
 static CACHE_METRIC: &str = "apollo.router.operations.entity.cache";
+const ENTITY_TYPE: Key = Key::from_static_str("entity.type");
+const CACHE_HIT: Key = Key::from_static_str("cache.hit");
 
 #[derive(Deserialize, JsonSchema, Clone, Default, Debug)]
 #[serde(deny_unknown_fields, default)]
@@ -82,6 +85,7 @@ impl From<&InstrumentsConfig> for CacheInstruments {
                         counter: Some(
                             meter
                                 .f64_counter(CACHE_METRIC)
+                                .with_unit(Unit::new("ops"))
                                 .with_description(
                                     "Entity cache hit/miss operations at the subgraph level",
                                 )
@@ -148,14 +152,13 @@ impl Instrumented for CacheInstruments {
                             .unwrap_or_default()
                         {
                             inner_cache_hit.attributes.push(KeyValue::new(
-                                Key::from_static_str("entity.type"),
+                                ENTITY_TYPE,
                                 opentelemetry::Value::String(entity_type.to_string().into()),
                             ));
                         }
-                        inner_cache_hit.attributes.push(KeyValue::new(
-                            Key::from_static_str("cache.hit"),
-                            opentelemetry::Value::Bool(true),
-                        ));
+                        inner_cache_hit
+                            .attributes
+                            .push(KeyValue::new(CACHE_HIT, opentelemetry::Value::Bool(true)));
                     }
                     cache_hit.on_response(response);
                 }
@@ -174,14 +177,13 @@ impl Instrumented for CacheInstruments {
                             .unwrap_or_default()
                         {
                             inner_cache_miss.attributes.push(KeyValue::new(
-                                Key::from_static_str("entity.type"),
+                                ENTITY_TYPE,
                                 opentelemetry::Value::String(entity_type.to_string().into()),
                             ));
                         }
-                        inner_cache_miss.attributes.push(KeyValue::new(
-                            Key::from_static_str("cache.hit"),
-                            opentelemetry::Value::Bool(false),
-                        ));
+                        inner_cache_miss
+                            .attributes
+                            .push(KeyValue::new(CACHE_HIT, opentelemetry::Value::Bool(false)));
                     }
                     cache_miss.on_response(response);
                 }
