@@ -634,12 +634,24 @@ pub(crate) enum SubgraphSelector {
     },
 }
 
-#[derive(Deserialize, JsonSchema, Clone, PartialEq, Default, Debug)]
-#[serde(rename_all = "snake_case")]
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case", untagged)]
 pub(crate) enum EntityType {
+    All(All),
+    Named(String),
+}
+
+impl Default for EntityType {
+    fn default() -> Self {
+        Self::All(All::All)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum All {
     #[default]
     All,
-    Named(String),
 }
 
 #[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
@@ -1410,7 +1422,7 @@ impl Selector for SubgraphSelector {
                     .flatten()?;
 
                 match entity_type {
-                    Some(EntityType::All) | None => Some(
+                    Some(EntityType::All(All::All)) | None => Some(
                         (cache_info
                             .0
                             .iter()
@@ -1501,6 +1513,7 @@ mod test {
     use crate::plugins::cache::entity::CacheSubgraph;
     use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::selectors::All;
     use crate::plugins::telemetry::config_new::selectors::CacheKind;
     use crate::plugins::telemetry::config_new::selectors::EntityType;
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
@@ -2583,7 +2596,7 @@ mod test {
     fn subgraph_cache_hit_all_entities() {
         let selector = SubgraphSelector::Cache {
             cache: CacheKind::Hit,
-            entity_type: Some(EntityType::All),
+            entity_type: Some(EntityType::All(All::All)),
         };
         let context = crate::context::Context::new();
         assert_eq!(

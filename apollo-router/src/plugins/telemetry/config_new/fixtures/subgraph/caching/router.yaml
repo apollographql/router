@@ -24,6 +24,26 @@ telemetry:
               - products
             - gt:
               - cache: hit
+                entity_type: all
+              - 0
+          attributes:
+            subgraph.name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string
+        only_cache_hit_on_subgraph_products_on_product_entity:
+          type: counter
+          value:
+            cache: hit
+            entity_type: Product
+          unit: hit
+          description: counter of subgraph request cache hit on subgraph products on product entity
+          condition:
+            all:
+            - eq:
+              - subgraph_name: true
+              - products
+            - gt:
+              - cache: hit
               - 0
           attributes:
             subgraph.name: true

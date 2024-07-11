@@ -29,6 +29,9 @@ events:
             Product:
               hit: 3
               miss: 0
+            Review:
+              hit: 5
+              miss: 0
     - subgraph_response:
         status: 200
         subgraph_name: "products"
