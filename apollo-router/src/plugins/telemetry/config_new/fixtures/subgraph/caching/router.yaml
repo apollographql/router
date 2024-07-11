@@ -1,0 +1,23 @@
+telemetry:
+  instrumentation:
+    instruments:
+      default_requirement_level: none
+      subgraph:
+        only_cache_hit_on_subgraph_products:
+          type: counter
+          value:
+            cache: hit
+          unit: hit
+          description: counter of subgraph request cache hit on subgraph products
+          condition:
+            all:
+            - eq:
+              - subgraph_name: true
+              - products
+            - gt:
+              - cache: hit
+              - 0
+          attributes:
+            subgraph.name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string

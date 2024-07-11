@@ -13,7 +13,7 @@ use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
 use crate::plugins::cache::entity::CacheSubgraph;
-use crate::plugins::cache::entity::CACHE_INFO_SUBGRAPH_CONTEXT_KEY;
+use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
@@ -1405,10 +1405,7 @@ impl Selector for SubgraphSelector {
             SubgraphSelector::Cache { cache, entity_type } => {
                 let cache_info: CacheSubgraph = response
                     .context
-                    .get(format!(
-                        "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}",
-                        response.subgraph_name.as_ref()?
-                    ))
+                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()?))
                     .ok()
                     .flatten()?;
                 dbg!(&cache_info);

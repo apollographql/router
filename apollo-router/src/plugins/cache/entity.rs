@@ -26,6 +26,7 @@ use tracing::Level;
 use super::cache_control::CacheControl;
 use super::invalidation::Invalidation;
 use super::invalidation::InvalidationOrigin;
+use super::metrics::CacheMetricContextKey;
 use super::metrics::CacheMetricsService;
 use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
@@ -52,8 +53,6 @@ use crate::Context;
 pub(crate) const ENTITIES: &str = "_entities";
 pub(crate) const REPRESENTATIONS: &str = "representations";
 pub(crate) const CONTEXT_CACHE_KEY: &str = "apollo_entity_cache::key";
-pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
-    "apollo::router::entity_cache_info_subgraph";
 
 register_plugin!("apollo", "preview_entity_cache", EntityCache);
 
@@ -402,9 +401,8 @@ impl InnerCacheService {
                     ControlFlow::Break(response) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 1, miss: 0 });
                         let _ = response.context.insert(
-                            format!(
-                                "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}",
-                                response.subgraph_name.clone().unwrap_or_default()
+                            CacheMetricContextKey::new(
+                                response.subgraph_name.clone().unwrap_or_default(),
                             ),
                             CacheSubgraph(cache_hit),
                         );
@@ -413,9 +411,8 @@ impl InnerCacheService {
                     ControlFlow::Continue((request, mut root_cache_key)) => {
                         cache_hit.insert("Query".to_string(), CacheHitMiss { hit: 0, miss: 1 });
                         let _ = request.context.insert(
-                            format!(
-                                "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}",
-                                request.subgraph_name.clone().unwrap_or_default()
+                            CacheMetricContextKey::new(
+                                request.subgraph_name.clone().unwrap_or_default(),
                             ),
                             CacheSubgraph(cache_hit),
                         );
@@ -1036,7 +1033,7 @@ fn filter_representations(
     }
 
     let _ = context.insert(
-        format!("{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{subgraph_name}"),
+        CacheMetricContextKey::new(subgraph_name.to_string()),
         CacheSubgraph(cache_hit),
     );
 

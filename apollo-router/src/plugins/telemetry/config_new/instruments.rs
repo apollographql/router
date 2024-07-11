@@ -2083,6 +2083,7 @@ mod tests {
         },
         SubgraphResponse {
             status: u16,
+            subgraph_name: Option<String>,
             data: Option<serde_json::Value>,
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
@@ -2421,6 +2422,7 @@ mod tests {
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
+                                    subgraph_name,
                                     status,
                                     data,
                                     extensions,
@@ -2429,6 +2431,7 @@ mod tests {
                                 } => {
                                     let response = subgraph::Response::fake2_builder()
                                         .context(context.clone())
+                                        .and_subgraph_name(subgraph_name)
                                         .status_code(StatusCode::from_u16(status).expect("status"))
                                         .and_data(data)
                                         .errors(errors)

@@ -19,7 +19,7 @@ use super::selectors::SubgraphSelector;
 use crate::metrics;
 use crate::plugins::cache::entity::CacheHitMiss;
 use crate::plugins::cache::entity::CacheSubgraph;
-use crate::plugins::cache::entity::CACHE_INFO_SUBGRAPH_CONTEXT_KEY;
+use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::attributes::DefaultAttributeRequirementLevel;
 use crate::plugins::telemetry::config_new::conditions::Condition;
@@ -119,13 +119,11 @@ impl Instrumented for CacheInstruments {
                 return;
             }
         };
-        let cache_info: CacheSubgraph = match dbg!(response
+        let cache_info: CacheSubgraph = match response
             .context
-            .get(&format!(
-                "{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{subgraph_name}"
-            ))
+            .get(CacheMetricContextKey::new(subgraph_name.clone()))
             .ok()
-            .flatten())
+            .flatten()
         {
             Some(cache_info) => cache_info,
             None => {
@@ -187,6 +185,8 @@ impl Instrumented for CacheInstruments {
                     }
                     cache_miss.on_response(response);
                 }
+                // Make sure it won't be incremented when dropped
+                let _ = cache_hit.inner.lock().counter.take();
             }
         }
     }
@@ -197,209 +197,3 @@ impl Instrumented for CacheInstruments {
         }
     }
 }
-
-// #[cfg(test)]
-// pub(crate) mod test {
-
-//     use super::*;
-//     use crate::metrics::FutureMetricsExt;
-//     use crate::plugins::telemetry::Telemetry;
-//     use crate::plugins::test::PluginTestHarness;
-//     use crate::Configuration;
-
-//     #[test_log::test(tokio::test)]
-//     async fn basic_metric_publishing() {
-//         async {
-//             let schema_str = include_str!(
-//                 "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
-//             );
-//             let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_named_query.graphql");
-
-//             let request = supergraph::Request::fake_builder()
-//                 .query(query_str)
-//                 .context(context(schema_str, query_str))
-//                 .build()
-//                 .unwrap();
-
-//             let harness = PluginTestHarness::<Telemetry>::builder()
-//                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
-//                 .schema(schema_str)
-//                 .build()
-//                 .await;
-
-//             harness
-//                 .call_supergraph(request, |req| {
-//                     let response: serde_json::Value = serde_json::from_str(include_str!(
-//                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
-//                     ))
-//                     .unwrap();
-//                     supergraph::Response::builder()
-//                         .data(response["data"].clone())
-//                         .context(req.context)
-//                         .build()
-//                         .unwrap()
-//                 })
-//                 .await
-//                 .unwrap();
-
-//             assert_histogram_sum!(
-//                 "graphql.field.list.length",
-//                 2.0,
-//                 "graphql.field.name" = "users",
-//                 "graphql.field.type" = "User",
-//                 "graphql.type.name" = "Query"
-//             );
-//         }
-//         .with_metrics()
-//         .await;
-//     }
-
-//     #[test_log::test(tokio::test)]
-//     async fn multiple_fields_metric_publishing() {
-//         async {
-//             let schema_str = include_str!(
-//                 "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
-//             );
-//             let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_query.graphql");
-
-//             let request = supergraph::Request::fake_builder()
-//                 .query(query_str)
-//                 .context(context(schema_str, query_str))
-//                 .build()
-//                 .unwrap();
-
-//             let harness = PluginTestHarness::<Telemetry>::builder()
-//                 .config(include_str!("fixtures/field_length_enabled.router.yaml"))
-//                 .schema(schema_str)
-//                 .build()
-//                 .await;
-
-//             harness
-//                 .call_supergraph(request, |req| {
-//                     let response: serde_json::Value = serde_json::from_str(include_str!(
-//                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
-//                     ))
-//                     .unwrap();
-//                     supergraph::Response::builder()
-//                         .data(response["data"].clone())
-//                         .context(req.context)
-//                         .build()
-//                         .unwrap()
-//                 })
-//                 .await
-//                 .unwrap();
-
-//             assert_histogram_sum!(
-//                 "graphql.field.list.length",
-//                 2.0,
-//                 "graphql.field.name" = "ships",
-//                 "graphql.field.type" = "Ship",
-//                 "graphql.type.name" = "Query"
-//             );
-//             assert_histogram_sum!(
-//                 "graphql.field.list.length",
-//                 2.0,
-//                 "graphql.field.name" = "users",
-//                 "graphql.field.type" = "User",
-//                 "graphql.type.name" = "Query"
-//             );
-//         }
-//         .with_metrics()
-//         .await;
-//     }
-
-//     #[test_log::test(tokio::test)]
-//     async fn disabled_metric_publishing() {
-//         async {
-//             let schema_str = include_str!(
-//                 "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
-//             );
-//             let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_named_query.graphql");
-
-//             let request = supergraph::Request::fake_builder()
-//                 .query(query_str)
-//                 .context(context(schema_str, query_str))
-//                 .build()
-//                 .unwrap();
-
-//             let harness = PluginTestHarness::<Telemetry>::builder()
-//                 .config(include_str!("fixtures/field_length_disabled.router.yaml"))
-//                 .schema(schema_str)
-//                 .build()
-//                 .await;
-
-//             harness
-//                 .call_supergraph(request, |req| {
-//                     let response: serde_json::Value = serde_json::from_str(include_str!(
-//                         "../../../demand_control/cost_calculator/fixtures/federated_ships_named_response.json"
-//                     ))
-//                     .unwrap();
-//                     supergraph::Response::builder()
-//                         .data(response["data"].clone())
-//                         .context(req.context)
-//                         .build()
-//                         .unwrap()
-//                 })
-//                 .await
-//                 .unwrap();
-
-//             assert_histogram_not_exists!("graphql.field.list.length", f64);
-//         }
-//         .with_metrics()
-//         .await;
-//     }
-
-//     #[test_log::test(tokio::test)]
-//     async fn filtered_metric_publishing() {
-//         async {
-//             let schema_str = include_str!(
-//                 "../../../demand_control/cost_calculator/fixtures/federated_ships_schema.graphql"
-//             );
-//             let query_str = include_str!("../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_query.graphql");
-
-//             let request = supergraph::Request::fake_builder()
-//                 .query(query_str)
-//                 .context(context(schema_str, query_str))
-//                 .build()
-//                 .unwrap();
-
-//             let harness = PluginTestHarness::<Telemetry>::builder()
-//                 .config(include_str!("fixtures/filtered_field_length.router.yaml"))
-//                 .schema(schema_str)
-//                 .build()
-//                 .await;
-
-//             harness
-//                 .call_supergraph(request, |req| {
-//                     let response: serde_json::Value = serde_json::from_str(include_str!(
-//                         "../../../demand_control/cost_calculator/fixtures/federated_ships_fragment_response.json"
-//                     ))
-//                     .unwrap();
-//                     supergraph::Response::builder()
-//                         .data(response["data"].clone())
-//                         .context(req.context)
-//                         .build()
-//                         .unwrap()
-//                 })
-//                 .await
-//                 .unwrap();
-
-//             assert_histogram_sum!("ships.list.length", 2.0);
-//         }
-//         .with_metrics()
-//         .await;
-//     }
-
-//     fn context(schema_str: &str, query_str: &str) -> Context {
-//         let schema = crate::spec::Schema::parse_test(schema_str, &Default::default()).unwrap();
-//         let query =
-//             crate::spec::Query::parse_document(query_str, None, &schema, &Configuration::default())
-//                 .unwrap();
-//         let context = Context::new();
-//         context
-//             .extensions()
-//             .with_lock(|mut lock| lock.insert(query));
-
-//         context
-//     }
-// }
