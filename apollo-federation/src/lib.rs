@@ -18,6 +18,7 @@
 mod api_schema;
 mod compat;
 pub mod error;
+pub mod utils;
 mod indented_display;
 pub mod link;
 pub mod merge;
