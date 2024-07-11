@@ -490,7 +490,7 @@ impl Plugin for MockedSubgraphs {
     }
 }
 
-// This function takes a valid request and duplicates it (with a new operation
+// This function takes a valid request and duplicates it (optionally, with a new operation
 // name) to create an array (batch) request.
 //
 // Note: It's important to make the operation name different to prevent race conditions in testing
@@ -499,14 +499,13 @@ impl Plugin for MockedSubgraphs {
 // Detailed Explanation
 //
 // A batch sends a series of requests concurrently through a router. If we
-// simply duplicate the request, then there is not insignificant chance that spans such as
+// simply duplicate the request, then there is significant chance that spans such as
 // "parse_query" won't appear because the document has already been parsed and is now in a cache.
 //
 // To explicitly avoid this, we add an operation name which will force the router to re-parse the
 // document since operation name is part of the parsed document cache key.
 //
-// This has been a significant cause of racy/flaky tests in the past, so only tamper with this
-// function if you understand what the impact will be.
+// This has been a significant cause of racy/flaky tests in the past.
 
 ///
 /// Convert a graphql request into a batch of requests
@@ -525,12 +524,10 @@ pub fn make_fake_batch(
         // Modify the request so that it is a valid array of requests.
         let mut new_req = req.clone();
 
-        // This "magical" section is looking to see if we have an operation named "one", which many
-        // of our batching tests do have. If so, replace the operation name "one" with "two".
-        // If our test doesn't have an operation name of one, then we just duplicate the existing
-        // request without modifying it.
-        // If we were provided an operation name transform, op_from_to, then try to modify the
-        // query and operation_name to match the supplied transform.
+        // If we were given an op_from_to, then try to modify the query to update the operation
+        // name from -> to.
+        // If our request doesn't have an operation name or we weren't given an op_from_to,
+        // just duplicate the request as is.
         if let Some((from, to)) = op_from_to {
             if let Some(operation_name) = &req.operation_name {
                 if operation_name == from {
