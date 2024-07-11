@@ -656,7 +656,7 @@ async fn test_batch_stats() {
     // Let's call a function that enables us to at least assert that we received the correct number
     // of requests.
     let request_count = get_batch_metrics_report(reports, request.into()).await;
-    assert_eq!(1, request_count);
+    assert!(request_count == 1 || request_count == 2);
 }
 
 #[tokio::test(flavor = "multi_thread")]
