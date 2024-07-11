@@ -70,8 +70,7 @@ pub(crate) async fn handle_responses(
                 // TODO: caching of the transformed JSONSelection with the selection set applied?
                 let transformed_selection = connector
                     .selection
-                    .apply_selection_set(response_key.selection_set())
-                    .unwrap(); // TODO: error handling
+                    .apply_selection_set(response_key.selection_set());
 
                 let (res, apply_to_errors) =
                     transformed_selection.apply_with_vars(&json_data, &response_key.inputs());

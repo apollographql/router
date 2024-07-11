@@ -449,7 +449,7 @@ async fn test_selection_set() {
             }
 
             fragment CommitDetails on CommitDetail {
-              author {
+              by {
                 user: name @skip(if: $skipField)
                 name
                 ...on CommitAuthor @skip(if: $skipInlineFragment) {
@@ -481,7 +481,7 @@ async fn test_selection_set() {
           {
             "commit": {
               "from_path_alias": "Foo Bar",
-              "author": {
+              "by": {
                 "user": "Foo Bar",
                 "name": "Foo Bar",
                 "address": "noone@nowhere",

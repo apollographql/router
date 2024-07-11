@@ -24,7 +24,7 @@ subgraphs:
         
         type CommitDetail {
           name_from_path: String
-          author: CommitAuthor
+          by: CommitAuthor
         }
           
         type CommitAuthor {
@@ -41,9 +41,9 @@ subgraphs:
                 selection: """
                 commit {
                   name_from_path: .author.name
-                  author {
-                    name
-                    email
+                  by: {
+                    name: .author.name
+                    email: .author.email
                     owner: $$args.owner
                   }
                 }

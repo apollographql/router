@@ -23,16 +23,9 @@ directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on
 
 directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
-type Author
-  @join__type(graph: CONNECTORS)
-{
-  login: String
-}
-
 type Commit
   @join__type(graph: CONNECTORS)
 {
-  author: Author!
   commit: CommitDetail
 }
 
@@ -48,7 +41,7 @@ type CommitDetail
   @join__type(graph: CONNECTORS)
 {
   name_from_path: String
-  author: CommitAuthor
+  by: CommitAuthor
 }
 
 input join__ContextArgument {
@@ -85,5 +78,5 @@ enum link__Purpose {
 type Query
   @join__type(graph: CONNECTORS)
 {
-  commits(owner: String!, repo: String!): [Commit] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/repos/{$args.owner}/{$args.repo}/commits"}, selection: "commit {\n  name_from_path: .author.name\n  author {\n    name\n    email\n    owner: $args.owner\n  }\n}"})
+  commits(owner: String!, repo: String!): [Commit] @join__directive(graphs: [CONNECTORS], name: "connect", args: {source: "json", http: {GET: "/repos/{$args.owner}/{$args.repo}/commits"}, selection: "commit {\n  name_from_path: .author.name\n  by: {\n    name: .author.name\n    email: .author.email\n    owner: $args.owner\n  }\n}"})
 }
