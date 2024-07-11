@@ -2,6 +2,14 @@ telemetry:
   instrumentation:
     instruments:
       default_requirement_level: none
+      cache:
+        apollo.router.operations.entity.cache:
+          attributes:
+            entity.type: true
+            subgraph.name:
+              subgraph_name: true
+            supergraph.operation.name:
+              supergraph_operation_name: string
       subgraph:
         only_cache_hit_on_subgraph_products:
           type: counter

@@ -1,12 +1,20 @@
 ---
 source: apollo-router/src/plugins/telemetry/config_new/instruments.rs
-description: Custom histogram with attributes
+description: Custom counter using cache selector
 expression: "&metrics.all()"
 info:
   telemetry:
     instrumentation:
       instruments:
         default_requirement_level: none
+        cache:
+          apollo.router.operations.entity.cache:
+            attributes:
+              entity.type: true
+              subgraph.name:
+                subgraph_name: true
+              supergraph.operation.name:
+                supergraph_operation_name: string
         subgraph:
           only_cache_hit_on_subgraph_products:
             type: counter
@@ -27,6 +35,22 @@ info:
               supergraph.operation.name:
                 supergraph_operation_name: string
 ---
+- name: apollo.router.operations.entity.cache
+  description: Entity cache hit/miss operations at the subgraph level
+  data:
+    datapoints:
+      - value: 0
+        attributes:
+          cache.hit: false
+          entity.type: Product
+          subgraph.name: products
+          supergraph.operation.name: Test
+      - value: 3
+        attributes:
+          cache.hit: true
+          entity.type: Product
+          subgraph.name: products
+          supergraph.operation.name: Test
 - name: only_cache_hit_on_subgraph_products
   description: counter of subgraph request cache hit on subgraph products
   unit: hit

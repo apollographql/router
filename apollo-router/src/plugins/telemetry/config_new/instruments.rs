@@ -1996,6 +1996,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::telemetry::config_new::cache::CacheInstruments;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
@@ -2296,6 +2297,7 @@ mod tests {
                         let mut router_instruments = None;
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
+                        let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = (&config).into();
                         let context = Context::new();
                         for event in request {
@@ -2403,6 +2405,7 @@ mod tests {
                                     headers,
                                 } => {
                                     subgraph_instruments = Some(config.new_subgraph_instruments());
+                                    cache_instruments = Some((&config).into());
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
                                         .and_operation_name(operation_name)
@@ -2420,6 +2423,7 @@ mod tests {
                                         .build();
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
                                     subgraph_name,
@@ -2440,6 +2444,10 @@ mod tests {
                                         .build()
                                         .unwrap();
                                     subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
+                                    cache_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
                                         .on_response(&response);
