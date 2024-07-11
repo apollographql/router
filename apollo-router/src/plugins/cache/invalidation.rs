@@ -25,6 +25,7 @@ pub(crate) struct Invalidation {
 pub(crate) struct InvalidationTopic;
 
 #[derive(Clone, Debug)]
+#[allow(dead_code)]
 pub(crate) enum InvalidationOrigin {
     Endpoint,
     Extensions,
