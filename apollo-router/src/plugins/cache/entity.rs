@@ -330,6 +330,11 @@ impl Plugin for EntityCache {
                     InvalidationService::new(self.subgraphs.clone(), self.invalidation.clone())
                         .boxed(),
                 );
+                tracing::info!(
+                    "Entity caching invalidation endpoint listening on: http://{}{}",
+                    invalidation.listen,
+                    invalidation.path
+                );
                 map.insert(invalidation.listen.clone(), endpoint);
             }
         }

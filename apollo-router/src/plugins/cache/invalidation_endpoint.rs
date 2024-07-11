@@ -27,9 +27,11 @@ use crate::ListenAddr;
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct InvalidationConfig {
     pub(crate) enabled: bool,
-    /// This one will be skipped if used in specific subgraph entry
-    #[schemars(with = "Option<String>")]
-    pub(crate) endpoint: Option<url::Url>,
+    /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
+    pub(crate) listen: Option<ListenAddr>,
+    /// Specify on which path you want to listen for callbacks (default: /callback)
+    pub(crate) path: Option<String>,
+
     pub(crate) shared_key: String,
 }
 
@@ -43,19 +45,18 @@ pub(crate) struct InvalidationEndpointConfig {
 impl TryFrom<InvalidationConfig> for InvalidationEndpointConfig {
     type Error = BoxError;
 
-    fn try_from(value: InvalidationConfig) -> Result<Self, Self::Error> {
-        let endpoint = match value.endpoint {
-            Some(e) => e,
-            None => {
-                return Err(BoxError::from(
-                    "endpoint value must be set for invalidation cache",
-                ))
-            }
-        };
+    fn try_from(config: InvalidationConfig) -> Result<Self, Self::Error> {
+        let path = config
+            .path
+            .clone()
+            .unwrap_or_else(|| "/invalidation".to_string());
+        let path = path.trim_end_matches('/');
 
         let cfg = Self {
-            path: endpoint.path().to_string(),
-            listen: ListenAddr::SocketAddr(endpoint.authority().parse()?),
+            path: path.to_string(),
+            listen: config
+                .listen
+                .unwrap_or_else(crate::plugins::subscription::default_listen_addr),
         };
 
         Ok(cfg)

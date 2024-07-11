@@ -3526,6 +3526,31 @@ expression: "&schema"
       },
       "type": "object"
     },
+    "InvalidationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "type": "boolean"
+        },
+        "listen": {
+          "$ref": "#/definitions/ListenAddr",
+          "description": "#/definitions/ListenAddr",
+          "nullable": true
+        },
+        "path": {
+          "default": null,
+          "description": "Specify on which path you want to listen for callbacks (default: /callback)",
+          "nullable": true,
+          "type": "string"
+        },
+        "shared_key": {
+          "default": "",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
     "JWTConf": {
       "additionalProperties": false,
       "properties": {
@@ -5579,9 +5604,14 @@ expression: "&schema"
       "description": "Per subgraph configuration for entity caching",
       "properties": {
         "enabled": {
+          "default": true,
           "description": "activates caching for this subgraph, overrides the global configuration",
-          "nullable": true,
           "type": "boolean"
+        },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationConfig",
+          "description": "#/definitions/InvalidationConfig",
+          "nullable": true
         },
         "private_id": {
           "description": "Context key used to separate cache sections per user",
