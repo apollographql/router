@@ -1,64 +1,72 @@
-use insta::assert_debug_snapshot;
-use insta::assert_snapshot;
+/// Macro to quickly expand a test case based on a test schema name.
+macro_rules! test_expands {
+    ($($name:ident),* $(,)*) => {
+        $(
+            mod $name {
+                #[test]
+                fn it_expands_supergraph() {
+                    use insta::assert_debug_snapshot;
+                    use insta::assert_snapshot;
 
-use crate::sources::connect::expand::expand_connectors;
-use crate::sources::connect::expand::ExpansionResult;
+                    use crate::sources::connect::expand::expand_connectors;
+                    use crate::sources::connect::expand::ExpansionResult;
 
-#[test]
-fn it_skips_non_connector_supergraphs() {
-    let to_ignore = include_str!("./schemas/ignored.graphql");
-    let ExpansionResult::Unchanged = expand_connectors(to_ignore).unwrap() else {
-        panic!("expected expansion to ignore non-connector supergraph");
+                    let to_expand = include_str!(concat!("schemas/", stringify!($name), ".graphql"));
+                    let ExpansionResult::Expanded {
+                        raw_sdl,
+                        api_schema,
+                        connectors,
+                    } = expand_connectors(to_expand).unwrap()
+                    else {
+                        panic!(
+                            concat!(
+                                "expected expansion to actually expand subgraphs for schemas/",
+                                stringify!($name),
+                                ".graphql"
+                            )
+                        );
+                    };
+
+                    assert_snapshot!(api_schema);
+                    assert_debug_snapshot!(connectors.by_service_name);
+                    assert_snapshot!(raw_sdl);
+                }
+            }
+        )*
+    };
+}
+macro_rules! test_ignores {
+    ($($name:ident),* $(,)*) => {
+        $(
+            mod $name {
+                #[test]
+                fn it_ignores_supergraph() {
+                    use crate::sources::connect::expand::expand_connectors;
+                    use crate::sources::connect::expand::ExpansionResult;
+
+                    let to_ignore = include_str!(concat!("schemas/", stringify!($name), ".graphql"));
+                    let ExpansionResult::Unchanged = expand_connectors(to_ignore).unwrap() else {
+                        panic!(
+                            concat!(
+                                "expected expansion to ignorenon-connector supergraph for schemas/",
+                                stringify!($name),
+                                ".graphql"
+                            )
+                        );
+                    };
+                }
+            }
+        )*
     };
 }
 
-#[test]
-fn it_expands_a_supergraph() {
-    let to_expand = include_str!("./schemas/simple.graphql");
-    let ExpansionResult::Expanded {
-        raw_sdl,
-        api_schema,
-        connectors,
-    } = expand_connectors(to_expand).unwrap()
-    else {
-        panic!("expected expansion to actually expand subgraphs");
-    };
-
-    assert_snapshot!(api_schema);
-    assert_debug_snapshot!(connectors.by_service_name);
-    assert_snapshot!(raw_sdl);
+test_expands! {
+    realistic,
+    simple,
+    steelthread,
 }
 
-#[test]
-fn it_expands_a_realistic_supergraph() {
-    let to_expand = include_str!("./schemas/realistic.graphql");
-    let ExpansionResult::Expanded {
-        raw_sdl,
-        api_schema,
-        connectors,
-    } = expand_connectors(to_expand).unwrap()
-    else {
-        panic!("expected expansion to actually expand subgraphs");
-    };
-
-    assert_snapshot!(api_schema);
-    assert_debug_snapshot!(connectors.by_service_name);
-    assert_snapshot!(raw_sdl);
-}
-
-#[test]
-fn it_expands_steelthread_supergraph() {
-    let to_expand = include_str!("./schemas/steelthread.graphql");
-    let ExpansionResult::Expanded {
-        raw_sdl,
-        api_schema,
-        connectors,
-    } = expand_connectors(to_expand).unwrap()
-    else {
-        panic!("expected expansion to actually expand subgraphs");
-    };
-
-    assert_snapshot!(api_schema);
-    assert_debug_snapshot!(connectors.by_service_name);
-    assert_snapshot!(raw_sdl);
+test_ignores! {
+    directives,
+    ignored,
 }
