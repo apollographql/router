@@ -271,7 +271,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.operation_signature
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: "# -\nquery($dontSendValue:Boolean!,$sendValue:Boolean!){topProducts{name reviews@include(if:$sendValue){author{name}}reviews@include(if:$dontSendValue){author{name}}}}"
               - key: apollo_private.query.aliases
                 value:
                   intValue: 0
@@ -637,7 +637,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -739,7 +739,7 @@ resourceSpans:
                   stringValue: products
               - key: graphql.operation.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -949,7 +949,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1051,7 +1051,7 @@ resourceSpans:
                   stringValue: reviews
               - key: graphql.operation.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1261,7 +1261,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1363,7 +1363,7 @@ resourceSpans:
                   stringValue: accounts
               - key: graphql.operation.name
                 value:
-                  stringValue: "[redacted]"
+                  stringValue: ""
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0

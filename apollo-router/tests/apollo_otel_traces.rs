@@ -154,11 +154,14 @@ async fn get_batch_router_service(
 
 macro_rules! assert_report {
         ($report: expr)=> {
+            assert_report!($report, false)
+        };
+        ($report: expr, $batch: literal)=> {
             insta::with_settings!({sort_maps => true}, {
                     insta::assert_yaml_snapshot!($report, {
                         ".**.attributes" => insta::sorted_redaction(),
                         ".**.attributes[]" => insta::dynamic_redaction(|mut value, _| {
-                            const REDACTED_ATTRIBUTES: [&'static str; 13] = [
+                            let mut redacted_attributes = vec![
                                 "apollo.client.host",
                                 "apollo.client.uname",
                                 "apollo.router.id",
@@ -170,12 +173,16 @@ macro_rules! assert_report {
                                 "apollo_private.http.response_headers",
                                 "apollo_private.sent_time_offset",
                                 "trace_id",
+                            ];
+                            if $batch {
+                                redacted_attributes.append(&mut vec![
                                 "apollo_private.operation_signature",
                                 "graphql.operation.name"
-                            ];
+                            ]);
+                            }
                             if let insta::internals::Content::Struct(name, key_value)  = &mut value{
                                 if name == &"KeyValue" {
-                                    if REDACTED_ATTRIBUTES.contains(&key_value[0].1.as_str().unwrap()) {
+                                    if redacted_attributes.contains(&key_value[0].1.as_str().unwrap()) {
                                         key_value[1].1 = insta::internals::Content::NewtypeVariant(
                                             "Value", 0, "stringValue", Box::new(insta::internals::Content::from("[redacted]"))
                                         );
@@ -417,7 +424,7 @@ async fn test_batch_trace_id() {
         );
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
-        assert_report!(report);
+        assert_report!(report, true);
     }
 }
 
@@ -483,7 +490,7 @@ async fn test_batch_send_header() {
         );
         let reports = Arc::new(Mutex::new(vec![]));
         let report = get_batch_trace_report(reports, request.into(), use_legacy_request_span).await;
-        assert_report!(report);
+        assert_report!(report, true);
     }
 }
 
