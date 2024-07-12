@@ -13,5 +13,4 @@ pub use parser::*;
 // remove the `#[cfg(test)]`.
 #[cfg(test)]
 pub use pretty::*;
-pub use selection_set::ApplySelectionSet;
 pub use visitor::*;

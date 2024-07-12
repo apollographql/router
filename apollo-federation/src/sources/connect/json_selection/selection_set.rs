@@ -32,14 +32,9 @@ use crate::sources::connect::Key;
 use crate::sources::connect::PathSelection;
 use crate::sources::connect::SubSelection;
 
-/// Create a new version of `Self` by applying a selection set.
-pub trait ApplySelectionSet {
-    /// Apply a selection set to create a new version of `Self`
-    fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self;
-}
-
-impl ApplySelectionSet for JSONSelection {
-    fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+impl JSONSelection {
+    /// Apply a selection set to create a new [`JSONSelection`]
+    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         match self {
             Self::Named(sub) => Self::Named(sub.apply_selection_set(selection_set)),
             Self::Path(path) => Self::Path(path.apply_selection_set(selection_set)),
@@ -47,8 +42,9 @@ impl ApplySelectionSet for JSONSelection {
     }
 }
 
-impl ApplySelectionSet for SubSelection {
-    fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+impl SubSelection {
+    /// Apply a selection set to create a new [`SubSelection`]
+    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         let mut new_selections = Vec::new();
         let mut dropped_fields = IndexMap::new();
         let mut referenced_fields = HashSet::new();
@@ -164,8 +160,9 @@ impl ApplySelectionSet for SubSelection {
     }
 }
 
-impl ApplySelectionSet for PathSelection {
-    fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+impl PathSelection {
+    /// Apply a selection set to create a new [`PathSelection`]
+    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         match self {
             Self::Var(str, path) => Self::Var(
                 str.clone(),
@@ -219,7 +216,6 @@ mod tests {
     use apollo_compiler::Schema;
     use pretty_assertions::assert_eq;
 
-    use crate::sources::connect::json_selection::selection_set::ApplySelectionSet;
     use crate::sources::connect::ApplyTo;
 
     fn selection_set(schema: &Valid<Schema>, s: &str) -> SelectionSet {

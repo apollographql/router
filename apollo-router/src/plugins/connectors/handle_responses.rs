@@ -1,6 +1,5 @@
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
-use apollo_federation::sources::connect::ApplySelectionSet;
 use apollo_federation::sources::connect::ApplyTo;
 use apollo_federation::sources::connect::Connector;
 use serde_json_bytes::ByteString;
