@@ -1,9 +1,11 @@
 use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::fmt;
 use std::fmt::Write;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::executable;
 use apollo_compiler::name;
@@ -274,6 +276,10 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
 
     directive @federation__requiresScopes(scopes: [[federation__Scope!]!]!) on FIELD_DEFINITION | OBJECT | INTERFACE | SCALAR | ENUM
 
+    directive @federation__cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+
+    directive @federation__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+
     scalar federation__FieldSet
 
     scalar federation__Scope
@@ -295,6 +301,33 @@ struct TypeInfos {
     union_types: Vec<TypeInfo>,
     enum_types: Vec<TypeInfo>,
     input_object_types: Vec<TypeInfo>,
+}
+
+fn get_original_directive_names<'schema>(
+    supergraph_schema: &'schema FederationSchema,
+) -> HashMap<&'schema str, &'schema str> {
+    let mut hm = HashMap::new();
+    for directive in &supergraph_schema.schema().schema_definition.directives {
+        if directive.name.as_str() == "link" {
+            if let (Some(url), Some(new_name)) = (
+                directive.argument_by_name("url"),
+                directive.argument_by_name("as"),
+            ) {
+                if url
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("https://specs.apollo.dev/cost"))
+                {
+                    hm.insert("cost", new_name.as_str().unwrap_or("cost"));
+                } else if url
+                    .as_str()
+                    .is_some_and(|s| s.starts_with("https://specs.apollo.dev/listSize"))
+                {
+                    hm.insert("listSize", new_name.as_str().unwrap_or("listSize"));
+                }
+            }
+        }
+    }
+    hm
 }
 
 fn extract_subgraphs_from_fed_2_supergraph(
@@ -320,6 +353,8 @@ fn extract_subgraphs_from_fed_2_supergraph(
         filtered_types,
     )?;
 
+    let original_directive_names = get_original_directive_names(supergraph_schema);
+
     extract_object_type_content(
         supergraph_schema,
         subgraphs,
@@ -327,6 +362,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         federation_spec_definitions,
         join_spec_definition,
         &object_types,
+        &original_directive_names,
     )?;
     extract_interface_type_content(
         supergraph_schema,
@@ -335,6 +371,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         federation_spec_definitions,
         join_spec_definition,
         &interface_types,
+        &original_directive_names,
     )?;
     extract_union_type_content(
         supergraph_schema,
@@ -349,6 +386,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         graph_enum_value_name_to_subgraph_name,
         join_spec_definition,
         &enum_types,
+        &original_directive_names,
     )?;
     extract_input_object_type_content(
         supergraph_schema,
@@ -356,6 +394,7 @@ fn extract_subgraphs_from_fed_2_supergraph(
         graph_enum_value_name_to_subgraph_name,
         join_spec_definition,
         &input_object_types,
+        &original_directive_names,
     )?;
 
     // We add all the "executable" directive definitions from the supergraph to each subgraphs, as
@@ -705,6 +744,7 @@ fn extract_object_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &HashMap<&str, &str>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -784,6 +824,7 @@ fn extract_object_type_content(
                         federation_spec_definition,
                         is_shareable,
                         None,
+                        original_directive_names,
                     )?;
                 }
             } else {
@@ -833,6 +874,7 @@ fn extract_object_type_content(
                         federation_spec_definition,
                         is_shareable,
                         Some(field_directive_application),
+                        original_directive_names,
                     )?;
                 }
             }
@@ -849,6 +891,7 @@ fn extract_interface_type_content(
     federation_spec_definitions: &IndexMap<Name, &'static FederationSpecDefinition>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &HashMap<&str, &str>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -978,6 +1021,7 @@ fn extract_interface_type_content(
                         federation_spec_definition,
                         false,
                         None,
+                        original_directive_names,
                     )?;
                 }
             } else {
@@ -1020,6 +1064,7 @@ fn extract_interface_type_content(
                         federation_spec_definition,
                         false,
                         Some(field_directive_application),
+                        original_directive_names,
                     )?;
                 }
             }
@@ -1127,6 +1172,7 @@ fn extract_enum_type_content(
     graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &HashMap<&str, &str>,
 ) -> Result<(), FederationError> {
     // This was added in join 0.3, so it can genuinely be None.
     let enum_value_directive_definition =
@@ -1141,6 +1187,35 @@ fn extract_enum_type_content(
             type_name: (*type_name).clone(),
         };
         let type_ = pos.get(supergraph_schema.schema())?;
+
+        for graph_enum_value in subgraph_info.keys() {
+            let subgraph = get_subgraph(
+                subgraphs,
+                graph_enum_value_name_to_subgraph_name,
+                graph_enum_value,
+            )?;
+            // BEGIN MESSY IMPL
+            let cost_directive_name = original_directive_names.get("cost").unwrap_or(&"cost");
+            if let Some(cost_directive) = type_.directives.get(*cost_directive_name) {
+                let destination_directive = Directive {
+                    name: name!("federation__cost"),
+                    arguments: cost_directive.arguments.clone(),
+                };
+                pos.insert_directive(&mut subgraph.schema, Component::from(destination_directive))?;
+            }
+
+            let list_size_directive_name = original_directive_names
+                .get("listSize")
+                .unwrap_or(&"listSize");
+            if let Some(list_size_directive) = type_.directives.get(*list_size_directive_name) {
+                let destination_directive = Directive {
+                    name: name!("federation__listSize"),
+                    arguments: list_size_directive.arguments.clone(),
+                };
+                pos.insert_directive(&mut subgraph.schema, Component::from(destination_directive))?;
+            }
+            // END MESSY IMPL
+        }
 
         for (value_name, value) in type_.values.iter() {
             let value_pos = pos.value(value_name.clone());
@@ -1211,6 +1286,7 @@ fn extract_input_object_type_content(
     graph_enum_value_name_to_subgraph_name: &IndexMap<Name, Arc<str>>,
     join_spec_definition: &JoinSpecDefinition,
     info: &[TypeInfo],
+    original_directive_names: &HashMap<&str, &str>,
 ) -> Result<(), FederationError> {
     let field_directive_definition =
         join_spec_definition.field_directive_definition(supergraph_schema)?;
@@ -1242,7 +1318,13 @@ fn extract_input_object_type_content(
                         graph_enum_value_name_to_subgraph_name,
                         graph_enum_value,
                     )?;
-                    add_subgraph_input_field(input_field_pos.clone(), input_field, subgraph, None)?;
+                    add_subgraph_input_field(
+                        input_field_pos.clone(),
+                        input_field,
+                        subgraph,
+                        None,
+                        original_directive_names,
+                    )?;
                 }
             } else {
                 for field_directive_application in &field_directive_applications {
@@ -1274,6 +1356,7 @@ fn extract_input_object_type_content(
                         input_field,
                         subgraph,
                         Some(field_directive_application),
+                        original_directive_names,
                     )?;
                 }
             }
@@ -1290,6 +1373,7 @@ fn add_subgraph_field(
     federation_spec_definition: &'static FederationSpecDefinition,
     is_shareable: bool,
     field_directive_application: Option<&FieldDirectiveArguments>,
+    original_directive_names: &HashMap<&str, &str>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1317,15 +1401,22 @@ fn add_subgraph_field(
     };
 
     for argument in &field.arguments {
+        let mut destination_argument = InputValueDefinition {
+            description: None,
+            name: argument.name.clone(),
+            ty: argument.ty.clone(),
+            default_value: argument.default_value.clone(),
+            directives: Default::default(),
+        };
+        propagate_demand_control_directives(
+            &argument.directives,
+            &mut destination_argument.directives,
+            original_directive_names,
+        );
+
         subgraph_field
             .arguments
-            .push(Node::new(InputValueDefinition {
-                description: None,
-                name: argument.name.clone(),
-                ty: argument.ty.clone(),
-                default_value: argument.default_value.clone(),
-                directives: Default::default(),
-            }))
+            .push(Node::new(destination_argument))
     }
     if let Some(requires) = &field_directive_application.requires {
         subgraph_field.directives.push(Node::new(
@@ -1367,6 +1458,12 @@ fn add_subgraph_field(
         ));
     }
 
+    propagate_demand_control_directives(
+        &field.directives,
+        &mut subgraph_field.directives,
+        original_directive_names,
+    );
+
     match object_or_interface_field_definition_position {
         ObjectOrInterfaceFieldDefinitionPosition::Object(pos) => {
             pos.insert(&mut subgraph.schema, Component::from(subgraph_field))?;
@@ -1384,6 +1481,7 @@ fn add_subgraph_input_field(
     input_field: &InputValueDefinition,
     subgraph: &mut FederationSubgraph,
     field_directive_application: Option<&FieldDirectiveArguments>,
+    original_directive_names: &HashMap<&str, &str>,
 ) -> Result<(), FederationError> {
     let field_directive_application =
         field_directive_application.unwrap_or_else(|| &FieldDirectiveArguments {
@@ -1400,13 +1498,19 @@ fn add_subgraph_input_field(
         Some(t) => Node::new(decode_type(t)?),
         None => input_field.ty.clone(),
     };
-    let subgraph_input_field = InputValueDefinition {
+    let mut subgraph_input_field = InputValueDefinition {
         description: None,
         name: input_object_field_definition_position.field_name.clone(),
         ty: subgraph_input_field_type,
         default_value: input_field.default_value.clone(),
         directives: Default::default(),
     };
+
+    propagate_demand_control_directives(
+        &input_field.directives,
+        &mut subgraph_input_field.directives,
+        original_directive_names,
+    );
 
     input_object_field_definition_position
         .insert(&mut subgraph.schema, Component::from(subgraph_input_field))?;
@@ -1446,6 +1550,32 @@ fn get_subgraph<'subgraph>(
         }
         .into()
     })
+}
+
+fn propagate_demand_control_directives(
+    source: &apollo_compiler::ast::DirectiveList,
+    dest: &mut apollo_compiler::ast::DirectiveList,
+    original_directive_names: &HashMap<&str, &str>,
+) {
+    let cost_directive_name = original_directive_names.get("cost").unwrap_or(&"cost");
+    if let Some(cost_directive) = source.get(*cost_directive_name) {
+        let destination_directive = Directive {
+            name: name!("federation__cost"),
+            arguments: cost_directive.arguments.clone(),
+        };
+        dest.push(Node::new(destination_directive));
+    }
+
+    let list_size_directive_name = original_directive_names
+        .get("listSize")
+        .unwrap_or(&"listSize");
+    if let Some(list_size_directive) = source.get(*list_size_directive_name) {
+        let destination_directive = Directive {
+            name: name!("federation__listSize"),
+            arguments: list_size_directive.arguments.clone(),
+        };
+        dest.push(Node::new(destination_directive));
+    }
 }
 
 struct FederationSubgraph {
