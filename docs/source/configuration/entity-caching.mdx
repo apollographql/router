@@ -142,9 +142,66 @@ Since the Router does not know in advance if a particular query will return priv
 
 ### Observability
 
+We added a new [selector](./telemetry/instrumentation/selectors#subgraph) in telemetry at the subgraph service called `cache` which returns the number of cache hit or miss we had by entity for a subgraph request.
+
 ## Spans
 
+For example you could add a new attribute on the subgraph span to know how many cache hit we had:
+
+```yaml title="todo_router.yaml"
+telemetry:
+  instrumentation:
+    spans:
+      subgraph:
+        attributes:
+          cache.hit:
+            cache: hit
+```
+
 ## Metrics
+
+We're providing a new section in `telemetry.instrumentation.instruments` to enable cache metrics:
+
+```yaml title="todo_router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      cache: # Cache instruments configuration
+        apollo.router.operations.entity.cache: # A counter which counts the number of cache hit and miss for subgraph requests
+          attributes:
+            entity.type: true # Include the entity type name. default: false
+            subgraph.name: # Custom attributes to include the subgraph name in the metric
+              subgraph_name: true
+            supergraph.operation.name: # Add custom attribute to display the supergraph operation name
+              supergraph_operation_name: string
+            # You can add more custom attributes using subgraph selectors
+```
+
+But you can also create you own metrics using custom instruments at the subgraph service.
+For example, here we create a custom instrument to generate an histogram measuring the subgraph request duration when we have at least 1 cache hit but only for subgraph "inventory":
+
+```yaml title="todo_router.yaml"
+telemetry:
+  instrumentation:
+    instruments:
+      subgraph:
+        only_cache_hit_on_subgraph_inventory:
+          type: histogram
+          value: duration
+          unit: hit
+          description: histogram of subgraph request duration when we have cache hit on subgraph inventory
+          condition:
+            all:
+            - eq:
+              - subgraph_name: true # subgraph selector
+              - inventory
+            - gt: # If the number of cache hit is greater than 0
+              - cache: hit
+              # entity_type: Product # Here you could also only check for the entity type Product, it's `all` by default if we don't specify this config.
+              - 0
+
+```
+
 
 ## Implementation notes
 
