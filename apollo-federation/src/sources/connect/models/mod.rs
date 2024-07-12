@@ -364,6 +364,7 @@ mod tests {
                         star: None,
                     },
                 ),
+                config: {},
                 entity_resolver: None,
             },
             ConnectId {
@@ -444,6 +445,7 @@ mod tests {
                         star: None,
                     },
                 ),
+                config: {},
                 entity_resolver: None,
             },
         }
