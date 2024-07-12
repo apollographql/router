@@ -6,6 +6,7 @@ use apollo_router::layers::ServiceBuilderExt;
 use apollo_router::plugin::Plugin;
 use apollo_router::plugin::PluginInit;
 use apollo_router::register_plugin;
+use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use http::StatusCode;
 use schemars::JsonSchema;
@@ -38,6 +39,18 @@ impl Plugin for AllowClientIdFromFile {
             allowed_ids_path,
             header,
         })
+    }
+
+    fn router_service(&self, service: router::BoxService) -> router::BoxService {
+        // or ControlFlow::Break(response) with a crafted response if we don't want the request to go through.
+        ServiceBuilder::new()
+            .map_request(|req: router::Request| {
+                let body = req.router_request.body();
+
+                req
+            })
+            .service(service)
+            .boxed()
     }
 
     // On each request, this plugin will extract a x-client-id header, and check against a file
