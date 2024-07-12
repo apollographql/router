@@ -109,6 +109,18 @@ pub(crate) mod mock_api {
             )),
         )
     }
+
+    pub(crate) fn user_1_with_pet() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/users/1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+              "id": 1,
+              "name": "Leanne Graham",
+              "pet": {
+                  "name": "Spot"
+              }
+            })))
+    }
 }
 
 pub(crate) mod mock_subgraph {
@@ -399,8 +411,46 @@ async fn test_mutation() {
     );
 }
 
+#[tokio::test]
+async fn test_nullability() {
+    let mock_server = MockServer::start().await;
+    mock_api::user_1_with_pet().mount(&mock_server).await;
+
+    let response = execute(
+        NULLABILITY_SCHEMA,
+        &mock_server.uri(),
+        "query { user(id: 1) { id name occupation address { zip } pet { species } } }",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "user": {
+          "id": 1,
+          "name": "Leanne Graham",
+          "occupation": null,
+          "address": null,
+          "pet": {
+            "species": null
+          }
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users/1").build()],
+    );
+}
+
 const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("./testdata/mutation.graphql");
+const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
 
 async fn execute(
     schema: &str,
