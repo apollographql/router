@@ -1,8 +1,8 @@
-### fix(telemetry): add response_context handling in event selector when using an event_* instrument ([PR #5565](https://github.com/apollographql/router/pull/5565))
+### Add response_context in event selector for event_* instruments ([PR #5565](https://github.com/apollographql/router/pull/5565))
 
-This will fix cases when you want to create a custom instruments having a value set to `event_*` with a condition executed on event and using the `response_context` selector in attributes.
+The router now supports creating custom instruments with a value set to `event_*` and using both a condition executed on an event and the `response_context` selector in attributes. Previous releases didn't support the `response_context` selector in attributes.
 
-Example:
+An example configuration:
 
 ```yaml
 telemetry:
