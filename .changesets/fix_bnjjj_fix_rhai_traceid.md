@@ -1,5 +1,7 @@
-### Provide a valid trace id in rhai scripts even if the trace isn't sampled ([PR #5606](https://github.com/apollographql/router/pull/5606))
+### Provide valid trace IDs for unsampled traces in Rhai scripts  ([PR #5606](https://github.com/apollographql/router/pull/5606))
 
-Before, when calling `traceid()` in a rhai script, if the trace wasn't sampled you won't get the traceid. It's now fixed and you'll get trace id even if the trace is not sampled.
+The `traceid()` function in a Rhai script for the router now returns a valid trace ID for all traces. 
+
+Previously, `traceid()` didn't return a valid trace ID if the trace wasn't sampled.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5606
