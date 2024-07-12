@@ -52,21 +52,18 @@ impl SubSelection {
         for selection in &self.selections {
             match selection {
                 NamedSelection::Field(alias, name, sub) => {
-                    let key = alias
-                        .as_ref()
-                        .map(|a| a.name.to_string())
-                        .unwrap_or(name.to_string());
-                    if let Some(fields) = field_map.get_vec(&key) {
+                    let key = alias.as_ref().map(|a| a.name.as_str()).unwrap_or(name);
+                    if let Some(fields) = field_map.get_vec(key) {
                         if self.star.is_some() {
-                            referenced_fields.insert(key.clone());
+                            referenced_fields.insert(key);
                         }
                         for field in fields {
-                            let field_response_key = field.response_key().to_string();
-                            let alias = if field_response_key == *name {
+                            let field_response_key = field.response_key().as_str();
+                            let alias = if field_response_key == name {
                                 None
                             } else {
                                 Some(Alias {
-                                    name: field_response_key.clone(),
+                                    name: field_response_key.to_string(),
                                 })
                             };
                             new_selections.push(NamedSelection::Field(
@@ -77,14 +74,14 @@ impl SubSelection {
                             ));
                         }
                     } else if self.star.is_some() {
-                        dropped_fields.insert(key.clone(), ());
+                        dropped_fields.insert(key, ());
                     }
                 }
                 NamedSelection::Quoted(alias, name, sub) => {
-                    let key = alias.name.to_string();
-                    if let Some(fields) = field_map.get_vec(&key) {
+                    let key = alias.name.as_str();
+                    if let Some(fields) = field_map.get_vec(key) {
                         if self.star.is_some() {
-                            referenced_fields.insert(key.clone());
+                            referenced_fields.insert(key);
                         }
                         for field in fields {
                             new_selections.push(NamedSelection::Quoted(
@@ -97,12 +94,12 @@ impl SubSelection {
                             ));
                         }
                     } else if self.star.is_some() {
-                        dropped_fields.insert(key.clone(), ());
+                        dropped_fields.insert(key, ());
                     }
                 }
                 NamedSelection::Path(alias, path_selection) => {
-                    let key = alias.name.to_string();
-                    if let Some(fields) = field_map.get_vec(&key) {
+                    let key = alias.name.as_str();
+                    if let Some(fields) = field_map.get_vec(key) {
                         if self.star.is_some() {
                             if let Some(name) = key_name(path_selection) {
                                 referenced_fields.insert(name);
@@ -123,8 +120,8 @@ impl SubSelection {
                     }
                 }
                 NamedSelection::Group(alias, sub) => {
-                    let key = alias.name.to_string();
-                    if let Some(fields) = field_map.get_vec(&key) {
+                    let key = alias.name.as_str();
+                    if let Some(fields) = field_map.get_vec(key) {
                         for field in fields {
                             new_selections.push(NamedSelection::Group(
                                 Alias {
@@ -143,11 +140,10 @@ impl SubSelection {
             // being picked up by the star.
             dropped_fields.retain(|key, _| !referenced_fields.contains(key));
             for (dropped, _) in dropped_fields {
-                let mut unused = "__unused__".to_owned();
-                unused.push_str(dropped.as_str());
+                let name = format!("__unused__{dropped}");
                 new_selections.push(NamedSelection::Field(
-                    Some(Alias { name: unused }),
-                    dropped.clone(),
+                    Some(Alias { name }),
+                    dropped.to_string(),
                     None,
                 ));
             }
@@ -179,10 +175,10 @@ impl PathSelection {
 }
 
 #[inline]
-fn key_name(path_selection: &PathSelection) -> Option<String> {
+fn key_name(path_selection: &PathSelection) -> Option<&str> {
     match path_selection {
-        PathSelection::Key(Key::Field(name), _) => Some(name.clone()),
-        PathSelection::Key(Key::Quoted(name), _) => Some(name.clone()),
+        PathSelection::Key(Key::Field(name), _) => Some(name),
+        PathSelection::Key(Key::Quoted(name), _) => Some(name),
         _ => None,
     }
 }
