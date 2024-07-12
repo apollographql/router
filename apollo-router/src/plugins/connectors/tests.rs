@@ -121,6 +121,25 @@ pub(crate) mod mock_api {
               }
             })))
     }
+
+    pub(crate) fn commits() -> Mock {
+        Mock::given(method("GET"))
+            .and(path("/repos/foo/bar/commits"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!(
+              [
+                {
+                  "sha": "abcdef",
+                  "commit": {
+                    "author": {
+                      "name": "Foo Bar",
+                      "email": "noone@nowhere",
+                      "date": "2024-07-09T01:22:33Z"
+                    },
+                    "message": "commit message",
+                  },
+                }]
+            )))
+    }
 }
 
 pub(crate) mod mock_subgraph {
@@ -412,6 +431,80 @@ async fn test_mutation() {
 }
 
 #[tokio::test]
+async fn test_selection_set() {
+    let mock_server = MockServer::start().await;
+    mock_api::commits().mount(&mock_server).await;
+
+    let response = execute(
+        SELECTION_SCHEMA,
+        &mock_server.uri(),
+        "query Commits($owner: String!, $repo: String!, $skipInlineFragment: Boolean!,
+                             $skipNamedFragment: Boolean!, $skipField: Boolean!) {
+              commits(owner: $owner, repo: $repo) {
+                commit {
+                  from_path_alias: name_from_path
+                  ...CommitDetails @skip(if: $skipNamedFragment)
+                }
+              }
+            }
+
+            fragment CommitDetails on CommitDetail {
+              by {
+                user: name @skip(if: $skipField)
+                name
+                ...on CommitAuthor @skip(if: $skipInlineFragment) {
+                  address: email
+                  owner
+                }
+                owner_not_fragment: owner
+              }
+            }",
+        serde_json_bytes::json!({
+        "owner": "foo",
+        "repo": "bar",
+        "skipField": false,
+        "skipInlineFragment": false,
+        "skipNamedFragment": false
+        })
+        .as_object()
+        .unwrap()
+        .clone(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "commits": [
+          {
+            "commit": {
+              "from_path_alias": "Foo Bar",
+              "by": {
+                "user": "Foo Bar",
+                "name": "Foo Bar",
+                "address": "noone@nowhere",
+                "owner": "foo",
+                "owner_not_fragment": "foo"
+              }
+            }
+          }
+        ]
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new()
+            .method("GET")
+            .path("/repos/foo/bar/commits")
+            .build()],
+    );
+}
+
+#[tokio::test]
 async fn test_nullability() {
     let mock_server = MockServer::start().await;
     mock_api::user_1_with_pet().mount(&mock_server).await;
@@ -451,6 +544,7 @@ async fn test_nullability() {
 const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("./testdata/mutation.graphql");
 const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
+const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
 
 async fn execute(
     schema: &str,

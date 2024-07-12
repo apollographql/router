@@ -114,6 +114,7 @@ pub(crate) fn make_request(
             json_body.as_ref(),
             transport.body.as_ref().map(|body| SelectionData {
                 source: body.to_string(),
+                transformed: body.to_string(),
                 result: json_body.clone(),
                 errors: apply_to_errors,
             }),
