@@ -110,8 +110,67 @@ impl Mocks for MockStore {
                 }
                 return Ok(RedisValue::Null);
             }
+            //FIXME: this is not working because fred's mock never sends the response to SCAN to the client
+            /*"SCAN" => {
+                let mut args_it = command.args.iter();
+                if let (
+                    Some(RedisValue::String(cursor)),
+                    Some(RedisValue::String(_match)),
+                    Some(RedisValue::String(pattern)),
+                    Some(RedisValue::String(_count)),
+                    Some(RedisValue::Integer(max_count)),
+                ) = (
+                    args_it.next(),
+                    args_it.next(),
+                    args_it.next(),
+                    args_it.next(),
+                    args_it.next(),
+                ) {
+                    let cursor: usize = cursor.parse().unwrap();
 
-            _ => {}
+                    if cursor > self.map.lock().len() {
+                        let res = RedisValue::Array(vec![
+                            RedisValue::String(0.to_string().into()),
+                            RedisValue::Array(Vec::new()),
+                        ]);
+                        println!("result: {res:?}");
+
+                        return Ok(res);
+                    }
+
+                    let regex = Regex::new(pattern).unwrap();
+                    let mut count = 0;
+                    let res: Vec<_> = self
+                        .map
+                        .lock()
+                        .keys()
+                        .enumerate()
+                        .skip(cursor)
+                        .map(|(i, key)| {
+                            println!("seen key at index {i}");
+                            count = i + 1;
+                            key
+                        })
+                        .filter(|key| regex.is_match(&*key))
+                        .map(|key| RedisValue::Bytes(key.clone()))
+                        .take(*max_count as usize)
+                        .collect();
+
+                    println!("scan returns cursor {count}, for {} values", res.len());
+                    let res = RedisValue::Array(vec![
+                        RedisValue::String(count.to_string().into()),
+                        RedisValue::Array(res),
+                    ]);
+                    println!("result: {res:?}");
+
+                    return Ok(res);
+                } else {
+                    panic!()
+                }
+            }*/
+            _ => {
+                panic!()
+            }
         }
         Err(RedisError::new(RedisErrorKind::NotFound, "mock not found"))
     }
@@ -437,3 +496,123 @@ async fn private() {
 
     insta::assert_json_snapshot!(response);
 }
+
+/*FIXME: reactivate test if we manage to make fred return the response to SCAN in mocks
+#[tokio::test(flavor = "multi_thread")]
+async fn invalidate() {
+    let query = "query { currentUser { activeOrganization { id creatorUser { __typename id } } } }";
+
+    let subgraphs = MockedSubgraphs([
+        ("user", MockSubgraph::builder().with_json(
+                serde_json::json!{{"query":"{currentUser{activeOrganization{__typename id}}}"}},
+                serde_json::json!{{"data": {"currentUser": { "activeOrganization": {
+                    "__typename": "Organization",
+                    "id": "1"
+                } }}}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build()),
+        ("orga", MockSubgraph::builder().with_json(
+            serde_json::json!{{
+                "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on Organization{creatorUser{__typename id}}}}",
+            "variables": {
+                "representations": [
+                    {
+                        "id": "1",
+                        "__typename": "Organization",
+                    }
+                ]
+            }}},
+            serde_json::json!{{"data": {
+                "_entities": [{
+                    "creatorUser": {
+                        "__typename": "User",
+                        "id": 2
+                    }
+                }]
+            }}}
+        ).with_header(CACHE_CONTROL, HeaderValue::from_static("public")).build())
+    ].into_iter().collect());
+
+    let redis_cache = RedisCacheStorage::from_mocks(Arc::new(MockStore::new()))
+        .await
+        .unwrap();
+    let entity_cache = EntityCache::with_mocks(redis_cache.clone(), HashMap::new())
+        .await
+        .unwrap();
+    let mut invalidation = entity_cache.invalidation.clone();
+
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache.clone())
+        .extra_plugin(subgraphs)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.oneshot(request).await.unwrap();
+
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    // Now testing without any mock subgraphs, all the data should come from the cache
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache.clone())
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.clone().oneshot(request).await.unwrap();
+
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+
+    // now we invalidate data
+    invalidation
+        .invalidate(vec![InvalidationRequest::Subgraph {
+            subgraph: "orga".to_string(),
+        }])
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(2000)).await;
+
+    panic!();
+    let service = TestHarness::builder()
+        .configuration_json(serde_json::json!({"include_subgraph_errors": { "all": true } }))
+        .unwrap()
+        .schema(SCHEMA)
+        .extra_plugin(entity_cache)
+        .build_supergraph()
+        .await
+        .unwrap();
+
+    let request = supergraph::Request::fake_builder()
+        .query(query)
+        .context(Context::new())
+        .build()
+        .unwrap();
+    let mut response = service.clone().oneshot(request).await.unwrap();
+
+    insta::assert_debug_snapshot!(response.response.headers().get(CACHE_CONTROL));
+    let response = response.next_response().await.unwrap();
+
+    insta::assert_json_snapshot!(response);
+    panic!()
+}*/

@@ -8,6 +8,8 @@ mod docs;
 mod file_upload;
 mod lifecycle;
 mod operation_limits;
+mod subgraph_response;
+mod traffic_shaping;
 
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
 mod redis;

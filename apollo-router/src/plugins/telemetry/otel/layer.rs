@@ -31,23 +31,22 @@ use tracing_subscriber::Layer;
 
 use super::OtelData;
 use super::PreSampledTracer;
-use crate::axum_factory::utils::REQUEST_SPAN_NAME;
 use crate::plugins::telemetry::config::Sampler;
 use crate::plugins::telemetry::config::SamplerOption;
+use crate::plugins::telemetry::consts::FIELD_EXCEPTION_MESSAGE;
+use crate::plugins::telemetry::consts::FIELD_EXCEPTION_STACKTRACE;
+use crate::plugins::telemetry::consts::OTEL_KIND;
+use crate::plugins::telemetry::consts::OTEL_NAME;
+use crate::plugins::telemetry::consts::OTEL_ORIGINAL_NAME;
+use crate::plugins::telemetry::consts::OTEL_STATUS_CODE;
+use crate::plugins::telemetry::consts::OTEL_STATUS_MESSAGE;
+use crate::plugins::telemetry::consts::REQUEST_SPAN_NAME;
+use crate::plugins::telemetry::consts::ROUTER_SPAN_NAME;
 use crate::plugins::telemetry::reload::IsSampled;
 use crate::plugins::telemetry::reload::SampledSpan;
 use crate::plugins::telemetry::reload::SPAN_SAMPLING_RATE;
-use crate::plugins::telemetry::ROUTER_SPAN_NAME;
 use crate::query_planner::subscription::SUBSCRIPTION_EVENT_SPAN_NAME;
 use crate::router_factory::STARTING_SPAN_NAME;
-
-pub(crate) const SPAN_NAME_FIELD: &str = "otel.name";
-pub(crate) const SPAN_KIND_FIELD: &str = "otel.kind";
-pub(crate) const SPAN_STATUS_CODE_FIELD: &str = "otel.status_code";
-pub(crate) const SPAN_STATUS_MESSAGE_FIELD: &str = "otel.status_message";
-
-const FIELD_EXCEPTION_MESSAGE: &str = "exception.message";
-const FIELD_EXCEPTION_STACKTRACE: &str = "exception.stacktrace";
 
 /// An [OpenTelemetry] propagation layer for use in a project that uses
 /// [tracing].
@@ -353,12 +352,12 @@ impl<'a> field::Visit for SpanAttributeVisitor<'a> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_str(&mut self, field: &field::Field, value: &str) {
         match field.name() {
-            SPAN_NAME_FIELD => self.span_builder.name = value.to_string().into(),
-            SPAN_KIND_FIELD => self.span_builder.span_kind = str_to_span_kind(value),
-            SPAN_STATUS_CODE_FIELD => {
+            OTEL_NAME => self.span_builder.name = value.to_string().into(),
+            OTEL_KIND => self.span_builder.span_kind = str_to_span_kind(value),
+            OTEL_STATUS_CODE => {
                 self.span_builder.status = str_to_status(value);
             }
-            SPAN_STATUS_MESSAGE_FIELD => {
+            OTEL_STATUS_MESSAGE => {
                 self.span_builder.status = otel::Status::error(value.to_string())
             }
             _ => self.record(KeyValue::new(field.name(), value.to_string())),
@@ -371,14 +370,10 @@ impl<'a> field::Visit for SpanAttributeVisitor<'a> {
     /// [`Span`]: opentelemetry::trace::Span
     fn record_debug(&mut self, field: &field::Field, value: &dyn fmt::Debug) {
         match field.name() {
-            SPAN_NAME_FIELD => self.span_builder.name = format!("{:?}", value).into(),
-            SPAN_KIND_FIELD => {
-                self.span_builder.span_kind = str_to_span_kind(&format!("{:?}", value))
-            }
-            SPAN_STATUS_CODE_FIELD => {
-                self.span_builder.status = str_to_status(&format!("{:?}", value))
-            }
-            SPAN_STATUS_MESSAGE_FIELD => {
+            OTEL_NAME => self.span_builder.name = format!("{:?}", value).into(),
+            OTEL_KIND => self.span_builder.span_kind = str_to_span_kind(&format!("{:?}", value)),
+            OTEL_STATUS_CODE => self.span_builder.status = str_to_status(&format!("{:?}", value)),
+            OTEL_STATUS_MESSAGE => {
                 self.span_builder.status = otel::Status::error(format!("{:?}", value))
             }
             _ => self.record(Key::new(field.name()).string(format!("{:?}", value))),
@@ -1083,7 +1078,7 @@ where
 
                     let attributes = builder
                         .attributes
-                        .get_or_insert_with(|| OrderMap::with_capacity(2));
+                        .get_or_insert_with(|| OrderMap::with_capacity(3));
                     attributes.insert(busy_ns, timings.busy.into());
                     attributes.insert(idle_ns, timings.idle.into());
                 }
@@ -1092,6 +1087,11 @@ where
                 builder.status = forced_status;
             }
             if let Some(forced_span_name) = forced_span_name {
+                // Insert the original span name as an attribute so that we can map it later
+                let attributes = builder
+                    .attributes
+                    .get_or_insert_with(|| OrderMap::with_capacity(1));
+                attributes.insert(OTEL_ORIGINAL_NAME.into(), builder.name.into());
                 builder.name = forced_span_name.into();
             }
 
@@ -1158,6 +1158,7 @@ mod tests {
 
     use super::*;
     use crate::plugins::telemetry::dynamic_attribute::SpanDynAttribute;
+    use crate::plugins::telemetry::OTEL_NAME;
 
     #[derive(Debug, Clone)]
     struct TestTracer(Arc<Mutex<Option<OtelData>>>);
@@ -1295,7 +1296,7 @@ mod tests {
             let span = tracing::debug_span!("static_name", otel.name = dynamic_name.as_str());
             let _entered = span.enter();
             span.set_span_dyn_attribute(
-                Key::from_static_str("otel.name"),
+                Key::from_static_str(OTEL_NAME),
                 opentelemetry::Value::String(forced_dynamic_name.clone().into()),
             );
         });

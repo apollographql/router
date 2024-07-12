@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::fmt;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,9 +18,11 @@ use fred::types::FromRedis;
 use fred::types::PerformanceConfig;
 use fred::types::ReconnectPolicy;
 use fred::types::RedisConfig;
+use fred::types::ScanResult;
 use fred::types::TlsConfig;
 use fred::types::TlsHostMapping;
 use futures::FutureExt;
+use futures::Stream;
 use tower::BoxError;
 use url::Url;
 
@@ -556,6 +559,31 @@ impl RedisCacheStorage {
             }
         };
         tracing::trace!("insert result {:?}", r);
+    }
+
+    pub(crate) async fn delete<K: KeyType>(&self, keys: Vec<RedisKey<K>>) -> Option<u32> {
+        self.inner
+            .del(keys)
+            .await
+            .map_err(|e| {
+                if !e.is_not_found() {
+                    tracing::error!(error = %e, "redis del error");
+                }
+                e
+            })
+            .ok()
+    }
+
+    pub(crate) fn scan(
+        &self,
+        pattern: String,
+        count: Option<u32>,
+    ) -> Pin<Box<dyn Stream<Item = Result<ScanResult, RedisError>> + Send>> {
+        if self.is_cluster {
+            Box::pin(self.inner.scan_cluster(pattern, count, None))
+        } else {
+            Box::pin(self.inner.scan(pattern, count, None))
+        }
     }
 }
 
