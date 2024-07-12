@@ -182,6 +182,17 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
         self.definitions.get(requested)
     }
 
+    pub(crate) fn find_for_federation_version(&self, federation_version: &Version) -> Option<&T> {
+        for (_, definition) in &self.definitions {
+            if let Some(minimum_federation_version) = definition.minimum_federation_version() {
+                if minimum_federation_version >= federation_version {
+                    return Some(definition);
+                }
+            }
+        }
+        None
+    }
+
     pub(crate) fn versions(&self) -> Keys<Version, T> {
         self.definitions.keys()
     }
