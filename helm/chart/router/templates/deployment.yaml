@@ -114,12 +114,12 @@ spec:
             {{- toYaml .Values.lifecycle | nindent 12 }}
           livenessProbe:
             httpGet:
-              path: "/health?live"
+              path: {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?live"}}
               port: {{ splitList ":" ((index .Values.router.configuration "health_check").listen | default ":8088") | last }}
             initialDelaySeconds: {{  ((.Values.probes).liveness).initialDelaySeconds | default 0 }}
           readinessProbe:
             httpGet:
-              path: "/health?ready"
+              path:  {{ (.Values.router.configuration.health_check.path | default "/health") }}{{"?ready"}}
               port: {{ (splitList ":"  ((index .Values.router.configuration "health_check").listen | default ":8088")) | last }}
             initialDelaySeconds: {{ ((.Values.probes).readiness).initialDelaySeconds | default 0 }}
           resources:
