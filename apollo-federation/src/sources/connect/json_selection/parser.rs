@@ -512,7 +512,6 @@ impl Alias {
 pub enum Key {
     Field(String),
     Quoted(String),
-    Index(usize),
 }
 
 impl Key {
@@ -527,7 +526,6 @@ impl Key {
         match self {
             Key::Field(name) => JSON::String(name.clone().into()),
             Key::Quoted(name) => JSON::String(name.clone().into()),
-            Key::Index(index) => JSON::Number((*index).into()),
         }
     }
 
@@ -538,7 +536,6 @@ impl Key {
         match self {
             Key::Field(name) => name.clone(),
             Key::Quoted(name) => name.clone(),
-            Key::Index(n) => n.to_string(),
         }
     }
 
@@ -556,7 +553,6 @@ impl Key {
                 let quoted = serde_json_bytes::Value::String(field.clone().into()).to_string();
                 format!(".{quoted}")
             }
-            Key::Index(index) => format!(".{index}"),
         }
     }
 }

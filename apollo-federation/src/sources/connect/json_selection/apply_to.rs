@@ -319,7 +319,6 @@ impl ApplyTo for PathList {
                 let result = if let Some(child) = match key {
                     Key::Field(name) => data.get(name),
                     Key::Quoted(name) => data.get(name),
-                    Key::Index(index) => data.get(index),
                 } {
                     tail.apply_to_path(child, vars, input_path, errors)
                 } else {
@@ -398,17 +397,6 @@ impl ApplyTo for SubSelection {
                                 Key::Field(name) | Key::Quoted(name) => {
                                     input_names.insert(name.as_str());
                                 }
-                                // While Property::Index may be used to
-                                // represent the input_path during apply_to_path
-                                // when arrays are encountered, it will never be
-                                // used to represent the parsed structure of any
-                                // actual selection string, becase arrays are
-                                // processed automatically/implicitly and their
-                                // indices are never explicitly selected. This
-                                // means the numeric Property::Index case cannot
-                                // affect the keys selected by * selections, so
-                                // input_names does not need updating here.
-                                Key::Index(_) => {}
                             };
                         }
                     }
