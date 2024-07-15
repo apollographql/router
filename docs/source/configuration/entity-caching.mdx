@@ -167,7 +167,7 @@ telemetry:
   instrumentation:
     instruments:
       cache: # Cache instruments configuration
-        http.client.request.cache: # A counter which counts the number of cache hit and miss for subgraph requests
+        apollo.router.operations.entity.cache: # A counter which counts the number of cache hit and miss for subgraph requests
           attributes:
             entity.type: true # Include the entity type name. default: false
             subgraph.name: # Custom attributes to include the subgraph name in the metric
