@@ -8,8 +8,6 @@ use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
-use petgraph::csr::NodeIndex;
-use petgraph::stable_graph::IndexType;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -560,7 +558,7 @@ fn compute_root_serial_dependency_graph(
             // }
             // then we should _not_ merge the 2 `mut1` fields (contrarily to what happens on queried fields).
 
-            prev_path = OpPathTree::merge(&prev_path, &new_path);
+            Arc::make_mut(&mut prev_path).extend(&new_path);
             fetch_dependency_graph = FetchDependencyGraph::new(
                 supergraph_schema.clone(),
                 federated_query_graph.clone(),
@@ -590,14 +588,14 @@ fn compute_root_serial_dependency_graph(
     Ok(digest)
 }
 
-fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<NodeIndex, FederationError> {
+fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<Arc<str>, FederationError> {
     let mut iter = graph.root_node_by_subgraph_iter();
-    let (Some((_, index)), None) = (iter.next(), iter.next()) else {
+    let (Some((name, _)), None) = (iter.next(), iter.next()) else {
         return Err(FederationError::internal(format!(
             "{graph} should have only one root."
         )));
     };
-    Ok(index.index() as u32)
+    Ok(name.clone())
 }
 
 pub(crate) fn compute_root_fetch_groups(

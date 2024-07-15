@@ -41,6 +41,7 @@ mod interface_object;
 mod interface_type_explosion;
 mod introspection_typename_handling;
 mod merged_abstract_types_handling;
+mod mutations;
 mod named_fragments;
 mod named_fragments_preservation;
 mod provides;

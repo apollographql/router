@@ -36,7 +36,7 @@ resourceSpans:
             traceState: ""
             parentSpanId: "[span_id]"
             flags: 0
-            name: query
+            name: query one
             kind: 2
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
@@ -44,6 +44,9 @@ resourceSpans:
               - key: apollo_private.request
                 value:
                   boolValue: true
+              - key: graphql.operation.name
+                value:
+                  stringValue: "[redacted]"
               - key: graphql.operation.type
                 value:
                   stringValue: query
@@ -319,7 +322,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.operation_signature
                 value:
-                  stringValue: "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}"
+                  stringValue: "[redacted]"
               - key: apollo_private.query.aliases
                 value:
                   intValue: 0
@@ -332,6 +335,9 @@ resourceSpans:
               - key: apollo_private.query.root_fields
                 value:
                   intValue: 1
+              - key: graphql.operation.name
+                value:
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -685,7 +691,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -787,7 +793,7 @@ resourceSpans:
                   stringValue: products
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -997,7 +1003,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1099,7 +1105,7 @@ resourceSpans:
                   stringValue: reviews
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1309,7 +1315,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1411,7 +1417,7 @@ resourceSpans:
                   stringValue: accounts
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1513,7 +1519,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: apollo_private.operation_signature
                 value:
-                  stringValue: "# -\n{topProducts{name reviews{author{name}}reviews{author{name}}}}"
+                  stringValue: "[redacted]"
               - key: apollo_private.query.aliases
                 value:
                   intValue: 0
@@ -1526,6 +1532,9 @@ resourceSpans:
               - key: apollo_private.query.root_fields
                 value:
                   intValue: 1
+              - key: graphql.operation.name
+                value:
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1879,7 +1888,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1981,7 +1990,7 @@ resourceSpans:
                   stringValue: products
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -2191,7 +2200,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -2293,7 +2302,7 @@ resourceSpans:
                   stringValue: reviews
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -2503,7 +2512,7 @@ resourceSpans:
                   stringValue: "[redacted]"
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -2605,7 +2614,7 @@ resourceSpans:
                   stringValue: accounts
               - key: graphql.operation.name
                 value:
-                  stringValue: ""
+                  stringValue: "[redacted]"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
