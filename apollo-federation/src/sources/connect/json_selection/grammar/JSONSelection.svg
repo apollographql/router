@@ -1,32 +1,32 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="239" height="81">
+<svg xmlns="http://www.w3.org/2000/svg" width="241" height="81">
    <defs>
       <style type="text/css">
     @namespace "http://www.w3.org/2000/svg";
-    .line                 {fill: none; stroke: #332200; stroke-width: 1;}
-    .bold-line            {stroke: #140E00; shape-rendering: crispEdges; stroke-width: 2;}
-    .thin-line            {stroke: #1F1400; shape-rendering: crispEdges}
-    .filled               {fill: #332200; stroke: none;}
+    .line                 {fill: none; stroke: #332900; stroke-width: 1;}
+    .bold-line            {stroke: #141000; shape-rendering: crispEdges; stroke-width: 2;}
+    .thin-line            {stroke: #1F1800; shape-rendering: crispEdges}
+    .filled               {fill: #332900; stroke: none;}
     text.terminal         {font-family: Verdana, Sans-serif;
                             font-size: 12px;
-                            fill: #140E00;
+                            fill: #141000;
                             font-weight: bold;
                           }
     text.nonterminal      {font-family: Verdana, Sans-serif;
                             font-size: 12px;
-                            fill: #1A1100;
+                            fill: #1A1400;
                             font-weight: normal;
                           }
     text.regexp           {font-family: Verdana, Sans-serif;
                             font-size: 12px;
-                            fill: #1F1400;
+                            fill: #1F1800;
                             font-weight: normal;
                           }
-    rect, circle, polygon {fill: #332200; stroke: #332200;}
-    rect.terminal         {fill: #FFC34D; stroke: #332200; stroke-width: 1;}
-    rect.nonterminal      {fill: #FFDF9E; stroke: #332200; stroke-width: 1;}
+    rect, circle, polygon {fill: #332900; stroke: #332900;}
+    rect.terminal         {fill: #FFDB4D; stroke: #332900; stroke-width: 1;}
+    rect.nonterminal      {fill: #FFEC9E; stroke: #332900; stroke-width: 1;}
     rect.text             {fill: none; stroke: none;}
-    polygon.regexp        {fill: #FFECC7; stroke: #332200; stroke-width: 1;}
+    polygon.regexp        {fill: #FFF4C7; stroke: #332900; stroke-width: 1;}
   </style>
    </defs>
    <polygon points="9 17 1 13 1 21"/>
@@ -34,8 +34,8 @@
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
       xlink:href="#NakedSubSelection"
       xlink:title="NakedSubSelection">
-      <rect x="51" y="3" width="140" height="32"/>
-      <rect x="49" y="1" width="140" height="32" class="nonterminal"/>
+      <rect x="51" y="3" width="142" height="32"/>
+      <rect x="49" y="1" width="142" height="32" class="nonterminal"/>
       <text class="nonterminal" x="59" y="21">NakedSubSelection</text>
    </a>
    <a xmlns:xlink="http://www.w3.org/1999/xlink"
@@ -46,7 +46,7 @@
       <text class="nonterminal" x="59" y="65">PathSelection</text>
    </a>
    <path class="line"
-         d="m17 17 h2 m20 0 h10 m140 0 h10 m-180 0 h20 m160 0 h20 m-200 0 q10 0 10 10 m180 0 q0 -10 10 -10 m-190 10 v24 m180 0 v-24 m-180 24 q0 10 10 10 m160 0 q10 0 10 -10 m-170 10 h10 m106 0 h10 m0 0 h34 m23 -44 h-3"/>
-   <polygon points="229 17 237 13 237 21"/>
-   <polygon points="229 17 221 13 221 21"/>
+         d="m17 17 h2 m20 0 h10 m142 0 h10 m-182 0 h20 m162 0 h20 m-202 0 q10 0 10 10 m182 0 q0 -10 10 -10 m-192 10 v24 m182 0 v-24 m-182 24 q0 10 10 10 m162 0 q10 0 10 -10 m-172 10 h10 m106 0 h10 m0 0 h36 m23 -44 h-3"/>
+   <polygon points="231 17 239 13 239 21"/>
+   <polygon points="231 17 223 13 223 21"/>
 </svg>

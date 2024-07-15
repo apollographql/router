@@ -99,7 +99,7 @@ JSArray              ::= "[" (JSLiteral ("," JSLiteral)*)? "]"
 StarSelection        ::= Alias? "*" SubSelection?
 NO_SPACE             ::= !SpacesOrComments
 SpacesOrComments     ::= (Spaces | Comment)+
-Spaces               ::= (" " | "\t" | "\r" | "\n")+
+Spaces               ::= ("⎵" | "\t" | "\r" | "\n")+
 Comment              ::= "#" [^\n]*
 ```
 
