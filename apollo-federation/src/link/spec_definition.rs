@@ -183,7 +183,7 @@ impl<T: SpecDefinition> SpecDefinitions<T> {
     }
 
     pub(crate) fn find_for_federation_version(&self, federation_version: &Version) -> Option<&T> {
-        for (_, definition) in &self.definitions {
+        for definition in self.definitions.values() {
             if let Some(minimum_federation_version) = definition.minimum_federation_version() {
                 if minimum_federation_version >= federation_version {
                     return Some(definition);

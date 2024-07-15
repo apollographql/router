@@ -131,7 +131,7 @@ impl CostSpecDefinition {
             original_directive_names.get(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC);
         if let Some(list_size_directive) = source.directives.get(
             list_size_directive_name
-                .unwrap_or(&&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)
+                .unwrap_or(&LIST_SIZE_DIRECTIVE_NAME_IN_SPEC)
                 .as_str(),
         ) {
             dest.insert_directive(

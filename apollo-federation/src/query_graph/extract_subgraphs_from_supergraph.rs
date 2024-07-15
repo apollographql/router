@@ -306,8 +306,8 @@ struct TypeInfos {
     input_object_types: Vec<TypeInfo>,
 }
 
-fn get_original_directive_names<'schema>(
-    supergraph_schema: &'schema FederationSchema,
+fn get_original_directive_names(
+    supergraph_schema: &FederationSchema,
 ) -> Result<HashMap<Name, Name>, FederationError> {
     let mut hm = HashMap::new();
     for directive in &supergraph_schema.schema().schema_definition.directives {
@@ -1391,6 +1391,7 @@ fn extract_input_object_type_content(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 fn add_subgraph_field(
     object_or_interface_field_definition_position: ObjectOrInterfaceFieldDefinitionPosition,
     field: &FieldDefinition,
