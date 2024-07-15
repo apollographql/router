@@ -18,12 +18,23 @@ use crate::Notify;
 #[derive(Clone)]
 pub(crate) struct Invalidation {
     enabled: bool,
+<<<<<<< HEAD
     handle: Handle<InvalidationTopic, Vec<InvalidationRequest>>,
     storage: Option<RedisCacheStorage>,
+=======
+    handle: Handle<InvalidationTopic, (InvalidationOrigin, Vec<InvalidationRequest>)>,
+>>>>>>> 5a39486a7ee63340717bf4337e45d01d0b0c4210
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
+
+#[derive(Clone, Debug)]
+#[allow(dead_code)]
+pub(crate) enum InvalidationOrigin {
+    Endpoint,
+    Extensions,
+}
 
 impl Invalidation {
     pub(crate) async fn new(storage: Option<RedisCacheStorage>) -> Result<Self, BoxError> {
@@ -44,34 +55,66 @@ impl Invalidation {
 
     pub(crate) async fn invalidate(
         &mut self,
+        origin: InvalidationOrigin,
         requests: Vec<InvalidationRequest>,
     ) -> Result<(), BoxError> {
         if self.enabled {
             let mut sink = self.handle.clone().into_sink();
-            sink.send(requests).await.map_err(|e| e.message)?;
+            sink.send((origin, requests)).await.map_err(|e| e.message)?;
         }
 
         Ok(())
     }
 
-    pub(super) async fn handle_request(&self, request: &InvalidationRequest) {
-        let key_prefix = request.key_prefix();
-        let storage = match &self.storage {
-            Some(s) => s,
-            None => {
-                tracing::debug!(
-                    "got invalidation request: {request:?}, but no storage, cancelling the request: {}",
-                    key_prefix
-                );
-                return;
-            }
+async fn start(
+    storage: RedisCacheStorage,
+    mut handle: HandleStream<InvalidationTopic, (InvalidationOrigin, Vec<InvalidationRequest>)>,
+) {
+    while let Some((origin, requests)) = handle.next().await {
+        let origin = match origin {
+            InvalidationOrigin::Endpoint => "endpoint",
+            InvalidationOrigin::Extensions => "extensions",
         };
-        handle_request(storage, request).await;
+        u64_counter!(
+            "apollo.router.operations.entity.invalidation.event",
+            "Entity cache received a batch of invalidation requests",
+            1u64,
+            "origin" = origin
+        );
+        handle_request_batch(&storage, origin, requests)
+            .instrument(tracing::info_span!(
+                "cache.invalidation.batch",
+                "origin" = origin
+            ))
+            .await
     }
 }
 
-pub(super) async fn handle_request(storage: &RedisCacheStorage, request: &InvalidationRequest) {
+async fn handle_request_batch(
+    storage: &RedisCacheStorage,
+    origin: &'static str,
+    requests: Vec<InvalidationRequest>,
+) {
+    for request in requests {
+        let start = Instant::now();
+        handle_request(storage, origin, &request)
+            .instrument(tracing::info_span!("cache.invalidation.request"))
+            .await;
+        f64_histogram!(
+            "apollo.router.cache.invalidation.duration",
+            "Duration of the invalidation event execution.",
+            start.elapsed().as_secs_f64()
+        );
+    }
+}
+
+async fn handle_request(
+    storage: &RedisCacheStorage,
+    origin: &'static str,
+    request: &InvalidationRequest,
+) {
     let key_prefix = request.key_prefix();
+    let subgraph = request.subgraph();
     tracing::debug!(
         "got invalidation request: {request:?}, will scan for: {}",
         key_prefix
@@ -102,6 +145,14 @@ pub(super) async fn handle_request(storage: &RedisCacheStorage, request: &Invali
                         tracing::debug!("deleting keys: {keys:?}");
                         count += keys.len() as u64;
                         storage.delete(keys).await;
+
+                        u64_counter!(
+                            "apollo.router.operations.entity.invalidation.entry",
+                            "Entity cache counter for invalidated entries",
+                            1u64,
+                            "origin" = origin,
+                            "subgraph.name" = subgraph.clone()
+                        );
                     }
                 }
             }
@@ -166,6 +217,15 @@ impl InvalidationRequest {
             InvalidationRequest::Type { subgraph, r#type } => {
                 format!("subgraph:{subgraph}:type:{type}*",)
             }
+            _ => {
+                todo!()
+            }
+        }
+    }
+
+    fn subgraph(&self) -> String {
+        match self {
+            InvalidationRequest::Subgraph { subgraph } => subgraph.clone(),
             _ => {
                 todo!()
             }
