@@ -9,6 +9,7 @@ use std::time::Instant;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use config_new::cache::CacheInstruments;
 use config_new::Selectors;
 use dashmap::DashMap;
 use futures::future::ready;
@@ -725,18 +726,30 @@ impl Plugin for Telemetry {
                     let custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
+                    let custom_cache_instruments: CacheInstruments =
+                        (&config.instrumentation.instruments).into();
+                    custom_cache_instruments.on_request(sub_request);
+
                     (
                         sub_request.context.clone(),
                         custom_instruments,
                         custom_attributes,
                         custom_events,
+                        custom_cache_instruments,
                     )
                 },
-                move |(context, custom_instruments, custom_attributes, custom_events): (
+                move |(
+                    context,
+                    custom_instruments,
+                    custom_attributes,
+                    custom_events,
+                    custom_cache_instruments,
+                ): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
                     SubgraphEvents,
+                    CacheInstruments,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
@@ -763,6 +776,7 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
+                                custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
                                 custom_events.on_response(resp);
                             }
@@ -776,6 +790,7 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_error(err, &context),
                                 );
+                                custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
                             }

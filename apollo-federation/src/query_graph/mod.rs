@@ -108,7 +108,7 @@ impl TryFrom<QueryGraphNodeType> for CompositeTypeDefinitionPosition {
 
     fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
         match value {
-            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
+            QueryGraphNodeType::SchemaType(ty) => Ok(ty.try_into()?),
             QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
                 r#"Type "{value}" was unexpectedly not a composite type"#
             ))),
@@ -121,7 +121,7 @@ impl TryFrom<QueryGraphNodeType> for ObjectTypeDefinitionPosition {
 
     fn try_from(value: QueryGraphNodeType) -> Result<Self, Self::Error> {
         match value {
-            QueryGraphNodeType::SchemaType(ty) => ty.try_into(),
+            QueryGraphNodeType::SchemaType(ty) => Ok(ty.try_into()?),
             QueryGraphNodeType::FederatedRootType(_) => Err(FederationError::internal(format!(
                 r#"Type "{value}" was unexpectedly not an object type"#
             ))),
