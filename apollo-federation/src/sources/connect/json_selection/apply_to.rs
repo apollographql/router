@@ -140,10 +140,6 @@ impl ApplyTo for JSONSelection {
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        if let JSON::Array(array) = data {
-            return self.apply_to_array(array, vars, input_path, errors);
-        }
-
         match self {
             // Because we represent a JSONSelection::Named as a SubSelection, we
             // can fully delegate apply_to_path to SubSelection::apply_to_path.
