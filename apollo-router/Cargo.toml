@@ -191,7 +191,7 @@ regex = "1.10.5"
 reqwest.workspace = true
 
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.27+v2.8.1"
+router-bridge = "=0.5.29"
 
 rust-embed = { version = "8.4.0", features = ["include-exclude"] }
 rustls = "0.21.12"
