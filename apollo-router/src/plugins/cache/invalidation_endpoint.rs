@@ -3,17 +3,20 @@ use std::task::Poll;
 
 use bytes::Buf;
 use futures::future::BoxFuture;
+use http::header::AUTHORIZATION;
 use http::Method;
 use http::StatusCode;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::json;
 use tower::BoxError;
 use tower::Service;
 use tracing_futures::Instrument;
 
 use super::entity::Subgraph;
 use super::invalidation::Invalidation;
+use super::invalidation::InvalidationOrigin;
 use crate::configuration::subgraph::SubgraphConfiguration;
 use crate::plugins::cache::invalidation::InvalidationRequest;
 use crate::services::router;
@@ -55,37 +58,9 @@ impl TryFrom<InvalidationConfig> for InvalidationEndpointConfig {
             listen: ListenAddr::SocketAddr(endpoint.authority().parse()?),
         };
 
-        dbg!(&cfg);
         Ok(cfg)
     }
 }
-
-// #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-// #[serde(rename_all = "camelCase")]
-// pub(crate) struct InvalidationPayload {
-//     /// required, kind of invalidation event. Can be "Subgraph", "Type", "Key" or "Tag"
-//     pub(crate) kind: InvalidationKind,
-//     /// optional, invalidate entries from specific subgraph
-//     pub(crate) subgraph: Option<String>,
-//     #[serde(rename = "type")]
-//     pub(crate) type_field: Option<InvalidationType>,
-//     /// optional, invalidate entries indexed by this key object
-//     pub(crate) key: Option<InvalidationKey>,
-//     /// optional, invalidate entries containing types or field marked with the tag
-//     pub(crate) tag: Option<String>,
-//     /// optional, used to mark an entry as stale if the router is configured with `stale-while-revalidate`
-//     #[serde(rename = "mark-stale", default)]
-//     pub(crate) mark_stale: bool,
-// }
-
-// #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-// #[serde(rename_all = "camelCase")]
-// pub(crate) enum InvalidationKind {
-//     Type,
-//     Subgraph,
-//     Key,
-//     Tag,
-// }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -102,8 +77,6 @@ pub(crate) struct InvalidationKey {
 
 #[derive(Clone)]
 pub(crate) struct InvalidationService {
-    // TODO: will be useful when checking the shared_key
-    #[allow(dead_code)]
     config: Arc<SubgraphConfiguration<Subgraph>>,
     invalidation: Invalidation,
 }
@@ -130,11 +103,20 @@ impl Service<router::Request> for InvalidationService {
     }
 
     fn call(&mut self, req: router::Request) -> Self::Future {
-        let invalidation = self.invalidation.clone();
+        let mut invalidation = self.invalidation.clone();
+        let config = self.config.clone();
         Box::pin(
             async move {
                 let (parts, body) = req.router_request.into_parts();
-                // TODO: check the shared_key
+                if !parts.headers.contains_key(AUTHORIZATION) {
+                    return Ok(router::Response {
+                        response: http::Response::builder()
+                            .status(StatusCode::UNAUTHORIZED)
+                            .body("Missing authorization header".into())
+                            .map_err(BoxError::from)?,
+                        context: req.context,
+                    });
+                }
                 match parts.method {
                     Method::POST => {
                         let body = Into::<RouterBody>::into(body)
@@ -142,33 +124,68 @@ impl Service<router::Request> for InvalidationService {
                             .await
                             .map_err(|e| format!("failed to get the request body: {e}"))
                             .and_then(|bytes| {
-                                serde_json::from_reader::<_, InvalidationRequest>(bytes.reader())
-                                    .map_err(|err| {
-                                        format!(
+                                serde_json::from_reader::<_, Vec<InvalidationRequest>>(
+                                    bytes.reader(),
+                                )
+                                .map_err(|err| {
+                                    format!(
                                         "failed to deserialize the request body into JSON: {err}"
                                     )
-                                    })
+                                })
                             });
+                        let shared_key = parts
+                            .headers
+                            .get(AUTHORIZATION)
+                            .ok_or("cannot find authorization header")?
+                            .to_str()?;
                         match body {
-                            Ok(body) => invalidation.handle_request(&body).await,
-                            Err(err) => {
-                                return Ok(router::Response {
-                                    response: http::Response::builder()
-                                        .status(StatusCode::BAD_REQUEST)
-                                        .body(err.into())
-                                        .map_err(BoxError::from)?,
-                                    context: req.context,
-                                });
+                            Ok(body) => {
+                                let valid_shared_key =
+                                    body.iter().map(|b| b.subgraph_name()).any(|subgraph_name| {
+                                        valid_shared_key(&config, shared_key, subgraph_name)
+                                    });
+                                if !valid_shared_key {
+                                    return Ok(router::Response {
+                                        response: http::Response::builder()
+                                            .status(StatusCode::UNAUTHORIZED)
+                                            .body("Invalid authorization header".into())
+                                            .map_err(BoxError::from)?,
+                                        context: req.context,
+                                    });
+                                }
+                                match invalidation
+                                    .invalidate(InvalidationOrigin::Endpoint, body)
+                                    .await
+                                {
+                                    Ok(count) => Ok(router::Response {
+                                        response: http::Response::builder()
+                                            .status(StatusCode::ACCEPTED)
+                                            .body(
+                                                serde_json::to_string(&json!({
+                                                    "count": count
+                                                }))?
+                                                .into(),
+                                            )
+                                            .map_err(BoxError::from)?,
+                                        context: req.context,
+                                    }),
+                                    Err(err) => Ok(router::Response {
+                                        response: http::Response::builder()
+                                            .status(StatusCode::BAD_REQUEST)
+                                            .body(err.to_string().into())
+                                            .map_err(BoxError::from)?,
+                                        context: req.context,
+                                    }),
+                                }
                             }
+                            Err(err) => Ok(router::Response {
+                                response: http::Response::builder()
+                                    .status(StatusCode::BAD_REQUEST)
+                                    .body(err.into())
+                                    .map_err(BoxError::from)?,
+                                context: req.context,
+                            }),
                         }
-
-                        Ok(router::Response {
-                            response: http::Response::builder()
-                                .status(StatusCode::ACCEPTED)
-                                .body("".into())
-                                .map_err(BoxError::from)?,
-                            context: req.context,
-                        })
                     }
                     _ => Ok(router::Response {
                         response: http::Response::builder()
@@ -182,4 +199,23 @@ impl Service<router::Request> for InvalidationService {
             .instrument(tracing::info_span!("invalidation_endpoint")),
         )
     }
+}
+
+fn valid_shared_key(
+    config: &SubgraphConfiguration<Subgraph>,
+    shared_key: &str,
+    subgraph_name: &str,
+) -> bool {
+    config
+        .all
+        .invalidation
+        .as_ref()
+        .map(|i| i.shared_key == shared_key)
+        .unwrap_or_default()
+        || config
+            .subgraphs
+            .get(subgraph_name)
+            .and_then(|s| s.invalidation.as_ref())
+            .map(|i| i.shared_key == shared_key)
+            .unwrap_or_default()
 }
