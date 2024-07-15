@@ -1,7 +1,8 @@
-### configure introspection caching ([PR #5583](https://github.com/apollographql/router/pull/5583))
+### Add option to deactivate introspection response caching ([PR #5583](https://github.com/apollographql/router/pull/5583))
 
-Adds an option to deactivate introspection response caching.
-Currently, introspection has to go through the query planner, and since that is expensive, the Router caches the introspection responses. This can end up filling the distributed cache, so until we have moved introspection execution entirely out of the planner, we make introspection response caching configurable, as follows:
+The router now supports an option to deactivate introspection response caching. Because the router caches responses as introspection happens in the query planner, cached introspection responses may consume too much of the distributed cache or fill it up. Setting this option prevents introspection responses from filling up the router's distributed cache.
+
+To deactivate introspection caching, set `supergraph.query_planning.legacy_introspection_caching` to `false`:
 
 
 ```yaml
