@@ -25,6 +25,7 @@ use apollo_compiler::Node;
 use indexmap::IndexMap;
 use multimap::MultiMap;
 
+use super::parser::PathList;
 use super::TYPENAMES;
 use crate::sources::connect::json_selection::Alias;
 use crate::sources::connect::json_selection::NamedSelection;
@@ -64,13 +65,15 @@ impl SubSelection {
                 Alias {
                     name: "__typename".to_string(),
                 },
-                PathSelection::Var(
-                    TYPENAMES.to_string(),
-                    Box::new(PathSelection::Key(
-                        Key::Field(selection_set.ty.to_string()),
-                        Box::new(PathSelection::Empty),
-                    )),
-                ),
+                PathSelection {
+                    path: PathList::Var(
+                        TYPENAMES.to_string(),
+                        Box::new(PathList::Key(
+                            Key::Field(selection_set.ty.to_string()),
+                            Box::new(PathList::Empty),
+                        )),
+                    ),
+                },
             ));
         }
 
@@ -184,9 +187,17 @@ impl SubSelection {
 impl PathSelection {
     /// Apply a selection set to create a new [`PathSelection`]
     pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
+        Self {
+            path: self.path.apply_selection_set(selection_set),
+        }
+    }
+}
+
+impl PathList {
+    pub fn apply_selection_set(&self, selection_set: &SelectionSet) -> Self {
         match self {
-            Self::Var(str, path) => Self::Var(
-                str.clone(),
+            Self::Var(name, path) => Self::Var(
+                name.clone(),
                 Box::new(path.apply_selection_set(selection_set)),
             ),
             Self::Key(key, path) => Self::Key(
@@ -201,9 +212,9 @@ impl PathSelection {
 
 #[inline]
 fn key_name(path_selection: &PathSelection) -> Option<&str> {
-    match path_selection {
-        PathSelection::Key(Key::Field(name), _) => Some(name),
-        PathSelection::Key(Key::Quoted(name), _) => Some(name),
+    match &path_selection.path {
+        PathList::Key(Key::Field(name), _) => Some(name),
+        PathList::Key(Key::Quoted(name), _) => Some(name),
         _ => None,
     }
 }
@@ -306,7 +317,7 @@ mod tests {
             r###".result {
   z: a
   y: c
-  x: .e.f
+  x: e.f
   w: "i-j"
   v: {
     u: l
@@ -393,7 +404,7 @@ mod tests {
     __unused__i: i
     rest: *
   }
-  path_to_f: .c.f
+  path_to_f: c.f
   rest: *
 }"###
         );

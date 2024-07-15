@@ -7,6 +7,7 @@
 
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::json_selection::NamedSelection;
+use crate::sources::connect::json_selection::PathList;
 use crate::sources::connect::json_selection::PathSelection;
 use crate::sources::connect::json_selection::StarSelection;
 use crate::sources::connect::json_selection::SubSelection;
@@ -90,6 +91,27 @@ impl PrettyPrintable for SubSelection {
 
 impl PrettyPrintable for PathSelection {
     fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
+        let inner = self.path.pretty_print_with_indentation(inline, indentation);
+        // Because we can't tell where PathList::Key elements appear in the path
+        // once we're inside PathList::pretty_print_with_indentation, we print
+        // all PathList::Key elements with a leading '.' character, but we
+        // remove the initial '.' if the path has more than one element, because
+        // then the leading '.' is not necessary to disambiguate the key from a
+        // field. To complicate matters further, inner may begin with spaces due
+        // to indentation.
+        let leading_space_count = inner.chars().take_while(|c| *c == ' ').count();
+        let suffix = inner[leading_space_count..].to_string();
+        if suffix.starts_with('.') && !self.path.is_single_key() {
+            // Strip the '.' but keep any leading spaces.
+            format!("{}{}", " ".repeat(leading_space_count), &suffix[1..])
+        } else {
+            inner
+        }
+    }
+}
+
+impl PrettyPrintable for PathList {
+    fn pretty_print_with_indentation(&self, inline: bool, indentation: usize) -> String {
         let mut result = String::new();
 
         if !inline {
@@ -97,22 +119,22 @@ impl PrettyPrintable for PathSelection {
         }
 
         match self {
-            PathSelection::Var(var, path) => {
-                let rest = path.pretty_print_with_indentation(true, indentation);
+            Self::Var(var, tail) => {
+                let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(var.as_str());
                 result.push_str(rest.as_str());
             }
-            PathSelection::Key(key, path) => {
-                let rest = path.pretty_print_with_indentation(true, indentation);
+            Self::Key(key, tail) => {
+                let rest = tail.pretty_print_with_indentation(true, indentation);
                 result.push_str(key.dotted().as_str());
                 result.push_str(rest.as_str());
             }
-            PathSelection::Selection(sub) => {
+            Self::Selection(sub) => {
                 let sub = sub.pretty_print_with_indentation(true, indentation);
                 result.push(' ');
                 result.push_str(sub.as_str());
             }
-            PathSelection::Empty => {}
+            Self::Empty => {}
         }
 
         result
@@ -264,7 +286,7 @@ mod tests {
             "cool: beans",
             "cool: beans {\n  whoa\n}",
             // Path
-            "cool: .one.two.three",
+            "cool: one.two.three",
             // Quoted
             r#"cool: "b e a n s""#,
             "cool: \"b e a n s\" {\n  a\n  b\n}",
@@ -291,8 +313,9 @@ mod tests {
             "$id.first {\n  username\n}",
             // Key
             ".first",
-            ".a.b.c.d.e",
-            ".one.two.three {\n  a\n  b\n}",
+            "a.b.c.d.e",
+            "one.two.three {\n  a\n  b\n}",
+            ".single {\n  x\n}",
         ];
         for path in paths {
             let (unmatched, path_selection) = PathSelection::parse(path).unwrap();

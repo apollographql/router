@@ -254,10 +254,18 @@ impl ApplyTo for PathSelection {
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
-        if let JSON::Array(array) = data {
-            return self.apply_to_array(array, vars, input_path, errors);
-        }
+        self.path.apply_to_path(data, vars, input_path, errors)
+    }
+}
 
+impl ApplyTo for PathList {
+    fn apply_to_path(
+        &self,
+        data: &JSON,
+        vars: &IndexMap<String, JSON>,
+        input_path: &mut Vec<JSON>,
+        errors: &mut IndexSet<ApplyToError>,
+    ) -> Option<JSON> {
         match self {
             Self::Var(var_name, tail) => {
                 if var_name == "$" {
@@ -265,7 +273,7 @@ impl ApplyTo for PathSelection {
                     // input_path instead of creating a new var_path here.
                     tail.apply_to_path(data, vars, input_path, errors)
                 } else if var_name == TYPENAMES {
-                    if let PathSelection::Key(Key::Field(ref name), _) = **tail {
+                    if let PathList::Key(Key::Field(ref name), _) = **tail {
                         let var_data = json!({ name: name });
                         let mut var_path = vec![json!(name)];
                         tail.apply_to_path(&var_data, vars, &mut var_path, errors)
@@ -288,6 +296,10 @@ impl ApplyTo for PathSelection {
                 }
             }
             Self::Key(key, tail) => {
+                if let JSON::Array(array) = data {
+                    return self.apply_to_array(array, vars, input_path, errors);
+                }
+
                 input_path.push(key.to_json());
 
                 if !matches!(data, JSON::Object(_)) {
@@ -381,7 +393,7 @@ impl ApplyTo for SubSelection {
                         input_names.insert(name.as_str());
                     }
                     NamedSelection::Path(_, path_selection) => {
-                        if let PathSelection::Key(key, _) = path_selection {
+                        if let PathList::Key(key, _) = &path_selection.path {
                             match key {
                                 Key::Field(name) | Key::Quoted(name) => {
                                     input_names.insert(name.as_str());

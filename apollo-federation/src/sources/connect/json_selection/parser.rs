@@ -198,17 +198,57 @@ impl NamedSelection {
 // PathStep      ::= "." Key | "->" Identifier MethodArgs?
 
 #[derive(Debug, PartialEq, Clone, Serialize)]
-pub enum PathSelection {
+pub struct PathSelection {
+    pub(super) path: PathList,
+}
+
+impl PathSelection {
+    pub fn parse(input: &str) -> IResult<&str, Self> {
+        let (input, path) = PathList::parse(input)?;
+        Ok((input, Self { path }))
+    }
+
+    pub fn is_single_key(&self) -> bool {
+        self.path.is_single_key()
+    }
+
+    pub fn from_slice(keys: &[Key], selection: Option<SubSelection>) -> Self {
+        Self {
+            path: PathList::from_slice(keys, selection),
+        }
+    }
+
+    pub fn collect_paths(&self) -> Vec<Key> {
+        self.path.collect_paths()
+    }
+
+    pub fn next_subselection(&self) -> Option<&SubSelection> {
+        self.path.next_subselection()
+    }
+
+    pub fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
+        self.path.next_mut_subselection()
+    }
+}
+
+impl From<PathList> for PathSelection {
+    fn from(path: PathList) -> Self {
+        Self { path }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Serialize)]
+pub(super) enum PathList {
     // We use a recursive structure here instead of a Vec<Key> to make applying
     // the selection to a JSON value easier.
-    Var(String, Box<PathSelection>),
-    Key(Key, Box<PathSelection>),
+    Var(String, Box<PathList>),
+    Key(Key, Box<PathList>),
     Selection(SubSelection),
     Empty,
 }
 
-impl PathSelection {
-    pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
+impl PathList {
+    fn parse(input: &str) -> IResult<&str, Self> {
         match Self::parse_with_depth(input, 0) {
             Ok((remainder, Self::Empty)) => Err(nom::Err::Error(nom::error::Error::new(
                 remainder,
@@ -280,6 +320,13 @@ impl PathSelection {
         Ok((input, Self::Empty))
     }
 
+    pub(crate) fn is_single_key(&self) -> bool {
+        match self {
+            Self::Key(_, rest) => matches!(rest.as_ref(), Self::Selection(_) | Self::Empty),
+            _ => false,
+        }
+    }
+
     pub(crate) fn from_slice(properties: &[Key], selection: Option<SubSelection>) -> Self {
         match properties {
             [] => selection.map_or(Self::Empty, Self::Selection),
@@ -310,20 +357,20 @@ impl PathSelection {
     /// Find the next subselection, traversing nested chains if needed
     pub(crate) fn next_subselection(&self) -> Option<&SubSelection> {
         match self {
-            PathSelection::Var(_, path) => path.next_subselection(),
-            PathSelection::Key(_, path) => path.next_subselection(),
-            PathSelection::Selection(sub) => Some(sub),
-            PathSelection::Empty => None,
+            Self::Var(_, tail) => tail.next_subselection(),
+            Self::Key(_, tail) => tail.next_subselection(),
+            Self::Selection(sub) => Some(sub),
+            Self::Empty => None,
         }
     }
 
     /// Find the next subselection, traversing nested chains if needed. Returns a mutable reference
     pub(crate) fn next_mut_subselection(&mut self) -> Option<&mut SubSelection> {
         match self {
-            PathSelection::Var(_, path) => path.next_mut_subselection(),
-            PathSelection::Key(_, path) => path.next_mut_subselection(),
-            PathSelection::Selection(sub) => Some(sub),
-            PathSelection::Empty => None,
+            Self::Var(_, tail) => tail.next_mut_subselection(),
+            Self::Key(_, tail) => tail.next_mut_subselection(),
+            Self::Selection(sub) => Some(sub),
+            Self::Empty => None,
         }
     }
 }
@@ -1187,95 +1234,101 @@ mod tests {
     fn test_path_selection_vars() {
         check_path_selection(
             "$var",
-            PathSelection::Var("$var".to_string(), Box::new(PathSelection::Empty)),
+            PathList::Var("$var".to_string(), Box::new(PathList::Empty)).into(),
         );
 
         check_path_selection(
             "$",
-            PathSelection::Var("$".to_string(), Box::new(PathSelection::Empty)),
+            PathList::Var("$".to_string(), Box::new(PathList::Empty)).into(),
         );
 
         check_path_selection(
             "$var { hello }",
-            PathSelection::Var(
+            PathList::Var(
                 "$var".to_string(),
-                Box::new(PathSelection::Selection(SubSelection {
+                Box::new(PathList::Selection(SubSelection {
                     selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
                     star: None,
                 })),
-            ),
+            )
+            .into(),
         );
 
         check_path_selection(
             "$ { hello }",
-            PathSelection::Var(
+            PathList::Var(
                 "$".to_string(),
-                Box::new(PathSelection::Selection(SubSelection {
+                Box::new(PathList::Selection(SubSelection {
                     selections: vec![NamedSelection::Field(None, "hello".to_string(), None)],
                     star: None,
                 })),
-            ),
+            )
+            .into(),
         );
 
         check_path_selection(
             "$var { before alias: $args.arg after }",
-            PathSelection::Var(
+            PathList::Var(
                 "$var".to_string(),
-                Box::new(PathSelection::Selection(SubSelection {
+                Box::new(PathList::Selection(SubSelection {
                     selections: vec![
                         NamedSelection::Field(None, "before".to_string(), None),
                         NamedSelection::Path(
                             Alias {
                                 name: "alias".to_string(),
                             },
-                            PathSelection::Var(
+                            PathList::Var(
                                 "$args".to_string(),
-                                Box::new(PathSelection::Key(
+                                Box::new(PathList::Key(
                                     Key::Field("arg".to_string()),
-                                    Box::new(PathSelection::Empty),
+                                    Box::new(PathList::Empty),
                                 )),
-                            ),
+                            )
+                            .into(),
                         ),
                         NamedSelection::Field(None, "after".to_string(), None),
                     ],
                     star: None,
                 })),
-            ),
+            )
+            .into(),
         );
 
         check_path_selection(
             "$.nested { key injected: $args.arg }",
-            PathSelection::Var(
+            PathList::Var(
                 "$".to_string(),
-                Box::new(PathSelection::Key(
+                Box::new(PathList::Key(
                     Key::Field("nested".to_string()),
-                    Box::new(PathSelection::Selection(SubSelection {
+                    Box::new(PathList::Selection(SubSelection {
                         selections: vec![
                             NamedSelection::Field(None, "key".to_string(), None),
                             NamedSelection::Path(
                                 Alias {
                                     name: "injected".to_string(),
                                 },
-                                PathSelection::Var(
+                                PathList::Var(
                                     "$args".to_string(),
-                                    Box::new(PathSelection::Key(
+                                    Box::new(PathList::Key(
                                         Key::Field("arg".to_string()),
-                                        Box::new(PathSelection::Empty),
+                                        Box::new(PathList::Empty),
                                     )),
-                                ),
+                                )
+                                .into(),
                             ),
                         ],
                         star: None,
                     })),
                 )),
-            ),
+            )
+            .into(),
         );
 
         check_path_selection(
             "$root.a.b.c",
-            PathSelection::Var(
+            PathList::Var(
                 "$root".to_string(),
-                Box::new(PathSelection::from_slice(
+                Box::new(PathList::from_slice(
                     &[
                         Key::Field("a".to_string()),
                         Key::Field("b".to_string()),
@@ -1283,7 +1336,8 @@ mod tests {
                     ],
                     None,
                 )),
-            ),
+            )
+            .into(),
         );
 
         check_path_selection(
@@ -1314,30 +1368,32 @@ mod tests {
 
         check_path_selection(
             "$.data",
-            PathSelection::Var(
+            PathList::Var(
                 "$".to_string(),
-                Box::new(PathSelection::Key(
+                Box::new(PathList::Key(
                     Key::Field("data".to_string()),
-                    Box::new(PathSelection::Empty),
+                    Box::new(PathList::Empty),
                 )),
-            ),
+            )
+            .into(),
         );
 
         check_path_selection(
             "$.data.'quoted property'.nested",
-            PathSelection::Var(
+            PathList::Var(
                 "$".to_string(),
-                Box::new(PathSelection::Key(
+                Box::new(PathList::Key(
                     Key::Field("data".to_string()),
-                    Box::new(PathSelection::Key(
+                    Box::new(PathList::Key(
                         Key::Quoted("quoted property".to_string()),
-                        Box::new(PathSelection::Key(
+                        Box::new(PathList::Key(
                             Key::Field("nested".to_string()),
-                            Box::new(PathSelection::Empty),
+                            Box::new(PathList::Empty),
                         )),
                     )),
                 )),
-            ),
+            )
+            .into(),
         );
 
         assert_eq!(
@@ -1366,18 +1422,14 @@ mod tests {
 
         assert_eq!(
             selection!("$"),
-            JSONSelection::Path(PathSelection::Var(
-                "$".to_string(),
-                Box::new(PathSelection::Empty),
-            )),
+            JSONSelection::Path(PathList::Var("$".to_string(), Box::new(PathList::Empty)).into()),
         );
 
         assert_eq!(
             selection!("$this"),
-            JSONSelection::Path(PathSelection::Var(
-                "$this".to_string(),
-                Box::new(PathSelection::Empty),
-            )),
+            JSONSelection::Path(
+                PathList::Var("$this".to_string(), Box::new(PathList::Empty)).into()
+            ),
         );
     }
 

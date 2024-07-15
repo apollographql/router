@@ -21,6 +21,7 @@ use super::parser::NamedSelection;
 use super::parser::PathSelection;
 use super::parser::StarSelection;
 use super::parser::SubSelection;
+use super::PathList;
 
 #[derive(Default)]
 struct GraphQLSelections(Vec<Result<GraphQLSelection, String>>);
@@ -92,19 +93,18 @@ impl From<NamedSelection> for Vec<GraphQLSelection> {
 
 impl From<PathSelection> for Vec<GraphQLSelection> {
     fn from(val: PathSelection) -> Vec<GraphQLSelection> {
+        val.path.into()
+    }
+}
+
+impl From<PathList> for Vec<GraphQLSelection> {
+    fn from(val: PathList) -> Vec<GraphQLSelection> {
         match val {
-            PathSelection::Var(_, _) => {
-                // Variable references do not correspond to GraphQL fields.
-                vec![]
-            }
-            PathSelection::Key(_, tail) => {
-                let tail = *tail;
-                tail.into()
-            }
-            PathSelection::Selection(selection) => {
-                GraphQLSelections::from(selection).valid_selections()
-            }
-            PathSelection::Empty => vec![],
+            // Variable references do not correspond to GraphQL fields.
+            PathList::Var(_, _) => vec![],
+            PathList::Key(_, tail) => (*tail).into(),
+            PathList::Selection(selection) => GraphQLSelections::from(selection).valid_selections(),
+            PathList::Empty => vec![],
         }
     }
 }
