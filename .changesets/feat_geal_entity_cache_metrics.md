@@ -11,7 +11,7 @@ telemetry:
     instruments:
       default_requirement_level: none
       cache:
-        http.client.request.cache:
+        apollo.router.operations.entity.cache:
           attributes:
             entity.type: true
             subgraph.name:
