@@ -40,18 +40,7 @@ impl JSONSelection {
 
     pub fn parse(input: &str) -> IResult<&str, Self> {
         alt((
-            all_consuming(map(
-                tuple((
-                    many0(NamedSelection::parse),
-                    // When a * selection is used, it must be the last selection
-                    // in the sequence, since it is not a NamedSelection.
-                    opt(StarSelection::parse),
-                    // In case there were no named selections and no * selection, we
-                    // still want to consume any space before the end of the input.
-                    spaces_or_comments,
-                )),
-                |(selections, star, _)| Self::Named(SubSelection { selections, star }),
-            )),
+            all_consuming(map(SubSelection::parse_naked, Self::Named)),
             all_consuming(map(PathSelection::parse, Self::Path)),
         ))(input)
     }
@@ -385,9 +374,16 @@ pub struct SubSelection {
 
 impl SubSelection {
     pub(crate) fn parse(input: &str) -> IResult<&str, Self> {
+        delimited(
+            tuple((spaces_or_comments, char('{'))),
+            Self::parse_naked,
+            tuple((char('}'), spaces_or_comments)),
+        )(input)
+    }
+
+    fn parse_naked(input: &str) -> IResult<&str, Self> {
         tuple((
             spaces_or_comments,
-            char('{'),
             many0(NamedSelection::parse),
             // Note that when a * selection is used, it must be the last
             // selection in the SubSelection, since it does not count as a
@@ -395,10 +391,8 @@ impl SubSelection {
             // selections vector.
             opt(StarSelection::parse),
             spaces_or_comments,
-            char('}'),
-            spaces_or_comments,
         ))(input)
-        .map(|(input, (_, _, selections, star, _, _, _))| (input, Self { selections, star }))
+        .map(|(input, (_, selections, star, _))| (input, Self { selections, star }))
     }
 
     pub fn selections_iter(&self) -> impl Iterator<Item = &NamedSelection> {
