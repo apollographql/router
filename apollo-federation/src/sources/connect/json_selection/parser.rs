@@ -255,7 +255,7 @@ impl PathList {
         if depth == 0 {
             if let Ok((suffix, opt_var)) = delimited(
                 tuple((spaces_or_comments, char('$'))),
-                opt(parse_identifier),
+                opt(parse_identifier_no_space),
                 spaces_or_comments,
             )(input)
             {
@@ -569,14 +569,19 @@ impl Display for Key {
 fn parse_identifier(input: &str) -> IResult<&str, String> {
     delimited(
         spaces_or_comments,
-        recognize(pair(
-            one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
-            many0(one_of(
-                "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
-            )),
-        )),
+        parse_identifier_no_space,
         spaces_or_comments,
     )(input)
+    .map(|(input, name)| (input, name.to_string()))
+}
+
+fn parse_identifier_no_space(input: &str) -> IResult<&str, String> {
+    recognize(pair(
+        one_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_"),
+        many0(one_of(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ_0123456789",
+        )),
+    ))(input)
     .map(|(input, name)| (input, name.to_string()))
 }
 
@@ -638,7 +643,7 @@ mod tests {
 
     #[test]
     fn test_identifier() {
-        assert_eq!(parse_identifier("hello"), Ok(("", "hello".to_string())),);
+        assert_eq!(parse_identifier("hello"), Ok(("", "hello".to_string())));
 
         assert_eq!(
             parse_identifier("hello_world"),
@@ -650,7 +655,25 @@ mod tests {
             Ok(("", "hello_world_123".to_string())),
         );
 
-        assert_eq!(parse_identifier(" hello "), Ok(("", "hello".to_string())),);
+        assert_eq!(parse_identifier(" hello "), Ok(("", "hello".to_string())));
+
+        assert_eq!(
+            parse_identifier_no_space("oyez"),
+            Ok(("", "oyez".to_string())),
+        );
+
+        assert_eq!(
+            parse_identifier_no_space("oyez   "),
+            Ok(("   ", "oyez".to_string())),
+        );
+
+        assert_eq!(
+            parse_identifier_no_space("  oyez   "),
+            Err(nom::Err::Error(nom::error::Error::new(
+                "  oyez   ",
+                nom::error::ErrorKind::OneOf
+            ))),
+        );
     }
 
     #[test]
@@ -1420,6 +1443,53 @@ mod tests {
             JSONSelection::Path(
                 PathList::Var("$this".to_string(), Box::new(PathList::Empty)).into()
             ),
+        );
+
+        assert_eq!(
+            selection!("value: $ a { b c }"),
+            JSONSelection::Named(SubSelection {
+                selections: vec![
+                    NamedSelection::Path(
+                        Alias::new("value"),
+                        PathSelection {
+                            path: PathList::Var("$".to_string(), Box::new(PathList::Empty)),
+                        },
+                    ),
+                    NamedSelection::Field(
+                        None,
+                        "a".to_string(),
+                        Some(SubSelection {
+                            selections: vec![
+                                NamedSelection::Field(None, "b".to_string(), None),
+                                NamedSelection::Field(None, "c".to_string(), None),
+                            ],
+                            star: None,
+                        }),
+                    ),
+                ],
+                star: None,
+            }),
+        );
+        assert_eq!(
+            selection!("value: $a { b c }"),
+            JSONSelection::Named(SubSelection {
+                selections: vec![NamedSelection::Path(
+                    Alias::new("value"),
+                    PathSelection {
+                        path: PathList::Var(
+                            "$a".to_string(),
+                            Box::new(PathList::Selection(SubSelection {
+                                selections: vec![
+                                    NamedSelection::Field(None, "b".to_string(), None),
+                                    NamedSelection::Field(None, "c".to_string(), None),
+                                ],
+                                star: None,
+                            })),
+                        ),
+                    },
+                ),],
+                star: None,
+            }),
         );
     }
 
