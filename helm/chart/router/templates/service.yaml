@@ -22,6 +22,12 @@ spec:
       targetPort: health
       protocol: TCP
       name: health
+    {{- if and (.Values.router.configuration.preview_entity_cache).enabled  (((.Values.router.configuration.preview_entity_cache).subgraph).all).enabled ((((.Values.router.configuration.preview_entity_cache).subgraph).all).invalidation).enabled}}
+    - port: {{ (splitList ":" .Values.router.configuration.preview_entity_cache.subgraph.all.invalidation.listen | last) }}
+      targetPort: 12345
+      protocol: TCP
+      name: invalidation
+    {{- end }}
     {{- if .Values.serviceMonitor.enabled }}
     {{/* NOTE: metrics configuration moved under telemetry.exporters in Router 1.35.0 */}}
     {{- if .Values.router.configuration.telemetry.exporters.metrics.prometheus.listen }}
