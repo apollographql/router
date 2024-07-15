@@ -561,6 +561,7 @@ mod tests {
                     .body(graphql::Response::builder().data(data.clone()).build())
                     .unwrap(),
                 context: Context::new(),
+                subgraph_name: None,
             };
 
             tx.send(Ok(response)).unwrap();
