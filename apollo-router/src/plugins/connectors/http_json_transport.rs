@@ -23,6 +23,7 @@ use http::header::UPGRADE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use percent_encoding::percent_decode_str;
 use serde_json_bytes::json;
@@ -67,7 +68,7 @@ lazy_static! {
 
 pub(crate) fn make_request(
     transport: &HttpJsonTransport,
-    inputs: Map<ByteString, Value>,
+    inputs: IndexMap<String, Value>,
     original_request: &connect::Request,
     debug: &mut Option<ConnectorContext>,
 ) -> Result<http::Request<RouterBody>, HttpJsonTransportError> {
@@ -75,10 +76,6 @@ pub(crate) fn make_request(
         make_uri(transport, &inputs).map_err(HttpJsonTransportError::ConnectorDirectiveError)?;
 
     let (json_body, body, apply_to_errors) = if let Some(ref selection) = transport.body {
-        let inputs = inputs
-            .into_iter()
-            .map(|(k, v)| (k.as_str().to_string(), v))
-            .collect();
         let (json_body, apply_to_errors) = selection.apply_with_vars(&json!({}), &inputs);
         let body = if let Some(json_body) = json_body.as_ref() {
             hyper::Body::from(serde_json::to_vec(json_body)?)
@@ -109,6 +106,7 @@ pub(crate) fn make_request(
             json_body.as_ref(),
             transport.body.as_ref().map(|body| SelectionData {
                 source: body.to_string(),
+                transformed: body.to_string(),
                 result: json_body.clone(),
                 errors: apply_to_errors,
             }),
@@ -120,7 +118,7 @@ pub(crate) fn make_request(
 
 fn make_uri(
     transport: &HttpJsonTransport,
-    inputs: &Map<ByteString, Value>,
+    inputs: &IndexMap<String, Value>,
 ) -> Result<Url, ConnectorDirectiveError> {
     let flat_inputs = flatten_keys(inputs);
     let path = transport
@@ -195,7 +193,7 @@ fn append_path(base_uri: Url, path: &str) -> Result<Url, ConnectorDirectiveError
 }
 
 // URLPathTemplate expects a map with flat dot-delimited keys.
-fn flatten_keys(inputs: &Map<ByteString, Value>) -> Map<ByteString, Value> {
+fn flatten_keys(inputs: &IndexMap<String, Value>) -> Map<ByteString, Value> {
     let mut flat = serde_json_bytes::Map::new();
     for (key, value) in inputs {
         flatten_keys_recursive(value, &mut flat, key.clone());
@@ -203,7 +201,7 @@ fn flatten_keys(inputs: &Map<ByteString, Value>) -> Map<ByteString, Value> {
     flat
 }
 
-fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, prefix: ByteString) {
+fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, prefix: String) {
     match inputs {
         Value::Object(map) => {
             for (key, value) in map {
@@ -211,8 +209,7 @@ fn flatten_keys_recursive(inputs: &Value, flat: &mut Map<ByteString, Value>, pre
                     "{prefix}.{key}",
                     prefix = prefix.as_str(),
                     key = key.as_str()
-                )
-                .into();
+                );
                 flatten_keys_recursive(value, flat, new_prefix);
             }
         }
@@ -317,6 +314,8 @@ mod tests {
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
+    use indexmap::IndexMap;
+    use serde_json_bytes::json;
 
     use crate::plugins::connectors::http_json_transport::add_headers;
 
@@ -448,19 +447,21 @@ mod tests {
 
     #[test]
     fn test_flatten_keys() {
-        let inputs = serde_json_bytes::json!({
-            "a": 1,
-            "b": {
-                "c": 2,
-                "d": {
-                    "e": 3
-                }
-            }
-        });
-        let flat = super::flatten_keys(inputs.as_object().unwrap());
+        let mut inputs = IndexMap::new();
+        inputs.insert("a".to_string(), json!(1));
+        inputs.insert(
+            "b".to_string(),
+            json!({
+                    "c": 2,
+                    "d": {
+                        "e": 3
+                    }
+            }),
+        );
+        let flat = super::flatten_keys(&inputs);
         assert_eq!(
             flat,
-            serde_json_bytes::json!({
+            json!({
                 "a": 1,
                 "b.c": 2,
                 "b.d.e": 3

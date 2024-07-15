@@ -184,6 +184,7 @@ impl ConnectorContext {
 
 pub(crate) struct SelectionData {
     pub(crate) source: String,
+    pub(crate) transformed: String,
     pub(crate) result: Option<serde_json_bytes::Value>,
     pub(crate) errors: Vec<ApplyToError>,
 }
@@ -206,6 +207,7 @@ struct ConnectorDebugHttpRequest {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ConnectorDebugSelection {
     source: String,
+    transformed: String,
     result: Option<serde_json_bytes::Value>,
     errors: Vec<serde_json_bytes::Value>,
 }
@@ -233,6 +235,7 @@ fn serialize_request(
             content: body.clone(),
             selection: selection_data.map(|selection| ConnectorDebugSelection {
                 source: selection.source,
+                transformed: selection.transformed,
                 result: selection.result,
                 errors: aggregate_apply_to_errors(&selection.errors),
             }),
@@ -269,6 +272,7 @@ fn serialize_response(
             content: json_body.clone(),
             selection: selection_data.map(|selection| ConnectorDebugSelection {
                 source: selection.source,
+                transformed: selection.transformed,
                 result: selection.result,
                 errors: aggregate_apply_to_errors(&selection.errors),
             }),
