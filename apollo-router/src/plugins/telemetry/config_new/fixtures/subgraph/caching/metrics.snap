@@ -8,7 +8,7 @@ info:
       instruments:
         default_requirement_level: none
         cache:
-          apollo.router.operations.entity.cache:
+          http.client.request.cache:
             attributes:
               entity.type: true
               subgraph.name:
@@ -55,7 +55,7 @@ info:
               supergraph.operation.name:
                 supergraph_operation_name: string
 ---
-- name: apollo.router.operations.entity.cache
+- name: http.client.request.cache
   description: Entity cache hit/miss operations at the subgraph level
   unit: ops
   data:
