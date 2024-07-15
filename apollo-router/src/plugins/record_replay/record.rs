@@ -63,14 +63,16 @@ impl Plugin for Record {
             .storage_path
             .unwrap_or_else(default_storage_path);
 
+        let schema_config = Default::default();
+        let schema = Schema::parse(init.supergraph_sdl.clone().as_str(), &schema_config)?;
+        let api_schema = Schema::parse_compiler_schema(&schema.create_api_schema(&schema_config)?)?;
+        let schema = schema.with_api_schema(api_schema);
+
         let plugin = Self {
             enabled: init.config.enabled,
             supergraph_sdl: init.supergraph_sdl.clone(),
             storage_path: storage_path.clone().into(),
-            schema: Arc::new(Schema::parse(
-                init.supergraph_sdl.clone().as_str(),
-                &Default::default(),
-            )?),
+            schema: Arc::new(schema),
         };
 
         if init.config.enabled {
