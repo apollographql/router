@@ -5,8 +5,8 @@ In Rhai 1.18.0, there were changes to how exceptions within functions were creat
 We've modified how we handle errors raised by Rhai to comply with this change, which means error message output is affected. The change means that errors in functions will no longer document which function the error occurred in, for example:
 
 ```diff
--         assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)\nin call to function 'process_subgraph_response_string''".to_string()));
-+         assert_eq!(processed_error.message, Some("rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)'".to_string()));
+-         "rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)\nin call to function 'process_subgraph_response_string''"
++         "rhai execution error: 'Runtime error: I have raised an error (line 223, position 5)'"
 ```
 
 Making this change allows us to keep up with the latest version (1.19.0) of Rhai.
