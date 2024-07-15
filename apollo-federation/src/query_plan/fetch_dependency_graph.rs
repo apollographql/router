@@ -1917,6 +1917,7 @@ pub(crate) fn compute_nodes_for_tree(
     initial_conditions: &OpGraphPathContext,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
     trace!(
+        snapshot = "OpPathTree",
         data = serde_json_bytes::json!(initial_tree.to_string()).to_string(),
         "path_tree"
     );
@@ -2007,6 +2008,7 @@ pub(crate) fn compute_nodes_for_tree(
         }
     }
     trace!(
+        snapshot = "DependencyGraph",
         data = json!(dependency_graph.to_json()).to_string(),
         "updated_dependency_graph"
     );
