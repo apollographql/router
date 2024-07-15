@@ -13,6 +13,8 @@ use serde_json_bytes::Value as JSON;
 use super::helpers::json_type_name;
 use super::parser::*;
 
+pub(super) type VarsWithPathsMap<'a> = IndexMap<String, (&'a JSON, Vec<JSON>)>;
+
 pub trait ApplyTo {
     // Applying a selection to a JSON value produces a new JSON value, along
     // with any/all errors encountered in the process. The value is represented
@@ -28,10 +30,17 @@ pub trait ApplyTo {
         data: &JSON,
         vars: &IndexMap<String, JSON>,
     ) -> (Option<JSON>, Vec<ApplyToError>) {
-        let mut input_path = vec![];
+        let mut vars_with_paths: VarsWithPathsMap = IndexMap::default();
+        for (var_name, var_data) in vars {
+            vars_with_paths.insert(var_name.to_string(), (var_data, vec![json!(var_name)]));
+        }
+        // The $ variable initially refers to the root data value, but is
+        // rebound by nested selection sets to refer to the root value the
+        // selection set was applied to.
+        vars_with_paths.insert("$".to_string(), (data, vec![]));
         // Using IndexSet over HashSet to preserve the order of the errors.
         let mut errors = IndexSet::default();
-        let value = self.apply_to_path(data, vars, &mut input_path, &mut errors);
+        let value = self.apply_to_path(data, &vars_with_paths, &mut vec![], &mut errors);
         (value, errors.into_iter().collect())
     }
 
@@ -40,7 +49,7 @@ pub trait ApplyTo {
     fn apply_to_path(
         &self,
         data: &JSON,
-        vars: &IndexMap<String, JSON>,
+        vars: &VarsWithPathsMap,
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON>;
@@ -50,7 +59,7 @@ pub trait ApplyTo {
     fn apply_to_array(
         &self,
         data_array: &[JSON],
-        vars: &IndexMap<String, JSON>,
+        vars: &VarsWithPathsMap,
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
@@ -136,7 +145,7 @@ impl ApplyTo for JSONSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        vars: &IndexMap<String, JSON>,
+        vars: &VarsWithPathsMap,
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
@@ -161,7 +170,7 @@ impl ApplyTo for NamedSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        vars: &IndexMap<String, JSON>,
+        vars: &VarsWithPathsMap,
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
@@ -246,7 +255,7 @@ impl ApplyTo for PathSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        vars: &IndexMap<String, JSON>,
+        vars: &VarsWithPathsMap,
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
@@ -258,16 +267,18 @@ impl ApplyTo for PathList {
     fn apply_to_path(
         &self,
         data: &JSON,
-        vars: &IndexMap<String, JSON>,
+        vars: &VarsWithPathsMap,
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         match self {
             Self::Var(var_name, tail) => {
-                if var_name == "$" {
-                    // Because $ refers to the current value, we keep using
-                    // input_path instead of creating a new var_path here.
-                    tail.apply_to_path(data, vars, input_path, errors)
+                if let Some((var_data, var_path)) = vars.get(var_name) {
+                    // Variables are associated with a path, which is always
+                    // just the variable name for named $variables other than $.
+                    // For the special variable $, the path represents the
+                    // sequence of keys from the root input data to the $ data.
+                    tail.apply_to_path(*var_data, vars, &mut var_path.clone(), errors)
                 } else if var_name == TYPENAMES {
                     if let PathList::Key(Key::Field(ref name), _) = **tail {
                         let var_data = json!({ name: name });
@@ -280,9 +291,6 @@ impl ApplyTo for PathList {
                         ));
                         None
                     }
-                } else if let Some(var_data) = vars.get(var_name) {
-                    let mut var_path = vec![json!(var_name)];
-                    tail.apply_to_path(var_data, vars, &mut var_path, errors)
                 } else {
                     errors.insert(ApplyToError::new(
                         format!("Variable {} not found", var_name).as_str(),
@@ -352,13 +360,19 @@ impl ApplyTo for SubSelection {
     fn apply_to_path(
         &self,
         data: &JSON,
-        vars: &IndexMap<String, JSON>,
+        vars: &VarsWithPathsMap,
         input_path: &mut Vec<JSON>,
         errors: &mut IndexSet<ApplyToError>,
     ) -> Option<JSON> {
         if let JSON::Array(array) = data {
             return self.apply_to_array(array, vars, input_path, errors);
         }
+
+        let vars: VarsWithPathsMap = {
+            let mut vars = vars.clone();
+            vars.insert("$".to_string(), (data, input_path.clone()));
+            vars
+        };
 
         let (data_map, data_really_primitive) = match data {
             JSON::Object(data_map) => (data_map.clone(), false),
@@ -369,7 +383,7 @@ impl ApplyTo for SubSelection {
         let mut input_names = IndexSet::default();
 
         for named_selection in &self.selections {
-            let value = named_selection.apply_to_path(data, vars, input_path, errors);
+            let value = named_selection.apply_to_path(data, &vars, input_path, errors);
 
             // If value is an object, extend output with its keys and their values.
             if let Some(JSON::Object(key_and_value)) = value {
@@ -420,7 +434,7 @@ impl ApplyTo for SubSelection {
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         if let Some(selected) =
-                            selection.apply_to_path(value, vars, input_path, errors)
+                            selection.apply_to_path(value, &vars, input_path, errors)
                         {
                             star_output.insert(key.clone(), selected);
                         }
@@ -433,7 +447,7 @@ impl ApplyTo for SubSelection {
                 for (key, value) in &data_map {
                     if !input_names.contains(key.as_str()) {
                         if let Some(selected) =
-                            selection.apply_to_path(value, vars, input_path, errors)
+                            selection.apply_to_path(value, &vars, input_path, errors)
                         {
                             output.insert(key.clone(), selected);
                         }
