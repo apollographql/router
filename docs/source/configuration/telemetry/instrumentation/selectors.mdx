@@ -76,6 +76,7 @@ The subgraph service executes multiple times during query execution, with each e
 | `subgraph_operation_name`   | Yes         | `string`\|`hash` | The operation name from the subgraph query                                     |
 | `subgraph_operation_kind`   | No          | `string`         | The operation kind from the subgraph query                                     |
 | `subgraph_query`            | Yes         | `string`         | The graphql query to the subgraph                                              |
+| `subgraph_name`             | No          | `true`\|`false`  | The subgraph name                                                              |
 | `subgraph_query_variable`   | Yes         |                  | The name of a subgraph query variable                                          |
 | `subgraph_response_data`    | Yes         |                  | Json Path into the subgraph response body data (it might impact performance)   |
 | `subgraph_response_errors`  | Yes         |                  | Json Path into the subgraph response body errors (it might impact performance) |
@@ -92,7 +93,8 @@ The subgraph service executes multiple times during query execution, with each e
 | `baggage`                   | Yes         |                  | The name of a baggage item                                                     |
 | `env`                       | Yes         |                  | The name of an environment variable                                            |
 | `static`                    | No          |                  | A static string value                                                          |
-| `error`                     | No          | `reason`         | a string value containing error reason when it's a critical error              |
+| `error`                     | No          | `reason`         | A string value containing error reason when it's a critical error              |
+| `cache`                     | No          | `hit`\|`miss`    | Returns the number of cache hit or miss for this subgraph request              |
 
 ### GraphQL
 
