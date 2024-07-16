@@ -45,6 +45,7 @@ use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
 use crate::link::LinksMetadata;
@@ -438,6 +439,10 @@ impl Merger {
             .map(|link| link.directive_name_in_schema(&FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC))
             .unwrap_or(FEDERATION_EXTERNAL_DIRECTIVE_NAME_IN_SPEC);
 
+        let inaccessible_directive_name = federation_identity
+            .map(|link| link.directive_name_in_schema(&INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC))
+            .unwrap_or(INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC);
+
         let interface_object_directive_name = federation_identity
             .map(|link| {
                 link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
@@ -537,11 +542,18 @@ impl Merger {
                     .next()
                     .is_some();
 
+                let inaccessible_field = field
+                    .directives
+                    .get_all(&inaccessible_directive_name)
+                    .next()
+                    .is_some();
+
                 let join_field_directive = join_field_applied_directive(
                     subgraph_name.clone(),
                     requires_directive_option,
                     provides_directive_option,
                     external_field,
+                    inaccessible_field,
                     overrides_directive_option,
                 );
 
@@ -1158,6 +1170,7 @@ fn join_field_applied_directive(
     requires: Option<&str>,
     provides: Option<&str>,
     external: bool,
+    inaccessible: bool,
     overrides: Option<(&str, Option<&str>)>, // from, label
 ) -> Directive {
     let mut join_field_directive = Directive {
@@ -1183,6 +1196,12 @@ fn join_field_applied_directive(
         join_field_directive.arguments.push(Node::new(Argument {
             name: name!("external"),
             value: external.into(),
+        }));
+    }
+    if inaccessible {
+        join_field_directive.arguments.push(Node::new(Argument {
+            name: name!("inaccessible"),
+            value: inaccessible.into(),
         }));
     }
     if let Some((from, label)) = overrides {

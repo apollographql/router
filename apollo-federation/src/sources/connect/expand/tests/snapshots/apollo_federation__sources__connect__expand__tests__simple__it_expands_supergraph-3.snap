@@ -51,5 +51,5 @@ type User @join__type(graph: CONNECTORS_QUERY_USER_0, key: "id") @join__type(gra
 type Query @join__type(graph: CONNECTORS_QUERY_USER_0) @join__type(graph: CONNECTORS_QUERY_USERS_0) @join__type(graph: CONNECTORS_USER_D_1) @join__type(graph: GRAPHQL) {
   user(id: ID!): User @join__field(graph: CONNECTORS_QUERY_USER_0)
   users: [User] @join__field(graph: CONNECTORS_QUERY_USERS_0)
-  _: ID @join__field(graph: CONNECTORS_USER_D_1)
+  _: ID @join__field(graph: CONNECTORS_USER_D_1, inaccessible: true)
 }
