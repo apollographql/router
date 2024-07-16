@@ -1,8 +1,6 @@
-use std::process::Command;
-use std::process::Stdio;
-
 use anyhow::Result;
 use xtask::*;
+use xshell::*;
 
 const PROJECT_NAME: &str = "apollo-federation-cli";
 
@@ -13,22 +11,19 @@ pub struct Flame {
 
 impl Flame {
     pub fn run(&self) -> Result<()> {
-        let samply = which::which("samply").map_err(|err| match err {
-            which::Error::CannotFindBinaryPath => {
-                anyhow::anyhow!("samply binary not found. Try to run: cargo install samply")
+        let shell = Shell::new()?;
+        match which::which("samply") {
+            Err(which::Error::CannotFindBinaryPath) => {
+                anyhow::bail!("samply binary not found. Try to run: cargo install samply")
             }
-            err => anyhow::anyhow!("{err}"),
-        })?;
+            Err(err) => anyhow::bail!("{err}"),
+            Ok(_) => (),
+        }
 
         cargo!(["build", "--profile", "profiling", "-p", PROJECT_NAME]);
-        let status = Command::new(samply)
-            .arg("record")
-            .arg(format!("./target/profiling/{PROJECT_NAME}"))
-            .args(&self.subargs)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .status()?;
-        anyhow::ensure!(status.success(), "samply exited with {status}");
+
+        let subargs = &self.subargs;
+        cmd!(shell, "samply record ./target/profiling/{PROJECT_NAME} {subargs...}").run()?;
 
         Ok(())
     }
