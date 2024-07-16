@@ -658,6 +658,7 @@ impl FetchDependencyGraph {
         //    which is important for some case of @requires).
         for existing_id in self.children_of(parent.parent_node_id) {
             let existing = self.node_weight(existing_id)?;
+            // we compare the subgraph names last because on average it improves performance
             if existing.merge_at.as_deref() == Some(merge_at)
                 && existing
                     .selection_set
@@ -1802,7 +1803,8 @@ impl FetchDependencyGraph {
         let node = self.node_weight(node_id)?;
         let child = self.node_weight(child_id)?;
         let parent_relation = self.parent_relation(child_id, node_id);
-
+        
+        // we compare the subgraph names last because on average it improves performance
         Ok(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.defer_ref == child.defer_ref
             && node.subgraph_name == child.subgraph_name)
@@ -1841,6 +1843,7 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
+        // we compare the subgraph names last because on average it improves performance
         Ok(node.merge_at == sibling.merge_at
             && own_parent_id == sibling_parent_id
             && node.defer_ref == sibling.defer_ref
@@ -1868,6 +1871,7 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
+        // we compare the subgraph names last because on average it improves performance
         Ok(grand_child_parent_relations[0].path_in_parent.is_some()
             && grand_child_parent_parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.merge_at == grand_child.merge_at
