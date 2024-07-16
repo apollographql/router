@@ -4,9 +4,9 @@
 //! Each "conceptual" type consists of up to three actual types: a data type, an "element"
 //! type, and a selection type.
 //! - The data type records the data about the type. Things like a field name or fragment type
-//! condition are in the data type. These types can be constructed and modified with plain rust.
+//!   condition are in the data type. These types can be constructed and modified with plain rust.
 //! - The element type contains the data type and maintains a key for the data. These types provide
-//! APIs for modifications that keep the key up-to-date.
+//!   APIs for modifications that keep the key up-to-date.
 //! - The selection type contains the element type and, for composite fields, a subselection.
 //!
 //! For example, for fields, the data type is [`FieldData`], the element type is
@@ -4003,11 +4003,11 @@ impl NamedFragments {
     /// want to consider to ignore the fragment for that subgraph, and that is when:
     /// 1. the subset that apply is actually empty. The fragment wouldn't be valid in this case anyway.
     /// 2. the subset is a single leaf field: in that case, using the one field directly is just shorter than using
-    ///   the fragment, so we consider the fragment don't really apply to that subgraph. Technically, using the
-    ///   fragment could still be of value if the fragment name is a lot smaller than the one field name, but it's
-    ///   enough of a niche case that we ignore it. Note in particular that one sub-case of this rule that is likely
-    ///   to be common is when the subset ends up being just `__typename`: this would basically mean the fragment
-    ///   don't really apply to the subgraph, and that this will ensure this is the case.
+    ///    the fragment, so we consider the fragment don't really apply to that subgraph. Technically, using the
+    ///    fragment could still be of value if the fragment name is a lot smaller than the one field name, but it's
+    ///    enough of a niche case that we ignore it. Note in particular that one sub-case of this rule that is likely
+    ///    to be common is when the subset ends up being just `__typename`: this would basically mean the fragment
+    ///    don't really apply to the subgraph, and that this will ensure this is the case.
     pub(crate) fn is_selection_set_worth_using(selection_set: &SelectionSet) -> bool {
         if selection_set.selections.len() == 0 {
             return false;

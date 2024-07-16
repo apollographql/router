@@ -6067,10 +6067,12 @@ fn validate_arguments(arguments: &[Node<InputValueDefinition>]) -> Result<(), Fe
 
 impl FederationSchema {
     /// Note that the input schema must be partially valid, in that:
+    ///
     /// 1. All schema element references must point to an existing schema element of the appropriate
     ///    kind (e.g. object type fields must return an existing output type).
     /// 2. If the schema uses the core/link spec, then usages of the @core/@link directive must be
     ///    valid.
+    ///
     /// The input schema may be otherwise invalid GraphQL (e.g. it may not contain a Query type). If
     /// you want a ValidFederationSchema, use ValidFederationSchema::new() instead.
     pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {

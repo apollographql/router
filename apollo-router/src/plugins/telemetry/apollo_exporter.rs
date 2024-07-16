@@ -1,5 +1,4 @@
 //! Configuration for apollo telemetry exporter.
-use std::error::Error;
 use std::fmt::Debug;
 use std::io::Write;
 use std::str::FromStr;
@@ -25,8 +24,6 @@ use serde::ser::SerializeStruct;
 use serde_json::Value;
 use sys_info::hostname;
 use tokio::sync::mpsc;
-use tokio::task::JoinError;
-use tonic::codegen::http::uri::InvalidUri;
 use tower::BoxError;
 use url::Url;
 
@@ -372,70 +369,6 @@ pub(crate) mod proto {
     pub(crate) mod reports {
         #![allow(clippy::derive_partial_eq_without_eq)]
         tonic::include_proto!("reports");
-    }
-}
-
-/// Reporting Error type
-#[derive(Debug)]
-pub(crate) struct ReporterError {
-    source: Box<dyn Error + Send + Sync + 'static>,
-    msg: String,
-}
-
-impl std::error::Error for ReporterError {}
-
-impl From<InvalidUri> for ReporterError {
-    fn from(error: InvalidUri) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<tonic::transport::Error> for ReporterError {
-    fn from(error: tonic::transport::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<std::io::Error> for ReporterError {
-    fn from(error: std::io::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<sys_info::Error> for ReporterError {
-    fn from(error: sys_info::Error) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl From<JoinError> for ReporterError {
-    fn from(error: JoinError) -> Self {
-        ReporterError {
-            msg: error.to_string(),
-            source: Box::new(error),
-        }
-    }
-}
-
-impl std::fmt::Display for ReporterError {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(
-            f,
-            "ReporterError: source: {}, message: {}",
-            self.source, self.msg
-        )
     }
 }
 
