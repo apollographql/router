@@ -1,15 +1,20 @@
-### Correct broken Datadog trace exporter span names and resource mapping ([Issue #5282](https://github.com/apollographql/router/issues/5282))
+### Fix span names and resource mapping for Datadog trace exporter ([Issue #5282](https://github.com/apollographql/router/issues/5282))
 
-The Router has two ways of sending traces to Datadog:
+> [!NOTE]
+> This is an **incremental** improvement, but we expect more improvements in Router v1.52.0 after https://github.com/apollographql/router/pull/5609/ lands.
 
-1. The [OpenTelemetry for Datadog](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog/#otlp-configuration) approach (which is the recommended method).  This is identified by `otlp` in YAML configuration, and is *not* impacted by this fix; and
+The router now uses _static span names_ by default. This change fixes the user experience of the Datadog trace exporter when sending traces with Datadog native configuration.
+
+The router has two ways of sending traces to Datadog:
+
+1. The [OpenTelemetry for Datadog](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog/#otlp-configuration) approach (which is the recommended method).  This is identified by `otlp` in YAML configuration, and it is *not* impacted by this fix.
 2. The ["Datadog native" configuration](https://www.apollographql.com/docs/router/configuration/telemetry/exporters/tracing/datadog/#datadog-native-configuration).  This is identified by the use of a `datadog:` key in YAML configuration.
 
-This fixes a bug in the latter approach which caused a broken user experience in certain Datadog experiences, such as the "Resources" section of the [Datadog APM Service Catalog](https://docs.datadoghq.com/service_catalog/) page.
+This change fixes a bug in the latter approach that broke some Datadog experiences, such as the "Resources" section of the [Datadog APM Service Catalog](https://docs.datadoghq.com/service_catalog/) page.
 
-We now use static span names by default, with resource mappings providing additional context when desired, which enables the desired behavior which was not possible before.
+We now use static span names by default, with resource mappings providing additional context when requested, which enables the desired behavior which was not possible before.
 
-_If for some reason you wish to maintain the existing behavior, you must either update your spans and resource mappings, or keep your spans and instead configure the router to use dynamic span names and disable resource mapping._
+_If for some reason you wish to maintain the existing behavior, you must either update your spans and resource mappings, or keep your spans and instead configure the router to use _dynamic span names_ and disable resource mapping._
 
 Enabling resource mapping and fixed span names is configured by the `enable_span_mapping` and `fixed_span_names` options:
 
