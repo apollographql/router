@@ -3531,6 +3531,7 @@ expression: "&schema"
       "properties": {
         "enabled": {
           "default": false,
+          "description": "Enable the invalidation",
           "type": "boolean"
         },
         "listen": {

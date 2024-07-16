@@ -26,6 +26,7 @@ use crate::ListenAddr;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
 pub(crate) struct InvalidationConfig {
+    /// Enable the invalidation
     pub(crate) enabled: bool,
     /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
     pub(crate) listen: Option<ListenAddr>,

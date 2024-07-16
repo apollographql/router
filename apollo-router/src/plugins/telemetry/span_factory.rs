@@ -91,7 +91,7 @@ impl SpanMode {
                     "otel.status_code" = ::tracing::field::Empty,
                     "apollo_private.duration_ns" = ::tracing::field::Empty,
                     "apollo_private.http.request_headers" = ::tracing::field::Empty,
-                    "apollo_private.http.response_headers" = ::tracing::field::Empty
+                    "apollo_private.http.re&sponse_headers" = ::tracing::field::Empty
                 );
                 span
             }
