@@ -9,7 +9,7 @@ mod json_selection;
 mod models;
 pub(crate) mod spec;
 mod url_path_template;
-mod validation;
+pub mod validation;
 
 use apollo_compiler::name;
 pub use json_selection::ApplyTo;
@@ -18,11 +18,6 @@ pub use json_selection::JSONSelection;
 pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
-pub use models::validate;
-pub use models::Location;
-pub use models::ValidationCode;
-pub use models::ValidationMessage;
-pub use models::ValidationSeverity;
 pub(crate) use spec::ConnectSpecDefinition;
 pub use url_path_template::URLPathTemplate;
 
