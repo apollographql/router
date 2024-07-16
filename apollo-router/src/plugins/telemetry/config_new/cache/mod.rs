@@ -187,8 +187,8 @@ impl Instrumented for CacheInstruments {
                     }
                     cloned_cache_miss.on_response(response);
                 }
-                // Make sure it won't be incremented when dropped
             }
+            // Make sure it won't be incremented when dropped
             let _ = cache_hit.inner.lock().counter.take();
         }
     }
