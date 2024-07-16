@@ -91,6 +91,14 @@ use crate::query_planner::FLATTEN_SPAN_NAME;
 use crate::query_planner::PARALLEL_SPAN_NAME;
 use crate::query_planner::SEQUENCE_SPAN_NAME;
 use crate::query_planner::SUBSCRIBE_SPAN_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_DETAIL;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_ALIAS;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_FIELD_RETURN_TYPE;
+use crate::services::connector_service::APOLLO_CONNECTOR_SELECTION;
+use crate::services::connector_service::APOLLO_CONNECTOR_SOURCE_DETAIL;
+use crate::services::connector_service::APOLLO_CONNECTOR_SOURCE_NAME;
+use crate::services::connector_service::APOLLO_CONNECTOR_TYPE;
 
 pub(crate) const APOLLO_PRIVATE_REQUEST: Key = Key::from_static_str("apollo_private.request");
 pub(crate) const APOLLO_PRIVATE_DURATION_NS: &str = "apollo_private.duration_ns";
@@ -150,12 +158,22 @@ const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
 ];
 
 /// Additional attributes to include when sending to the OTLP protocol.
-const OTLP_EXT_INCLUDE_ATTRS: [Key; 5] = [
+const OTLP_EXT_INCLUDE_ATTRS: [Key; 14] = [
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
     opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
+    #[allow(deprecated)]
+    opentelemetry_semantic_conventions::trace::HTTP_URL,
+    APOLLO_CONNECTOR_TYPE,
+    APOLLO_CONNECTOR_DETAIL,
+    APOLLO_CONNECTOR_SELECTION,
+    APOLLO_CONNECTOR_FIELD_NAME,
+    APOLLO_CONNECTOR_FIELD_ALIAS,
+    APOLLO_CONNECTOR_FIELD_RETURN_TYPE,
+    APOLLO_CONNECTOR_SOURCE_NAME,
+    APOLLO_CONNECTOR_SOURCE_DETAIL,
 ];
 
 const REPORTS_INCLUDE_SPANS: [&str; 16] = [
