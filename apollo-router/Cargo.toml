@@ -8,7 +8,7 @@ description = "A configurable, high-performance routing runtime for Apollo Feder
 license = "Elastic-2.0"
 
 # renovate-automation: rustc version
-rust-version = "1.72.0"
+rust-version = "1.76.0"
 edition = "2021"
 build = "build/main.rs"
 
@@ -171,7 +171,7 @@ opentelemetry-otlp = { version = "0.13.0", default-features = false, features = 
     "http-proto",
     "metrics",
     "reqwest-client",
-    "trace"
+    "trace",
 ] }
 opentelemetry-semantic-conventions = "0.12.0"
 opentelemetry-zipkin = { version = "0.18.0", default-features = false, features = [
