@@ -669,7 +669,7 @@ pub enum Code {
     InvalidHttpHeaderMapping,
     /// Certain directives are not allowed when using connectors
     UnsupportedFederationDirective,
-    /// TODO: update
+    /// Abstract types are not allowed when using connectors
     UnsupportedAbstractType,
 }
 
