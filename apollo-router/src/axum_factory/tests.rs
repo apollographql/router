@@ -1875,7 +1875,7 @@ async fn http_compressed_service() -> impl Service<
         .map_err(Into::into);
 
     let service = http_client::response_decompression(service)
-        .map_request(|mut req: http::Request<hyper::Body>| {
+        .map_request(|mut req: http::Request<crate::services::router::Body>| {
             req.headers_mut().append(
                 ACCEPT,
                 HeaderValue::from_static(APPLICATION_JSON.essence_str()),
@@ -2384,6 +2384,18 @@ async fn test_supergraph_timeout() {
         .unwrap();
 
     assert_eq!(response.status(), StatusCode::GATEWAY_TIMEOUT);
+
     let body = response.bytes().await.unwrap();
-    assert_eq!(std::str::from_utf8(&body).unwrap(), "request timed out");
+    let body: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        body,
+        json!({
+             "errors": [{
+                 "message": "Request timed out",
+                 "extensions": {
+                     "code": "REQUEST_TIMEOUT"
+                 }
+             }]
+        })
+    );
 }

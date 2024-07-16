@@ -4,9 +4,9 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::fmt::Write;
 
-use apollo_compiler::ast::InvalidNameError;
 use apollo_compiler::validation::DiagnosticList;
 use apollo_compiler::validation::WithErrors;
+use apollo_compiler::InvalidNameError;
 use lazy_static::lazy_static;
 
 use crate::subgraph::spec::FederationSpecError;
@@ -35,12 +35,19 @@ pub enum SingleFederationError {
         "An internal error has occurred, please report this bug to Apollo.\n\nDetails: {message}"
     )]
     Internal { message: String },
+    #[error("An internal error has occurred, please report this bug to Apollo. Details: {0}")]
+    #[allow(private_interfaces)] // users should not inspect this.
+    InternalRebaseError(#[from] crate::operation::RebaseError),
     #[error("{message}")]
     InvalidGraphQL { message: String },
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
     #[error("{message}")]
     TypeDefinitionInvalid { message: String },
+    #[error("{message}")]
+    UnsupportedFederationDirective { message: String },
+    #[error("{message}")]
+    UnsupportedFederationVersion { message: String },
     #[error("{message}")]
     UnsupportedLinkedFeature { message: String },
     #[error("{message}")]
@@ -195,11 +202,19 @@ impl SingleFederationError {
     pub fn code(&self) -> ErrorCode {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
+            SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
             SingleFederationError::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
             SingleFederationError::TypeDefinitionInvalid { .. } => ErrorCode::TypeDefinitionInvalid,
+            SingleFederationError::UnsupportedFederationDirective { .. } => {
+                ErrorCode::UnsupportedFederationDirective
+            }
+            SingleFederationError::UnsupportedFederationVersion { .. } => {
+                ErrorCode::UnsupportedFederationVersion
+            }
+
             SingleFederationError::UnsupportedLinkedFeature { .. } => {
                 ErrorCode::UnsupportedLinkedFeature
             }
@@ -367,7 +382,7 @@ impl SingleFederationError {
 impl From<InvalidNameError> for SingleFederationError {
     fn from(err: InvalidNameError) -> Self {
         SingleFederationError::InvalidGraphQL {
-            message: format!("Invalid GraphQL name \"{}\"", err.0),
+            message: format!("Invalid GraphQL name \"{}\"", err.name),
         }
     }
 }
@@ -379,10 +394,21 @@ impl From<InvalidNameError> for FederationError {
 }
 
 impl From<FederationSpecError> for FederationError {
-    fn from(_err: FederationSpecError) -> Self {
+    fn from(err: FederationSpecError) -> Self {
         // TODO: When we get around to finishing the composition port, we should really switch it to
         // using FederationError instead of FederationSpecError.
-        todo!()
+        let message = err.to_string();
+        match err {
+            FederationSpecError::UnsupportedVersionError { .. } => {
+                SingleFederationError::UnsupportedFederationVersion { message }.into()
+            }
+            FederationSpecError::UnsupportedFederationDirective { .. } => {
+                SingleFederationError::UnsupportedFederationDirective { message }.into()
+            }
+            FederationSpecError::InvalidGraphQLName(message) => {
+                SingleFederationError::InvalidGraphQL { message }.into()
+            }
+        }
     }
 }
 
@@ -411,7 +437,7 @@ impl Display for MultipleFederationErrors {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "The following errors occurred:")?;
         for error in &self.errors {
-            write!(f, "\n\n  - ")?;
+            write!(f, "\n  - ")?;
             for c in error.to_string().chars() {
                 if c == '\n' {
                     write!(f, "\n    ")?;
@@ -1166,6 +1192,19 @@ lazy_static! {
         "An internal federation error occured.".to_owned(),
         None,
     );
+
+    static ref UNSUPPORTED_FEDERATION_VERSION: ErrorCodeDefinition = ErrorCodeDefinition::new(
+        "UNSUPPORTED_FEDERATION_VERSION".to_owned(),
+        "Supergraphs composed with federation version 1 are not supported. Please recompose your supergraph with federation version 2 or greater".to_owned(),
+        None,
+    );
+
+    static ref UNSUPPORTED_FEDERATION_DIRECTIVE: ErrorCodeDefinition = ErrorCodeDefinition::new(
+        "UNSUPPORTED_FEDERATION_DIRECTIVE".to_owned(),
+        "Indicates that the specified specification version is outside of supported range".to_owned(),
+        None,
+
+    );
 }
 
 #[derive(Debug, strum_macros::EnumIter)]
@@ -1247,6 +1286,8 @@ pub enum ErrorCode {
     InterfaceObjectUsageError,
     InterfaceKeyNotOnImplementation,
     InterfaceKeyMissingImplementationType,
+    UnsupportedFederationVersion,
+    UnsupportedFederationDirective,
 }
 
 impl ErrorCode {
@@ -1344,6 +1385,8 @@ impl ErrorCode {
             ErrorCode::InterfaceKeyMissingImplementationType => {
                 &INTERFACE_KEY_MISSING_IMPLEMENTATION_TYPE
             }
+            ErrorCode::UnsupportedFederationVersion => &UNSUPPORTED_FEDERATION_VERSION,
+            ErrorCode::UnsupportedFederationDirective => &UNSUPPORTED_FEDERATION_DIRECTIVE,
         }
     }
 }

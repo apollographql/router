@@ -2,16 +2,17 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::executable::Name;
 use apollo_compiler::executable::Value;
+use apollo_compiler::Name;
+use apollo_compiler::Node;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 
 use crate::error::FederationError;
+use crate::operation::Selection;
+use crate::operation::SelectionMap;
+use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::OpPathElement;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionMap;
-use crate::query_plan::operation::SelectionSet;
 
 /// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
 /// to be queried, based on the `@skip`/`@include` applications on the selections within.
@@ -238,6 +239,68 @@ pub(crate) fn remove_conditions_from_selection_set(
             })
         }
     }
+}
+
+/// Given a `selection_set` and given a set of directive applications that can be eliminated (`unneeded_directives`; in
+/// practice those are conditionals (@skip and @include) already accounted for), returns an equivalent selection set but with unnecessary
+/// "starting" fragments having the unneeded condition/directives removed.
+pub(crate) fn remove_unneeded_top_level_fragment_directives(
+    selection_set: &SelectionSet,
+    unneded_directives: &DirectiveList,
+) -> Result<SelectionSet, FederationError> {
+    let mut selection_map = SelectionMap::new();
+
+    for selection in selection_set.selections.values() {
+        match selection {
+            Selection::Field(_) => {
+                selection_map.insert(selection.clone());
+            }
+            Selection::InlineFragment(inline_fragment) => {
+                let fragment = &inline_fragment.inline_fragment;
+                if fragment.type_condition_position.is_none() {
+                    // if there is no type condition we should preserve the directive info
+                    selection_map.insert(selection.clone());
+                } else {
+                    let mut needed_directives: Vec<Node<Directive>> = Vec::new();
+                    if fragment.directives.len() > 0 {
+                        for directive in fragment.directives.iter() {
+                            if !unneded_directives.contains(directive) {
+                                needed_directives.push(directive.clone());
+                            }
+                        }
+                    }
+
+                    // We recurse, knowing that we'll stop as soon as we hit field selections, so this only cover the fragments
+                    // at the "top-level" of the set.
+                    let updated_selections = remove_unneeded_top_level_fragment_directives(
+                        &inline_fragment.selection_set,
+                        unneded_directives,
+                    )?;
+                    if needed_directives.len() == fragment.directives.len() {
+                        // We need all the directives that the fragment has. Return it unchanged.
+                        let final_selection =
+                            inline_fragment.with_updated_selection_set(updated_selections);
+                        selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
+                    }
+
+                    // We can skip some of the fragment directives directive.
+                    let final_selection =
+                        inline_fragment.with_updated_directives(DirectiveList(needed_directives));
+                    selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
+                }
+            }
+            _ => {
+                // TODO should we apply same logic as for inline_fragment "just in case"?
+                return Err(FederationError::internal("unexpected fragment spread"));
+            }
+        }
+    }
+
+    Ok(SelectionSet {
+        schema: selection_set.schema.clone(),
+        type_position: selection_set.type_position.clone(),
+        selections: Arc::new(selection_map),
+    })
 }
 
 fn remove_conditions_of_element(

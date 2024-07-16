@@ -12,15 +12,15 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 apollo-compiler.workspace = true
-apollo-smith.workspace = true
-apollo-parser.workspace = true
+apollo-parser = "0.7.6"
+apollo-smith = "0.8.0"
 env_logger = "0.10.2"
 log = "0.4"
 reqwest = { workspace = true, features = ["json", "blocking"] }
 serde_json.workspace = true
 tokio.workspace = true
 # note: this dependency should _always_ be pinned, prefix the version with an `=`
-router-bridge = "=0.5.21+v2.7.5"
+router-bridge = "=0.5.27+v2.8.1"
 
 [dev-dependencies]
 anyhow = "1"
@@ -58,10 +58,3 @@ name = "federation"
 path = "fuzz_targets/federation.rs"
 test = false
 doc = false
-
-[[bin]]
-name = "apollo_router_studio_interop"
-path = "fuzz_targets/apollo_router_studio_interop.rs"
-test = false
-doc = false
-bench = false

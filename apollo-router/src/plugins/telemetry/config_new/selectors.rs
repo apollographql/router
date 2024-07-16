@@ -1,9 +1,9 @@
 use access_json::JSONQuery;
 use derivative::Derivative;
-use jsonpath_rust::JsonPathFinder;
-use jsonpath_rust::JsonPathInst;
+use opentelemetry_api::Value;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::path::JsonPathInst;
 use serde_json_bytes::ByteString;
 use sha2::Digest;
 
@@ -12,21 +12,28 @@ use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::plugin::serde::deserialize_json_query;
 use crate::plugin::serde::deserialize_jsonpath;
+use crate::plugins::cache::entity::CacheSubgraph;
+use crate::plugins::cache::metrics::CacheMetricContextKey;
 use crate::plugins::demand_control::CostContext;
 use crate::plugins::telemetry::config::AttributeValue;
 use crate::plugins::telemetry::config_new::cost::CostValue;
 use crate::plugins::telemetry::config_new::get_baggage;
+use crate::plugins::telemetry::config_new::instruments::Event;
+use crate::plugins::telemetry::config_new::instruments::InstrumentValue;
+use crate::plugins::telemetry::config_new::instruments::Standard;
 use crate::plugins::telemetry::config_new::trace_id;
 use crate::plugins::telemetry::config_new::DatadogId;
 use crate::plugins::telemetry::config_new::Selector;
 use crate::plugins::telemetry::config_new::ToOtelValue;
+use crate::query_planner::APOLLO_OPERATION_ID;
 use crate::services::router;
 use crate::services::subgraph;
 use crate::services::supergraph;
+use crate::services::FIRST_EVENT_CONTEXT_KEY;
+use crate::spec::operation_limits::OperationLimits;
 use crate::Context;
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum TraceIdFormat {
     /// Open Telemetry trace ID, a hex string.
@@ -35,8 +42,7 @@ pub(crate) enum TraceIdFormat {
     Datadog,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationName {
     /// The raw operation name.
@@ -46,8 +52,7 @@ pub(crate) enum OperationName {
 }
 
 #[allow(dead_code)]
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ErrorRepr {
     // /// The error code if available
@@ -56,16 +61,29 @@ pub(crate) enum ErrorRepr {
     Reason,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum Query {
     /// The raw query kind.
     String,
+    /// The query aliases.
+    Aliases,
+    /// The query depth.
+    Depth,
+    /// The query height.
+    Height,
+    /// The query root fields.
+    RootFields,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum SubgraphQuery {
+    /// The raw query kind.
+    String,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum ResponseStatus {
     /// The http status code.
@@ -74,8 +92,7 @@ pub(crate) enum ResponseStatus {
     Reason,
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, rename_all = "snake_case")]
 pub(crate) enum OperationKind {
     /// The raw operation kind.
@@ -83,7 +100,22 @@ pub(crate) enum OperationKind {
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[cfg_attr(test, derive(PartialEq))]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum RouterValue {
+    Standard(Standard),
+    Custom(RouterSelector),
+}
+
+impl From<&RouterValue> for InstrumentValue<RouterSelector> {
+    fn from(value: &RouterValue) -> Self {
+        match value {
+            RouterValue::Standard(standard) => InstrumentValue::Standard(standard.clone()),
+            RouterValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug, PartialEq)]
 #[serde(deny_unknown_fields, untagged)]
 pub(crate) enum RouterSelector {
     /// A header from the request
@@ -123,6 +155,11 @@ pub(crate) enum RouterSelector {
         /// The format of the trace ID.
         trace_id: TraceIdFormat,
     },
+    /// Apollo Studio operation id
+    StudioOperationId {
+        /// Apollo Studio operation id
+        studio_operation_id: bool,
+    },
     /// A value from context.
     ResponseContext {
         /// The response context key.
@@ -133,6 +170,17 @@ pub(crate) enum RouterSelector {
         redact: Option<String>,
         /// Optional default value.
         default: Option<AttributeValue>,
+    },
+    /// The operation name from the query.
+    OperationName {
+        /// The operation name from the query.
+        operation_name: OperationName,
+        #[serde(skip)]
+        #[allow(dead_code)]
+        /// Optional redaction pattern.
+        redact: Option<String>,
+        /// Optional default value.
+        default: Option<String>,
     },
     /// A value from baggage.
     Baggage {
@@ -156,10 +204,11 @@ pub(crate) enum RouterSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
     },
     OnGraphQLError {
         /// Boolean set to true if the response body contains graphql error
@@ -172,10 +221,33 @@ pub(crate) enum RouterSelector {
     },
 }
 
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SupergraphValue {
+    Standard(Standard),
+    Event(Event<SupergraphSelector>),
+    Custom(SupergraphSelector),
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case")]
+pub(crate) enum EventHolder {
+    EventCustom(SupergraphSelector),
+}
+
+impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
+    fn from(value: &SupergraphValue) -> Self {
+        match value {
+            SupergraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SupergraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+            SupergraphValue::Event(e) => InstrumentValue::Chunked(e.clone()),
+        }
+    }
+}
+
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
-#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, untagged)]
-#[derivative(Debug)]
+#[derivative(Debug, PartialEq)]
 pub(crate) enum SupergraphSelector {
     OperationName {
         /// The operation name from the query.
@@ -195,8 +267,6 @@ pub(crate) enum SupergraphSelector {
     },
     Query {
         /// The graphql query.
-        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
-        #[allow(dead_code)]
         query: Query,
         #[serde(skip)]
         #[allow(dead_code)]
@@ -306,10 +376,15 @@ pub(crate) enum SupergraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
+    },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        on_graphql_error: bool,
     },
     Error {
         #[allow(dead_code)]
@@ -317,17 +392,36 @@ pub(crate) enum SupergraphSelector {
         error: ErrorRepr,
     },
     /// Cost attributes
-    #[allow(dead_code)]
     Cost {
         /// The cost value to select, one of: estimated, actual, delta.
         cost: CostValue,
     },
+    /// Boolean returning true if it's the primary response and not events like subscription events or deferred responses
+    IsPrimaryResponse {
+        /// Boolean returning true if it's the primary response and not events like subscription events or deferred responses
+        is_primary_response: bool,
+    },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, Debug)]
+#[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
+pub(crate) enum SubgraphValue {
+    Standard(Standard),
+    Custom(SubgraphSelector),
+}
+
+impl From<&SubgraphValue> for InstrumentValue<SubgraphSelector> {
+    fn from(value: &SubgraphValue) -> Self {
+        match value {
+            SubgraphValue::Standard(s) => InstrumentValue::Standard(s.clone()),
+            SubgraphValue::Custom(selector) => InstrumentValue::Custom(selector.clone()),
+        }
+    }
 }
 
 #[derive(Deserialize, JsonSchema, Clone, Derivative)]
-#[cfg_attr(test, derivative(PartialEq))]
 #[serde(deny_unknown_fields, rename_all = "snake_case", untagged)]
-#[derivative(Debug)]
+#[derivative(Debug, PartialEq)]
 pub(crate) enum SubgraphSelector {
     SubgraphOperationName {
         /// The operation name from the subgraph query.
@@ -345,11 +439,13 @@ pub(crate) enum SubgraphSelector {
         #[allow(dead_code)]
         subgraph_operation_kind: OperationKind,
     },
+    SubgraphName {
+        /// The subgraph name
+        subgraph_name: bool,
+    },
     SubgraphQuery {
         /// The graphql query to the subgraph.
-        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
-        #[allow(dead_code)]
-        subgraph_query: Query,
+        subgraph_query: SubgraphQuery,
         #[serde(skip)]
         #[allow(dead_code)]
         /// Optional redaction pattern.
@@ -448,8 +544,6 @@ pub(crate) enum SubgraphSelector {
     },
     SupergraphQuery {
         /// The supergraph query to the subgraph.
-        // Allow dead code is required because there is only one variant in Query and we need to avoid the dead code warning.
-        #[allow(dead_code)]
         supergraph_query: Query,
         #[serde(skip)]
         #[allow(dead_code)]
@@ -498,6 +592,10 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<AttributeValue>,
     },
+    OnGraphQLError {
+        /// Boolean set to true if the response body contains graphql error
+        subgraph_on_graphql_error: bool,
+    },
     Baggage {
         /// The name of the baggage item.
         baggage: String,
@@ -518,16 +616,49 @@ pub(crate) enum SubgraphSelector {
         /// Optional default value.
         default: Option<String>,
     },
+    /// Deprecated, should not be used anymore, use static field instead
     Static(String),
     StaticField {
-        /// A static string value
-        r#static: String,
+        /// A static value
+        r#static: AttributeValue,
     },
     Error {
-        #[allow(dead_code)]
         /// Critical error if it happens
         error: ErrorRepr,
     },
+    Cache {
+        /// Select if you want to get cache hit or cache miss
+        cache: CacheKind,
+        /// Specify the entity type on which you want the cache data. (default: all)
+        entity_type: Option<EntityType>,
+    },
+}
+
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case", untagged)]
+pub(crate) enum EntityType {
+    All(All),
+    Named(String),
+}
+
+impl Default for EntityType {
+    fn default() -> Self {
+        Self::All(All::All)
+    }
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Deserialize, JsonSchema, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum All {
+    #[default]
+    All,
+}
+
+#[derive(Deserialize, JsonSchema, Clone, PartialEq, Debug)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CacheKind {
+    Hit,
+    Miss,
 }
 
 impl Selector for RouterSelector {
@@ -605,6 +736,23 @@ impl Selector for RouterSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = response.context.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
             RouterSelector::Baggage {
                 baggage, default, ..
             } => get_baggage(baggage).or_else(|| default.maybe_to_otel_value()),
@@ -617,14 +765,59 @@ impl Selector for RouterSelector {
                     None
                 }
             }
+            RouterSelector::Static(val) => Some(val.clone().into()),
             RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::StudioOperationId {
+                studio_operation_id,
+            } if *studio_operation_id => response
+                .context
+                .get::<_, String>(APOLLO_OPERATION_ID)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             RouterSelector::Error { .. } => Some(error.to_string().into()),
+            RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            RouterSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            RouterSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            _ => None,
+        }
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            RouterSelector::Static(val) => Some(val.clone().into()),
+            RouterSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -719,6 +912,26 @@ impl Selector for SupergraphSelector {
 
     fn on_response(&self, response: &supergraph::Response) -> Option<opentelemetry::Value> {
         match self {
+            SupergraphSelector::Query { query, .. } => {
+                let limits_opt = response
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                match query {
+                    Query::Aliases => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
+                    }
+                    Query::Depth => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
+                    }
+                    Query::Height => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
+                    }
+                    Query::RootFields => limits_opt
+                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
+                    Query::String => None,
+                }
+            }
             SupergraphSelector::ResponseHeader {
                 response_header,
                 default,
@@ -750,6 +963,42 @@ impl Selector for SupergraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if response.context.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
+            }
+            SupergraphSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = response.context.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SupergraphSelector::OperationKind { .. } => response
+                .context
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SupergraphSelector::IsPrimaryResponse {
+                is_primary_response: is_primary,
+            } if *is_primary => Some(true.into()),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
             SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             // For request
             _ => None,
@@ -767,17 +1016,7 @@ impl Selector for SupergraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.data {
-                let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(response_data.clone())).find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
-
+                let val = response_data.find(data);
                 val.maybe_to_otel_value()
             } else {
                 None
@@ -789,38 +1028,141 @@ impl Selector for SupergraphSelector {
                 ..
             } => {
                 let errors = response.errors.clone();
-                let data: serde_json::Value = serde_json::to_value(errors).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(response_errors.clone())).find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
+                let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
+                let val = response_errors.find(&data);
 
                 val.maybe_to_otel_value()
             }
             .or_else(|| default.maybe_to_otel_value()),
-            SupergraphSelector::Cost { cost } => {
-                let extensions = ctx.extensions().lock();
-                extensions
-                    .get::<CostContext>()
-                    .map(|cost_result| match cost {
-                        CostValue::Estimated => cost_result.estimated.into(),
-                        CostValue::Actual => cost_result.actual.into(),
-                        CostValue::Delta => cost_result.delta().into(),
-                        CostValue::Result => cost_result.result.into(),
-                    })
+            SupergraphSelector::Cost { cost } => ctx.extensions().with_lock(|lock| {
+                lock.get::<CostContext>().map(|cost_result| match cost {
+                    CostValue::Estimated => cost_result.estimated.into(),
+                    CostValue::Actual => cost_result.actual.into(),
+                    CostValue::Delta => cost_result.delta().into(),
+                    CostValue::Result => cost_result.result.into(),
+                })
+            }),
+            SupergraphSelector::OnGraphQLError { on_graphql_error } if *on_graphql_error => {
+                if ctx.get_json_value(CONTAINS_GRAPHQL_ERROR)
+                    == Some(serde_json_bytes::Value::Bool(true))
+                {
+                    Some(opentelemetry::Value::Bool(true))
+                } else {
+                    None
+                }
             }
+            SupergraphSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SupergraphSelector::OperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SupergraphSelector::IsPrimaryResponse {
+                is_primary_response: is_primary,
+            } if *is_primary => Some(opentelemetry::Value::Bool(
+                ctx.get_json_value(FIRST_EVENT_CONTEXT_KEY)
+                    == Some(serde_json_bytes::Value::Bool(true)),
+            )),
+            SupergraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
+            SupergraphSelector::OperationName {
+                operation_name,
+                default,
+                ..
+            } => {
+                let op_name = ctx.get(OPERATION_NAME).ok().flatten();
+                match operation_name {
+                    OperationName::String => op_name.or_else(|| default.clone()),
+                    OperationName::Hash => op_name.or_else(|| default.clone()).map(|op_name| {
+                        let mut hasher = sha2::Sha256::new();
+                        hasher.update(op_name.as_bytes());
+                        let result = hasher.finalize();
+                        hex::encode(result)
+                    }),
+                }
+                .map(opentelemetry::Value::from)
+            }
+            SupergraphSelector::OperationKind { .. } => ctx
+                .get::<_, String>(OPERATION_KIND)
+                .ok()
+                .flatten()
+                .map(opentelemetry::Value::from),
+            SupergraphSelector::Query { query, .. } => {
+                let limits_opt = ctx
+                    .extensions()
+                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                match query {
+                    Query::Aliases => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
+                    }
+                    Query::Depth => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
+                    }
+                    Query::Height => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
+                    }
+                    Query::RootFields => limits_opt
+                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
+                    Query::String => None,
+                }
+            }
             SupergraphSelector::Error { .. } => Some(error.to_string().into()),
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SupergraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            SupergraphSelector::IsPrimaryResponse {
+                is_primary_response: is_primary,
+            } if *is_primary => Some(opentelemetry::Value::Bool(
+                ctx.get_json_value(FIRST_EVENT_CONTEXT_KEY)
+                    == Some(serde_json_bytes::Value::Bool(true)),
+            )),
+            _ => None,
+        }
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            SupergraphSelector::Static(val) => Some(val.clone().into()),
+            SupergraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -867,6 +1209,10 @@ impl Selector for SubgraphSelector {
                 }
                 .map(opentelemetry::Value::from)
             }
+            SubgraphSelector::SubgraphName { subgraph_name } if *subgraph_name => request
+                .subgraph_name
+                .clone()
+                .map(opentelemetry::Value::from),
             SubgraphSelector::SubgraphOperationKind { .. } => request
                 .context
                 .get::<_, String>(OPERATION_KIND)
@@ -880,13 +1226,36 @@ impl Selector for SubgraphSelector {
                 .flatten()
                 .map(opentelemetry::Value::from),
 
-            SubgraphSelector::SupergraphQuery { default, .. } => request
-                .supergraph_request
-                .body()
-                .query
-                .clone()
-                .or_else(|| default.clone())
-                .map(opentelemetry::Value::from),
+            SubgraphSelector::SupergraphQuery {
+                default,
+                supergraph_query,
+                ..
+            } => {
+                let limits_opt = request
+                    .context
+                    .extensions()
+                    .with_lock(|lock| lock.get::<OperationLimits<u32>>().cloned());
+                match supergraph_query {
+                    Query::Aliases => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.aliases as i64))
+                    }
+                    Query::Depth => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.depth as i64))
+                    }
+                    Query::Height => {
+                        limits_opt.map(|limits| opentelemetry::Value::I64(limits.height as i64))
+                    }
+                    Query::RootFields => limits_opt
+                        .map(|limits| opentelemetry::Value::I64(limits.root_fields as i64)),
+                    Query::String => request
+                        .supergraph_request
+                        .body()
+                        .query
+                        .clone()
+                        .or_else(|| default.clone())
+                        .map(opentelemetry::Value::from),
+                }
+            }
             SubgraphSelector::SubgraphQuery { default, .. } => request
                 .subgraph_request
                 .body()
@@ -1010,17 +1379,7 @@ impl Selector for SubgraphSelector {
                 default,
                 ..
             } => if let Some(data) = &response.response.body().data {
-                let data: serde_json::Value = serde_json::to_value(data.clone()).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_data.clone()))
-                        .find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
+                let val = subgraph_response_data.find(data);
 
                 val.maybe_to_otel_value()
             } else {
@@ -1033,17 +1392,9 @@ impl Selector for SubgraphSelector {
                 ..
             } => {
                 let errors = response.response.body().errors.clone();
-                let data: serde_json::Value = serde_json::to_value(errors).ok()?;
-                let mut val =
-                    JsonPathFinder::new(Box::new(data), Box::new(subgraph_response_error.clone()))
-                        .find();
-                if let serde_json::Value::Array(array) = &mut val {
-                    if array.len() == 1 {
-                        val = array
-                            .pop()
-                            .expect("already checked the array had a length of 1; qed");
-                    }
-                }
+                let data: serde_json_bytes::Value = serde_json_bytes::to_value(errors).ok()?;
+
+                let val = subgraph_response_error.find(&data);
 
                 val.maybe_to_otel_value()
             }
@@ -1058,15 +1409,75 @@ impl Selector for SubgraphSelector {
                 .as_ref()
                 .and_then(|v| v.maybe_to_otel_value())
                 .or_else(|| default.maybe_to_otel_value()),
+            SubgraphSelector::OnGraphQLError {
+                subgraph_on_graphql_error: on_graphql_error,
+            } if *on_graphql_error => Some((!response.response.body().errors.is_empty()).into()),
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
             SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SubgraphSelector::Cache { cache, entity_type } => {
+                let cache_info: CacheSubgraph = response
+                    .context
+                    .get(CacheMetricContextKey::new(response.subgraph_name.clone()?))
+                    .ok()
+                    .flatten()?;
+
+                match entity_type {
+                    Some(EntityType::All(All::All)) | None => Some(
+                        (cache_info
+                            .0
+                            .iter()
+                            .fold(0usize, |acc, (_entity_type, cache_hit_miss)| match cache {
+                                CacheKind::Hit => acc + cache_hit_miss.hit,
+                                CacheKind::Miss => acc + cache_hit_miss.miss,
+                            }) as i64)
+                            .into(),
+                    ),
+                    Some(EntityType::Named(entity_type_name)) => {
+                        let res = cache_info.0.iter().fold(
+                            0usize,
+                            |acc, (entity_type, cache_hit_miss)| {
+                                if entity_type == entity_type_name {
+                                    match cache {
+                                        CacheKind::Hit => acc + cache_hit_miss.hit,
+                                        CacheKind::Miss => acc + cache_hit_miss.miss,
+                                    }
+                                } else {
+                                    acc
+                                }
+                            },
+                        );
+
+                        (res != 0).then_some((res as i64).into())
+                    }
+                }
+            }
             // For request
             _ => None,
         }
     }
 
-    fn on_error(&self, error: &tower::BoxError) -> Option<opentelemetry::Value> {
+    fn on_error(&self, error: &tower::BoxError, ctx: &Context) -> Option<opentelemetry::Value> {
         match self {
             SubgraphSelector::Error { .. } => Some(error.to_string().into()),
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
+            SubgraphSelector::ResponseContext {
+                response_context,
+                default,
+                ..
+            } => ctx
+                .get_json_value(response_context)
+                .as_ref()
+                .and_then(|v| v.maybe_to_otel_value())
+                .or_else(|| default.maybe_to_otel_value()),
+            _ => None,
+        }
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        match self {
+            SubgraphSelector::Static(val) => Some(val.clone().into()),
+            SubgraphSelector::StaticField { r#static } => Some(r#static.clone().into()),
             _ => None,
         }
     }
@@ -1078,7 +1489,6 @@ mod test {
     use std::sync::Arc;
 
     use http::StatusCode;
-    use jsonpath_rust::JsonPathInst;
     use opentelemetry::baggage::BaggageExt;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
@@ -1090,6 +1500,8 @@ mod test {
     use opentelemetry::KeyValue;
     use opentelemetry_api::StringValue;
     use serde_json::json;
+    use serde_json_bytes::path::JsonPathInst;
+    use tower::BoxError;
     use tracing::span;
     use tracing::subscriber;
     use tracing_subscriber::layer::SubscriberExt;
@@ -1097,17 +1509,27 @@ mod test {
     use crate::context::OPERATION_KIND;
     use crate::context::OPERATION_NAME;
     use crate::graphql;
+    use crate::plugins::cache::entity::CacheHitMiss;
+    use crate::plugins::cache::entity::CacheSubgraph;
+    use crate::plugins::cache::metrics::CacheMetricContextKey;
     use crate::plugins::telemetry::config::AttributeValue;
+    use crate::plugins::telemetry::config_new::selectors::All;
+    use crate::plugins::telemetry::config_new::selectors::CacheKind;
+    use crate::plugins::telemetry::config_new::selectors::EntityType;
     use crate::plugins::telemetry::config_new::selectors::OperationKind;
     use crate::plugins::telemetry::config_new::selectors::OperationName;
     use crate::plugins::telemetry::config_new::selectors::Query;
     use crate::plugins::telemetry::config_new::selectors::ResponseStatus;
     use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+    use crate::plugins::telemetry::config_new::selectors::SubgraphQuery;
     use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
     use crate::plugins::telemetry::config_new::selectors::SupergraphSelector;
     use crate::plugins::telemetry::config_new::selectors::TraceIdFormat;
     use crate::plugins::telemetry::config_new::Selector;
     use crate::plugins::telemetry::otel;
+    use crate::query_planner::APOLLO_OPERATION_ID;
+    use crate::services::FIRST_EVENT_CONTEXT_KEY;
+    use crate::spec::operation_limits::OperationLimits;
 
     #[test]
     fn router_static() {
@@ -1122,6 +1544,25 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn router_static_field() {
+        let selector = RouterSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::RouterRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1261,6 +1702,25 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn supergraph_static_field() {
+        let selector = SupergraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SupergraphRequest::fake_builder()
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1313,7 +1773,7 @@ mod test {
                     &crate::services::SubgraphRequest::fake_builder()
                         .supergraph_request(Arc::new(
                             http::Request::builder()
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1321,6 +1781,29 @@ mod test {
                 .unwrap(),
             "test_static".into()
         );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
+    }
+
+    #[test]
+    fn subgraph_static_field() {
+        let selector = SubgraphSelector::StaticField {
+            r#static: "test_static".to_string().into(),
+        };
+        assert_eq!(
+            selector
+                .on_request(
+                    &crate::services::SubgraphRequest::fake_builder()
+                        .supergraph_request(Arc::new(
+                            http::Request::builder()
+                                .body(graphql::Request::builder().build())
+                                .unwrap()
+                        ))
+                        .build()
+                )
+                .unwrap(),
+            "test_static".into()
+        );
+        assert_eq!(selector.on_drop().unwrap(), "test_static".into());
     }
 
     #[test]
@@ -1337,7 +1820,7 @@ mod test {
                         .supergraph_request(Arc::new(
                             http::Request::builder()
                                 .header("header_key", "header_value")
-                                .body(crate::request::Request::builder().build())
+                                .body(graphql::Request::builder().build())
                                 .unwrap()
                         ))
                         .build()
@@ -1473,6 +1956,13 @@ mod test {
 
         assert_eq!(
             selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
                 .on_response(
                     &crate::services::RouterResponse::fake_builder()
                         .build()
@@ -1535,6 +2025,32 @@ mod test {
     }
 
     #[test]
+    fn supergraph_is_primary() {
+        let selector = SupergraphSelector::IsPrimaryResponse {
+            is_primary_response: true,
+        };
+        let context = crate::context::Context::new();
+        let _ = context.insert(FIRST_EVENT_CONTEXT_KEY, true);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context.clone())
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            true.into()
+        );
+        assert_eq!(
+            selector
+                .on_response_event(&crate::graphql::Response::builder().build(), &context)
+                .unwrap(),
+            true.into()
+        );
+    }
+
+    #[test]
     fn supergraph_response_context() {
         let selector = SupergraphSelector::ResponseContext {
             response_context: "context_key".to_string(),
@@ -1551,6 +2067,13 @@ mod test {
                         .build()
                         .unwrap()
                 )
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
                 .unwrap(),
             "context_value".into()
         );
@@ -1636,6 +2159,13 @@ mod test {
 
         assert_eq!(
             selector
+                .on_error(&BoxError::from(String::from("my error")), &context)
+                .unwrap(),
+            "context_value".into()
+        );
+
+        assert_eq!(
+            selector
                 .on_response(
                     &crate::services::SubgraphResponse::fake2_builder()
                         .build()
@@ -1664,7 +2194,16 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             let _context_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             assert_eq!(
@@ -1702,6 +2241,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(
@@ -1713,6 +2260,7 @@ mod test {
                 "defaulted".into()
             );
             let _outer_guard = Context::new()
+                .with_remote_span_context(span_context)
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
                 .attach();
             let span = span!(tracing::Level::INFO, "test");
@@ -1740,6 +2288,14 @@ mod test {
                 redact: None,
                 default: Some("defaulted".into()),
             };
+            let span_context = SpanContext::new(
+                TraceId::from_u128(42),
+                SpanId::from_u64(42),
+                // Make sure it's sampled if not, it won't create anything at the otel layer
+                TraceFlags::default().with_sampled(true),
+                false,
+                TraceState::default(),
+            );
             assert_eq!(
                 selector
                     .on_request(&crate::services::SubgraphRequest::fake_builder().build())
@@ -1748,6 +2304,7 @@ mod test {
             );
             let _outer_guard = Context::new()
                 .with_baggage(vec![KeyValue::new("baggage_key", "baggage_value")])
+                .with_remote_span_context(span_context)
                 .attach();
 
             let span = span!(tracing::Level::INFO, "test");
@@ -1781,7 +2338,7 @@ mod test {
             let span_context = SpanContext::new(
                 TraceId::from_u128(42),
                 SpanId::from_u64(42),
-                TraceFlags::default(),
+                TraceFlags::default().with_sampled(true),
                 false,
                 TraceState::default(),
             );
@@ -1820,6 +2377,27 @@ mod test {
     }
 
     #[test]
+    fn test_router_studio_trace_id() {
+        let selector = RouterSelector::StudioOperationId {
+            studio_operation_id: true,
+        };
+        let ctx = crate::Context::new();
+        let _ = ctx.insert(APOLLO_OPERATION_ID, "42".to_string()).unwrap();
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::RouterResponse::fake_builder()
+                        .context(ctx)
+                        .build()
+                        .unwrap(),
+                )
+                .unwrap(),
+            opentelemetry::Value::String("42".into())
+        );
+    }
+
+    #[test]
     fn router_env() {
         let selector = RouterSelector::Env {
             env: "SELECTOR_ENV_VARIABLE".to_string(),
@@ -1844,6 +2422,39 @@ mod test {
                     .unwrap(),
             ),
             Some("env_value".into())
+        );
+    }
+
+    #[test]
+    fn router_operation_name_string() {
+        let selector = RouterSelector::OperationName {
+            operation_name: OperationName::String,
+            redact: None,
+            default: Some("defaulted".to_string()),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("defaulted".into())
+        );
+        let _ = context.insert(OPERATION_NAME, "topProducts".to_string());
+        assert_eq!(
+            selector.on_response(
+                &crate::services::RouterResponse::fake_builder()
+                    .context(context.clone())
+                    .build()
+                    .unwrap(),
+            ),
+            Some("topProducts".into())
+        );
+        assert_eq!(
+            selector.on_error(&BoxError::from(String::from("my error")), &context),
+            Some("topProducts".into())
         );
     }
 
@@ -1935,6 +2546,23 @@ mod test {
     }
 
     #[test]
+    fn subgraph_name() {
+        let selector = SubgraphSelector::SubgraphName {
+            subgraph_name: true,
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_request(
+                &crate::services::SubgraphRequest::fake_builder()
+                    .context(context)
+                    .subgraph_name("test".to_string())
+                    .build(),
+            ),
+            Some("test".into())
+        );
+    }
+
+    #[test]
     fn supergraph_operation_name_string() {
         let selector = SupergraphSelector::OperationName {
             operation_name: OperationName::String,
@@ -1961,6 +2589,82 @@ mod test {
                     .unwrap(),
             ),
             Some("topProducts".into())
+        );
+    }
+
+    #[test]
+    fn subgraph_cache_hit_all_entities() {
+        let selector = SubgraphSelector::Cache {
+            cache: CacheKind::Hit,
+            entity_type: Some(EntityType::All(All::All)),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            None
+        );
+        let cache_info = CacheSubgraph(
+            [
+                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
+                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let _ = context
+            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
+            .unwrap();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(5))
+        );
+    }
+
+    #[test]
+    fn subgraph_cache_hit_one_entity() {
+        let selector = SubgraphSelector::Cache {
+            cache: CacheKind::Hit,
+            entity_type: Some(EntityType::Named("Reviews".to_string())),
+        };
+        let context = crate::context::Context::new();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            None
+        );
+        let cache_info = CacheSubgraph(
+            [
+                ("Products".to_string(), CacheHitMiss { hit: 3, miss: 0 }),
+                ("Reviews".to_string(), CacheHitMiss { hit: 2, miss: 0 }),
+            ]
+            .into_iter()
+            .collect(),
+        );
+        let _ = context
+            .insert(CacheMetricContextKey::new("test".to_string()), cache_info)
+            .unwrap();
+        assert_eq!(
+            selector.on_response(
+                &crate::services::SubgraphResponse::fake_builder()
+                    .subgraph_name("test".to_string())
+                    .context(context.clone())
+                    .build(),
+            ),
+            Some(opentelemetry::Value::I64(2))
         );
     }
 
@@ -2138,6 +2842,89 @@ mod test {
         );
     }
 
+    fn create_select_and_context(query: Query) -> (SupergraphSelector, crate::Context) {
+        let selector = SupergraphSelector::Query {
+            query,
+            redact: None,
+            default: Some("default".to_string()),
+        };
+        let limits = OperationLimits {
+            aliases: 1,
+            depth: 2,
+            height: 3,
+            root_fields: 4,
+        };
+        let context = crate::Context::new();
+        context
+            .extensions()
+            .with_lock(|mut lock| lock.insert::<OperationLimits<u32>>(limits));
+        (selector, context)
+    }
+
+    #[test]
+    fn supergraph_query_aliases() {
+        let (selector, context) = create_select_and_context(Query::Aliases);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            1.into()
+        );
+    }
+
+    #[test]
+    fn supergraph_query_depth() {
+        let (selector, context) = create_select_and_context(Query::Depth);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            2.into()
+        );
+    }
+
+    #[test]
+    fn supergraph_query_height() {
+        let (selector, context) = create_select_and_context(Query::Height);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            3.into()
+        );
+    }
+
+    #[test]
+    fn supergraph_query_root_fields() {
+        let (selector, context) = create_select_and_context(Query::RootFields);
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SupergraphResponse::fake_builder()
+                        .context(context)
+                        .build()
+                        .unwrap()
+                )
+                .unwrap(),
+            4.into()
+        );
+    }
+
     #[test]
     fn subgraph_supergraph_query() {
         let selector = SubgraphSelector::SupergraphQuery {
@@ -2171,7 +2958,7 @@ mod test {
     #[test]
     fn subgraph_subgraph_query() {
         let selector = SubgraphSelector::SubgraphQuery {
-            subgraph_query: Query::String,
+            subgraph_query: SubgraphQuery::String,
             redact: None,
             default: Some("default".to_string()),
         };
@@ -2316,6 +3103,41 @@ mod test {
                 ]
                 .into()
             )
+        );
+    }
+
+    #[test]
+    fn subgraph_on_graphql_error() {
+        let selector = SubgraphSelector::OnGraphQLError {
+            subgraph_on_graphql_error: true,
+        };
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .error(
+                            graphql::Error::builder()
+                                .message("not found")
+                                .extension_code("NOT_FOUND")
+                                .build()
+                        )
+                        .build()
+                )
+                .unwrap(),
+            opentelemetry::Value::Bool(true)
+        );
+
+        assert_eq!(
+            selector
+                .on_response(
+                    &crate::services::SubgraphResponse::fake_builder()
+                        .data(serde_json_bytes::json!({
+                            "hello": ["bonjour", "hello", "ciao"]
+                        }))
+                        .build()
+                )
+                .unwrap(),
+            opentelemetry::Value::Bool(false)
         );
     }
 

@@ -1,6 +1,6 @@
 ---
-title: Subgraph entity caching for the Apollo Router
-subtitle: Redis-backed caching for entities
+title: Subgraph Entity Caching for the Apollo Router
+subtitle: Configure Redis-backed caching for entities
 description: Subgraph entity caching for Apollo Router with GraphOS Enterprise. Cache and reuse individual entities across queries.
 minVersion: 1.40.0
 ---
@@ -92,12 +92,15 @@ preview_entity_cache:
     timeout: 5ms # Optional, by default: 2ms
     ttl: 24h # Optional, by default no expiration
 
-  # Configure entity caching per subgraph
-  subgraphs:
-    products:
-      ttl: 120s # overrides the global TTL
-    inventory:
-      enabled: false # disable for a specific subgraph
+  subgraph:
+    all:
+      enabled: true
+    # Configure entity caching per subgraph, overrides options from the "all" section
+    subgraphs:
+      products:
+        ttl: 120s # overrides the global TTL
+      inventory:
+        enabled: false # disable for a specific subgraph
 ```
 
 ### Configure time to live (TTL)

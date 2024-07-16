@@ -1,0 +1,99 @@
+---
+source: apollo-router/tests/set_context.rs
+expression: response
+---
+{
+  "data": {
+    "t": {
+      "id": "1",
+      "u": {
+        "field": 1234
+      }
+    }
+  },
+  "extensions": {
+    "apolloQueryPlan": {
+      "object": {
+        "kind": "QueryPlan",
+        "node": {
+          "kind": "Sequence",
+          "nodes": [
+            {
+              "kind": "Fetch",
+              "serviceName": "Subgraph1",
+              "variableUsages": [],
+              "operation": "query Query_Null_Param__Subgraph1__0{t{__typename prop id u{__typename id}}}",
+              "operationName": "Query_Null_Param__Subgraph1__0",
+              "operationKind": "query",
+              "id": null,
+              "inputRewrites": null,
+              "outputRewrites": null,
+              "contextRewrites": null,
+              "schemaAwareHash": "19bd66a3ecc2d9495dffce2279774de3275cb027254289bb61b0c1937a7738b4",
+              "authorization": {
+                "is_authenticated": false,
+                "scopes": [],
+                "policies": []
+              }
+            },
+            {
+              "kind": "Flatten",
+              "path": [
+                "",
+                "t",
+                "u"
+              ],
+              "node": {
+                "kind": "Fetch",
+                "serviceName": "Subgraph1",
+                "requires": [
+                  {
+                    "kind": "InlineFragment",
+                    "typeCondition": "U",
+                    "selections": [
+                      {
+                        "kind": "Field",
+                        "name": "__typename"
+                      },
+                      {
+                        "kind": "Field",
+                        "name": "id"
+                      }
+                    ]
+                  }
+                ],
+                "variableUsages": [
+                  "contextualArgument_1_0"
+                ],
+                "operation": "query Query_Null_Param__Subgraph1__1($representations:[_Any!]!$contextualArgument_1_0:String){_entities(representations:$representations){...on U{field(a:$contextualArgument_1_0)}}}",
+                "operationName": "Query_Null_Param__Subgraph1__1",
+                "operationKind": "query",
+                "id": null,
+                "inputRewrites": null,
+                "outputRewrites": null,
+                "contextRewrites": [
+                  {
+                    "kind": "KeyRenamer",
+                    "path": [
+                      "..",
+                      "... on T",
+                      "prop"
+                    ],
+                    "renameKeyTo": "contextualArgument_1_0"
+                  }
+                ],
+                "schemaAwareHash": "010ba25ca76f881bd9f0d5e338f9c07829d4d00e183828b6577d593aea0cf21e",
+                "authorization": {
+                  "is_authenticated": false,
+                  "scopes": [],
+                  "policies": []
+                }
+              }
+            }
+          ]
+        }
+      },
+      "text": "QueryPlan {\n  Sequence {\n    Fetch(service: \"Subgraph1\") {\n      {\n        t {\n          __typename\n          prop\n          id\n          u {\n            __typename\n            id\n          }\n        }\n      }\n    },\n    Flatten(path: \".t.u\") {\n      Fetch(service: \"Subgraph1\") {\n        {\n          ... on U {\n            __typename\n            id\n          }\n        } =>\n        {\n          ... on U {\n            field(a: $contextualArgument_1_0)\n          }\n        }\n      },\n    },\n  },\n}"
+    }
+  }
+}

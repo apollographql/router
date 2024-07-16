@@ -116,7 +116,12 @@ async fn apq_request(
             }
         }
         (Some((apq_hash, _)), _) => {
-            if let Ok(cached_query) = cache.get(&redis_key(&apq_hash)).await.get().await {
+            if let Ok(cached_query) = cache
+                .get(&redis_key(&apq_hash), |_| Ok(()))
+                .await
+                .get()
+                .await
+            {
                 let _ = request.context.insert("persisted_query_hit", true);
                 tracing::trace!("apq: cache hit");
                 request.supergraph_request.body_mut().query = Some(cached_query);
@@ -544,9 +549,11 @@ mod apq_tests {
 
     fn new_context() -> Context {
         let context = Context::new();
-        context.extensions().lock().insert(ClientRequestAccepts {
-            json: true,
-            ..Default::default()
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(ClientRequestAccepts {
+                json: true,
+                ..Default::default()
+            })
         });
 
         context

@@ -8,11 +8,11 @@ use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::EnumValueDefinition;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::InputValueDefinition;
-use apollo_compiler::schema::Name;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::schema::ScalarType;
 use apollo_compiler::schema::Type;
 use apollo_compiler::schema::UnionType;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
@@ -534,7 +534,7 @@ fn ensure_expected_type_kind(
     actual: &TypeDefinitionPosition,
 ) -> Result<(), FederationError> {
     let actual_kind: TypeKind = TypeKind::from(actual);
-    if expected != actual_kind {
+    if expected == actual_kind {
         Ok(())
     } else {
         let actual_type_name = actual.type_name();

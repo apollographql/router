@@ -18,6 +18,7 @@ use super::OperationKind;
 use super::PlanNode;
 use super::Primary;
 use super::QueryPlan;
+use crate::graphql;
 use crate::json_ext::Path;
 use crate::json_ext::PathElement;
 use crate::plugin;
@@ -26,7 +27,6 @@ use crate::query_planner;
 use crate::query_planner::fetch::FetchNode;
 use crate::query_planner::fetch::SubgraphOperation;
 use crate::query_planner::BridgeQueryPlanner;
-use crate::request;
 use crate::services::subgraph_service::MakeSubgraphService;
 use crate::services::supergraph;
 use crate::services::SubgraphResponse;
@@ -82,6 +82,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
         root: serde_json::from_str(test_query_plan!()).unwrap(),
         formatted_query_plan: Default::default(),
         query: Arc::new(Query::empty()),
+        query_metrics: Default::default(),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
             referenced_fields_by_type: Default::default(),
@@ -116,6 +117,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -140,6 +142,7 @@ async fn fetch_includes_operation_name() {
         }
         .into(),
         query: Arc::new(Query::empty()),
+        query_metrics: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -177,6 +180,7 @@ async fn fetch_includes_operation_name() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -198,6 +202,7 @@ async fn fetch_makes_post_requests() {
         }
         .into(),
         query: Arc::new(Query::empty()),
+        query_metrics: Default::default(),
     };
 
     let succeeded: Arc<AtomicBool> = Default::default();
@@ -235,6 +240,7 @@ async fn fetch_makes_post_requests() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -266,6 +272,7 @@ async fn defer() {
                         id: Some("fetch1".into()),
                         input_rewrites: None,
                         output_rewrites: None,
+                        context_rewrites: None,
                         schema_aware_hash: Default::default(),
                         authorization: Default::default(),
                     }))),
@@ -311,17 +318,19 @@ async fn defer() {
                             id: Some("fetch2".into()),
                             input_rewrites: None,
                             output_rewrites: None,
+                            context_rewrites: None,
                             schema_aware_hash: Default::default(),
                             authorization: Default::default(),
                         })),
                     }))),
                 }],
-            },
+            }.into(),
             usage_reporting: UsageReporting {
                 stats_report_key: "this is a test report key".to_string(),
                 referenced_fields_by_type: Default::default(),
             }.into(),
             query: Arc::new(Query::empty()),
+            query_metrics: Default::default()
         };
 
     let mut mock_x_service = plugin::test::MockSubgraphService::new();
@@ -385,6 +394,7 @@ async fn defer() {
             &sf,
             &Default::default(),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -431,7 +441,7 @@ async fn defer_if_condition() {
             .unwrap();
     let schema = planner.schema();
 
-    let root: PlanNode =
+    let root: Arc<PlanNode> =
         serde_json::from_str(include_str!("testdata/defer_clause_plan.json")).unwrap();
 
     let query_plan = QueryPlan {
@@ -451,6 +461,7 @@ async fn defer_if_condition() {
             .unwrap(),
         ),
         formatted_query_plan: None,
+        query_metrics: Default::default(),
     };
 
     let mocked_accounts = MockSubgraph::builder()
@@ -486,13 +497,14 @@ async fn defer_if_condition() {
             &Arc::new(
                 http::Request::builder()
                     .body(
-                        request::Request::fake_builder()
+                        graphql::Request::fake_builder()
                             .variables(json!({ "shouldDefer": true }).as_object().unwrap().clone())
                             .build(),
                     )
                     .unwrap(),
             ),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -515,6 +527,7 @@ async fn defer_if_condition() {
             &service_factory,
             &Default::default(),
             &schema,
+            &Default::default(),
             default_sender,
             None,
             &None,
@@ -539,13 +552,14 @@ async fn defer_if_condition() {
             &Arc::new(
                 http::Request::builder()
                     .body(
-                        request::Request::fake_builder()
+                        graphql::Request::fake_builder()
                             .variables(json!({ "shouldDefer": false }).as_object().unwrap().clone())
                             .build(),
                     )
                     .unwrap(),
             ),
             &schema,
+            &Default::default(),
             sender,
             None,
             &None,
@@ -629,6 +643,7 @@ async fn dependent_mutations() {
         }
         .into(),
         query: Arc::new(Query::empty()),
+        query_metrics: Default::default(),
     };
 
     let mut mock_a_service = plugin::test::MockSubgraphService::new();
@@ -667,6 +682,7 @@ async fn dependent_mutations() {
             &sf,
             &Default::default(),
             &Arc::new(Schema::parse_test(schema, &Default::default()).unwrap()),
+            &Default::default(),
             sender,
             None,
             &None,
@@ -1799,9 +1815,11 @@ fn broken_plan_does_not_panic() {
             id: Some("fetch1".into()),
             input_rewrites: None,
             output_rewrites: None,
+            context_rewrites: None,
             schema_aware_hash: Default::default(),
             authorization: Default::default(),
-        }),
+        })
+        .into(),
         formatted_query_plan: Default::default(),
         usage_reporting: UsageReporting {
             stats_report_key: "this is a test report key".to_string(),
@@ -1809,11 +1827,13 @@ fn broken_plan_does_not_panic() {
         }
         .into(),
         query: Arc::new(Query::empty()),
+        query_metrics: Default::default(),
     };
     let subgraph_schema = apollo_compiler::Schema::parse_and_validate(subgraph_schema, "").unwrap();
     let mut subgraph_schemas = HashMap::new();
     subgraph_schemas.insert("X".to_owned(), Arc::new(subgraph_schema));
-    let result = plan.root.hash_subqueries(&subgraph_schemas, "");
+    let result = Arc::make_mut(&mut plan.root)
+        .init_parsed_operations_and_hash_subqueries(&subgraph_schemas, "");
     assert_eq!(
         result.unwrap_err().to_string(),
         r#"[1:3] Cannot query field "invalid" on type "Query"."#

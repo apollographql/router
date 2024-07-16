@@ -9,7 +9,7 @@ use tower::ServiceExt;
 #[tokio::test(flavor = "multi_thread")]
 async fn all_rhai_callbacks_are_invoked() {
     let env_filter = "apollo_router=info";
-    let mock_writer = tracing_test::internal::MockWriter::new(&tracing_test::internal::GLOBAL_BUF);
+    let mock_writer = tracing_test::internal::MockWriter::new(tracing_test::internal::global_buf());
     let subscriber = tracing_test::internal::get_subscriber(mock_writer, env_filter);
 
     let _guard = tracing::dispatcher::set_default(&subscriber);

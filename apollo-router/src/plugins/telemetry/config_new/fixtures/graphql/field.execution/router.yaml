@@ -1,0 +1,5 @@
+telemetry:
+  instrumentation:
+    instruments:
+      graphql:
+        field.execution: true

@@ -19,16 +19,17 @@ use serde_json::Value;
 use tower::BoxError;
 use tower::ServiceExt;
 
+use crate::integration::common::graph_os_enabled;
 use crate::integration::IntegrationTest;
 
 #[tokio::test(flavor = "multi_thread")]
-async fn query_planner() -> Result<(), BoxError> {
+async fn query_planner_cache() -> Result<(), BoxError> {
     // If this test fails and the cache key format changed you'll need to update the key here.
     // 1. Force this test to run locally by removing the cfg() line at the top of this file.
     // 2. run `docker compose up -d` and connect to the redis container by running `docker-compose exec redis /bin/bash`.
     // 3. Run the `redis-cli` command from the shell and start the redis `monitor` command.
     // 4. Run this test and yank the updated cache key from the redis logs.
-    let known_cache_key = "plan:0:v2.7.5:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:9c26cb1f820a78848ba3d5d3295c16aa971368c5295422fd33cc19d4a6006a9c";
+    let known_cache_key = "plan:0:v2.8.1:16385ebef77959fcdc520ad507eb1f7f7df28f1d54a0569e3adabcb4cd00d7ce:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:3106dfc3339d8c3f3020434024bff0f566a8be5995199954db5a7525a7d7e67a";
 
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
     let client = RedisClient::new(config, None, None, None);
@@ -367,19 +368,24 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -410,7 +416,7 @@ async fn entity_cache() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -472,19 +478,24 @@ async fn entity_cache() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -670,19 +681,24 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
         .with_subgraph_network_requests()
         .configuration_json(json!({
             "preview_entity_cache": {
+                "enabled": true,
                 "redis": {
                     "urls": ["redis://127.0.0.1:6379"],
                     "ttl": "2s"
                 },
-                "enabled": false,
-                "subgraphs": {
-                    "products": {
-                        "enabled": true,
-                        "ttl": "60s"
+                "subgraph": {
+                    "all": {
+                        "enabled": false,
                     },
-                    "reviews": {
-                        "enabled": true,
-                        "ttl": "10s"
+                    "subgraphs": {
+                        "products": {
+                            "enabled": true,
+                            "ttl": "60s"
+                        },
+                        "reviews": {
+                            "enabled": true,
+                            "ttl": "10s"
+                        }
                     }
                 }
             },
@@ -727,7 +743,7 @@ async fn entity_cache_authorization() -> Result<(), BoxError> {
     insta::assert_json_snapshot!(response);
 
     let s:String = client
-          .get("subgraph:products:Query:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
+          .get("subgraph:products:type:Query:hash:0df945dc1bc08f7fc02e8905b4c72aa9112f29bb7a214e4a38d199f0aa635b48:data:d9d84a3c7ffc27b0190a671212f3740e5b8478e84e23825830e97822e25cf05c")
           .await
           .unwrap();
     let v: Value = serde_json::from_str(&s).unwrap();
@@ -902,7 +918,7 @@ async fn connection_failure_blocks_startup() {
 async fn query_planner_redis_update_query_fragments() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_query_fragments.router.yaml"),
-        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:ae8b525534cb7446a34715fc80edd41d4d29aa65c5f39f9237d4ed8459e3fe82",
+        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:9054d19854e1d9e282ac7645c612bc70b8a7143d43b73d44dade4a5ec43938b4",
     )
     .await;
 }
@@ -921,7 +937,7 @@ async fn query_planner_redis_update_planner_mode() {
 async fn query_planner_redis_update_introspection() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_introspection.router.yaml"),
-        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c",
+        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:04b3051125b5994fba6b0a22b2d8b4246cadc145be030c491a3431655d2ba07a",
     )
     .await;
 }
@@ -930,7 +946,7 @@ async fn query_planner_redis_update_introspection() {
 async fn query_planner_redis_update_defer() {
     test_redis_query_plan_config_update(
         include_str!("fixtures/query_planner_redis_config_update_defer.router.yaml"),
-        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:8a17c5b196af5e3a18d24596424e9849d198f456dd48297b852a5f2ca847169b",
+        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:3b7241b0db2cd878b79c0810121953ba544543f3cb2692aaf1a59184470747b0",
     )
     .await;
 }
@@ -941,7 +957,7 @@ async fn query_planner_redis_update_type_conditional_fetching() {
         include_str!(
             "fixtures/query_planner_redis_config_update_type_conditional_fetching.router.yaml"
         ),
-        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:275f78612ed3d45cdf6bf328ef83e368b5a44393bd8c944d4a7d694aed61f017",
+        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:0ca695a8c4c448b65fa04229c663f44150af53b184ebdcbb0ad6862290efed76",
     )
     .await;
 }
@@ -952,12 +968,15 @@ async fn query_planner_redis_update_reuse_query_fragments() {
         include_str!(
             "fixtures/query_planner_redis_config_update_reuse_query_fragments.router.yaml"
         ),
-        "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:15fbb62c94e8da6ea78f28a6eb86a615dcaf27ff6fd0748fac4eb614b0b17662",
+        "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:f7c04319556397ec4b550aa5aaa96c73689cee09026b661b6a9fc20b49e6fa77",
     )
     .await;
 }
 
 async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key: &str) {
+    if !graph_os_enabled() {
+        return;
+    }
     // This test shows that the redis key changes when the query planner config changes.
     // The test starts a router with a specific config, executes a query, and checks the redis cache key.
     // Then it updates the config, executes the query again, and checks the redis cache key.
@@ -972,7 +991,7 @@ async fn test_redis_query_plan_config_update(updated_config: &str, new_cache_key
     router.assert_started().await;
     router.clear_redis_cache().await;
 
-    let starting_key = "plan:0:v2.7.5:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:1910d63916aae7a1066cb8c7d622fc3a8e363ed1b6ac8e214deed4046abae85c";
+    let starting_key = "plan:0:v2.8.1:a9e605fa09adc5a4b824e690b4de6f160d47d84ede5956b58a7d300cca1f7204:3973e022e93220f9212c18d0d0c543ae7c309e46640da93a4a0314de999f5112:4a5827854a6d2efc85045f0d5bede402e15958390f1073d2e77df56188338e5a";
     router.execute_default_query().await;
     router.assert_redis_cache_contains(starting_key, None).await;
     router.update_config(updated_config).await;

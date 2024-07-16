@@ -59,8 +59,6 @@ use crate::http_server_factory::HttpServerFactory;
 use crate::http_server_factory::HttpServerHandle;
 use crate::http_server_factory::Listener;
 use crate::plugins::telemetry::SpanMode;
-use crate::plugins::traffic_shaping::Elapsed;
-use crate::plugins::traffic_shaping::RateLimited;
 use crate::router::ApolloRouterError;
 use crate::router_factory::Endpoint;
 use crate::router_factory::RouterFactory;
@@ -663,24 +661,7 @@ async fn handle_graphql(
     );
 
     match res {
-        Err(err) => {
-            if let Some(source_err) = err.source() {
-                if source_err.is::<RateLimited>() {
-                    return RateLimited::new().into_response();
-                }
-                if source_err.is::<Elapsed>() {
-                    return Elapsed::new().into_response();
-                }
-            }
-            if err.is::<RateLimited>() {
-                return RateLimited::new().into_response();
-            }
-            if err.is::<Elapsed>() {
-                return Elapsed::new().into_response();
-            }
-
-            internal_server_error(err)
-        }
+        Err(err) => internal_server_error(err),
         Ok(response) => {
             let (mut parts, body) = response.response.into_parts();
 
@@ -695,7 +676,7 @@ async fn handle_graphql(
                         CONTENT_ENCODING,
                         HeaderValue::from_static(compressor.content_encoding()),
                     );
-                    Body::wrap_stream(compressor.process(body))
+                    Body::wrap_stream(compressor.process(body.into()))
                 }
             };
 
@@ -754,7 +735,9 @@ impl<'a> Drop for CancelHandler<'a> {
                 self.span
                     .in_scope(|| tracing::error!("broken pipe: the client closed the connection"));
             }
-            self.context.extensions().lock().insert(CanceledRequest);
+            self.context
+                .extensions()
+                .with_lock(|mut lock| lock.insert(CanceledRequest));
         }
     }
 }
@@ -799,7 +782,10 @@ mod tests {
         assert_eq!(mode, SpanMode::Deprecated);
     }
 
-    #[tokio::test]
+    // Perform a short wait, (100ns) which is intended to complete before the http router call. If
+    // it does complete first, then the http router call will be cancelled and we'll see an error
+    // log in our assert.
+    #[tokio::test(flavor = "multi_thread")]
     async fn request_cancel_log() {
         let mut http_router = crate::TestHarness::builder()
             .configuration_yaml(include_str!("testdata/log_on_broken_pipe.router.yaml"))
@@ -811,7 +797,7 @@ mod tests {
 
         async {
             let _res = tokio::time::timeout(
-                std::time::Duration::from_micros(100),
+                std::time::Duration::from_nanos(100),
                 http_router.call(
                     http::Request::builder()
                         .method("POST")
@@ -823,15 +809,17 @@ mod tests {
                 ),
             )
             .await;
-
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
         .with_subscriber(assert_snapshot_subscriber!(
             tracing_core::LevelFilter::ERROR
         ))
         .await
     }
-    #[tokio::test]
+
+    // Perform a short wait, (100ns) which is intended to complete before the http router call. If
+    // it does complete first, then the http router call will be cancelled and we'll not see an
+    // error log in our assert.
+    #[tokio::test(flavor = "multi_thread")]
     async fn request_cancel_no_log() {
         let mut http_router = crate::TestHarness::builder()
             .configuration_yaml(include_str!("testdata/no_log_on_broken_pipe.router.yaml"))
@@ -843,7 +831,7 @@ mod tests {
 
         async {
             let _res = tokio::time::timeout(
-                std::time::Duration::from_micros(100),
+                std::time::Duration::from_nanos(100),
                 http_router.call(
                     http::Request::builder()
                         .method("POST")
@@ -855,8 +843,6 @@ mod tests {
                 ),
             )
             .await;
-
-            tokio::time::sleep(std::time::Duration::from_millis(1000)).await;
         }
         .with_subscriber(assert_snapshot_subscriber!(
             tracing_core::LevelFilter::ERROR

@@ -2,6 +2,7 @@ use opentelemetry::baggage::BaggageExt;
 use opentelemetry::trace::TraceContextExt;
 use opentelemetry::trace::TraceId;
 use opentelemetry::KeyValue;
+use opentelemetry_api::Value;
 use paste::paste;
 use tower::BoxError;
 use tracing::Span;
@@ -16,11 +17,13 @@ use crate::Context;
 pub(crate) mod attributes;
 pub(crate) mod conditions;
 
+pub(crate) mod cache;
 mod conditional;
-mod cost;
+pub(crate) mod cost;
 pub(crate) mod events;
 mod experimental_when_header;
 pub(crate) mod extendable;
+pub(crate) mod graphql;
 pub(crate) mod instruments;
 pub(crate) mod logging;
 pub(crate) mod selectors;
@@ -36,7 +39,16 @@ pub(crate) trait Selectors {
     fn on_response_event(&self, _response: &Self::EventResponse, _ctx: &Context) -> Vec<KeyValue> {
         Vec::with_capacity(0)
     }
-    fn on_error(&self, error: &BoxError) -> Vec<KeyValue>;
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Vec<KeyValue>;
+    fn on_response_field(
+        &self,
+        _attrs: &mut Vec<KeyValue>,
+        _ty: &apollo_compiler::executable::NamedType,
+        _field: &apollo_compiler::executable::Field,
+        _value: &serde_json_bytes::Value,
+        _ctx: &Context,
+    ) {
+    }
 }
 
 pub(crate) trait Selector {
@@ -53,7 +65,20 @@ pub(crate) trait Selector {
     ) -> Option<opentelemetry::Value> {
         None
     }
-    fn on_error(&self, error: &BoxError) -> Option<opentelemetry::Value>;
+    fn on_error(&self, error: &BoxError, ctx: &Context) -> Option<opentelemetry::Value>;
+    fn on_response_field(
+        &self,
+        _ty: &apollo_compiler::executable::NamedType,
+        _field: &apollo_compiler::executable::Field,
+        _value: &serde_json_bytes::Value,
+        _ctx: &Context,
+    ) -> Option<opentelemetry::Value> {
+        None
+    }
+
+    fn on_drop(&self) -> Option<Value> {
+        None
+    }
 }
 
 pub(crate) trait DefaultForLevel {
@@ -98,7 +123,7 @@ pub(crate) fn trace_id() -> Option<TraceId> {
     if span_context.is_valid() {
         Some(span_context.trace_id())
     } else {
-        None
+        crate::tracer::TraceId::current().map(|trace_id| TraceId::from(trace_id.to_u128()))
     }
 }
 
@@ -186,6 +211,13 @@ impl From<opentelemetry::Value> for AttributeValue {
 
 #[cfg(test)]
 mod test {
+    use std::sync::OnceLock;
+
+    use apollo_compiler::ast::FieldDefinition;
+    use apollo_compiler::ast::NamedType;
+    use apollo_compiler::executable::Field;
+    use apollo_compiler::name;
+    use apollo_compiler::Node;
     use opentelemetry::trace::SpanContext;
     use opentelemetry::trace::SpanId;
     use opentelemetry::trace::TraceContextExt;
@@ -203,6 +235,25 @@ mod test {
     use crate::plugins::telemetry::config_new::ToOtelValue;
     use crate::plugins::telemetry::otel;
 
+    pub(crate) fn field() -> &'static Field {
+        static FIELD: OnceLock<Field> = OnceLock::new();
+        FIELD.get_or_init(|| {
+            Field::new(
+                name!("field_name"),
+                Node::new(FieldDefinition {
+                    description: None,
+                    name: name!("field_name"),
+                    arguments: vec![],
+                    ty: apollo_compiler::ty!(field_type),
+                    directives: Default::default(),
+                }),
+            )
+        })
+    }
+    pub(crate) fn ty() -> NamedType {
+        name!("type_name")
+    }
+
     #[test]
     fn dd_convert() {
         let trace_id = TraceId::from_hex("234e10d9e749a0a19e94ac0e4a896aee").unwrap();
@@ -216,7 +267,7 @@ mod test {
         let subscriber = tracing_subscriber::registry().with(otel::layer());
         tracing::subscriber::with_default(subscriber, || {
             let span_context = SpanContext::new(
-                TraceId::from_u128(42),
+                TraceId::from(42),
                 SpanId::from_u64(42),
                 TraceFlags::default(),
                 false,

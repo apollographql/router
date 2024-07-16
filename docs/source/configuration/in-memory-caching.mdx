@@ -1,5 +1,7 @@
 ---
-title: In-memory caching in the Apollo Router
+title: In-Memory Caching in the Apollo Router
+subtitle: Configure caching for query plans and automatic persisted queries
+description: Configure the Apollo Router's in-memory caching for improved performance. Configure query plans and automatic persisted queries caching.
 ---
 
 The Apollo Router uses an in-memory LRU cache to store the following data:
@@ -17,6 +19,7 @@ If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _di
 </Tip>
 
 ## Performance improvements vs stability
+
 The Router is a highly scalable and low-latency runtime. Even with all caching **disabled**, the time to process operations and query plans will be very minimal (nanoseconds to milliseconds) when compared to the overall supergraph request, except in the edge cases of extremely large operations and supergraphs. Caching offers stability to those running a large graph so that your overhead for given operations stays consistent, not that it dramatically improves. If you would like to validate the performance wins of operation caching, check out the [traces and metrics in the Router](/router/configuration/telemetry/instrumentation/standard-instruments#performance) to take measurements before and after. In extremely large edge cases though, we have seen the cache save 2-10x time to create the query plan, which is still a small part of the overall request.
 
 ## Caching query plans

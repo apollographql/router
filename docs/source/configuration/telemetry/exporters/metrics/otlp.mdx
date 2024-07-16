@@ -1,7 +1,7 @@
 ---
 title: OpenTelemetry Protocol (OTLP) exporter
 subtitle: Configure the OpenTelemetry Protocol (OTLP) exporter for metrics
-description: Configure the OpenTelemetry Protocol (OTLP) exporter for metrics in the Apollo Router
+description: Configure the OpenTelemetry Protocol (OTLP) exporter for metrics in the Apollo Router.
 ---
 import BatchProcessorPreamble from '../../../../../shared/batch-processor-preamble.mdx';
 import BatchProcessorRef from '../../../../../shared/batch-processor-ref.mdx';
@@ -152,4 +152,4 @@ telemetry:
 | `endpoint`      |                        | `http://127.0.0.1:4317` for gRPC and `http://127.0.0.1:4318` for HTTP | The endpoint to send spans to.                                         |
 | `grpc`          |                        |                                                                       | Configuration specific to gRPC protocol.                               |
 | `http`          |                        |                                                                       | Configuration specific to HTTP protocol.                               |
-| `temporarility` | `delta`\|`cumulative`  |                                                                       | See the documentation for your APM to see what this should be set to.  |
+| `temporality`   | `delta`\|`cumulative`  |                                                                       | See the documentation for your APM to see what this should be set to.  |

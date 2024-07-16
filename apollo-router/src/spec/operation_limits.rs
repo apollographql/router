@@ -3,12 +3,13 @@ use std::collections::HashSet;
 
 use apollo_compiler::executable;
 use apollo_compiler::ExecutableDocument;
+use apollo_compiler::Name;
 use serde::Deserialize;
 use serde::Serialize;
 
 use crate::Configuration;
 
-#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, Serialize, Deserialize)]
 pub(crate) struct OperationLimits<T> {
     pub(crate) depth: T,
     pub(crate) height: T,
@@ -56,6 +57,7 @@ impl OperationLimits<bool> {
 
 /// Returns which limits are exceeded by the given query, if any
 pub(crate) fn check(
+    query_metrics_in: &mut OperationLimits<u32>,
     configuration: &Configuration,
     query: &str,
     document: &ExecutableDocument,
@@ -68,11 +70,6 @@ pub(crate) fn check(
         root_fields: config_limits.max_root_fields,
         aliases: config_limits.max_aliases,
     };
-    if !max.map(|limit| limit.is_some()).any() {
-        // No configured limit
-        return Ok(());
-    }
-
     let Ok(operation) = document.get_operation(operation_name) else {
         // Undefined or ambiguous operation name.
         // The request is invalid and will be rejected by some other part of the router,
@@ -82,6 +79,16 @@ pub(crate) fn check(
 
     let mut fragment_cache = HashMap::new();
     let measured = count(document, &mut fragment_cache, &operation.selection_set);
+
+    // Keep a record of the measurements
+    *query_metrics_in = measured;
+
+    // If we don't have a configured limit, we can just return Ok
+    if !max.map(|limit| limit.is_some()).any() {
+        // No configured limit
+        return Ok(());
+    }
+
     let exceeded = max.combine(measured, |_, config, measured| {
         if let Some(limit) = config {
             measured > limit
@@ -118,7 +125,7 @@ enum Computation<T> {
 /// Recursively measure the given selection set against each limit
 fn count<'a>(
     document: &'a executable::ExecutableDocument,
-    fragment_cache: &mut HashMap<&'a executable::Name, Computation<OperationLimits<u32>>>,
+    fragment_cache: &mut HashMap<&'a Name, Computation<OperationLimits<u32>>>,
     selection_set: &'a executable::SelectionSet,
 ) -> OperationLimits<u32> {
     let mut counts = OperationLimits {

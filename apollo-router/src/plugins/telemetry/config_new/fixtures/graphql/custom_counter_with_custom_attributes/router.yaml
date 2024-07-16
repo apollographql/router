@@ -1,0 +1,16 @@
+telemetry:
+  instrumentation:
+    instruments:
+      graphql:
+        "custom_counter":
+          description: "count of requests"
+          type: counter
+          unit: "unit"
+          value: unit
+          attributes:
+            graphql.field.name: true
+            graphql.field.type: true
+            graphql.type.name: true
+            "custom_attribute":
+              field_name: string
+

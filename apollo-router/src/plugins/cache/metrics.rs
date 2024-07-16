@@ -17,6 +17,8 @@ use super::entity::REPRESENTATIONS;
 use crate::services::subgraph;
 use crate::spec::TYPENAME;
 
+pub(crate) const CACHE_INFO_SUBGRAPH_CONTEXT_KEY: &str =
+    "apollo::router::entity_cache_info_subgraph";
 pub(crate) struct CacheMetricsService(Option<InnerCacheMetricsService>);
 
 impl CacheMetricsService {
@@ -72,16 +74,11 @@ impl InnerCacheMetricsService {
         mut request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
         let cache_attributes = Self::get_cache_attributes(&mut request);
-        println!(
-            "inner metrics cache attributes in root req for {}: {:?}",
-            self.name, cache_attributes
-        );
 
         let response = self.service.call(request).await?;
 
         if let Some(cache_attributes) = cache_attributes {
             if let Some(counter) = &self.counter {
-                println!("inner metrics cache {}: will update metrics", self.name,);
                 Self::update_cache_metrics(&self.name, counter, &response, cache_attributes)
             }
         }
@@ -135,7 +132,6 @@ impl InnerCacheMetricsService {
         } else {
             Arc::new(hash_vary_headers(&cache_attributes.headers))
         };
-        println!("will update cache counter");
 
         CacheCounter::record(
             counter,
@@ -272,5 +268,19 @@ impl CacheCounter {
         self.secondary = secondary;
 
         self.created_at = Instant::now();
+    }
+}
+
+pub(crate) struct CacheMetricContextKey(String);
+
+impl CacheMetricContextKey {
+    pub(crate) fn new(subgraph_name: String) -> Self {
+        Self(subgraph_name)
+    }
+}
+
+impl From<CacheMetricContextKey> for String {
+    fn from(val: CacheMetricContextKey) -> Self {
+        format!("{CACHE_INFO_SUBGRAPH_CONTEXT_KEY}_{}", val.0)
     }
 }

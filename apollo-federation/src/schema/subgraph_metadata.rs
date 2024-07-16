@@ -6,8 +6,8 @@ use crate::error::FederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionSet;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
 use crate::schema::field_set::add_interface_field_implementations;
 use crate::schema::field_set::collect_target_fields_from_field_set;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -281,7 +281,7 @@ impl ExternalMetadata {
     ) -> Result<bool, FederationError> {
         for selection in selection_set.selections.values() {
             if let Selection::Field(field_selection) = selection {
-                if self.is_external(&field_selection.field.data().field_position)? {
+                if self.is_external(&field_selection.field.field_position)? {
                     return Ok(true);
                 }
             }

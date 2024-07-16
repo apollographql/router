@@ -1,6 +1,7 @@
 ---
-title: Rhai script API reference
-description: For Apollo Router customizations
+title: Rhai Script API Reference
+subtitle: For Apollo Router customizations
+description: This reference documents the symbols and behaviors that are specific to Rhai customizations for the Apollo Router. Includes entry point hooks, logging, and more.
 ---
 
 This reference documents the symbols and behaviors that are specific to [Rhai customizations](./rhai/) for the Apollo Router.
@@ -137,7 +138,7 @@ fn process_response(response) {
 }
 
 fn supergraph_service(service) {
-    const response_callback = Fn("process_request");
+    const response_callback = Fn("process_response");
     service.map_response(response_callback);
 }
 ```
@@ -242,24 +243,6 @@ You don't need to import the "base64" module. It is imported in the router.
 
 </Note>
 
-## sha256 hash strings
-
-Your Rhai customization can use the function `sha256::digest()` to hash strings using the SHA256 hashing algorithm.
-
-```rhai
-fn supergraph_service(service){
-    service.map_request(|request|{
-        let sha = sha256::digest("hello world");
-        log_info(sha);
-    });
-}
-```
-<Note>
-
-You don't need to import the "sha256" module. It is imported in the router.
-
-</Note>
-
 ### Different alphabets
 
 Base64 supports multiple alphabets to encode data, depending on the supported characters where it is used. The router supports the following alphabets:
@@ -287,6 +270,24 @@ fn supergraph_service(service) {
 }
 ```
 
+## sha256 hash strings
+
+Your Rhai customization can use the function `sha256::digest()` to hash strings using the SHA256 hashing algorithm.
+
+```rhai
+fn supergraph_service(service){
+    service.map_request(|request|{
+        let sha = sha256::digest("hello world");
+        log_info(sha);
+    });
+}
+```
+<Note>
+
+You don't need to import the "sha256" module. It is imported in the router.
+
+</Note>
+
 ## Headers with multiple values
 
 The simple get/set api for dealing with single value headers is sufficient for most use cases. If you wish to set multiple values on a key then you should do this by supplying an array of values.
@@ -302,6 +303,16 @@ Your Rhai customization can use the function `unix_now()` to obtain the current 
 ```rhai
 fn supergraph_service(service) {
     let now = unix_now();
+}
+```
+
+## Unix timestamp (in milliseconds)
+
+Your Rhai customization can use the function `unix_ms_now()` to obtain the current Unix timestamp in milliseconds since the Unix epoch. 
+
+```rhai
+fn supergraph_service(service) {
+    let now = unix_ms_now();
 }
 ```
 
@@ -336,6 +347,19 @@ fn router_service(service) {
 * `get()` may fail, so it's best to handle exceptions when using it.
 
 </Note>
+
+## Available constants
+
+The router provides constants for your Rhai scripts that mostly help you fetch data from the context.
+
+```
+Router.APOLLO_SDL // Context key to access the SDL
+Router.APOLLO_START // Constant to calculate durations
+Router.APOLLO_AUTHENTICATION_JWT_CLAIMS // Context key to access authentication jwt claims
+Router.APOLLO_SUBSCRIPTION_WS_CUSTOM_CONNECTION_PARAMS // Context key to modify or access the custom connection params when using subscriptions in WebSocket to subgraphs (cf subscription docs)
+Router.APOLLO_ENTITY_CACHE_KEY // Context key to access the entity cache key
+Router.APOLLO_OPERATION_ID // Context key to get the value of apollo operation id (studio trace id) from the context
+```
 
 ## `Request` interface
 
@@ -560,7 +584,7 @@ The following fields are identical in behavior to their `request` counterparts:
 
 ### `response.is_primary()`
 
-Be particularly careful when interacting with headers in a response context. For router_service(), supergraph_service() and execution_service(), response headers only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the headers in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
+Be particularly careful when interacting with `headers` or `status_code` in a response context. For `router_service()`, `supergraph_service()` and `execution_service()`, response `headers` and `status_code` only exist for the first response in a deferred response stream. You can handle this by making use of the `is_primary()` function which will return true if a response is the first (or primary) response. If you do try to access the `headers` or `status_code` in a non-primary response, then you'll raise an exception which can be handled like any other rhai exception, but is not so convenient as using the `is_primary()` method.
 
 ```rhai
     if response.is_primary() {
@@ -645,3 +669,7 @@ if response.status_code == status_code_from_int(200) {
     print(`ok`);
 }
 ```
+
+<Note>
+The `response.status_code` object is available _only_ for `map_response` callbacks registered in `router_service` or `subgraph_service`.
+</Note>

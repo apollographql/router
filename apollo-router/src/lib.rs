@@ -70,8 +70,6 @@ mod orbiter;
 mod plugins;
 pub(crate) mod protocols;
 mod query_planner;
-mod request;
-mod response;
 mod router;
 mod router_factory;
 pub mod services;
@@ -97,6 +95,7 @@ pub use crate::router::RouterHttpServer;
 pub use crate::router::SchemaSource;
 pub use crate::router::ShutdownSource;
 pub use crate::router_factory::Endpoint;
+pub use crate::test_harness::make_fake_batch;
 pub use crate::test_harness::MockedSubgraphs;
 pub use crate::test_harness::TestHarness;
 pub use crate::uplink::UplinkConfig;
@@ -112,6 +111,9 @@ pub mod _private {
 
     pub use crate::plugin::PluginFactory;
     pub use crate::plugin::PLUGINS;
+    // For comparison/fuzzing
+    pub use crate::query_planner::bridge_query_planner::QueryPlanResult;
+    pub use crate::query_planner::dual_query_planner::plan_matches;
     // For tests
     pub use crate::router_factory::create_test_service_factory_from_yaml;
 }

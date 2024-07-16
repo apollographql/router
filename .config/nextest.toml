@@ -1,3 +1,92 @@
+[[profile.default.overrides]]
+# These are known flaky tests according to the test flakiness report provided
+# in CircleCI insights, based on the `dev` branch:
+#
+# https://app.circleci.com/insights/github/apollographql/router/workflows/ci_checks/tests
+#
+# We will retry these tests up to 2 additional times. Retry counts are recorded.
+# Items on this list should be prioritized to get improved and removed from this
+# list at the time they are fixed.
+#
+# Frankly, it may be best to just retry all tests in the apollo-router::integration_tests
+# module, as they have a high failure rate, in general.
+retries = 2
+filter = '''
+   ( binary_id(=apollo-router) & test(=axum_factory::axum_http_server_factory::tests::request_cancel_log) )
+or ( binary_id(=apollo-router) & test(=axum_factory::axum_http_server_factory::tests::request_cancel_no_log) )
+or ( binary_id(=apollo-router) & test(=notification::tests::it_test_ttl) )
+or ( binary_id(=apollo-router) & test(=plugins::telemetry::metrics::apollo::test::apollo_metrics_enabled) )
+or ( binary_id(=apollo-router) & test(=plugins::telemetry::tests::it_test_prometheus_metrics) )
+or ( binary_id(=apollo-router) & test(=services::subgraph_service::tests::test_subgraph_service_websocket_with_error) )
+or ( binary_id(=apollo-router) & test(=uplink::license_stream::test::license_expander_claim_pause_claim) )
+or ( binary_id(=apollo-router) & test(=uplink::persisted_queries_manifest_stream::test::integration_test) )
+or ( binary_id(=apollo-router-benchmarks) & test(=tests::test) )
+or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_batch_send_header) )
+or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_batch_trace_id) )
+or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_condition_if) )
+or ( binary_id(=apollo-router::apollo_otel_traces) & test(=test_trace_id) )
+or ( binary_id(=apollo-router::apollo_reports) & test(=non_defer) )
+or ( binary_id(=apollo-router::apollo_reports) & test(=test_batch_stats) )
+or ( binary_id(=apollo-router::apollo_reports) & test(=test_client_name) )
+or ( binary_id(=apollo-router::apollo_reports) & test(=test_client_version) )
+or ( binary_id(=apollo-router::apollo_reports) & test(=test_condition_if) )
+or ( binary_id(=apollo-router::apollo_reports) & test(=test_send_header) )
+or ( binary_id(=apollo-router::apollo_reports) & test(=test_trace_id) )
+or ( binary_id(=apollo-router::integration_tests) & test(=api_schema_hides_field) )
+or ( binary_id(=apollo-router::integration_tests) & test(=automated_persisted_queries) )
+or ( binary_id(=apollo-router::integration_tests) & test(=defer_default_variable) )
+or ( binary_id(=apollo-router::integration_tests) & test(=defer_path) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_batches_with_errors_in_multi_graph) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_batches_with_errors_in_single_graph) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_handles_cancelled_by_coprocessor) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_handles_cancelled_by_rhai) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_handles_indefinite_timeouts) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_handles_short_timeouts) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_handles_single_invalid_graphql) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_handles_single_request_cancelled_by_coprocessor) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_handles_single_request_cancelled_by_rhai) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_supports_multi_subgraph_batching) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::batching::it_supports_single_subgraph_batching) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::coprocessor::test_error_not_propagated_to_client) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_incompatible_query_order) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_invalid_file_order) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_invalid_multipart_order) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_upload_without_file) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_with_file_count_limits) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_with_file_size_limit) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_fails_with_no_boundary_in_multipart) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::file_upload::it_uploads_to_multiple_subgraphs) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_graceful_shutdown) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_happy) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_reload_config_valid) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_reload_config_with_broken_plugin) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::lifecycle::test_reload_config_with_broken_plugin_recovery) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::apq) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::connection_failure_blocks_startup) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::entity_cache) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_defer) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_query_fragments) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::query_planner_redis_update_reuse_query_fragments) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::redis::test::connection_failure_blocks_startup) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::jaeger::test_decimal_trace_id) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_json) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_json_sampler_off) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::logging::test_text_sampler_off) )
+or ( binary_id(=apollo-router::integration_tests) & test(=integration::telemetry::metrics::test_subgraph_auth_metrics) )
+or ( binary_id(=apollo-router::samples) & test(=/enterprise/entity-cache/invalidation) )
+or ( binary_id(=apollo-router::samples) & test(=/enterprise/entity-cache/invalidation-subgraph) )
+or ( binary_id(=apollo-router::samples) & test(=/enterprise/entity-cache/invalidation-subgraph-type) )
+or ( binary_id(=apollo-router::samples) & test(=/enterprise/query-planning-redis) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context_dependent_fetch_failure) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context_list) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context_list_of_lists) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context_no_typenames) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context_type_mismatch) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context_union) )
+or ( binary_id(=apollo-router::set_context) & test(=test_set_context_unrelated_fetch_failure) )
+'''
+
 [profile.ci]
 # Print out output for failing tests as soon as they fail, and also at the end
 # of the run (for easy scrollability).
@@ -19,6 +108,6 @@ path = "junit.xml"
 # Integration tests require more than one thread. The default setting of 1 will cause too many integration tests to run
 # at the same time and causes tests to fail where timing is involved.
 # This filter applies only to to the integration tests in the apollo-router package.
-[[profile.default.overrides]]
-filter = 'package(apollo-router) & kind(test)'
-threads-required = 2
+[[profile.ci.overrides]]
+filter = 'test(/^apollo-router::/)'
+threads-required = 4

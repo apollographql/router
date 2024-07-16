@@ -112,7 +112,6 @@ fn it_works_with_nested_provides() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")] // TODO: fix bug FED-230
 fn it_works_on_interfaces() {
     let planner = planner!(
         Subgraph1: r#"
@@ -247,8 +246,6 @@ fn it_works_on_interfaces() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_works_on_unions() {
     let planner = planner!(
         Subgraph1: r#"
@@ -302,49 +299,49 @@ fn it_works_on_unions() {
         // This is our sanity check: we first query _without_ the provides
         // to make sure we _do_ need to go the the second subgraph.
         @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "Subgraph1") {
-              {
-                noProvides {
-                  __typename
-                  ... on T1 {
-                    __typename
-                    id
-                  }
-                  ... on T2 {
-                    __typename
-                    id
-                    a
-                  }
-                }
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            noProvides {
+              __typename
+              ... on T1 {
+                __typename
+                id
               }
-            },
-            Flatten(path: "noProvides") {
-              Fetch(service: "Subgraph2") {
-                {
-                  ... on T1 {
-                    __typename
-                    id
-                  }
-                  ... on T2 {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on T1 {
-                    a
-                  }
-                  ... on T2 {
-                    b
-                  }
-                }
-              },
-            },
+              ... on T2 {
+                __typename
+                id
+                a
+              }
+            }
+          }
+        },
+        Flatten(path: "noProvides") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T1 {
+                __typename
+                id
+              }
+              ... on T2 {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T1 {
+                a
+              }
+              ... on T2 {
+                b
+              }
+            }
           },
-        }
-        "###
+        },
+      },
+    }
+    "###
     );
 
     // Ensuring that querying only `a` can be done with subgraph1 only when provided.
@@ -363,22 +360,22 @@ fn it_works_on_unions() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Fetch(service: "Subgraph1") {
-            {
-              withProvidesForT1 {
-                __typename
-                ... on T1 {
-                  a
-                }
-                ... on T2 {
-                  a
-                }
-              }
+    QueryPlan {
+      Fetch(service: "Subgraph1") {
+        {
+          withProvidesForT1 {
+            __typename
+            ... on T1 {
+              a
             }
-          },
+            ... on T2 {
+              a
+            }
+          }
         }
-        "###
+      },
+    }
+    "###
     );
 
     // But ensure that querying `b` still goes to subgraph2 if only a is provided.
@@ -398,41 +395,41 @@ fn it_works_on_unions() {
           }
         "#,
         @r###"
-        QueryPlan {
-          Sequence {
-            Fetch(service: "Subgraph1") {
-              {
-                withProvidesForT1 {
-                  __typename
-                  ... on T1 {
-                    a
-                  }
-                  ... on T2 {
-                    __typename
-                    id
-                    a
-                  }
-                }
+    QueryPlan {
+      Sequence {
+        Fetch(service: "Subgraph1") {
+          {
+            withProvidesForT1 {
+              __typename
+              ... on T1 {
+                a
               }
-            },
-            Flatten(path: "withProvidesForT1") {
-              Fetch(service: "Subgraph2") {
-                {
-                  ... on T2 {
-                    __typename
-                    id
-                  }
-                } =>
-                {
-                  ... on T2 {
-                    b
-                  }
-                }
-              },
-            },
+              ... on T2 {
+                __typename
+                id
+                a
+              }
+            }
+          }
+        },
+        Flatten(path: "withProvidesForT1") {
+          Fetch(service: "Subgraph2") {
+            {
+              ... on T2 {
+                __typename
+                id
+              }
+            } =>
+            {
+              ... on T2 {
+                b
+              }
+            }
           },
-        }
-        "###
+        },
+      },
+    }
+    "###
     );
 
     // Lastly, if both are provided, ensures we only hit subgraph1.
@@ -473,8 +470,6 @@ fn it_works_on_unions() {
 }
 
 #[test]
-#[should_panic(expected = "Schema has no type \"I\"")]
-// TODO: investigate this failure
 fn it_allow_providing_fields_for_only_some_subtype() {
     let planner = planner!(
         Subgraph1: r#"
@@ -681,8 +676,6 @@ fn it_allow_providing_fields_for_only_some_subtype() {
 }
 
 #[test]
-#[should_panic(expected = "Subgraph unexpectedly does not use federation spec")]
-// TODO: investigate this failure
 fn it_works_with_type_condition_even_for_types_only_reachable_by_the_at_provides() {
     let planner = planner!(
         Subgraph1: r#"

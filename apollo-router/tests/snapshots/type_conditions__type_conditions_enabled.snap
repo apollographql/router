@@ -78,6 +78,7 @@ expression: response
               "id": null,
               "inputRewrites": null,
               "outputRewrites": null,
+              "contextRewrites": null,
               "schemaAwareHash": "0144f144d271437ed45f9d20706be86ffbf1e124d77c7add3db17d4a1498ce97",
               "authorization": {
                 "is_authenticated": false,
@@ -139,6 +140,7 @@ expression: response
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
+                    "contextRewrites": null,
                     "schemaAwareHash": "23759b36e5149924c757a8b9586adec2c0f6be04ecdf2c3c3ea277446daa690b",
                     "authorization": {
                       "is_authenticated": false,
@@ -198,6 +200,7 @@ expression: response
                     "id": null,
                     "inputRewrites": null,
                     "outputRewrites": null,
+                    "contextRewrites": null,
                     "schemaAwareHash": "8ee58ad8b4823bcbda9126d2565e1cb04bf91ff250b1098476a1d7614a870121",
                     "authorization": {
                       "is_authenticated": false,

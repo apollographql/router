@@ -1,5 +1,5 @@
 ---
-title: Configure GraphQL subscription support
+title: Configure GraphQL Subscription Support
 subtitle: Enable clients to receive real-time updates
 description: Configure your router to support GraphQL subscriptions, enabling clients to receive real-time updates via WebSocket or HTTP callbacks.
 minVersion: 1.22.0
@@ -99,13 +99,20 @@ subscription:
         path: /subscriptions # The absolute URL path to use for subgraph subscription endpoints (Default: /ws)
       subgraphs: # Overrides subscription settings for individual subgraphs
         reviews: # Overrides settings for the 'reviews' subgraph
-          path: /ws # Absolute path that overrides '/subscriptions' defined above
+          path: /ws # Absolute path that overrides the preceding '/subscriptions' path for 'all'
           protocol: graphql_ws # The WebSocket-based subprotocol to use for subscription communication (Default: graphql_ws)
           heartbeat_interval: 10s # Optional and 'disable' by default, also supports 'enable' (set 5s interval) and custom values for intervals, e.g. '100ms', '10s', '1m'.
 ```
 
 This example enables subscriptions in **passthrough mode**, which uses long-lived WebSocket connections.
-Note: If your subgraph implementation (e.g. [DGS](https://netflix.github.io/dgs/)) can close idle connection, set `heartbest_interval` to keep connection alive.
+
+<Note>
+
+- Each `path` must be set as an absolute path. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the path configuration as `path: "/foo/bar/graphql/ws"`.
+- Subgraph path configurations override the path configuration for `all` subgraphs.
+- If your subgraph implementation (e.g. [DGS](https://netflix.github.io/dgs/)) can close idle connections, set `heartbeat_interval` to keep the connection alive.
+
+</Note>
 
 The router supports the following WebSocket subprotocols, specified via the `protocol` option:
 
@@ -123,14 +130,14 @@ Your router creates a separate WebSocket connection for each client subscription
 
 <Note>
 
-* Your router must use whichever subprotocol is expected by each of your subgraphs.
-* To disambiguate between `graph-ws` and `graph_ws`:
-  * `graph-ws` (with a hyphen `-`) is the name of the [library](https://github.com/enisdenjo/graphql-ws) that uses the recommended `graphql_ws` (with un underscore `_`) WebSocket subprotocol.
-* Each `path` must be set as an absolute path. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the absolute path as `path: "/foo/bar/graphql/ws"`.
-* The `public_url` must include the configured `path` on the router. For example, given a server URL of `http://localhost:8080` and the router's `path` = `/my_callback`, then your `public_url` must append the `path` to the server: `http://localhost:8080/my_callback`.
-* If you have a proxy in front of the router that redirects queries to the `path` configured in the router, you can specify another path for the `public_url`, for example `http://localhost:8080/external_path`.
-* Given a `public_url`, the router appends a subscription id to the `public_url` to get {`http://localhost:8080/external_access/{subscription_id}`} then passes it directly to your subgraphs.
-* If you don't specify the `path`, its default value is `/callback`, so you'll have to specify it in `public_url`.
+- Your router must use whichever subprotocol is expected by each of your subgraphs.
+- To disambiguate between `graph-ws` and `graph_ws`:
+  - `graph-ws` (with a hyphen `-`) is the name of the [library](https://github.com/enisdenjo/graphql-ws) that uses the recommended `graphql_ws` (with un underscore `_`) WebSocket subprotocol.
+- Each `path` must be set as an absolute path. For example, given `http://localhost:8080/foo/bar/graphql/ws`, set the absolute path as `path: "/foo/bar/graphql/ws"`.
+- The `public_url` must include the configured `path` on the router. For example, given a server URL of `http://localhost:8080` and the router's `path` = `/my_callback`, then your `public_url` must append the `path` to the server: `http://localhost:8080/my_callback`.
+- If you have a proxy in front of the router that redirects queries to the `path` configured in the router, you can specify another path for the `public_url`, for example `http://localhost:8080/external_path`.
+- Given a `public_url`, the router appends a subscription id to the `public_url` to get {`http://localhost:8080/external_access/{subscription_id}`} then passes it directly to your subgraphs.
+- If you don't specify the `path`, its default value is `/callback`, so you'll have to specify it in `public_url`.
 
 </Note>
 

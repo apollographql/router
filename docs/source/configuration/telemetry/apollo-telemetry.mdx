@@ -1,7 +1,7 @@
 ---
 title: GraphOS reporting
 subtitle: Send Apollo Router operation metrics to GraphOS
-description: Report operation usage metrics from the Apollo Router to GraphOS to enable schema checks and metrics visualization in GraphOS Studio
+description: Report GraphQL operation usage metrics from the Apollo Router to GraphOS to enable schema checks and metrics visualization in GraphOS Studio.
 ---
 
 The Apollo Router can report operation usage metrics to [GraphOS](/graphos/) that you can then visualize in GraphOS Studio. These metrics also enable powerful GraphOS features like [schema checks](/graphos/delivery/schema-checks/).
@@ -70,6 +70,17 @@ To completely disable requesting and reporting subgraph trace data, set `field_l
 telemetry:
   apollo:
     field_level_instrumentation_sampler: always_off
+```
+
+### Experimental local field metrics
+
+Apollo Router can send field-level metrics to GraphOS without using FTV1 tracing. This feature is experimental and is not yet displayable in GraphOS Studio.
+To enable this feature, set the `experimental_local_field_metrics` option to `true` in your router configuration:
+
+```yaml title="router.yaml"
+telemetry:
+  apollo:
+    experimental_local_field_metrics: true
 ```
 
 ## Advanced configuration
@@ -280,17 +291,17 @@ An array of names for the variables that the router _will not_ report to GraphOS
 ```yaml title="router.yaml"
 telemetry:
   apollo:
-    # The percentage of requests will include HTTP request and response headers in traces sent to Apollo Studio.
+    # The percentage of requests will include HTTP request and response headers in traces sent to GraphOS Studio.
     # This is expensive and should be left at a low value.
     # This cannot be higher than tracing->common->sampler
     field_level_instrumentation_sampler: 0.01 # (default)
 
-    # Include HTTP request and response headers in traces sent to Apollo Studio
+    # Include HTTP request and response headers in traces sent to GraphOS Studio
     send_headers: # other possible values are all, only (with an array), except (with an array), none (by default)
       except: # Send all headers except referer
         - referer
 
-    # Include variable values in Apollo in traces sent to Apollo Studio
+    # Include variable values in Apollo in traces sent to GraphOS Studio
     send_variable_values: # other possible values are all, only (with an array), except (with an array), none (by default)
       except: # Send all variable values except for variable named first
         - first
@@ -331,3 +342,10 @@ telemetry:
           account: # Override the default behavior for the "account" subgraph
             send: false
 ```
+
+
+<Note>
+
+If you're writing a plugin, you can get the Studio Trace ID by reading the value of `apollo_operation_id` from the context.
+
+</Note>

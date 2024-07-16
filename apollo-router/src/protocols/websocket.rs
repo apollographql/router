@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::pin::Pin;
 use std::task::Poll;
 use std::time::Duration;
@@ -112,6 +113,8 @@ pub(crate) enum ClientMessage {
     },
     /// Connection terminated by the client
     ConnectionTerminate,
+    /// Close the websocket connection (not related to any graphql sub protocol)
+    CloseWebsocket,
     /// Useful for detecting failed connections, displaying latency metrics or
     /// other types of network probing.
     ///
@@ -280,7 +283,7 @@ where
             })?;
         if !matches!(resp, Some(Ok(ServerMessage::ConnectionAck))) {
             return Err(graphql::Error::builder()
-                .message("didn't receive the connection ack from websocket connection")
+                .message(format!("didn't receive the connection ack from websocket connection but instead got: {:?}", resp))
                 .extension_code("WEBSOCKET_ACK_ERROR")
                 .build());
         }
@@ -340,10 +343,20 @@ where
     stream
         .with(|client_message: ClientMessage| {
             // It applies to the Sink
-            future::ready(match serde_json::to_string(&client_message) {
-                Ok(client_message_str) => Ok(Message::Text(client_message_str)),
-                Err(err) => Err(Error::SerdeError(err)),
-            })
+            match client_message {
+                ClientMessage::CloseWebsocket => {
+                    future::ready(Ok(Message::Close(Some(CloseFrame{
+                        code: CloseCode::Normal,
+                        reason: Cow::default(),
+                    }))))
+                },
+                message => {
+                    future::ready(match serde_json::to_string(&message) {
+                        Ok(client_message_str) => Ok(Message::Text(client_message_str)),
+                        Err(err) => Err(Error::SerdeError(err)),
+                    })
+                },
+            }
         })
         .map(move |msg| match msg {
             // It applies to the Stream
@@ -486,6 +499,8 @@ struct InnerStream<S> {
     // Booleans for state machine when closing the stream
     completed: bool,
     terminated: bool,
+    // When the websocket stream is closed (!= graphql sub protocol)
+    closed: bool,
 }
 }
 
@@ -500,6 +515,7 @@ where
             protocol,
             completed: false,
             terminated: false,
+            closed: false,
         }
     }
 }
@@ -646,6 +662,21 @@ where
                 }
             }
         }
+
+        if !*this.closed {
+            // instead of just calling poll_close we also send a proper CloseWebsocket event to indicate it's a normal close, not an error
+            match Pin::new(&mut Pin::new(&mut this.stream).send(ClientMessage::CloseWebsocket))
+                .poll(cx)
+            {
+                Poll::Ready(_) => {
+                    *this.closed = true;
+                }
+                Poll::Pending => {
+                    return Poll::Pending;
+                }
+            }
+        }
+
         Pin::new(&mut this.stream).poll_close(cx).map_err(|_err| {
             graphql::Error::builder()
                 .message("cannot close websocket connection")

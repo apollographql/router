@@ -1,7 +1,7 @@
 ---
 title: Metrics exporters
 subtitle: Export Apollo Router metrics
-description: Collect and export metrics from the Apollo Router for Prometheus, OpenTelemetry Protocol (OTLP), Datadog, and New Relic
+description: Collect and export metrics from the Apollo Router for Prometheus, OpenTelemetry Protocol (OTLP), Datadog, and New Relic.
 ---
 
 The Apollo Router supports collection of metrics with [OpenTelemetry](https://opentelemetry.io/), with exporters for:
@@ -217,6 +217,20 @@ telemetry:
 
 ```
 
+You can drop specific metrics if you don't want these metrics to be sent to your APM.
+
+```yaml title="router.yaml"
+telemetry:
+  exporters:
+    metrics:
+      common:
+        service_name: apollo-router
+        views:
+          - name: apollo_router_http_request_duration_seconds # Instrument name you want to edit. You can use wildcard in names. If you want to target all instruments just use '*'
+            aggregation: drop
+
+```
+
 ## Metrics common reference
 
 | Attribute           | Default                  | Description                                                   |
@@ -225,6 +239,7 @@ telemetry:
 | `service_namespace` |                          | The OpenTelemetry namespace.                                  |
 | `resource`          |                          | The OpenTelemetry resource to attach to metrics.              |
 | `attributes`        |                          | Customization for the apollo_router_http_requests instrument. |
+| `views`             |                          | Override default buckets or configuration for metrics (including dropping the metric itself) |
 
 
 ## Related topics

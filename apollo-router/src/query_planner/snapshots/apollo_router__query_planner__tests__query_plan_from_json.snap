@@ -17,6 +17,7 @@ Sequence {
                 id: None,
                 input_rewrites: None,
                 output_rewrites: None,
+                context_rewrites: None,
                 schema_aware_hash: QueryHash(
                     "",
                 ),
@@ -81,6 +82,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -155,6 +157,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -216,6 +219,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),
@@ -287,6 +291,7 @@ Sequence {
                                         id: None,
                                         input_rewrites: None,
                                         output_rewrites: None,
+                                        context_rewrites: None,
                                         schema_aware_hash: QueryHash(
                                             "",
                                         ),

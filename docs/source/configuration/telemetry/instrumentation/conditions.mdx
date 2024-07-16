@@ -1,10 +1,8 @@
 ---
 title: Conditions
 subtitle: Set conditions for when events or instruments are triggered
-description: Set conditions for when events or instruments are triggered in the Apollo Router
+description: Set conditions for when events or instruments are triggered in the Apollo Router.
 ---
-
-<PremiumFeature linkWithAnchor="https://www.apollographql.com/pricing#observability"/>
 
 You can set conditions for when an [instrument](./instruments) should be mutated or an [event](./events) should be triggered.
 
@@ -43,7 +41,7 @@ For example, the following condition checks the value of `x-req-header` exists:
 
 ```yaml
 exists:
-  - request_header: x-req-header
+  request_header: x-req-header
 ```
 
 #### `eq`
@@ -150,7 +148,7 @@ The available basic conditions:
 | `eq`     | An equality test between selectors or values             |
 | `gt`     | An inequality test between selectors or values           |
 | `lt`     | An inequality test between selectors or values           |
-| `exist`  | A check to see if the selectors value exists             |
+| `exists`  | A check to see if the selectors value exists             |
 | `not`    | A negated equality test between selectors or values      |
 | `all`    | A list of conditions that must all be true               |
 | `any`    | A list of conditions of which at least one must be true  |

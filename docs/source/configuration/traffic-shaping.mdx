@@ -1,7 +1,7 @@
 ---
-title: Traffic shaping in the Apollo Router
-subtitle: ' '
-description: "Tune the performance and reliability of traffic to and from the Apollo Router."
+title: Traffic Shaping in the Apollo Router
+subtitle: Tune the performance and reliability of traffic to and from the router
+description: Fine-tune traffic performance and reliability in Apollo Router with YAML configuration for client and subgraph traffic shaping. 
 ---
 
 The Apollo Router provides various features to improve the performance and reliability of
@@ -185,26 +185,7 @@ traffic_shaping:
 
 ### HTTP/2
 
-The router supports subgraph connections over:
-- HTTP/1.1
-- HTTP/1.1 with TLS
-- HTTP/2 with TLS
-- HTTP/2 Cleartext protocol (h2c). This uses HTTP/2 over plaintext connections.
-
-Use the table below to look up the resulting protocol of a subgraph connection, based on the subgraph URL and the `experimental_http2` option:
-
-|                           | URL with `http://` | URL with `https://`         |
-| ------------------------- | ------------------- | --------------------------- |
-| `experimental_http2: disable` | HTTP/1.1           | HTTP/1.1 with TLS           |
-| `experimental_http2: enable`  | HTTP/1.1           | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
-| `experimental_http2: http2only` | h2c              | HTTP/2 with TLS              |
-| `experimental_http2` not set | HTTP/1.1 | Either HTTP/1.1 or HTTP/2 with TLS, as determined by the TLS handshake with a subgraph |
-
-<Note>
-
-Configuring `experimental_http2: http2only` for a subgraph that doesn't support HTTP/2 results in a failed subgraph connection.
-
-</Note>
+<HttpConnection type="subgraph" />
 
 ### Ordering
 

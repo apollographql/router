@@ -11,13 +11,18 @@ use http::StatusCode;
 use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
+use tokio::task;
 
+use crate::apollo_studio_interop::generate_extended_references;
+use crate::apollo_studio_interop::ExtendedReferenceStats;
 use crate::context::OPERATION_KIND;
 use crate::context::OPERATION_NAME;
 use crate::graphql::Error;
 use crate::graphql::ErrorExtension;
 use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::Conf as TelemetryConfig;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -28,6 +33,8 @@ use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
 
+pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query";
+
 /// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]
 #[allow(clippy::type_complexity)]
@@ -36,6 +43,7 @@ pub(crate) struct QueryAnalysisLayer {
     configuration: Arc<Configuration>,
     cache: Arc<Mutex<LruCache<QueryAnalysisKey, Result<(Context, ParsedDocument), SpecError>>>>,
     enable_authorization_directives: bool,
+    metrics_reference_mode: ApolloMetricsReferenceMode,
 }
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -48,6 +56,8 @@ impl QueryAnalysisLayer {
     pub(crate) async fn new(schema: Arc<Schema>, configuration: Arc<Configuration>) -> Self {
         let enable_authorization_directives =
             AuthorizationPlugin::enable_directives(&configuration, &schema).unwrap_or(false);
+        let metrics_reference_mode = TelemetryConfig::metrics_reference_mode(&configuration);
+
         Self {
             schema,
             cache: Arc::new(Mutex::new(LruCache::new(
@@ -60,15 +70,36 @@ impl QueryAnalysisLayer {
             ))),
             enable_authorization_directives,
             configuration,
+            metrics_reference_mode,
         }
     }
 
-    pub(crate) fn parse_document(
+    pub(crate) async fn parse_document(
         &self,
         query: &str,
         operation_name: Option<&str>,
     ) -> Result<ParsedDocument, SpecError> {
-        Query::parse_document(query, operation_name, &self.schema, &self.configuration)
+        let query = query.to_string();
+        let operation_name = operation_name.map(|o| o.to_string());
+        let schema = self.schema.clone();
+        let conf = self.configuration.clone();
+
+        // Must be created *outside* of the spawn_blocking or the span is not connected to the
+        // parent
+        let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
+
+        task::spawn_blocking(move || {
+            span.in_scope(|| {
+                Query::parse_document(
+                    &query,
+                    operation_name.as_deref(),
+                    schema.as_ref(),
+                    conf.as_ref(),
+                )
+            })
+        })
+        .await
+        .expect("parse_document task panicked")
     }
 
     pub(crate) async fn supergraph_request(
@@ -117,8 +148,7 @@ impl QueryAnalysisLayer {
 
         let res = match entry {
             None => {
-                let span = tracing::info_span!("parse_query", "otel.kind" = "INTERNAL");
-                match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
+                match self.parse_document(&query, op_name.as_deref()).await {
                     Err(errors) => {
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {
@@ -164,6 +194,7 @@ impl QueryAnalysisLayer {
                             .expect("cannot insert operation name into context; this is a bug");
                         let operation_kind =
                             operation.map(|op| OperationKind::from(op.operation_type));
+                        // FIXME: I think we should not add an operation kind by default. If it's an invalid graphql operation for example it might be useful to detect there isn't operation_kind
                         context
                             .insert(OPERATION_KIND, operation_kind.unwrap_or_default())
                             .expect("cannot insert operation kind in the context; this is a bug");
@@ -171,7 +202,7 @@ impl QueryAnalysisLayer {
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {
                                 query,
-                                operation_name: op_name,
+                                operation_name: op_name.clone(),
                             },
                             Ok((context.clone(), doc.clone())),
                         );
@@ -186,25 +217,40 @@ impl QueryAnalysisLayer {
         match res {
             Ok((context, doc)) => {
                 request.context.extend(&context);
-                request
-                    .context
-                    .extensions()
-                    .lock()
-                    .insert::<ParsedDocument>(doc);
+
+                let extended_ref_stats = if matches!(
+                    self.metrics_reference_mode,
+                    ApolloMetricsReferenceMode::Extended
+                ) {
+                    Some(generate_extended_references(
+                        doc.executable.clone(),
+                        op_name,
+                        self.schema.api_schema(),
+                        &request.supergraph_request.body().variables.clone(),
+                    ))
+                } else {
+                    None
+                };
+
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert::<ParsedDocument>(doc.clone());
+                    if let Some(stats) = extended_ref_stats {
+                        lock.insert::<ExtendedReferenceStats>(stats);
+                    }
+                });
+
                 Ok(SupergraphRequest {
                     supergraph_request: request.supergraph_request,
                     context: request.context,
                 })
             }
             Err(errors) => {
-                request
-                    .context
-                    .extensions()
-                    .lock()
-                    .insert(Arc::new(UsageReporting {
+                request.context.extensions().with_lock(|mut lock| {
+                    lock.insert(Arc::new(UsageReporting {
                         stats_report_key: errors.get_error_key().to_string(),
                         referenced_fields_by_type: HashMap::new(),
-                    }));
+                    }))
+                });
                 Err(SupergraphResponse::builder()
                     .errors(errors.into_graphql_errors().unwrap_or_default())
                     .status_code(StatusCode::BAD_REQUEST)

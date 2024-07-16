@@ -303,9 +303,11 @@ impl InstrumentData {
             opt.enabled,
             "$[?(@.enabled)]",
             opt.subgraph.enabled,
-            "$[?(@.subgraphs..enabled)]",
+            "$[?(@.subgraph.all.enabled)]",
+            opt.subgraph.enabled,
+            "$[?(@.subgraph.subgraphs..enabled)]",
             opt.subgraph.ttl,
-            "$[?(@.subgraphs..ttl)]"
+            "$[?(@.subgraph.all.ttl || @.subgraph.subgraphs..ttl)]"
         );
         populate_config_instrument!(
             apollo.router.config.telemetry,
@@ -338,6 +340,8 @@ impl InstrumentData {
             "$..instruments.supergraph",
             opt.instruments.subgraph,
             "$..instruments.subgraph",
+            opt.instruments.graphql,
+            "$..instruments.graphql",
             opt.instruments.default_attribute_requirement_level,
             "$..instruments.default_attribute_requirement_level",
             opt.spans,
@@ -373,22 +377,31 @@ impl InstrumentData {
         );
 
         populate_config_instrument!(
-            apollo.router.config.experimental_demand_control,
-            "$.experimental_demand_control[?(@.enabled == true)]",
+            apollo.router.config.demand_control,
+            "$.preview_demand_control[?(@.enabled == true)]",
             opt.mode,
             "$.mode"
+        );
+
+        populate_config_instrument!(
+            apollo.router.config.apollo_telemetry_options,
+            "$.telemetry.apollo",
+            opt.signature_normalization_algorithm,
+            "$.experimental_apollo_signature_normalization_algorithm",
+            opt.metrics_reference_mode,
+            "$.experimental_apollo_metrics_reference_mode"
         );
 
         // We need to update the entry we just made because the selected strategy is a named object in the config.
         // The jsonpath spec doesn't include a utility for getting the keys out of an object, so we do it manually.
         if let Some((_, demand_control_attributes)) = self
             .data
-            .get_mut(&"apollo.router.config.experimental_demand_control".to_string())
+            .get_mut(&"apollo.router.config.demand_control".to_string())
         {
             Self::get_first_key_from_path(
                 demand_control_attributes,
                 "opt.strategy",
-                "$.experimental_demand_control[?(@.enabled == true)].strategy",
+                "$.preview_demand_control[?(@.enabled == true)].strategy",
                 yaml,
             );
         }

@@ -34,6 +34,7 @@ use opentelemetry::sdk::trace::TracerProvider;
 use opentelemetry::sdk::Resource;
 use opentelemetry::testing::trace::NoopSpanExporter;
 use opentelemetry::trace::TraceContextExt;
+use opentelemetry_api::trace::TraceId;
 use opentelemetry_api::trace::TracerProvider as OtherTracerProvider;
 use opentelemetry_api::Context;
 use opentelemetry_api::KeyValue;
@@ -81,7 +82,6 @@ pub struct IntegrationTest {
     _subgraphs: wiremock::MockServer,
     telemetry: Telemetry,
 
-    // Don't remove these, there is a weak reference to the tracer provider from a tracer and if the provider is dropped then no export will happen.
     pub _tracer_provider_client: TracerProvider,
     pub _tracer_provider_subgraph: TracerProvider,
     subscriber_client: Dispatch,
@@ -175,6 +175,7 @@ impl Telemetry {
                 .with_span_processor(
                     BatchSpanProcessor::builder(
                         opentelemetry_datadog::new_pipeline()
+                            .with_service_name(service_name)
                             .build_exporter()
                             .expect("datadog pipeline failed"),
                         opentelemetry::runtime::Tokio,
@@ -488,7 +489,7 @@ impl IntegrationTest {
     #[allow(dead_code)]
     pub fn execute_default_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query_internal(
             &json!({"query":"query {topProducts{name}}","variables":{}}),
             None,
@@ -499,28 +500,28 @@ impl IntegrationTest {
     pub fn execute_query(
         &self,
         query: &Value,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query_internal(query, None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query_internal(&json!({"garbage":{}}), None)
     }
 
     #[allow(dead_code)]
     pub fn execute_huge_query(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query_internal(&json!({"query":"query {topProducts{name, name, name, name, name, name, name, name, name, name}}","variables":{}}), None)
     }
 
     #[allow(dead_code)]
     pub fn execute_bad_content_type(
         &self,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         self.execute_query_internal(&json!({"garbage":{}}), Some("garbage"))
     }
 
@@ -528,7 +529,7 @@ impl IntegrationTest {
         &self,
         query: &Value,
         content_type: Option<&'static str>,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -540,7 +541,7 @@ impl IntegrationTest {
 
         async move {
             let span = info_span!("client_request");
-            let span_id = span.context().span().span_context().trace_id().to_string();
+            let span_id = span.context().span().span_context().trace_id();
 
             async move {
                 let client = reqwest::Client::new();
@@ -577,7 +578,7 @@ impl IntegrationTest {
     pub fn execute_untraced_query(
         &self,
         query: &Value,
-    ) -> impl std::future::Future<Output = (String, reqwest::Response)> {
+    ) -> impl std::future::Future<Output = (TraceId, reqwest::Response)> {
         assert!(
             self.router.is_some(),
             "router was not started, call `router.start().await; router.assert_started().await`"
@@ -600,14 +601,16 @@ impl IntegrationTest {
             request.headers_mut().remove(ACCEPT);
             match client.execute(request).await {
                 Ok(response) => (
-                    response
-                        .headers()
-                        .get("apollo-custom-trace-id")
-                        .cloned()
-                        .unwrap_or(HeaderValue::from_static("no-trace-id"))
-                        .to_str()
-                        .unwrap_or_default()
-                        .to_string(),
+                    TraceId::from_hex(
+                        response
+                            .headers()
+                            .get("apollo-custom-trace-id")
+                            .cloned()
+                            .unwrap_or(HeaderValue::from_static("no-trace-id"))
+                            .to_str()
+                            .unwrap_or_default(),
+                    )
+                    .unwrap_or(TraceId::INVALID),
                     response,
                 ),
                 Err(err) => {
@@ -828,6 +831,40 @@ impl IntegrationTest {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         panic!("'{text}' not detected in metrics\n{last_metrics}");
+    }
+
+    #[allow(dead_code)]
+    pub async fn assert_metrics_contains_multiple(
+        &self,
+        mut texts: Vec<&str>,
+        duration: Option<Duration>,
+    ) {
+        let now = Instant::now();
+        let mut last_metrics = String::new();
+        while now.elapsed() < duration.unwrap_or_else(|| Duration::from_secs(15)) {
+            if let Ok(metrics) = self
+                .get_metrics_response()
+                .await
+                .expect("failed to fetch metrics")
+                .text()
+                .await
+            {
+                let mut v = vec![];
+                for text in &texts {
+                    if !metrics.contains(text) {
+                        v.push(*text);
+                    }
+                }
+                if v.len() == texts.len() {
+                    return;
+                } else {
+                    texts = v;
+                }
+                last_metrics = metrics;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        panic!("'{texts:?}' not detected in metrics\n{last_metrics}");
     }
 
     #[allow(dead_code)]
@@ -1115,4 +1152,15 @@ fn merge_overrides(
     }
 
     serde_yaml::to_string(&config).unwrap()
+}
+
+#[allow(dead_code)]
+pub fn graph_os_enabled() -> bool {
+    matches!(
+        (
+            std::env::var("TEST_APOLLO_KEY"),
+            std::env::var("TEST_APOLLO_GRAPH_REF"),
+        ),
+        (Ok(_), Ok(_))
+    )
 }

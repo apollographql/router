@@ -1,0 +1,11 @@
+telemetry:
+  instrumentation:
+    instruments:
+      router:
+        http.server.active_requests: false
+        http.server.request.duration: false
+        "custom.histogram.duration":
+          description: "histogram of requests"
+          type: histogram
+          unit: "unit"
+          value: duration

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use apollo_compiler::NodeStr;
+use apollo_compiler::validation::Valid;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
@@ -50,6 +50,7 @@ impl QueryPlan {
         service_factory: &'a Arc<SubgraphServiceFactory>,
         supergraph_request: &'a Arc<http::Request<Request>>,
         schema: &'a Arc<Schema>,
+        subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
         sender: mpsc::Sender<Response>,
         subscription_handle: Option<SubscriptionHandle>,
         subscription_config: &'a Option<SubscriptionConfig>,
@@ -73,6 +74,7 @@ impl QueryPlan {
                     root_node: &self.root,
                     subscription_handle: &subscription_handle,
                     subscription_config,
+                    subgraph_schemas,
                 },
                 &root,
                 &initial_value.unwrap_or_default(),
@@ -100,8 +102,9 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) context: &'a Context,
     pub(crate) service_factory: &'a Arc<SubgraphServiceFactory>,
     pub(crate) schema: &'a Arc<Schema>,
+    pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
-    pub(crate) deferred_fetches: &'a HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+    pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
@@ -203,7 +206,7 @@ impl PlanNode {
                             .instrument(tracing::info_span!(
                                 SUBSCRIBE_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = primary.service_name.as_str(),
+                                "apollo.subgraph.name" = primary.service_name.as_ref(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
                             .await;
@@ -226,9 +229,7 @@ impl PlanNode {
                     if parameters
                         .context
                         .extensions()
-                        .lock()
-                        .get::<CanceledRequest>()
-                        .is_some()
+                        .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
                     {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
@@ -238,7 +239,7 @@ impl PlanNode {
                             .instrument(tracing::info_span!(
                                 FETCH_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = fetch_node.service_name.as_str(),
+                                "apollo.subgraph.name" = fetch_node.service_name.as_ref(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
                             .await;
@@ -254,7 +255,7 @@ impl PlanNode {
                     errors = Vec::new();
                     async {
                         let mut deferred_fetches: HashMap<
-                            NodeStr,
+                            String,
                             broadcast::Sender<(Value, Vec<Error>)>,
                         > = HashMap::new();
                         let mut futures = Vec::new();
@@ -293,6 +294,7 @@ impl PlanNode {
                                         root_node: parameters.root_node,
                                         subscription_handle: parameters.subscription_handle,
                                         subscription_config: parameters.subscription_config,
+                                        subgraph_schemas: parameters.subgraph_schemas,
                                     },
                                     current_dir,
                                     &value,
@@ -403,7 +405,7 @@ impl DeferredNode {
         parent_value: &Value,
         sender: mpsc::Sender<Response>,
         primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
-        deferred_fetches: &mut HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+        deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> impl Future<Output = ()> {
         let mut deferred_receivers = Vec::new();
 
@@ -435,6 +437,7 @@ impl DeferredNode {
         let label = self.label.as_ref().map(|l| l.to_string());
         let tx = sender;
         let sc = parameters.schema.clone();
+        let subgraph_schemas = parameters.subgraph_schemas.clone();
         let orig = parameters.supergraph_request.clone();
         let sf = parameters.service_factory.clone();
         let root_node = parameters.root_node.clone();
@@ -481,6 +484,7 @@ impl DeferredNode {
                             root_node: &root_node,
                             subscription_handle: &subscription_handle,
                             subscription_config: &subscription_config,
+                            subgraph_schemas: &subgraph_schemas,
                         },
                         &Path::default(),
                         &value,
