@@ -1,14 +1,8 @@
 use indexmap::IndexMap;
-pub use validation::validate;
-pub use validation::Code as ValidationCode;
-pub use validation::Location;
-pub use validation::Message as ValidationMessage;
-pub use validation::Severity as ValidationSeverity;
 
 use super::spec::ConnectHTTPArguments;
 use super::spec::HTTPHeaderOption;
 use super::spec::SourceHTTPArguments;
-use super::validation;
 use super::ConnectId;
 use super::JSONSelection;
 use super::URLPathTemplate;
