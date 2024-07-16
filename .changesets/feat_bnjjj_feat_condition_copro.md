@@ -1,4 +1,4 @@
-### feat(coprocessor): Support conditional coprocessor execution per stage of request lifecycle ([PR #5557](https://github.com/apollographql/router/pull/5557))
+### Support conditional coprocessor execution per stage of request lifecycle ([PR #5557](https://github.com/apollographql/router/pull/5557))
 
 The router now supports conditional execution of the coprocessor for each stage of the request lifecycle (except for the `Execution` stage).
 

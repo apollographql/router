@@ -2,6 +2,6 @@
 
 The `traceid()` function in a Rhai script for the router now returns a valid trace ID for all traces. 
 
-Previously, `traceid()` didn't return a valid trace ID if the trace wasn't sampled.
+Previously, `traceid()` didn't return a trace ID if the trace wasn't selected for sampling.
 
 By [@bnjjj](https://github.com/bnjjj) in https://github.com/apollographql/router/pull/5606

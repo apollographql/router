@@ -1,4 +1,4 @@
-### Add response_context in event selector for event_* instruments ([PR #5565](https://github.com/apollographql/router/pull/5565))
+### Add `response_context` in event selector for `event_*` instruments ([PR #5565](https://github.com/apollographql/router/pull/5565))
 
 The router now supports creating custom instruments with a value set to `event_*` and using both a condition executed on an event and the `response_context` selector in attributes. Previous releases didn't support the `response_context` selector in attributes.
 
