@@ -7,6 +7,7 @@ use itertools::EitherOrBoth;
 use itertools::Itertools;
 use mime::APPLICATION_JSON;
 use req_asserts::Matcher;
+use serde_json::json;
 use tower::ServiceExt;
 use tracing_fluent_assertions::AssertionRegistry;
 use tracing_fluent_assertions::AssertionsLayer;
@@ -148,14 +149,14 @@ pub(crate) mod mock_subgraph {
     pub(crate) fn user_entity_query() -> Mock {
         Mock::given(method("POST"))
             .and(path("/graphql"))
-            .and(body_json(serde_json::json!({
+            .and(body_json(json!({
               "query": "query($representations:[_Any!]!){_entities(representations:$representations){...on User{c}}}",
               "variables": {"representations":[{"__typename":"User","id":1},{"__typename":"User","id":2}]}
             })))
             .respond_with(
                 ResponseTemplate::new(200)
                     .insert_header(CONTENT_TYPE, APPLICATION_JSON.essence_str())
-                    .set_body_json(serde_json::json!({
+                    .set_body_json(json!({
                       "data": {
                         "_entities": [{
                           "__typename": "User",
@@ -168,6 +169,49 @@ pub(crate) mod mock_subgraph {
                     })),
             )
     }
+}
+
+#[tokio::test]
+async fn value_from_config() {
+    let mock_server = MockServer::start().await;
+    mock_api::user_1().mount(&mock_server).await;
+
+    let response = execute(
+        STEEL_THREAD_SCHEMA,
+        &mock_server.uri(),
+        "query { me { id name username} }",
+        Default::default(),
+        Some(json!({
+            "preview_connectors": {
+                "subgraphs": {
+                    "connectors": {
+                        "custom": {
+                            "id": 1,
+                        }
+                    }
+                }
+            }
+        })),
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "me": {
+          "id": 1,
+          "name": "Leanne Graham",
+          "username": "Bret"
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users/1").build()],
+    );
 }
 
 #[tokio::test]
@@ -565,24 +609,31 @@ async fn execute(
     }));
 
     let config_object = config.as_object_mut().unwrap();
-    config_object.insert(
-        "preview_connectors".to_string(),
-        serde_json::json!({
-          "subgraphs": {
-            "connectors": {
-              "sources": {
+    config_object
+        .entry("preview_connectors")
+        .or_insert(json!({}))
+        .as_object_mut()
+        .unwrap()
+        .entry("subgraphs")
+        .or_insert(json!({}))
+        .as_object_mut()
+        .unwrap()
+        .entry("connectors")
+        .or_insert(json!({}))
+        .as_object_mut()
+        .unwrap()
+        .insert(
+            "sources".to_string(),
+            json!({
                 "json": {
                   "override_url": connector_uri
                 }
-              }
-            }
-          }
-        }),
-    );
+            }),
+        );
 
     config_object.insert(
         "override_subgraph_url".to_string(),
-        serde_json::json!({
+        json!({
           "graphql": subgraph_uri
         }),
     );
