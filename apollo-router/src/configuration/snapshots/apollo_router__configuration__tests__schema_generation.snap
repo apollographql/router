@@ -1614,6 +1614,10 @@ expression: "&schema"
           "description": "Enable or disable the entity caching feature",
           "type": "boolean"
         },
+        "invalidation": {
+          "$ref": "#/definitions/InvalidationEndpointConfig",
+          "description": "#/definitions/InvalidationEndpointConfig"
+        },
         "metrics": {
           "$ref": "#/definitions/Metrics",
           "description": "#/definitions/Metrics"
@@ -1628,6 +1632,7 @@ expression: "&schema"
         }
       },
       "required": [
+        "invalidation",
         "redis",
         "subgraph"
       ],
@@ -3526,30 +3531,22 @@ expression: "&schema"
       },
       "type": "object"
     },
-    "InvalidationConfig": {
+    "InvalidationEndpointConfig": {
       "additionalProperties": false,
       "properties": {
-        "enabled": {
-          "default": false,
-          "description": "Enable the invalidation",
-          "type": "boolean"
-        },
         "listen": {
           "$ref": "#/definitions/ListenAddr",
-          "description": "#/definitions/ListenAddr",
-          "nullable": true
+          "description": "#/definitions/ListenAddr"
         },
         "path": {
-          "default": null,
-          "description": "Specify on which path you want to listen for callbacks (default: /callback)",
-          "nullable": true,
-          "type": "string"
-        },
-        "shared_key": {
-          "default": "",
+          "description": "Specify on which path you want to listen for invalidation endpoint",
           "type": "string"
         }
       },
+      "required": [
+        "listen",
+        "path"
+      ],
       "type": "object"
     },
     "JWTConf": {
@@ -5610,11 +5607,12 @@ expression: "&schema"
           "type": "boolean"
         },
         "invalidation": {
-          "$ref": "#/definitions/InvalidationConfig",
-          "description": "#/definitions/InvalidationConfig",
+          "$ref": "#/definitions/SubgraphInvalidationConfig",
+          "description": "#/definitions/SubgraphInvalidationConfig",
           "nullable": true
         },
         "private_id": {
+          "default": null,
           "description": "Context key used to separate cache sections per user",
           "nullable": true,
           "type": "string"
@@ -5814,6 +5812,22 @@ expression: "&schema"
         "http.client.response.body.size": {
           "$ref": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector",
           "description": "#/definitions/DefaultedStandardInstrument_for_extendable_attribute_apollo_router::plugins::telemetry::config_new::attributes::SubgraphAttributes_apollo_router::plugins::telemetry::config_new::selectors::SubgraphSelector"
+        }
+      },
+      "type": "object"
+    },
+    "SubgraphInvalidationConfig": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "default": false,
+          "description": "Enable the invalidation",
+          "type": "boolean"
+        },
+        "shared_key": {
+          "default": "",
+          "description": "Shared key needed to request the invalidation endpoint",
+          "type": "string"
         }
       },
       "type": "object"

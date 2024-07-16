@@ -25,43 +25,20 @@ use crate::ListenAddr;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema, Default)]
 #[serde(rename_all = "snake_case", deny_unknown_fields, default)]
-pub(crate) struct InvalidationConfig {
+pub(crate) struct SubgraphInvalidationConfig {
     /// Enable the invalidation
     pub(crate) enabled: bool,
-    /// Listen address on which the callback must listen (default: 127.0.0.1:4000)
-    pub(crate) listen: Option<ListenAddr>,
-    /// Specify on which path you want to listen for callbacks (default: /callback)
-    pub(crate) path: Option<String>,
-
+    /// Shared key needed to request the invalidation endpoint
     pub(crate) shared_key: String,
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) struct InvalidationEndpointConfig {
-    /// This one will be skipped if used in specific subgraph entry
+    /// Specify on which path you want to listen for invalidation endpoint
     pub(crate) path: String,
+    /// Listen address on which the invalidation endpoint must listen
     pub(crate) listen: ListenAddr,
-}
-
-impl TryFrom<InvalidationConfig> for InvalidationEndpointConfig {
-    type Error = BoxError;
-
-    fn try_from(config: InvalidationConfig) -> Result<Self, Self::Error> {
-        let path = config
-            .path
-            .clone()
-            .unwrap_or_else(|| "/invalidation".to_string());
-        let path = path.trim_end_matches('/');
-
-        let cfg = Self {
-            path: path.to_string(),
-            listen: config
-                .listen
-                .unwrap_or_else(crate::plugins::subscription::default_listen_addr),
-        };
-
-        Ok(cfg)
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]

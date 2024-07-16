@@ -92,6 +92,11 @@ preview_entity_cache:
     timeout: 5ms # Optional, by default: 2ms
     ttl: 24h # Optional, by default no expiration
 
+  # Configure invalidation endpoint
+  invalidation:
+    listen: 127.0.0.1:4000
+    path: /invalidation
+
   subgraph:
     all:
       enabled: true
