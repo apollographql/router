@@ -56,6 +56,7 @@ The supergraph service is executed after query parsing but before query executio
 | `query_variable`   | Yes         |                                                       | The name of a graphql query variable                                              |
 | `request_header`   | Yes         |                                                       | The name of a request header                                                      |
 | `response_header`  | Yes         |                                                       | The name of a response header                                                     |
+| `is_primary_response` | No       | `true`\|`false`                                       | Boolean returning true if it's the primary response and not events like subscription events or deferred responses |
 | `response_data`    | Yes         |                                                       | Json Path into the supergraph response body data (it might impact performances)   |
 | `response_errors`  | Yes         |                                                       | Json Path into the supergraph response body errors (it might impact performances) |
 | `request_context`  | Yes         |                                                       | The name of a request context key                                                 |
@@ -81,6 +82,7 @@ The subgraph service executes multiple times during query execution, with each e
 | `subgraph_request_header`   | Yes         |                  | The name of a subgraph request header                                          |
 | `subgraph_response_header`  | Yes         |                  | The name of a subgraph response header                                         |
 | `subgraph_response_status`  | Yes         | `code`\|`reason` | The status of a subgraph response                                              |
+| `subgraph_on_graphql_error` | No          | `true`\|`false`  | Boolean set to true if the subgraph response payload contains a graphql error |
 | `supergraph_operation_name` | Yes         | `string`\|`hash` | The operation name from the supergraph query                                   |
 | `supergraph_operation_kind` | Yes         | `string`         | The operation kind from the supergraph query                                   |
 | `supergraph_query`          | Yes         | `string`         | The graphql query to the supergraph                                            |

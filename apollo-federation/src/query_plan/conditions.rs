@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::executable::Name;
 use apollo_compiler::executable::Value;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
@@ -256,7 +256,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                 selection_map.insert(selection.clone());
             }
             Selection::InlineFragment(inline_fragment) => {
-                let fragment = inline_fragment.inline_fragment.data();
+                let fragment = &inline_fragment.inline_fragment;
                 if fragment.type_condition_position.is_none() {
                     // if there is no type condition we should preserve the directive info
                     selection_map.insert(selection.clone());
