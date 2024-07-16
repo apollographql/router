@@ -8,6 +8,7 @@ use std::time::Instant;
 use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
@@ -26,7 +27,7 @@ pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
+    pub(crate) implementers_map: HashMap<Name, Implementers>,
     api_schema: Option<ApiSchema>,
     pub(crate) schema_id: Arc<String>,
 }
@@ -631,7 +632,6 @@ mod tests {
                 assert_eq!(
                     s,
                     r#"The supergraph schema failed to produce a valid API schema: The following errors occurred:
-
   - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `@foo(someArg:)`, which is in the API schema."#
                 );
             }
