@@ -1,6 +1,6 @@
 use anyhow::Result;
-use xtask::*;
 use xshell::*;
+use xtask::*;
 
 const PROJECT_NAME: &str = "apollo-federation-cli";
 
@@ -23,7 +23,11 @@ impl Flame {
         cargo!(["build", "--profile", "profiling", "-p", PROJECT_NAME]);
 
         let subargs = &self.subargs;
-        cmd!(shell, "samply record ./target/profiling/{PROJECT_NAME} {subargs...}").run()?;
+        cmd!(
+            shell,
+            "samply record ./target/profiling/{PROJECT_NAME} {subargs...}"
+        )
+        .run()?;
 
         Ok(())
     }
