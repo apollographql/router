@@ -162,15 +162,15 @@ pub fn validate(schema: Schema) -> Vec<Message> {
             )),
             ExtendedType::Union(union_type) => connect_errors.push(Message {
                 code: Code::UnsupportedAbstractType,
-                message: format!("Abstract schema types, such as `union`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/#abstract-schema-types."),
-                locations: Location::from_node(union_type.location(), source_map)
+                message: "Abstract schema types, such as `union`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/#abstract-schema-types.".to_string(),
+                locations: Location::from_extended_type_node(union_type, source_map, "union")
                     .into_iter()
                     .collect(),
             }),
             ExtendedType::Interface(interface) => connect_errors.push(Message {
                 code: Code::UnsupportedAbstractType,
-                message: format!("Abstract schema types, such as `interface`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/#abstract-schema-types."),
-                locations: Location::from_node(interface.location(), source_map)
+                message: "Abstract schema types, such as `interface`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/#abstract-schema-types.".to_string(),
+                locations: Location::from_extended_type_node(interface, source_map, "interface")
                     .into_iter()
                     .collect(),
             }),
@@ -595,6 +595,23 @@ impl Location {
         let end = source
             .get_line_column(node.end_offset())
             .map(|(line, column)| Location { line, column })?;
+        Some(Range { start, end })
+    }
+
+    fn from_extended_type_node<T>(
+        node: &Node<T>,
+        sources: &SourceMap,
+        extended_type: &str,
+    ) -> Option<Range<Self>> {
+        let node_location = node.location()?;
+        let source = sources.get(&node_location.file_id())?;
+        let start = source
+            .get_line_column(node_location.offset())
+            .map(|(line, column)| Location { line, column })?;
+        let end = source
+            .get_line_column(node_location.offset() + extended_type.chars().count())
+            .map(|(line, column)| Location { line, column })?;
+
         Some(Range { start, end })
     }
 }
