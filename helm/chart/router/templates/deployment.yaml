@@ -175,10 +175,10 @@ spec:
   {{- if .Values.rollingUpdate }}
   strategy:
     rollingUpdate:
-      {{- if .Values.rollingUpdate.maxUnavailable }}
+      {{- if  (hasKey .Values.rollingUpdate "maxUnavailable") }}
       maxUnavailable: {{ .Values.rollingUpdate.maxUnavailable }}
       {{- end }}
-      {{- if .Values.rollingUpdate.maxSurge }}
+      {{- if (hasKey .Values.rollingUpdate "maxSurge") }}
       maxSurge: {{ .Values.rollingUpdate.maxSurge }}
       {{- end }}
   {{- end }}
