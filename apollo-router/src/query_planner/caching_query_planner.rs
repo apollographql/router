@@ -406,7 +406,7 @@ where
         let qp = self.clone();
         Box::pin(async move {
             let context = request.context.clone();
-            qp.plan(request).await.map(|response| {
+            qp.plan(request).await.inspect(|response| {
                 if let Some(usage_reporting) = context
                     .extensions()
                     .with_lock(|lock| lock.get::<Arc<UsageReporting>>().cloned())
@@ -420,7 +420,6 @@ where
                         usage_reporting.stats_report_key.clone(),
                     );
                 }
-                response
             })
         })
     }
@@ -645,12 +644,11 @@ impl std::fmt::Display for CachingQueryKey {
         let operation = hex::encode(hasher.finalize());
 
         let mut hasher = Sha256::new();
-        hasher.update(&serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
-        hasher.update(
-            &serde_json::to_vec(&self.plan_options).expect("serialization should not fail"),
-        );
+        hasher.update(serde_json::to_vec(&self.metadata).expect("serialization should not fail"));
         hasher
-            .update(&serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
+            .update(serde_json::to_vec(&self.plan_options).expect("serialization should not fail"));
+        hasher
+            .update(serde_json::to_vec(&self.config_mode).expect("serialization should not fail"));
         hasher.update(&*self.schema_id);
         hasher.update([self.introspection as u8]);
         let metadata = hex::encode(hasher.finalize());

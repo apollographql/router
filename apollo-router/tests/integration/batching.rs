@@ -4,7 +4,7 @@ use itertools::Itertools;
 use tower::BoxError;
 use wiremock::ResponseTemplate;
 
-use crate::integration::common::ValueExt as _;
+use crate::integration::ValueExt as _;
 
 const CONFIG: &str = include_str!("../fixtures/batching/all_enabled.router.yaml");
 const SHORT_TIMEOUTS_CONFIG: &str = include_str!("../fixtures/batching/short_timeouts.router.yaml");
