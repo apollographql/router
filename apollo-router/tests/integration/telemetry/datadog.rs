@@ -11,8 +11,8 @@ use tower::BoxError;
 
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Telemetry;
-use crate::integration::common::ValueExt;
 use crate::integration::IntegrationTest;
+use crate::integration::ValueExt;
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_default_span_names() -> Result<(), BoxError> {

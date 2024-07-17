@@ -19,6 +19,8 @@
 #![cfg_attr(feature = "failfast", allow(unreachable_code))]
 #![warn(unreachable_pub)]
 #![warn(missing_docs)]
+// TODO: silence false positives (apollo_compiler::Name) and investigate the rest
+#![allow(clippy::mutable_key_type)]
 
 macro_rules! failfast_debug {
     ($($tokens:tt)+) => {{
