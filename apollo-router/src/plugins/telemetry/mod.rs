@@ -9,6 +9,7 @@ use std::time::Instant;
 use ::tracing::info_span;
 use ::tracing::Span;
 use axum::headers::HeaderName;
+use config_new::cache::CacheInstruments;
 use config_new::instruments::StaticInstrument;
 use config_new::Selectors;
 use dashmap::DashMap;
@@ -214,17 +215,6 @@ struct TelemetryActivation {
     private_meter_provider: Option<FilterMeterProvider>,
     is_active: bool,
 }
-
-#[derive(Debug)]
-struct ReportingError;
-
-impl fmt::Display for ReportingError {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ReportingError")
-    }
-}
-
-impl std::error::Error for ReportingError {}
 
 fn setup_tracing<T: TracingConfigurator>(
     mut builder: Builder,
@@ -779,18 +769,30 @@ impl Plugin for Telemetry {
                     let custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
+                    let custom_cache_instruments: CacheInstruments =
+                        (&config.instrumentation.instruments).into();
+                    custom_cache_instruments.on_request(sub_request);
+
                     (
                         sub_request.context.clone(),
                         custom_instruments,
                         custom_attributes,
                         custom_events,
+                        custom_cache_instruments,
                     )
                 },
-                move |(context, custom_instruments, custom_attributes, custom_events): (
+                move |(
+                    context,
+                    custom_instruments,
+                    custom_attributes,
+                    custom_events,
+                    custom_cache_instruments,
+                ): (
                     Context,
                     SubgraphInstruments,
                     Vec<KeyValue>,
                     SubgraphEvents,
+                    CacheInstruments,
                 ),
                       f: BoxFuture<'static, Result<SubgraphResponse, BoxError>>| {
                     let subgraph_attribute = subgraph_attribute.clone();
@@ -817,6 +819,7 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_response(resp),
                                 );
+                                custom_cache_instruments.on_response(resp);
                                 custom_instruments.on_response(resp);
                                 custom_events.on_response(resp);
                             }
@@ -830,6 +833,7 @@ impl Plugin for Telemetry {
                                         .attributes
                                         .on_error(err, &context),
                                 );
+                                custom_cache_instruments.on_error(err, &context);
                                 custom_instruments.on_error(err, &context);
                                 custom_events.on_error(err, &context);
                             }
@@ -2226,7 +2230,6 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::OK);
         let body = get_body_bytes(resp.body_mut()).await.unwrap();
         String::from_utf8_lossy(&body)
-            .to_string()
             .split('\n')
             .filter(|l| l.contains("bucket") && !l.contains("apollo_router_span_count"))
             .sorted()

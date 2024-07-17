@@ -21,6 +21,8 @@ use tokio::time::Instant;
 use tower::BoxError;
 
 use super::attributes::HttpServerAttributes;
+use super::cache::attributes::CacheAttributes;
+use super::cache::CacheInstrumentsConfig;
 use super::graphql::selectors::ListLength;
 use super::graphql::GraphQLInstruments;
 use super::graphql::FIELD_EXECUTION;
@@ -80,6 +82,11 @@ pub(crate) struct InstrumentsConfig {
     pub(crate) graphql: Extendable<
         GraphQLInstrumentsConfig,
         Instrument<GraphQLAttributes, GraphQLSelector, GraphQLValue>,
+    >,
+    /// Cache instruments
+    pub(crate) cache: Extendable<
+        CacheInstrumentsConfig,
+        Instrument<CacheAttributes, SubgraphSelector, SubgraphValue>,
     >,
 }
 
@@ -1653,7 +1660,7 @@ pub(crate) type SubgraphCustomInstruments = CustomInstruments<
 >;
 
 // ---------------- Counter -----------------------
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum Increment {
     Unit,
     EventUnit,
@@ -1683,6 +1690,18 @@ where
     pub(crate) inner: Mutex<CustomCounterInner<Request, Response, A, T>>,
 }
 
+impl<Request, Response, A, T> Clone for CustomCounter<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response> + Debug + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            inner: Mutex::new(self.inner.lock().clone()),
+        }
+    }
+}
+
 pub(crate) struct CustomCounterInner<Request, Response, A, T>
 where
     A: Selectors<Request = Request, Response = Response> + Default,
@@ -1696,6 +1715,24 @@ where
     pub(crate) attributes: Vec<opentelemetry_api::KeyValue>,
     // Useful when it's a counter on events to know if we have to count for an event or not
     pub(crate) incremented: bool,
+}
+
+impl<Request, Response, A, T> Clone for CustomCounterInner<Request, Response, A, T>
+where
+    A: Selectors<Request = Request, Response = Response> + Default,
+    T: Selector<Request = Request, Response = Response> + Debug + Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            increment: self.increment.clone(),
+            selector: self.selector.clone(),
+            selectors: self.selectors.clone(),
+            counter: self.counter.clone(),
+            condition: self.condition.clone(),
+            attributes: self.attributes.clone(),
+            incremented: self.incremented,
+        }
+    }
 }
 
 impl<A, T, Request, Response, EventResponse> Instrumented for CustomCounter<Request, Response, A, T>
@@ -2418,6 +2455,7 @@ mod tests {
     use crate::http_ext::TryIntoHeaderValue;
     use crate::json_ext::Path;
     use crate::metrics::FutureMetricsExt;
+    use crate::plugins::telemetry::config_new::cache::CacheInstruments;
     use crate::plugins::telemetry::config_new::graphql::GraphQLInstruments;
     use crate::plugins::telemetry::config_new::instruments::Instrumented;
     use crate::plugins::telemetry::config_new::instruments::InstrumentsConfig;
@@ -2505,6 +2543,7 @@ mod tests {
         },
         SubgraphResponse {
             status: u16,
+            subgraph_name: Option<String>,
             data: Option<serde_json::Value>,
             #[serde(default)]
             #[schemars(with = "Option<serde_json::Map<String, serde_json::Value>>")]
@@ -2717,6 +2756,7 @@ mod tests {
                         let mut router_instruments = None;
                         let mut supergraph_instruments = None;
                         let mut subgraph_instruments = None;
+                        let mut cache_instruments: Option<CacheInstruments> = None;
                         let graphql_instruments: GraphQLInstruments = config
                             .new_graphql_instruments(Arc::new(
                                 config.new_static_graphql_instruments(),
@@ -2833,6 +2873,7 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_static_subgraph_instruments()),
                                     ));
+                                    cache_instruments = Some((&config).into());
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
                                         .and_operation_name(operation_name)
@@ -2850,8 +2891,10 @@ mod tests {
                                         .build();
 
                                     subgraph_instruments.as_mut().unwrap().on_request(&request);
+                                    cache_instruments.as_mut().unwrap().on_request(&request);
                                 }
                                 Event::SubgraphResponse {
+                                    subgraph_name,
                                     status,
                                     data,
                                     extensions,
@@ -2860,6 +2903,7 @@ mod tests {
                                 } => {
                                     let response = subgraph::Response::fake2_builder()
                                         .context(context.clone())
+                                        .and_subgraph_name(subgraph_name)
                                         .status_code(StatusCode::from_u16(status).expect("status"))
                                         .and_data(data)
                                         .errors(errors)
@@ -2868,6 +2912,10 @@ mod tests {
                                         .build()
                                         .unwrap();
                                     subgraph_instruments
+                                        .take()
+                                        .expect("subgraph request must have been made first")
+                                        .on_response(&response);
+                                    cache_instruments
                                         .take()
                                         .expect("subgraph request must have been made first")
                                         .on_response(&response);
