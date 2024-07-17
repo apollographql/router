@@ -372,8 +372,13 @@ fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> bool {
 // AST comparison functions
 
 fn same_ast_document(x: &ast::Document, y: &ast::Document) -> bool {
-    fn split_definitions(doc: &ast::Document
-    ) -> (Vec<&ast::OperationDefinition>, Vec<&ast::FragmentDefinition>, Vec<&ast::Definition>) {
+    fn split_definitions(
+        doc: &ast::Document,
+    ) -> (
+        Vec<&ast::OperationDefinition>,
+        Vec<&ast::FragmentDefinition>,
+        Vec<&ast::Definition>,
+    ) {
         let mut operations: Vec<&ast::OperationDefinition> = Vec::new();
         let mut fragments: Vec<&ast::FragmentDefinition> = Vec::new();
         let mut others: Vec<&ast::Definition> = Vec::new();
@@ -393,14 +398,17 @@ fn same_ast_document(x: &ast::Document, y: &ast::Document) -> bool {
 
     assert!(x_others.is_empty(), "Unexpected definition types");
     assert!(y_others.is_empty(), "Unexpected definition types");
-    assert!(x_ops.len() == y_ops.len(), "Different number of operation definitions");
+    assert!(
+        x_ops.len() == y_ops.len(),
+        "Different number of operation definitions"
+    );
 
     x_ops
         .iter()
         .zip(y_ops.iter())
         .all(|(x_op, y_op)| same_ast_operation_definition(x_op, y_op))
-    && x_frags.len() == y_frags.len()
-    && x_frags
+        && x_frags.len() == y_frags.len()
+        && x_frags
             .iter()
             .zip(y_frags.iter())
             .all(|(x_frag, y_frag)| same_ast_fragment_definition(x_frag, y_frag))
@@ -417,10 +425,7 @@ fn same_ast_operation_definition(
         && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set)
 }
 
-fn same_ast_fragment_definition(
-    x: &ast::FragmentDefinition,
-    y: &ast::FragmentDefinition,
-) -> bool {
+fn same_ast_fragment_definition(x: &ast::FragmentDefinition, y: &ast::FragmentDefinition) -> bool {
     x.name == y.name
         && x.type_condition == y.type_condition
         && x.directives == y.directives
@@ -460,7 +465,7 @@ fn get_selection_key(selection: &ast::Selection) -> SelectionKey {
         ast::Selection::InlineFragment(fragment) => SelectionKey::InlineFragment {
             type_condition: fragment.type_condition.clone(),
             directives: fragment.directives.clone(),
-        }
+        },
     }
 }
 
@@ -469,7 +474,11 @@ use std::ops::Not;
 /// Get the sub-selections of a selection.
 fn get_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>> {
     match selection {
-        ast::Selection::Field(field) => field.selection_set.is_empty().not().then(|| &field.selection_set),
+        ast::Selection::Field(field) => field
+            .selection_set
+            .is_empty()
+            .not()
+            .then(|| &field.selection_set),
         ast::Selection::FragmentSpread(_) => None,
         ast::Selection::InlineFragment(fragment) => Some(&fragment.selection_set),
     }
