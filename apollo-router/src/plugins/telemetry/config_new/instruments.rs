@@ -22,11 +22,14 @@ use tower::BoxError;
 
 use super::attributes::HttpServerAttributes;
 use super::cache::attributes::CacheAttributes;
+use super::cache::CacheInstruments;
 use super::cache::CacheInstrumentsConfig;
+use super::cache::CACHE_METRIC;
 use super::graphql::selectors::ListLength;
 use super::graphql::GraphQLInstruments;
 use super::graphql::FIELD_EXECUTION;
 use super::graphql::FIELD_LENGTH;
+use super::selectors::CacheKind;
 use super::DefaultForLevel;
 use super::Selector;
 use crate::metrics;
@@ -715,7 +718,6 @@ impl InstrumentsConfig {
         &self,
         static_instruments: Arc<HashMap<String, StaticInstrument>>,
     ) -> GraphQLInstruments {
-        let meter = metrics::meter_provider().meter(METER_NAME);
         GraphQLInstruments {
             list_length: self.graphql.attributes.list_length.is_enabled().then(|| {
                 let mut nb_attributes = 0;
@@ -732,7 +734,17 @@ impl InstrumentsConfig {
                     inner: Mutex::new(CustomHistogramInner {
                         increment: Increment::FieldCustom(None),
                         condition: Condition::True,
-                        histogram: Some(meter.f64_histogram(FIELD_LENGTH).init()),
+                        histogram: Some(static_instruments
+                                .get(FIELD_LENGTH)
+                                .expect(
+                                    "cannot get static instrument for graphql; this should not happen",
+                                )
+                                .as_histogram()
+                                .cloned()
+                                .expect(
+                                    "cannot convert instrument to counter for graphql; this should not happen",
+                                )
+                            ),
                         attributes: Vec::with_capacity(nb_attributes),
                         selector: Some(Arc::new(GraphQLSelector::ListLength {
                             list_length: ListLength::Value,
@@ -761,7 +773,17 @@ impl InstrumentsConfig {
                         inner: Mutex::new(CustomCounterInner {
                             increment: Increment::FieldUnit,
                             condition: Condition::True,
-                            counter: Some(meter.f64_counter(FIELD_EXECUTION).init()),
+                            counter: Some(static_instruments
+                                .get(FIELD_EXECUTION)
+                                .expect(
+                                    "cannot get static instrument for graphql; this should not happen",
+                                )
+                                .as_counter_f64()
+                                .cloned()
+                                .expect(
+                                    "cannot convert instrument to counter for graphql; this should not happen",
+                                )
+                            ),
                             attributes: Vec::with_capacity(nb_attributes),
                             selector: None,
                             selectors,
@@ -772,8 +794,72 @@ impl InstrumentsConfig {
             custom: CustomInstruments::new(&self.graphql.custom, static_instruments),
         }
     }
+
+    pub(crate) fn new_static_cache_instruments(&self) -> HashMap<String, StaticInstrument> {
+        let meter = metrics::meter_provider().meter(METER_NAME);
+        let mut static_instruments: HashMap<String, StaticInstrument> = HashMap::new();
+        if self.cache.attributes.cache.is_enabled() {
+            static_instruments.insert(
+                CACHE_METRIC.to_string(),
+                StaticInstrument::CounterF64(
+                    meter
+                        .f64_counter(CACHE_METRIC)
+                        .with_unit(Unit::new("ops"))
+                        .with_description("Entity cache hit/miss operations at the subgraph level")
+                        .init(),
+                ),
+            );
+        }
+
+        static_instruments
+    }
+
+    pub(crate) fn new_cache_instruments(
+        &self,
+        static_instruments: Arc<HashMap<String, StaticInstrument>>,
+    ) -> CacheInstruments {
+        CacheInstruments {
+            cache_hit: self.cache.attributes.cache.is_enabled().then(|| {
+                let mut nb_attributes = 0;
+                let selectors = match &self.cache.attributes.cache {
+                    DefaultedStandardInstrument::Bool(_) | DefaultedStandardInstrument::Unset => {
+                        None
+                    }
+                    DefaultedStandardInstrument::Extendable { attributes } => {
+                        nb_attributes = attributes.custom.len();
+                        Some(attributes.clone())
+                    }
+                };
+                CustomCounter {
+                    inner: Mutex::new(CustomCounterInner {
+                        increment: Increment::Custom(None),
+                        condition: Condition::True,
+                        counter: Some(dbg!(&static_instruments)
+                                .get(CACHE_METRIC)
+                                .expect(
+                                    "cannot get static instrument for cache; this should not happen",
+                                )
+                                .as_counter_f64()
+                                .cloned()
+                                .expect(
+                                    "cannot convert instrument to counter for cache; this should not happen",
+                                )
+                            ),
+                        attributes: Vec::with_capacity(nb_attributes),
+                        selector: Some(Arc::new(SubgraphSelector::Cache {
+                            cache: CacheKind::Hit,
+                            entity_type: None,
+                        })),
+                        selectors,
+                        incremented: false,
+                    }),
+                }
+            }),
+        }
+    }
 }
 
+#[derive(Debug)]
 pub(crate) enum StaticInstrument {
     CounterF64(Counter<f64>),
     UpDownCounterI64(UpDownCounter<i64>),
@@ -2873,7 +2959,9 @@ mod tests {
                                     subgraph_instruments = Some(config.new_subgraph_instruments(
                                         Arc::new(config.new_static_subgraph_instruments()),
                                     ));
-                                    cache_instruments = Some((&config).into());
+                                    cache_instruments = Some(config.new_cache_instruments(
+                                        Arc::new(config.new_static_cache_instruments()),
+                                    ));
                                     let graphql_request = graphql::Request::fake_builder()
                                         .query(query)
                                         .and_operation_name(operation_name)

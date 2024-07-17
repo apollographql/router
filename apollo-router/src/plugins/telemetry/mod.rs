@@ -204,6 +204,7 @@ pub(crate) struct Telemetry {
     router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     subgraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    cache_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     activation: Mutex<TelemetryActivation>,
 }
 
@@ -320,6 +321,16 @@ impl Plugin for Telemetry {
         } else {
             RwLock::default()
         };
+        let cache_custom_instruments = if cfg!(test) {
+            RwLock::new(Arc::new(
+                config
+                    .instrumentation
+                    .instruments
+                    .new_static_cache_instruments(),
+            ))
+        } else {
+            RwLock::default()
+        };
 
         Ok(Telemetry {
             custom_endpoints: metrics_builder.custom_endpoints,
@@ -342,6 +353,7 @@ impl Plugin for Telemetry {
             router_custom_instruments,
             supergraph_custom_instruments,
             subgraph_custom_instruments,
+            cache_custom_instruments,
             sampling_filter_ratio,
             config: Arc::new(config),
         })
@@ -744,6 +756,7 @@ impl Plugin for Telemetry {
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
         let static_subgraph_instruments = self.subgraph_custom_instruments.read().clone();
+        let static_cache_instruments = self.cache_custom_instruments.read().clone();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
             .map_request(move |req: SubgraphRequest| request_ftv1(req))
@@ -769,8 +782,10 @@ impl Plugin for Telemetry {
                     let custom_events = config.instrumentation.events.new_subgraph_events();
                     custom_events.on_request(sub_request);
 
-                    let custom_cache_instruments: CacheInstruments =
-                        (&config.instrumentation.instruments).into();
+                    let custom_cache_instruments: CacheInstruments = config
+                        .instrumentation
+                        .instruments
+                        .new_cache_instruments(static_cache_instruments.clone());
                     custom_cache_instruments.on_request(sub_request);
 
                     (
@@ -920,6 +935,12 @@ impl Telemetry {
                 .instrumentation
                 .instruments
                 .new_static_subgraph_instruments(),
+        );
+        *self.cache_custom_instruments.write() = Arc::new(
+            self.config
+                .instrumentation
+                .instruments
+                .new_static_cache_instruments(),
         );
 
         reload_fmt(create_fmt_layer(&self.config));
