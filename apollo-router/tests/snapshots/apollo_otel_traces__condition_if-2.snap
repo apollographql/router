@@ -887,9 +887,6 @@ resourceSpans:
               - key: graphql.operation.name
                 value:
                   stringValue: ""
-              - key: http.url
-                value:
-                  stringValue: "https://products.demo.starstuff.dev/"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -937,10 +934,7 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: http.url
-                value:
-                  stringValue: "https://products.demo.starstuff.dev/"
+            attributes: []
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1310,9 +1304,6 @@ resourceSpans:
               - key: graphql.operation.name
                 value:
                   stringValue: ""
-              - key: http.url
-                value:
-                  stringValue: "https://reviews.demo.starstuff.dev/"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1360,10 +1351,7 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: http.url
-                value:
-                  stringValue: "https://reviews.demo.starstuff.dev/"
+            attributes: []
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1628,9 +1616,6 @@ resourceSpans:
               - key: graphql.operation.name
                 value:
                   stringValue: ""
-              - key: http.url
-                value:
-                  stringValue: "https://accounts.demo.starstuff.dev/"
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
@@ -1678,10 +1663,7 @@ resourceSpans:
             kind: 3
             startTimeUnixNano: "[start_time]"
             endTimeUnixNano: "[end_time]"
-            attributes:
-              - key: http.url
-                value:
-                  stringValue: "https://accounts.demo.starstuff.dev/"
+            attributes: []
             droppedAttributesCount: 0
             events: []
             droppedEventsCount: 0
