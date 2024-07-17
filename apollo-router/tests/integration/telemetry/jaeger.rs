@@ -342,7 +342,6 @@ async fn validate_trace(
         .finish();
 
     let id = id.to_string();
-    println!("trace id: {}", id);
     let url = format!("http://localhost:16686/api/traces/{id}?{params}");
     for _ in 0..10 {
         if find_valid_trace(
@@ -428,6 +427,12 @@ fn verify_router_span_fields(
             .first(),
         Some(&&Value::String("1.0".to_string()))
     );
+    assert!(router_span
+        .select_path("$.logs[*].fields[?(@.key == 'histogram.apollo_router_span')].value")?
+        .is_empty(),);
+    assert!(router_span
+        .select_path("$.logs[*].fields[?(@.key == 'histogram.apollo_router_span')].value")?
+        .is_empty(),);
     if custom_span_instrumentation {
         assert_eq!(
             router_span
