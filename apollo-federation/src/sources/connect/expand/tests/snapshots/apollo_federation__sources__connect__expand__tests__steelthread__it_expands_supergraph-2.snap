@@ -5,7 +5,7 @@ expression: connectors.by_service_name
 {
     "connectors_Query_users_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users",
+            label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -16,26 +16,26 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "https://jsonplaceholder.typicode.com/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "users",
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: [],
-                body: None,
+        transport: HttpJsonTransport {
+            template: URLTemplate {
+                base: Some(
+                    "https://jsonplaceholder.typicode.com",
+                ),
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "users",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: [],
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -57,7 +57,7 @@ expression: connectors.by_service_name
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users/{$args.id!}",
+            label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users/{$args.id!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -68,37 +68,37 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "https://jsonplaceholder.typicode.com/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "users",
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$args.id",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: [],
-                body: None,
+        transport: HttpJsonTransport {
+            template: URLTemplate {
+                base: Some(
+                    "https://jsonplaceholder.typicode.com",
+                ),
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "users",
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$args.id",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: [],
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -127,7 +127,7 @@ expression: connectors.by_service_name
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "connectors.json http: GET /users/{$this.c!}",
+            label: "connectors.json http: GET https://jsonplaceholder.typicode.com/users/{$this.c!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "json",
@@ -138,37 +138,37 @@ expression: connectors.by_service_name
                 directive_index: 1,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "https://jsonplaceholder.typicode.com/",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "users",
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$this.c",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: [],
-                body: None,
+        transport: HttpJsonTransport {
+            template: URLTemplate {
+                base: Some(
+                    "https://jsonplaceholder.typicode.com",
+                ),
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "users",
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$this.c",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: [],
+            body: None,
+        },
         selection: Path(
             Var(
                 "$",

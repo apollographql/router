@@ -59,7 +59,7 @@ pub(super) fn check_or_add(
         name: link.type_name_in_schema(&JSON_SELECTION_SCALAR_NAME),
     };
 
-    // scalar URLPathTemplate
+    // scalar URLTemplate
     let url_path_template_spec = ScalarTypeSpecification {
         name: link.type_name_in_schema(&URL_PATH_TEMPLATE_SCALAR_NAME),
     };
@@ -403,7 +403,7 @@ mod tests {
 
         scalar connect__JSONSelection
 
-        scalar connect__URLPathTemplate
+        scalar connect__URLTemplate
 
         input connect__HTTPHeaderMapping {
           name: String!
@@ -412,11 +412,11 @@ mod tests {
         }
 
         input connect__ConnectHTTP {
-          GET: connect__URLPathTemplate
-          POST: connect__URLPathTemplate
-          PUT: connect__URLPathTemplate
-          PATCH: connect__URLPathTemplate
-          DELETE: connect__URLPathTemplate
+          GET: connect__URLTemplate
+          POST: connect__URLTemplate
+          PUT: connect__URLTemplate
+          PATCH: connect__URLTemplate
+          DELETE: connect__URLTemplate
           body: connect__JSONSelection
           headers: [connect__HTTPHeaderMapping!]
         }

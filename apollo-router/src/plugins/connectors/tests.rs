@@ -1,3 +1,4 @@
+use std::net::TcpListener;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -301,7 +302,7 @@ async fn basic_errors() {
         {
           "message": "http error: 404 Not Found",
           "extensions": {
-            "connector": "connectors.json http: GET /users",
+            "connector": "connectors.json http: GET https://jsonplaceholder.typicode.com/users",
             "code": "404"
           }
         }
@@ -541,10 +542,47 @@ async fn test_nullability() {
     );
 }
 
+#[tokio::test]
+async fn test_no_source() {
+    // TODO: make this port dynamic once overriding via config is supported
+    let mock_server = MockServer::builder()
+        .listener(TcpListener::bind("127.0.0.1:37895").expect("Could not bind port"))
+        .start()
+        .await;
+    mock_api::user_1().mount(&mock_server).await;
+
+    let response = execute(
+        NO_SOURCES_SCHEMA,
+        &mock_server.uri(),
+        "query { user(id: 1) { id name }}",
+        Default::default(),
+        None,
+        |_| {},
+    )
+    .await;
+
+    insta::assert_json_snapshot!(response, @r###"
+    {
+      "data": {
+        "user": {
+          "id": 1,
+          "name": "Leanne Graham"
+        }
+      }
+    }
+    "###);
+
+    req_asserts::matches(
+        &mock_server.received_requests().await.unwrap(),
+        vec![Matcher::new().method("GET").path("/users/1").build()],
+    );
+}
+
 const STEEL_THREAD_SCHEMA: &str = include_str!("./testdata/steelthread.graphql");
 const MUTATION_SCHEMA: &str = include_str!("./testdata/mutation.graphql");
 const NULLABILITY_SCHEMA: &str = include_str!("./testdata/nullability.graphql");
 const SELECTION_SCHEMA: &str = include_str!("./testdata/selection.graphql");
+const NO_SOURCES_SCHEMA: &str = include_str!("./testdata/connector-without-source.graphql");
 
 async fn execute(
     schema: &str,

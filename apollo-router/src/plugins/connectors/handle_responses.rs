@@ -238,8 +238,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::Transport;
-    use apollo_federation::sources::connect::URLPathTemplate;
+    use apollo_federation::sources::connect::URLTemplate;
     use insta::assert_debug_snapshot;
     use serde_json_bytes::json;
 
@@ -257,13 +256,12 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: Transport::HttpJson(HttpJsonTransport {
-                base_url: "http://localhost/api".into(),
-                path_template: URLPathTemplate::parse("/path").unwrap(),
+            transport: HttpJsonTransport {
+                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
-            }),
+            },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
         };
@@ -343,13 +341,12 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: Transport::HttpJson(HttpJsonTransport {
-                base_url: "http://localhost/api".into(),
-                path_template: URLPathTemplate::parse("/path").unwrap(),
+            transport: HttpJsonTransport {
+                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
-            }),
+            },
             selection: JSONSelection::parse(".data { id }").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
         };
@@ -454,13 +451,12 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: Transport::HttpJson(HttpJsonTransport {
-                base_url: "http://localhost/api".into(),
-                path_template: URLPathTemplate::parse("/path").unwrap(),
+            transport: HttpJsonTransport {
+                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
-            }),
+            },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Implicit),
         };
@@ -559,13 +555,12 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: Transport::HttpJson(HttpJsonTransport {
-                base_url: "http://localhost/api".into(),
-                path_template: URLPathTemplate::parse("/path").unwrap(),
+            transport: HttpJsonTransport {
+                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
                 method: HTTPMethod::Get,
                 headers: Default::default(),
                 body: Default::default(),
-            }),
+            },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: Some(EntityResolver::Explicit),
         };

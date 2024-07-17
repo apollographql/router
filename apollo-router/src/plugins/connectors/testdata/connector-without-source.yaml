@@ -1,0 +1,23 @@
+# rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/connector-without-source.yaml > apollo-router/src/plugins/connectors/testdata/connector-without-source.graphql
+federation_version: =2.9.0-connectors.9
+subgraphs:
+  connectors:
+    routing_url: none
+    schema:
+      sdl: |
+        extend schema
+          @link(url: "https://specs.apollo.dev/federation/v2.8")
+          @link(
+            url: "https://specs.apollo.dev/connect/v0.1"
+            import: ["@connect", "@source"]
+          )
+
+        type User {
+          id: ID!
+          name: String
+        }
+
+        type Query {
+          user(id: ID!): User
+            @connect(http: { GET: "http://127.0.0.1:37895/users/{$$args.id}" }, selection: "id name")
+        }

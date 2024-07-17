@@ -34,7 +34,7 @@ pub(crate) const HTTP_HEADER_MAPPING_AS_ARGUMENT_NAME: Name = name!("as");
 pub(crate) const HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME: Name = name!("value");
 
 pub(crate) const JSON_SELECTION_SCALAR_NAME: Name = name!("JSONSelection");
-pub(crate) const URL_PATH_TEMPLATE_SCALAR_NAME: Name = name!("URLPathTemplate");
+pub(crate) const URL_PATH_TEMPLATE_SCALAR_NAME: Name = name!("URLTemplate");
 
 /// Arguments to the `@source` directive
 ///

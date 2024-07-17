@@ -5,7 +5,7 @@ expression: connectors.by_service_name
 {
     "connectors_Query_users_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET ",
+            label: "connectors.example http: GET http://example",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -16,18 +16,18 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "http://example",
-                path_template: URLPathTemplate {
-                    path: [],
-                    query: {},
-                },
-                method: Get,
-                headers: [],
-                body: None,
+        transport: HttpJsonTransport {
+            template: URLTemplate {
+                base: Some(
+                    "http://example",
+                ),
+                path: [],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: [],
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -49,7 +49,7 @@ expression: connectors.by_service_name
     },
     "connectors_Query_user_0": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$args.id!}",
+            label: "connectors.example http: GET http://example/{$args.id!}",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -60,30 +60,30 @@ expression: connectors.by_service_name
                 directive_index: 0,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "http://example",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$args.id",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: [],
-                body: None,
+        transport: HttpJsonTransport {
+            template: URLTemplate {
+                base: Some(
+                    "http://example",
+                ),
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$args.id",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: [],
+            body: None,
+        },
         selection: Named(
             SubSelection {
                 selections: [
@@ -112,7 +112,7 @@ expression: connectors.by_service_name
     },
     "connectors_User_d_1": Connector {
         id: ConnectId {
-            label: "connectors.example http: GET /{$this.c!}/d",
+            label: "connectors.example http: GET http://example/{$this.c!}/d",
             subgraph_name: "connectors",
             source_name: Some(
                 "example",
@@ -123,37 +123,37 @@ expression: connectors.by_service_name
                 directive_index: 1,
             },
         },
-        transport: HttpJson(
-            HttpJsonTransport {
-                base_url: "http://example",
-                path_template: URLPathTemplate {
-                    path: [
-                        ParameterValue {
-                            parts: [
-                                Var(
-                                    VariableExpression {
-                                        var_path: "$this.c",
-                                        batch_separator: None,
-                                        required: true,
-                                    },
-                                ),
-                            ],
-                        },
-                        ParameterValue {
-                            parts: [
-                                Text(
-                                    "d",
-                                ),
-                            ],
-                        },
-                    ],
-                    query: {},
-                },
-                method: Get,
-                headers: [],
-                body: None,
+        transport: HttpJsonTransport {
+            template: URLTemplate {
+                base: Some(
+                    "http://example",
+                ),
+                path: [
+                    ParameterValue {
+                        parts: [
+                            Var(
+                                VariableExpression {
+                                    var_path: "$this.c",
+                                    batch_separator: None,
+                                    required: true,
+                                },
+                            ),
+                        ],
+                    },
+                    ParameterValue {
+                        parts: [
+                            Text(
+                                "d",
+                            ),
+                        ],
+                    },
+                ],
+                query: {},
             },
-        ),
+            method: Get,
+            headers: [],
+            body: None,
+        },
         selection: Path(
             Var(
                 "$",

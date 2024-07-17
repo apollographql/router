@@ -152,11 +152,12 @@ fn request_params_to_requests(
     let mut results = vec![];
 
     for (response_key, inputs) in request_params {
-        let request = match connector.transport {
-            apollo_federation::sources::connect::Transport::HttpJson(ref transport) => {
-                make_request(transport, inputs.merge(), original_request, debug)?
-            }
-        };
+        let request = make_request(
+            &connector.transport,
+            inputs.merge(),
+            original_request,
+            debug,
+        )?;
 
         results.push((request, response_key));
     }
@@ -489,7 +490,7 @@ mod tests {
     use apollo_federation::sources::connect::HTTPMethod;
     use apollo_federation::sources::connect::HttpJsonTransport;
     use apollo_federation::sources::connect::JSONSelection;
-    use apollo_federation::sources::connect::URLPathTemplate;
+    use apollo_federation::sources::connect::URLTemplate;
     use insta::assert_debug_snapshot;
 
     use crate::graphql;
@@ -1309,15 +1310,12 @@ mod tests {
                 0,
                 "test label",
             ),
-            transport: apollo_federation::sources::connect::Transport::HttpJson(
-                HttpJsonTransport {
-                    base_url: "http://localhost/api".into(),
-                    path_template: URLPathTemplate::parse("/path").unwrap(),
-                    method: HTTPMethod::Get,
-                    headers: Default::default(),
-                    body: Default::default(),
-                },
-            ),
+            transport: HttpJsonTransport {
+                template: URLTemplate::parse("http://localhost/api/path").unwrap(),
+                method: HTTPMethod::Get,
+                headers: Default::default(),
+                body: Default::default(),
+            },
             selection: JSONSelection::parse(".data").unwrap().1,
             entity_resolver: None,
         };

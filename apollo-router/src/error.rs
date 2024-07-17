@@ -574,8 +574,6 @@ pub(crate) enum SchemaError {
 pub(crate) enum ConnectorDirectiveError {
     /// Invalid Base URI on API
     InvalidBaseUri(url::ParseError),
-    /// Invalid Path for directive
-    InvalidPath(url::ParseError),
     /// Could not generate path from inputs
     PathGenerationError(String),
 }

@@ -8,7 +8,7 @@ pub mod expand;
 mod json_selection;
 mod models;
 pub(crate) mod spec;
-mod url_path_template;
+mod url_template;
 pub mod validation;
 
 use apollo_compiler::name;
@@ -19,14 +19,13 @@ pub use json_selection::Key;
 pub use json_selection::PathSelection;
 pub use json_selection::SubSelection;
 pub(crate) use spec::ConnectSpecDefinition;
-pub use url_path_template::URLPathTemplate;
+pub use url_template::URLTemplate;
 
 pub use self::models::Connector;
 pub use self::models::EntityResolver;
 pub use self::models::HTTPHeader;
 pub use self::models::HTTPMethod;
 pub use self::models::HttpJsonTransport;
-pub use self::models::Transport;
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::ObjectFieldDefinitionPosition;
 use crate::schema::ObjectOrInterfaceFieldDefinitionPosition;
