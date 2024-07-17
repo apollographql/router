@@ -40,27 +40,7 @@ pub(super) fn parse_schema(schema_doc: &str) -> ValidFederationSchema {
 }
 
 pub(super) fn parse_operation(schema: &ValidFederationSchema, query: &str) -> Operation {
-    let executable_document = apollo_compiler::ExecutableDocument::parse_and_validate(
-        schema.schema(),
-        query,
-        "query.graphql",
-    )
-    .unwrap();
-    let operation = executable_document.operations.get(None).unwrap();
-    let named_fragments = NamedFragments::new(&executable_document.fragments, schema);
-    let selection_set =
-        SelectionSet::from_selection_set(&operation.selection_set, &named_fragments, schema)
-            .unwrap();
-
-    Operation {
-        schema: schema.clone(),
-        root_kind: operation.operation_type.into(),
-        name: operation.name.clone(),
-        variables: Arc::new(operation.variables.clone()),
-        directives: Arc::new(operation.directives.clone()),
-        selection_set,
-        named_fragments,
-    }
+    Operation::parse(schema.clone(), query, "query.graphql", None).unwrap()
 }
 
 /// Parse and validate the query similarly to `parse_operation`, but does not construct the

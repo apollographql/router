@@ -46,6 +46,7 @@ use apollo_compiler::Node;
 
 use super::Containment;
 use super::ContainmentOptions;
+use super::DirectiveList;
 use super::Field;
 use super::FieldSelection;
 use super::Fragment;
@@ -759,7 +760,7 @@ enum FullMatchingFragmentCondition<'a> {
     ForInlineFragmentSelection {
         // the type condition and directives on an inline fragment selection.
         type_condition_position: &'a CompositeTypeDefinitionPosition,
-        directives: &'a Arc<executable::DirectiveList>,
+        directives: &'a Arc<DirectiveList>,
     },
 }
 
@@ -2987,8 +2988,8 @@ mod tests {
     ///
 
     #[test]
-    #[should_panic(expected = "directive cannot be used on FRAGMENT_DEFINITION")]
-    // TODO: Investigate this restriction on query document in Rust version.
+    #[should_panic(expected = "directive is not supported for FRAGMENT_DEFINITION")]
+    // XXX(@goto-bus-stop): this test does not make sense, we should remove this feature
     fn reuse_fragments_with_same_directive_on_the_fragment() {
         let schema_doc = r#"
                 type Query {

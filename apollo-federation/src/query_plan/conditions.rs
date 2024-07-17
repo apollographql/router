@@ -2,7 +2,6 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::collections::IndexMap;
-use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -10,6 +9,7 @@ use indexmap::map::Entry;
 use serde::Serialize;
 
 use crate::error::FederationError;
+use crate::operation::DirectiveList;
 use crate::operation::Selection;
 use crate::operation::SelectionMap;
 use crate::operation::SelectionSet;
@@ -285,8 +285,8 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                     }
 
                     // We can skip some of the fragment directives directive.
-                    let final_selection =
-                        inline_fragment.with_updated_directives(DirectiveList(needed_directives));
+                    let final_selection = inline_fragment
+                        .with_updated_directives(DirectiveList::from_iter(needed_directives));
                     selection_map.insert(Selection::InlineFragment(Arc::new(final_selection)));
                 }
             }
@@ -308,19 +308,17 @@ fn remove_conditions_of_element(
     element: OpPathElement,
     conditions: &VariableConditions,
 ) -> OpPathElement {
-    let updated_directives: DirectiveList = DirectiveList(
-        element
-            .directives()
-            .iter()
-            .filter(|d| {
-                !matches_condition_for_kind(d, conditions, ConditionKind::Include)
-                    && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
-            })
-            .cloned()
-            .collect(),
-    );
+    let updated_directives: DirectiveList = element
+        .directives()
+        .iter()
+        .filter(|d| {
+            !matches_condition_for_kind(d, conditions, ConditionKind::Include)
+                && !matches_condition_for_kind(d, conditions, ConditionKind::Skip)
+        })
+        .cloned()
+        .collect();
 
-    if updated_directives.0.len() == element.directives().len() {
+    if updated_directives.len() == element.directives().len() {
         element
     } else {
         element.with_updated_directives(updated_directives)

@@ -167,7 +167,7 @@ pub(super) fn sort_arguments(arguments: &mut [Node<executable::Argument>]) {
 
 /// Compare sorted arguments; see [compare_sorted_name_value_pairs()] for semantics. This is used
 /// for hashing directives in a way consistent with [same_directives()].
-fn compare_sorted_arguments(
+pub(super) fn compare_sorted_arguments(
     left: &[Node<executable::Argument>],
     right: &[Node<executable::Argument>],
 ) -> std::cmp::Ordering {
