@@ -372,25 +372,38 @@ fn flatten_node_matches(this: &FlattenNode, other: &FlattenNode) -> bool {
 // AST comparison functions
 
 fn same_ast_document(x: &ast::Document, y: &ast::Document) -> bool {
-    x.definitions
-        .iter()
-        .zip(y.definitions.iter())
-        .all(|(x_def, y_def)| same_ast_definition(x_def, y_def))
-}
-
-fn same_ast_definition(x: &ast::Definition, y: &ast::Definition) -> bool {
-    match (x, y) {
-        (ast::Definition::OperationDefinition(x), ast::Definition::OperationDefinition(y)) => {
-            same_ast_operation_definition(x, y)
+    fn split_definitions(doc: &ast::Document
+    ) -> (Vec<&ast::OperationDefinition>, Vec<&ast::FragmentDefinition>, Vec<&ast::Definition>) {
+        let mut operations: Vec<&ast::OperationDefinition> = Vec::new();
+        let mut fragments: Vec<&ast::FragmentDefinition> = Vec::new();
+        let mut others: Vec<&ast::Definition> = Vec::new();
+        for def in doc.definitions.iter() {
+            match def {
+                ast::Definition::OperationDefinition(op) => operations.push(op),
+                ast::Definition::FragmentDefinition(frag) => fragments.push(frag),
+                _ => others.push(def),
+            }
         }
-        (ast::Definition::FragmentDefinition(x), ast::Definition::FragmentDefinition(y)) => x == y,
-        (ast::Definition::FragmentDefinition(_), _) => false,
-        (_, ast::Definition::FragmentDefinition(_)) => false,
-        _ => {
-            // false
-            panic!("Unexpected definition types");
-        }
+        fragments.sort_by_key(|frag| frag.name.clone());
+        (operations, fragments, others)
     }
+
+    let (x_ops, x_frags, x_others) = split_definitions(x);
+    let (y_ops, y_frags, y_others) = split_definitions(y);
+
+    assert!(x_others.is_empty(), "Unexpected definition types");
+    assert!(y_others.is_empty(), "Unexpected definition types");
+    assert!(x_ops.len() == y_ops.len(), "Different number of operation definitions");
+
+    x_ops
+        .iter()
+        .zip(y_ops.iter())
+        .all(|(x_op, y_op)| same_ast_operation_definition(x_op, y_op))
+    && x_frags.len() == y_frags.len()
+    && x_frags
+            .iter()
+            .zip(y_frags.iter())
+            .all(|(x_frag, y_frag)| same_ast_fragment_definition(x_frag, y_frag))
 }
 
 fn same_ast_operation_definition(
@@ -400,6 +413,16 @@ fn same_ast_operation_definition(
     // Note: Operation names are ignored, since parallel fetches may have different names.
     x.operation_type == y.operation_type
         && vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x.name.cmp(&y.name))
+        && x.directives == y.directives
+        && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set)
+}
+
+fn same_ast_fragment_definition(
+    x: &ast::FragmentDefinition,
+    y: &ast::FragmentDefinition,
+) -> bool {
+    x.name == y.name
+        && x.type_condition == y.type_condition
         && x.directives == y.directives
         && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set)
 }
@@ -532,6 +555,15 @@ mod ast_comparison_tests {
     fn test_top_level_selection_order() {
         let op_x = r#"{ x { w z } y }"#;
         let op_y = r#"{ y x { z w } }"#;
+        let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
+        let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
+        assert!(super::same_ast_document(&ast_x, &ast_y));
+    }
+
+    #[test]
+    fn test_fragment_definition_order() {
+        let op_x = r#"{ q { ...f1 ...f2 } } fragment f1 on T { x y } fragment f2 on T { w z }"#;
+        let op_y = r#"{ q { ...f1 ...f2 } } fragment f2 on T { w z } fragment f1 on T { x y }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y));
