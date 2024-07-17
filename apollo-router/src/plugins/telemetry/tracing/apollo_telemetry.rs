@@ -158,14 +158,12 @@ const REPORTS_INCLUDE_ATTRS: [Key; 26] = [
 ];
 
 /// Additional attributes to include when sending to the OTLP protocol.
-const OTLP_EXT_INCLUDE_ATTRS: [Key; 14] = [
+const OTLP_EXT_INCLUDE_ATTRS: [Key; 13] = [
     OPERATION_SUBTYPE,
     EXT_TRACE_ID,
     opentelemetry_semantic_conventions::trace::HTTP_REQUEST_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_BODY_SIZE,
     opentelemetry_semantic_conventions::trace::HTTP_RESPONSE_STATUS_CODE,
-    #[allow(deprecated)]
-    opentelemetry_semantic_conventions::trace::HTTP_URL,
     APOLLO_CONNECTOR_TYPE,
     APOLLO_CONNECTOR_DETAIL,
     APOLLO_CONNECTOR_SELECTION,
