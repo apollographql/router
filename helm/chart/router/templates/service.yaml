@@ -23,8 +23,8 @@ spec:
       protocol: TCP
       name: health
     {{- /* Should we expose an entity cache invalidation port? */}}
-    {{- if and (.Values.router.configuration.preview_entity_cache).enabled  (((.Values.router.configuration.preview_entity_cache).subgraph).all).enabled ((((.Values.router.configuration.preview_entity_cache).subgraph).all).invalidation).enabled}}
-    - port: {{ (splitList ":" .Values.router.configuration.preview_entity_cache.subgraph.all.invalidation.listen | last) }}
+    {{- if and (.Values.router.configuration.preview_entity_cache).enabled (.Values.router.configuration.preview_entity_cache).invalidation }}
+    - port: {{ (splitList ":" .Values.router.configuration.preview_entity_cache.invalidation.listen | last) }}
       targetPort: invalidation
       protocol: TCP
       name: invalidation
