@@ -202,6 +202,22 @@ impl Plugin for EntityCache {
                 .into());
         }
 
+        if init
+            .config
+            .subgraph
+            .all
+            .invalidation
+            .as_ref()
+            .map(|i| i.shared_key.is_empty())
+            .unwrap_or_default()
+        {
+            return Err(
+                "you must set a default shared_key invalidation for all subgraphs"
+                    .to_string()
+                    .into(),
+            );
+        }
+
         let invalidation = Invalidation::new(storage.clone()).await?;
 
         Ok(Self {
