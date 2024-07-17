@@ -50,6 +50,8 @@ use crate::plugin::plugins;
 use crate::plugins::subscription::SubscriptionConfig;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN;
 use crate::plugins::subscription::APOLLO_SUBSCRIPTION_PLUGIN_NAME;
+use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
+use crate::plugins::telemetry::config::ApolloSignatureNormalizationAlgorithm;
 use crate::uplink::UplinkConfig;
 use crate::ApolloRouterError;
 
@@ -59,6 +61,7 @@ mod experimental;
 pub(crate) mod metrics;
 mod persisted_queries;
 mod schema;
+pub(crate) mod shared;
 pub(crate) mod subgraph;
 #[cfg(test)]
 mod tests;
@@ -222,12 +225,12 @@ pub(crate) enum ApiSchemaMode {
 #[serde(rename_all = "lowercase")]
 pub(crate) enum ApolloMetricsGenerationMode {
     /// Use the new Rust-based implementation.
+    #[default]
     New,
     /// Use the old JavaScript-based implementation.
     Legacy,
     /// Use Rust-based and Javascript-based implementations side by side, logging warnings if the
     /// implementations disagree.
-    #[default]
     Both,
 }
 
@@ -590,6 +593,44 @@ impl Configuration {
                 message: "`experimental_query_planner_mode: new` requires `experimental_apollo_metrics_generation_mode: new`",
                 error: "either change to some other query planner mode, or change to new metrics generation".into()
             });
+        }
+
+        let apollo_telemetry_config = match self.apollo_plugins.plugins.get("telemetry") {
+            Some(telemetry_config) => {
+                match serde_json::from_value::<crate::plugins::telemetry::config::Conf>(
+                    telemetry_config.clone(),
+                ) {
+                    Ok(conf) => Some(conf.apollo),
+                    _ => None,
+                }
+            }
+            _ => None,
+        };
+
+        if let Some(config) = apollo_telemetry_config {
+            if matches!(
+                config.experimental_apollo_signature_normalization_algorithm,
+                ApolloSignatureNormalizationAlgorithm::Enhanced
+            ) && self.experimental_apollo_metrics_generation_mode
+                != ApolloMetricsGenerationMode::New
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_apollo_signature_normalization_algorithm: enhanced` requires `experimental_apollo_metrics_generation_mode: new`",
+                    error: "either change to the legacy signature normalization mode, or change to new metrics generation".into()
+                });
+            }
+
+            if matches!(
+                config.experimental_apollo_metrics_reference_mode,
+                ApolloMetricsReferenceMode::Extended
+            ) && self.experimental_apollo_metrics_generation_mode
+                != ApolloMetricsGenerationMode::New
+            {
+                return Err(ConfigurationError::InvalidConfiguration {
+                    message: "`experimental_apollo_metrics_reference_mode: extended` requires `experimental_apollo_metrics_generation_mode: new`",
+                    error: "either change to the standard reference generation mode, or change to new metrics generation".into()
+                });
+            };
         }
 
         Ok(self)
@@ -997,7 +1038,7 @@ impl Default for Apq {
 }
 
 /// Query planning cache configuration
-#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, default)]
 pub(crate) struct QueryPlanning {
     /// Cache configuration
@@ -1006,7 +1047,6 @@ pub(crate) struct QueryPlanning {
     /// a list of the most used queries (from the in memory cache)
     /// Configures the number of queries warmed up. Defaults to 1/3 of
     /// the in memory cache
-    #[serde(default)]
     pub(crate) warmed_up_queries: Option<usize>,
 
     /// Sets a limit to the number of generated query plans.
@@ -1039,6 +1079,32 @@ pub(crate) struct QueryPlanning {
     /// Set the size of a pool of workers to enable query planning parallelism.
     /// Default: 1.
     pub(crate) experimental_parallelism: AvailableParallelism,
+
+    /// Activates introspection response caching
+    /// Historically, the Router has executed introspection queries in the query planner, and cached their
+    /// response in its cache because they were expensive. This will change soon as introspection will be
+    /// removed from the query planner. In the meantime, since storing introspection responses can fill up
+    /// the cache, this option can be used to deactivate it.
+    /// Default: true
+    pub(crate) legacy_introspection_caching: bool,
+}
+
+impl Default for QueryPlanning {
+    fn default() -> Self {
+        Self {
+            cache: QueryPlanCache::default(),
+            warmed_up_queries: Default::default(),
+            experimental_plans_limit: Default::default(),
+            experimental_parallelism: Default::default(),
+            experimental_paths_limit: Default::default(),
+            experimental_reuse_query_plans: Default::default(),
+            legacy_introspection_caching: default_legacy_introspection_caching(),
+        }
+    }
+}
+
+const fn default_legacy_introspection_caching() -> bool {
+    true
 }
 
 impl QueryPlanning {

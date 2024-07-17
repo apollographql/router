@@ -1,0 +1,9 @@
+query TestCommaEnhanced($arg1: String, $arg2: String, $veryMuchUsuallyTooLongName1234567890: String) {
+    manyArgsQuery(arg1: $arg1, arg2: $arg2, arg3: "", arg4: $veryMuchUsuallyTooLongName1234567890) {
+        enumResponse
+        basicTypes {
+            nullableId
+        }
+        id
+    }
+}

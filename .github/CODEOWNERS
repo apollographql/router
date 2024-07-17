@@ -1,5 +1,6 @@
 /docs/ @apollographql/docs
-/apollo-federation/ @dariuszkuc @sachindshinde @goto-bus-stop @SimonSapin
+/apollo-federation/ @dariuszkuc @sachindshinde @goto-bus-stop @SimonSapin @lrlna @TylerBloom @duckki
+/apollo-federation/src/sources/connect/json_selection @benjamn
 /apollo-router/ @apollographql/polaris @apollographql/atlas
 /apollo-router-benchmarks/ @apollographql/polaris @apollographql/atlas
 /apollo-router-scaffold/ @apollographql/polaris @apollographql/atlas

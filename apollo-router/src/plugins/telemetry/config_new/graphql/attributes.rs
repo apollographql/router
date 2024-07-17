@@ -1,9 +1,11 @@
+use apollo_compiler::executable::Field;
+use apollo_compiler::executable::NamedType;
 use opentelemetry_api::KeyValue;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use serde_json_bytes::Value;
 use tower::BoxError;
 
-use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
 use crate::plugins::telemetry::config_new::graphql::selectors::FieldName;
 use crate::plugins::telemetry::config_new::graphql::selectors::FieldType;
 use crate::plugins::telemetry::config_new::graphql::selectors::GraphQLSelector;
@@ -71,13 +73,19 @@ impl Selectors for GraphQLAttributes {
         Vec::default()
     }
 
-    fn on_response_field(&self, typed_value: &TypedValue, ctx: &Context) -> Vec<KeyValue> {
-        let mut attrs = Vec::with_capacity(4);
+    fn on_response_field(
+        &self,
+        attrs: &mut Vec<KeyValue>,
+        ty: &NamedType,
+        field: &Field,
+        value: &Value,
+        ctx: &Context,
+    ) {
         if let Some(true) = self.field_name {
             if let Some(name) = (GraphQLSelector::FieldName {
                 field_name: FieldName::String,
             })
-            .on_response_field(typed_value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.field.name", name));
             }
@@ -86,7 +94,7 @@ impl Selectors for GraphQLAttributes {
             if let Some(ty) = (GraphQLSelector::FieldType {
                 field_type: FieldType::Name,
             })
-            .on_response_field(typed_value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.field.type", ty));
             }
@@ -95,7 +103,7 @@ impl Selectors for GraphQLAttributes {
             if let Some(ty) = (GraphQLSelector::TypeName {
                 type_name: TypeName::String,
             })
-            .on_response_field(typed_value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.type.name", ty));
             }
@@ -104,7 +112,7 @@ impl Selectors for GraphQLAttributes {
             if let Some(length) = (GraphQLSelector::ListLength {
                 list_length: ListLength::Value,
             })
-            .on_response_field(typed_value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.list.length", length));
             }
@@ -114,19 +122,19 @@ impl Selectors for GraphQLAttributes {
                 operation_name: OperationName::String,
                 default: None,
             })
-            .on_response_field(typed_value, ctx)
+            .on_response_field(ty, field, value, ctx)
             {
                 attrs.push(KeyValue::new("graphql.operation.name", length));
             }
         }
-        attrs
     }
 }
 
 #[cfg(test)]
 mod test {
+    use serde_json_bytes::json;
+
     use crate::context::OPERATION_NAME;
-    use crate::plugins::demand_control::cost_calculator::schema_aware_response::TypedValue;
     use crate::plugins::telemetry::config_new::test::field;
     use crate::plugins::telemetry::config_new::test::ty;
     use crate::plugins::telemetry::config_new::DefaultForLevel;
@@ -156,10 +164,10 @@ mod test {
             operation_name: Some(true),
             type_name: Some(true),
         };
-        let typed_value = TypedValue::Bool(ty(), field(), &true);
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
-        let result = attributes.on_response_field(&typed_value, &ctx);
+        let mut result = Default::default();
+        attributes.on_response_field(&mut result, &ty(), field(), &json!(true), &ctx);
         assert_eq!(result.len(), 4);
         assert_eq!(result[0].key.as_str(), "graphql.field.name");
         assert_eq!(result[0].value.as_str(), "field_name");
@@ -180,18 +188,16 @@ mod test {
             operation_name: Some(true),
             type_name: Some(true),
         };
-        let typed_value = TypedValue::List(
-            ty(),
-            field(),
-            vec![
-                TypedValue::Bool(ty(), field(), &true),
-                TypedValue::Bool(ty(), field(), &true),
-                TypedValue::Bool(ty(), field(), &true),
-            ],
-        );
         let ctx = Context::default();
         let _ = ctx.insert(OPERATION_NAME, "operation_name".to_string());
-        let result = attributes.on_response_field(&typed_value, &ctx);
+        let mut result = Default::default();
+        attributes.on_response_field(
+            &mut result,
+            &ty(),
+            field(),
+            &json!(vec![true, true, true]),
+            &ctx,
+        );
         assert_eq!(result.len(), 5);
         assert_eq!(result[0].key.as_str(), "graphql.field.name");
         assert_eq!(result[0].value.as_str(), "field_name");

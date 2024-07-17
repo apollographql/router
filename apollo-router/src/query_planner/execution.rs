@@ -2,7 +2,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use futures::future::join_all;
 use futures::prelude::*;
 use tokio::sync::broadcast;
@@ -105,7 +104,7 @@ pub(crate) struct ExecutionParameters<'a> {
     pub(crate) schema: &'a Arc<Schema>,
     pub(crate) subgraph_schemas: &'a Arc<HashMap<String, Arc<Valid<apollo_compiler::Schema>>>>,
     pub(crate) supergraph_request: &'a Arc<http::Request<Request>>,
-    pub(crate) deferred_fetches: &'a HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+    pub(crate) deferred_fetches: &'a HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     pub(crate) query: &'a Arc<Query>,
     pub(crate) root_node: &'a PlanNode,
     pub(crate) subscription_handle: &'a Option<SubscriptionHandle>,
@@ -207,7 +206,7 @@ impl PlanNode {
                             .instrument(tracing::info_span!(
                                 SUBSCRIBE_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = primary.service_name.as_str(),
+                                "apollo.subgraph.name" = primary.service_name.as_ref(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
                             .await;
@@ -230,9 +229,7 @@ impl PlanNode {
                     if parameters
                         .context
                         .extensions()
-                        .lock()
-                        .get::<CanceledRequest>()
-                        .is_some()
+                        .with_lock(|lock| lock.get::<CanceledRequest>().is_some())
                     {
                         value = Value::Object(Object::default());
                         errors = Vec::new();
@@ -242,7 +239,7 @@ impl PlanNode {
                             .instrument(tracing::info_span!(
                                 FETCH_SPAN_NAME,
                                 "otel.kind" = "INTERNAL",
-                                "apollo.subgraph.name" = fetch_node.service_name.as_str(),
+                                "apollo.subgraph.name" = fetch_node.service_name.as_ref(),
                                 "apollo_private.sent_time_offset" = fetch_time_offset
                             ))
                             .await;
@@ -258,7 +255,7 @@ impl PlanNode {
                     errors = Vec::new();
                     async {
                         let mut deferred_fetches: HashMap<
-                            NodeStr,
+                            String,
                             broadcast::Sender<(Value, Vec<Error>)>,
                         > = HashMap::new();
                         let mut futures = Vec::new();
@@ -408,7 +405,7 @@ impl DeferredNode {
         parent_value: &Value,
         sender: mpsc::Sender<Response>,
         primary_sender: &broadcast::Sender<(Value, Vec<Error>)>,
-        deferred_fetches: &mut HashMap<NodeStr, broadcast::Sender<(Value, Vec<Error>)>>,
+        deferred_fetches: &mut HashMap<String, broadcast::Sender<(Value, Vec<Error>)>>,
     ) -> impl Future<Output = ()> {
         let mut deferred_receivers = Vec::new();
 

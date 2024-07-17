@@ -1,8 +1,6 @@
 mod include_skip;
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO will be fixed with selection set updates in https://apollographql.atlassian.net/browse/FED-241
 fn handles_simple_requires() {
     let planner = planner!(
         Subgraph1: r#"
@@ -68,8 +66,6 @@ fn handles_simple_requires() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
 fn it_handles_multiple_requires_within_the_same_entity_fetch() {
     let planner = planner!(
         Subgraph1: r#"
@@ -183,8 +179,6 @@ fn it_handles_multiple_requires_within_the_same_entity_fetch() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
 fn handles_multiple_requires_involving_different_nestedness() {
     let planner = planner!(
         Subgraph1: r#"
@@ -252,6 +246,22 @@ fn handles_multiple_requires_involving_different_nestedness() {
               }
             },
             Parallel {
+              Flatten(path: "list.@.user") {
+                Fetch(service: "Subgraph2") {
+                  {
+                    ... on User {
+                      __typename
+                      id
+                      value
+                    }
+                  } =>
+                  {
+                    ... on User {
+                      computed
+                    }
+                  }
+                },
+              },
               Flatten(path: "list.@") {
                 Fetch(service: "Subgraph2") {
                   {
@@ -272,22 +282,6 @@ fn handles_multiple_requires_involving_different_nestedness() {
                   }
                 },
               },
-              Flatten(path: "list.@.user") {
-                Fetch(service: "Subgraph2") {
-                  {
-                    ... on User {
-                      __typename
-                      id
-                      value
-                    }
-                  } =>
-                  {
-                    ... on User {
-                      computed
-                    }
-                  }
-                },
-              },
             },
           },
         }
@@ -297,8 +291,6 @@ fn handles_multiple_requires_involving_different_nestedness() {
 
 /// require that depends on another require
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_simple_require_chain() {
     let planner = planner!(
         Subgraph1: r#"
@@ -451,8 +443,6 @@ fn it_handles_simple_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_require_chain_not_ending_in_original_group() {
     // This is somewhat simiar to the 'simple require chain' case, but the chain does not
     // end in the group in which the query start
@@ -638,8 +628,6 @@ fn it_handles_require_chain_not_ending_in_original_group() {
 
 /// a chain of 10 requires
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_handles_longer_require_chain() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1173,8 +1161,6 @@ fn it_handles_complex_require_chain() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure after optimize is merged
 fn it_handes_diamond_shape_depedencies() {
     // The idea of this test is that to be able to fulfill the @require in subgraph D, we need
     // both values from C for the @require and values from B for the key itself, but both
@@ -1247,6 +1233,21 @@ fn it_handes_diamond_shape_depedencies() {
             },
             Parallel {
               Flatten(path: "t") {
+                Fetch(service: "C") {
+                  {
+                    ... on T {
+                      __typename
+                      id1
+                    }
+                  } =>
+                  {
+                    ... on T {
+                      v3
+                    }
+                  }
+                },
+              },
+              Flatten(path: "t") {
                 Fetch(service: "B") {
                   {
                     ... on T {
@@ -1261,21 +1262,6 @@ fn it_handes_diamond_shape_depedencies() {
                       v1
                       v2
                       id1
-                    }
-                  }
-                },
-              },
-              Flatten(path: "t") {
-                Fetch(service: "C") {
-                  {
-                    ... on T {
-                      __typename
-                      id1
-                    }
-                  } =>
-                  {
-                    ... on T {
-                      v3
                     }
                   }
                 },
@@ -1304,8 +1290,6 @@ fn it_handes_diamond_shape_depedencies() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO will be fixed with selection set updates in https://apollographql.atlassian.net/browse/FED-241
 fn it_can_require_at_inaccessible_fields() {
     let planner = planner!(
         Subgraph1: r#"
@@ -1377,8 +1361,6 @@ fn it_can_require_at_inaccessible_fields() {
 }
 
 #[test]
-#[should_panic(expected = "snapshot assertion")]
-// TODO: investigate this failure
 fn it_require_of_multiple_field_when_one_is_also_a_key_to_reach_another() {
     // The specificity of this example is that we `T.v` requires 2 fields `req1`
     // and `req2`, but `req1` is also a key to get `req2`. This dependency was

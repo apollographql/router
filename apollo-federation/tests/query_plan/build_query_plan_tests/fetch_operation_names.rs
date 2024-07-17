@@ -262,7 +262,7 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
     let Some(TopLevelPlanNode::Fetch(fetch)) = &plan.node else {
         panic!()
     };
-    assert_eq!(fetch.subgraph_name, "S1");
+    assert_eq!(fetch.subgraph_name.as_ref(), "S1");
     assert!(fetch.requires.is_none());
     assert!(fetch.operation_document.fragments.is_empty());
     let mut operations = fetch.operation_document.all_operations();

@@ -13,8 +13,8 @@ telemetry:
         enabled: true
         batch_processor:
           scheduled_delay: 100ms
-        agent:
-          endpoint: default
+        collector:
+          endpoint: http://127.0.0.1:14268/api/traces
     logging:
       experimental_when_header:
         - name: apollo-router-log-request
@@ -44,8 +44,8 @@ telemetry:
               eq:
                 - request_header: "head"
                 - "test"
-          studio.trace.id:
-            trace_id: apollo
+          studio.operation.id:
+            studio_operation_id: true
       supergraph:
         attributes:
           graphql.operation.name: true

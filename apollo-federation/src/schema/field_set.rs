@@ -3,15 +3,15 @@ use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
 use apollo_compiler::Schema;
 use indexmap::IndexMap;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
-use crate::query_plan::operation::NamedFragments;
-use crate::query_plan::operation::SelectionSet;
+use crate::operation::NamedFragments;
+use crate::operation::SelectionSet;
+use crate::query_graph::graph_path::OpPathElement;
 use crate::schema::position::CompositeTypeDefinitionPosition;
 use crate::schema::position::FieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
@@ -24,20 +24,27 @@ use crate::schema::ValidFederationSchema;
 // However, since `parse_field_set` uses the standard GraphQL parser, which allows aliases,
 // we need this secondary check to ensure that aliases are not used.
 fn check_absence_of_aliases(
-    field_set: &Valid<FieldSet>,
+    selection_set: &SelectionSet,
     code_str: &str,
 ) -> Result<(), FederationError> {
-    let aliases = field_set.selection_set.fields().filter_map(|field| {
-        field.alias.as_ref().map(|alias|
-            SingleFederationError::UnsupportedFeature {
-                // PORT_NOTE: The JS version also quotes the directive name in the error message.
-                //            For example, "aliases are not currently supported in @requires".
-                message: format!(
-                    r#"Cannot use alias "{}" in "{}": aliases are not currently supported in the used directive"#,
-                    alias, code_str)
-            })
-    });
-    MultipleFederationErrors::from_iter(aliases).into_result()
+    let mut alias_errors = vec![];
+    selection_set.for_each_element(&mut |elem| {
+        let OpPathElement::Field(field) = elem else {
+            return Ok(());
+        };
+        let Some(alias) = &field.alias else {
+            return Ok(());
+        };
+        alias_errors.push(SingleFederationError::UnsupportedFeature {
+            // PORT_NOTE: The JS version also quotes the directive name in the error message.
+            //            For example, "aliases are not currently supported in @requires".
+            message: format!(
+                r#"Cannot use alias "{}" in "{}": aliases are not currently supported in the used directive"#,
+                alias, code_str)
+        });
+        Ok(())
+    })?;
+    MultipleFederationErrors::from_iter(alias_errors).into_result()
 }
 
 // TODO: In the JS codebase, this has some error-rewriting to help give the user better hints around
@@ -56,12 +63,15 @@ pub(crate) fn parse_field_set(
         "field_set.graphql",
     )?;
 
-    // Validate the field set has no aliases.
-    check_absence_of_aliases(&field_set, value)?;
-
     // field set should not contain any named fragments
     let named_fragments = NamedFragments::new(&IndexMap::new(), schema);
-    SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)
+    let selection_set =
+        SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)?;
+
+    // Validate the field set has no aliases.
+    check_absence_of_aliases(&selection_set, value)?;
+
+    Ok(selection_set)
 }
 
 /// This exists because there's a single callsite in extract_subgraphs_from_supergraph() that needs
@@ -88,16 +98,12 @@ pub(crate) fn parse_field_set_without_normalization(
 pub(crate) fn collect_target_fields_from_field_set(
     schema: &Valid<Schema>,
     parent_type_name: NamedType,
-    value: NodeStr,
+    value: &str,
 ) -> Result<Vec<FieldDefinitionPosition>, FederationError> {
     // Note this parsing takes care of adding curly braces ("{" and "}") if they aren't in the
     // string.
-    let field_set = FieldSet::parse_and_validate(
-        schema,
-        parent_type_name,
-        value.as_str(),
-        "field_set.graphql",
-    )?;
+    let field_set =
+        FieldSet::parse_and_validate(schema, parent_type_name, value, "field_set.graphql")?;
     let mut stack = vec![&field_set.selection_set];
     let mut fields = vec![];
     while let Some(selection_set) = stack.pop() {
@@ -182,7 +188,7 @@ pub(crate) fn add_interface_field_implementations(
 
 #[cfg(test)]
 mod tests {
-    use apollo_compiler::schema::Name;
+    use apollo_compiler::Name;
 
     use crate::error::FederationError;
     use crate::query_graph::build_federated_query_graph;
@@ -232,9 +238,7 @@ mod tests {
         assert_eq!(
             err.to_string(),
             r#"The following errors occurred:
-
   - Cannot use alias "r1" in "r1: r s q1: q": aliases are not currently supported in the used directive
-
   - Cannot use alias "q1" in "r1: r s q1: q": aliases are not currently supported in the used directive"#
         );
         Ok(())

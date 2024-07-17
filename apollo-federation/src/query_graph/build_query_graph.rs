@@ -2,9 +2,8 @@ use std::sync::Arc;
 
 use apollo_compiler::schema::DirectiveList as ComponentDirectiveList;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::NodeStr;
+use apollo_compiler::Name;
 use apollo_compiler::Schema;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
@@ -19,15 +18,15 @@ use crate::error::SingleFederationError;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::KeyDirectiveArguments;
+use crate::operation::merge_selection_sets;
+use crate::operation::Selection;
+use crate::operation::SelectionSet;
 use crate::query_graph::extract_subgraphs_from_supergraph::extract_subgraphs_from_supergraph;
 use crate::query_graph::QueryGraph;
 use crate::query_graph::QueryGraphEdge;
 use crate::query_graph::QueryGraphEdgeTransition;
 use crate::query_graph::QueryGraphNode;
 use crate::query_graph::QueryGraphNodeType;
-use crate::query_plan::operation::merge_selection_sets;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionSet;
 use crate::schema::field_set::parse_field_set;
 use crate::schema::position::AbstractTypeDefinitionPosition;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -60,9 +59,10 @@ pub fn build_federated_query_graph(
     let for_query_planning = for_query_planning.unwrap_or(true);
     let mut query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
-        current_source: NodeStr::new(""),
+        current_source: "".into(),
         graph: Default::default(),
         sources: Default::default(),
+        subgraphs_by_name: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
@@ -72,7 +72,7 @@ pub fn build_federated_query_graph(
     for (subgraph_name, subgraph) in subgraphs {
         let builder = SchemaQueryGraphBuilder::new(
             query_graph,
-            NodeStr::new(&subgraph_name),
+            subgraph_name,
             subgraph.schema,
             Some(api_schema.clone()),
             for_query_planning,
@@ -88,14 +88,15 @@ pub fn build_federated_query_graph(
 ///
 /// Assumes the given schemas have been validated.
 pub fn build_query_graph(
-    name: NodeStr,
+    name: Arc<str>,
     schema: ValidFederationSchema,
 ) -> Result<QueryGraph, FederationError> {
     let mut query_graph = QueryGraph {
         // Note this name is a dummy initial name that gets overridden as we build the query graph.
-        current_source: NodeStr::new(""),
+        current_source: "".into(),
         graph: Default::default(),
         sources: Default::default(),
+        subgraphs_by_name: Default::default(),
         types_to_nodes_by_source: Default::default(),
         root_kinds_to_nodes_by_source: Default::default(),
         non_trivial_followup_edges: Default::default(),
@@ -110,7 +111,7 @@ struct BaseQueryGraphBuilder {
 }
 
 impl BaseQueryGraphBuilder {
-    fn new(mut query_graph: QueryGraph, source: NodeStr, schema: ValidFederationSchema) -> Self {
+    fn new(mut query_graph: QueryGraph, source: Arc<str>, schema: ValidFederationSchema) -> Self {
         query_graph.current_source = source.clone();
         query_graph.sources.insert(source.clone(), schema);
         query_graph
@@ -240,7 +241,7 @@ impl SchemaQueryGraphBuilder {
     /// a subgraph query graph is being built.
     fn new(
         query_graph: QueryGraph,
-        source: NodeStr,
+        source: Arc<str>,
         schema: ValidFederationSchema,
         api_schema: Option<ValidFederationSchema>,
         for_query_planning: bool,
@@ -961,7 +962,7 @@ impl FederatedQueryGraphBuilder {
     ) -> Result<Self, FederationError> {
         let base = BaseQueryGraphBuilder::new(
             query_graph,
-            NodeStr::new(FEDERATED_GRAPH_ROOT_SOURCE),
+            FEDERATED_GRAPH_ROOT_SOURCE.into(),
             // This is a dummy schema that should never be used, so it's fine if we assume validity
             // here (note that empty schemas have no Query type, making them invalid GraphQL).
             ValidFederationSchema::new(Valid::assume_valid(Schema::new()))?,
@@ -975,6 +976,7 @@ impl FederatedQueryGraphBuilder {
     }
 
     fn build(mut self) -> Result<QueryGraph, FederationError> {
+        self.copy_subgraphs();
         self.add_federated_root_nodes()?;
         self.copy_types_to_nodes()?;
         self.add_root_edges()?;
@@ -990,6 +992,18 @@ impl FederatedQueryGraphBuilder {
         // This method adds no nodes/edges, but just precomputes followup edge information.
         self.precompute_non_trivial_followup_edges()?;
         Ok(self.base.build())
+    }
+
+    fn copy_subgraphs(&mut self) {
+        for (source, schema) in &self.base.query_graph.sources {
+            if *source == self.base.query_graph.current_source {
+                continue;
+            }
+            self.base
+                .query_graph
+                .subgraphs_by_name
+                .insert(source.clone(), schema.clone());
+        }
     }
 
     fn add_federated_root_nodes(&mut self) -> Result<(), FederationError> {
@@ -1138,7 +1152,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = Arc::new(parse_field_set(
                     schema,
                     type_pos.type_name().clone(),
-                    &application.fields,
+                    application.fields,
                 )?);
 
                 // Note that each subgraph has a key edge to itself (when head == tail below).
@@ -1263,7 +1277,7 @@ impl FederatedQueryGraphBuilder {
                                 implementation_type_in_other_subgraph_pos
                                     .type_name()
                                     .clone(),
-                                &application.fields,
+                                application.fields,
                             ) else {
                                 // Ignored on purpose: it just means the key is not usable on this
                                 // subgraph.
@@ -1328,7 +1342,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = parse_field_set(
                     schema,
                     field_definition_position.parent().type_name().clone(),
-                    &application.fields,
+                    application.fields,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1393,7 +1407,7 @@ impl FederatedQueryGraphBuilder {
                 let conditions = parse_field_set(
                     schema,
                     field_type_pos.type_name().clone(),
-                    &application.fields,
+                    application.fields,
                 )?;
                 all_conditions.push(conditions);
             }
@@ -1443,7 +1457,7 @@ impl FederatedQueryGraphBuilder {
 
     fn add_provides_edges(
         base: &mut BaseQueryGraphBuilder,
-        source: &NodeStr,
+        source: &Arc<str>,
         head: NodeIndex,
         provided: &SelectionSet,
         provide_id: u32,
@@ -1469,7 +1483,7 @@ impl FederatedQueryGraphBuilder {
                                     return None;
                                 };
                                 if field_definition_position.field_name()
-                                    == field_selection.field.data().name()
+                                    == field_selection.field.name()
                                 {
                                     Some((edge_ref.id(), edge_ref.target()))
                                 } else {
@@ -1502,9 +1516,8 @@ impl FederatedQueryGraphBuilder {
                             // fix this below by filtering by provide_id.
                             let field = field_selection
                                 .field
-                                .data()
                                 .field_position
-                                .get(field_selection.field.data().schema.schema())?;
+                                .get(field_selection.field.schema.schema())?;
                             let tail_type = field.ty.inner_named_type();
                             let possible_tails = base
                                 .query_graph
@@ -1546,7 +1559,6 @@ impl FederatedQueryGraphBuilder {
                                 source: source.clone(),
                                 field_definition_position: field_selection
                                     .field
-                                    .data()
                                     .field_position
                                     .clone(),
                                 is_part_of_provides: true,
@@ -1563,7 +1575,6 @@ impl FederatedQueryGraphBuilder {
                     Selection::InlineFragment(inline_fragment_selection) => {
                         if let Some(type_condition_pos) = &inline_fragment_selection
                             .inline_fragment
-                            .data()
                             .type_condition_position
                         {
                             // We should always have an edge: otherwise it would mean we list a type
@@ -1936,7 +1947,7 @@ impl FederatedQueryGraphBuilder {
 const FEDERATED_GRAPH_ROOT_SOURCE: &str = "_";
 
 struct FederatedQueryGraphBuilderSubgraphs {
-    map: IndexMap<NodeStr, FederatedQueryGraphBuilderSubgraphData>,
+    map: IndexMap<Arc<str>, FederatedQueryGraphBuilderSubgraphData>,
 }
 
 impl FederatedQueryGraphBuilderSubgraphs {
@@ -2023,11 +2034,11 @@ impl QueryGraphEdgeData {
     }
 }
 
-fn resolvable_key_applications(
-    directives: &ComponentDirectiveList,
+fn resolvable_key_applications<'doc>(
+    directives: &'doc ComponentDirectiveList,
     key_directive_definition_name: &Name,
     federation_spec_definition: &'static FederationSpecDefinition,
-) -> Result<Vec<KeyDirectiveArguments>, FederationError> {
+) -> Result<Vec<KeyDirectiveArguments<'doc>>, FederationError> {
     let mut applications = Vec::new();
     for directive in directives.get_all(key_directive_definition_name) {
         let key_directive_application =
@@ -2043,8 +2054,7 @@ fn resolvable_key_applications(
 #[cfg(test)]
 mod tests {
     use apollo_compiler::name;
-    use apollo_compiler::schema::Name;
-    use apollo_compiler::NodeStr;
+    use apollo_compiler::Name;
     use apollo_compiler::Schema;
     use indexmap::IndexMap;
     use indexmap::IndexSet;
@@ -2065,12 +2075,12 @@ mod tests {
     use crate::schema::position::SchemaRootDefinitionKind;
     use crate::schema::ValidFederationSchema;
 
-    const SCHEMA_NAME: NodeStr = NodeStr::from_static(&"test");
+    const SCHEMA_NAME: &str = "test";
 
     fn test_query_graph_from_schema_sdl(sdl: &str) -> Result<QueryGraph, FederationError> {
         let schema =
             ValidFederationSchema::new(Schema::parse_and_validate(sdl, "schema.graphql")?)?;
-        build_query_graph(SCHEMA_NAME, schema)
+        build_query_graph(SCHEMA_NAME.into(), schema)
     }
 
     fn assert_node_type(
@@ -2083,7 +2093,7 @@ mod tests {
             *query_graph.node_weight(node)?,
             QueryGraphNode {
                 type_: QueryGraphNodeType::SchemaType(output_type_definition_position),
-                source: SCHEMA_NAME,
+                source: SCHEMA_NAME.into(),
                 has_reachable_cross_subgraph_edges: false,
                 provide_id: None,
                 root_kind,
@@ -2122,7 +2132,7 @@ mod tests {
         let schema = query_graph.schema()?;
         field_pos.get(schema.schema())?;
         let expected_field_transition = QueryGraphEdgeTransition::FieldCollection {
-            source: SCHEMA_NAME,
+            source: SCHEMA_NAME.into(),
             field_definition_position: field_pos.clone().into(),
             is_part_of_provides: false,
         };

@@ -34,13 +34,11 @@ use super::OtelData;
 /// authors of alternate OpenTelemetry SDK implementations if they wish to have
 /// `tracing` compatibility.
 ///
-/// See the [`OpenTelemetrySpanExt::set_parent`] and
-/// [`OpenTelemetrySpanExt::context`] methods for example usage.
+/// See the [`OpenTelemetrySpanExt::context`] method for example usage.
 ///
 /// [`Tracer`]: opentelemetry::trace::Tracer
 /// [`SpanBuilder`]: opentelemetry::trace::SpanBuilder
 /// [`PreSampledTracer::sampled_span_context`]: crate::PreSampledTracer::sampled_span_context
-/// [`OpenTelemetrySpanExt::set_parent`]: crate::OpenTelemetrySpanExt::set_parent
 /// [`OpenTelemetrySpanExt::context`]: crate::OpenTelemetrySpanExt::context
 /// [`Context`]: opentelemetry::Context
 pub(crate) trait PreSampledTracer {
@@ -188,6 +186,7 @@ mod tests {
             parent_cx,
             event_attributes: None,
             forced_status: None,
+            forced_span_name: None,
         });
         let span = cx.span();
         let span_context = span.span_context();
@@ -232,6 +231,7 @@ mod tests {
                 parent_cx,
                 event_attributes: None,
                 forced_status: None,
+                forced_span_name: None,
             });
 
             assert_eq!(

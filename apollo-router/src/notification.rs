@@ -34,42 +34,19 @@ static NOTIFY_CHANNEL_SIZE: usize = 1024;
 static DEFAULT_MSG_CHANNEL_SIZE: usize = 128;
 
 #[derive(Error, Debug)]
-pub(crate) enum NotifyError<V> {
+pub(crate) enum NotifyError<K, V> {
+    #[error("cannot receive data from pubsub")]
+    RecvError(#[from] RecvError),
     #[error("cannot send data to pubsub")]
     SendError(#[from] SendError<V>),
+    #[error("cannot send data to pubsub")]
+    NotificationSendError(#[from] SendError<Notification<K, V>>),
+    #[error("cannot send data to pubsub")]
+    NotificationTrySendError(#[from] TrySendError<Notification<K, V>>),
     #[error("cannot send data to response stream")]
     BroadcastSendError(#[from] broadcast::error::SendError<V>),
     #[error("this topic doesn't exist")]
     UnknownTopic,
-}
-
-impl<K, V> From<SendError<Notification<K, V>>> for NotifyError<V>
-where
-    K: Send + Hash + Eq + Clone + 'static,
-    V: Send + Clone + 'static,
-{
-    fn from(error: SendError<Notification<K, V>>) -> Self {
-        error.into()
-    }
-}
-
-impl<V> From<RecvError> for NotifyError<V>
-where
-    V: Send + Clone + 'static,
-{
-    fn from(error: RecvError) -> Self {
-        error.into()
-    }
-}
-
-impl<K, V> From<TrySendError<Notification<K, V>>> for NotifyError<V>
-where
-    K: Send + Hash + Eq + Clone + 'static,
-    V: Send + Clone + 'static,
-{
-    fn from(error: TrySendError<Notification<K, V>>) -> Self {
-        error.into()
-    }
 }
 
 type ResponseSender<V> =
@@ -81,7 +58,7 @@ type ResponseSenderWithCreated<V> = oneshot::Sender<(
     bool,
 )>;
 
-enum Notification<K, V> {
+pub(crate) enum Notification<K, V> {
     CreateOrSubscribe {
         topic: K,
         // Sender connected to the original source stream
@@ -132,6 +109,27 @@ enum Notification<K, V> {
     },
 }
 
+impl<K, V> Debug for Notification<K, V> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CreateOrSubscribe { .. } => f.debug_struct("CreateOrSubscribe").finish(),
+            Self::Subscribe { .. } => f.debug_struct("Subscribe").finish(),
+            Self::SubscribeIfExist { .. } => f.debug_struct("SubscribeIfExist").finish(),
+            Self::Unsubscribe { .. } => f.debug_struct("Unsubscribe").finish(),
+            Self::ForceDelete { .. } => f.debug_struct("ForceDelete").finish(),
+            Self::Exist { .. } => f.debug_struct("Exist").finish(),
+            Self::InvalidIds { .. } => f.debug_struct("InvalidIds").finish(),
+            Self::UpdateHeartbeat { .. } => f.debug_struct("UpdateHeartbeat").finish(),
+            #[cfg(test)]
+            Self::TryDelete { .. } => f.debug_struct("TryDelete").finish(),
+            #[cfg(test)]
+            Self::Broadcast { .. } => f.debug_struct("Broadcast").finish(),
+            #[cfg(test)]
+            Self::Debug { .. } => f.debug_struct("Debug").finish(),
+        }
+    }
+}
+
 /// In memory pub/sub implementation
 #[derive(Clone)]
 pub struct Notify<K, V> {
@@ -154,7 +152,7 @@ where
         queue_size: Option<usize>,
     ) -> Notify<K, V> {
         let (sender, receiver) = mpsc::channel(NOTIFY_CHANNEL_SIZE);
-        let receiver_stream = ReceiverStream::new(receiver);
+        let receiver_stream: ReceiverStream<Notification<K, V>> = ReceiverStream::new(receiver);
         tokio::task::spawn(task(receiver_stream, ttl, heartbeat_error_message));
         Notify {
             sender,
@@ -199,7 +197,7 @@ where
     K: Send + Hash + Eq + Clone + 'static,
     V: Send + Clone + 'static,
 {
-    pub(crate) async fn set_ttl(&self, new_ttl: Option<Duration>) -> Result<(), NotifyError<V>> {
+    pub(crate) async fn set_ttl(&self, new_ttl: Option<Duration>) -> Result<(), NotifyError<K, V>> {
         self.sender
             .send(Notification::UpdateHeartbeat { new_ttl })
             .await?;
@@ -212,7 +210,7 @@ where
         &mut self,
         topic: K,
         heartbeat_enabled: bool,
-    ) -> Result<(Handle<K, V>, bool), NotifyError<V>> {
+    ) -> Result<(Handle<K, V>, bool), NotifyError<K, V>> {
         let (sender, _receiver) =
             broadcast::channel(self.queue_size.unwrap_or(DEFAULT_MSG_CHANNEL_SIZE));
 
@@ -237,7 +235,7 @@ where
         Ok((handle, created))
     }
 
-    pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<V>> {
+    pub(crate) async fn subscribe(&mut self, topic: K) -> Result<Handle<K, V>, NotifyError<K, V>> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -263,7 +261,7 @@ where
     pub(crate) async fn subscribe_if_exist(
         &mut self,
         topic: K,
-    ) -> Result<Option<Handle<K, V>>, NotifyError<V>> {
+    ) -> Result<Option<Handle<K, V>>, NotifyError<K, V>> {
         let (sender, receiver) = oneshot::channel();
 
         self.sender
@@ -286,7 +284,7 @@ where
         Ok(handle.into())
     }
 
-    pub(crate) async fn exist(&mut self, topic: K) -> Result<bool, NotifyError<V>> {
+    pub(crate) async fn exist(&mut self, topic: K) -> Result<bool, NotifyError<K, V>> {
         // Channel to check if the topic still exists or not
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -305,7 +303,7 @@ where
     pub(crate) async fn invalid_ids(
         &mut self,
         topics: Vec<K>,
-    ) -> Result<(Vec<K>, Vec<K>), NotifyError<V>> {
+    ) -> Result<(Vec<K>, Vec<K>), NotifyError<K, V>> {
         // Channel to check if the topic still exists or not
         let (response_tx, response_rx) = oneshot::channel();
 
@@ -322,7 +320,7 @@ where
     }
 
     /// Delete the topic even if several subscribers are still listening
-    pub(crate) async fn force_delete(&mut self, topic: K) -> Result<(), NotifyError<V>> {
+    pub(crate) async fn force_delete(&mut self, topic: K) -> Result<(), NotifyError<K, V>> {
         // if disconnected, we don't care (the task was stopped)
         self.sender
             .send(Notification::ForceDelete { topic })
@@ -333,7 +331,7 @@ where
     /// Delete the topic if and only if one or zero subscriber is still listening
     /// This function is not async to allow it to be used in a Drop impl
     #[cfg(test)]
-    pub(crate) fn try_delete(&mut self, topic: K) -> Result<(), NotifyError<V>> {
+    pub(crate) fn try_delete(&mut self, topic: K) -> Result<(), NotifyError<K, V>> {
         // if disconnected, we don't care (the task was stopped)
         self.sender
             .try_send(Notification::TryDelete { topic })
@@ -341,7 +339,7 @@ where
     }
 
     #[cfg(test)]
-    pub(crate) async fn broadcast(&mut self, data: V) -> Result<(), NotifyError<V>> {
+    pub(crate) async fn broadcast(&mut self, data: V) -> Result<(), NotifyError<K, V>> {
         self.sender
             .send(Notification::Broadcast { data })
             .await
@@ -349,7 +347,7 @@ where
     }
 
     #[cfg(test)]
-    pub(crate) async fn debug(&mut self) -> Result<usize, NotifyError<V>> {
+    pub(crate) async fn debug(&mut self) -> Result<usize, NotifyError<K, V>> {
         let (response_tx, response_rx) = oneshot::channel();
         self.sender
             .send(Notification::Debug {
@@ -540,7 +538,7 @@ where
     V: Clone + 'static + Send,
 {
     /// Send data to the subscribed topic
-    pub(crate) fn send_sync(&mut self, data: V) -> Result<(), NotifyError<V>> {
+    pub(crate) fn send_sync(&mut self, data: V) -> Result<(), NotifyError<K, V>> {
         self.msg_sender.send(data.into()).map_err(|err| {
             NotifyError::BroadcastSendError(broadcast::error::SendError(err.0.unwrap()))
         })?;
@@ -606,11 +604,6 @@ async fn task<K, V>(
             _ = ttl_fut.next() => {
                 let heartbeat_error_message = heartbeat_error_message.clone();
                 pubsub.kill_dead_topics(heartbeat_error_message).await;
-                u64_counter!(
-                    "apollo_router_opened_subscriptions",
-                    "Number of opened subscriptions",
-                    pubsub.subscriptions.len() as u64
-                );
             }
             message = receiver.next() => {
                 match message {
@@ -753,8 +746,18 @@ where
         sender: broadcast::Sender<Option<V>>,
         heartbeat_enabled: bool,
     ) {
-        self.subscriptions
-            .insert(topic, Subscription::new(sender, heartbeat_enabled));
+        let existed = self
+            .subscriptions
+            .insert(topic, Subscription::new(sender, heartbeat_enabled))
+            .is_some();
+        if !existed {
+            // TODO: deprecated name, should use our new convention apollo.router. for router next
+            i64_up_down_counter!(
+                "apollo_router_opened_subscriptions",
+                "Number of opened subscriptions",
+                1
+            );
+        }
     }
 
     fn subscribe(&mut self, topic: K, sender: ResponseSender<V>) {
@@ -802,8 +805,15 @@ where
             }
             None => tracing::trace!("Cannot find the subscription to unsubscribe"),
         }
+        #[allow(clippy::collapsible_if)]
         if topic_to_delete {
-            self.subscriptions.remove(&topic);
+            if self.subscriptions.remove(&topic).is_some() {
+                i64_up_down_counter!(
+                    "apollo_router_opened_subscriptions",
+                    "Number of opened subscriptions",
+                    -1
+                );
+            }
         };
     }
 
@@ -870,6 +880,11 @@ where
 
             // Send error message to all killed connections
             for (_subscriber_id, subscription) in closed_subs {
+                i64_up_down_counter!(
+                    "apollo_router_opened_subscriptions",
+                    "Number of opened subscriptions",
+                    -1
+                );
                 if let Some(heartbeat_error_message) = &heartbeat_error_message {
                     let _ = subscription
                         .msg_sender
@@ -895,6 +910,11 @@ where
         tracing::trace!("deleting subscription");
         let sub = self.subscriptions.remove(&topic);
         if let Some(sub) = sub {
+            i64_up_down_counter!(
+                "apollo_router_opened_subscriptions",
+                "Number of opened subscriptions",
+                -1
+            );
             let _ = sub.msg_sender.send(None);
         }
     }

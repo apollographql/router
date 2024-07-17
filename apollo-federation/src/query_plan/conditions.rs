@@ -2,17 +2,17 @@ use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
 use apollo_compiler::executable::DirectiveList;
-use apollo_compiler::executable::Name;
 use apollo_compiler::executable::Value;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
 
 use crate::error::FederationError;
+use crate::operation::Selection;
+use crate::operation::SelectionMap;
+use crate::operation::SelectionSet;
 use crate::query_graph::graph_path::OpPathElement;
-use crate::query_plan::operation::Selection;
-use crate::query_plan::operation::SelectionMap;
-use crate::query_plan::operation::SelectionSet;
 
 /// This struct is meant for tracking whether a selection set in a `FetchDependencyGraphNode` needs
 /// to be queried, based on the `@skip`/`@include` applications on the selections within.
@@ -256,7 +256,7 @@ pub(crate) fn remove_unneeded_top_level_fragment_directives(
                 selection_map.insert(selection.clone());
             }
             Selection::InlineFragment(inline_fragment) => {
-                let fragment = inline_fragment.inline_fragment.data();
+                let fragment = &inline_fragment.inline_fragment;
                 if fragment.type_condition_position.is_none() {
                     // if there is no type condition we should preserve the directive info
                     selection_map.insert(selection.clone());

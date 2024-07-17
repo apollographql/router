@@ -8,6 +8,7 @@ use std::time::Instant;
 use apollo_compiler::ast;
 use apollo_compiler::schema::Implementers;
 use apollo_compiler::validation::Valid;
+use apollo_compiler::Name;
 use http::Uri;
 use semver::Version;
 use semver::VersionReq;
@@ -26,8 +27,9 @@ pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) implementers_map: HashMap<ast::Name, Implementers>,
+    pub(crate) implementers_map: HashMap<Name, Implementers>,
     api_schema: Option<ApiSchema>,
+    pub(crate) schema_id: Arc<String>,
 }
 
 /// TODO: remove and use apollo_federation::Supergraph unconditionally
@@ -128,12 +130,15 @@ impl Schema {
             Supergraph::ApolloCompiler(definitions)
         };
 
+        let schema_id = Arc::new(Schema::schema_id(sdl));
+
         Ok(Schema {
             raw_sdl: Arc::new(sdl.to_owned()),
             supergraph,
             subgraphs,
             implementers_map,
             api_schema: None,
+            schema_id,
         })
     }
 
@@ -377,6 +382,7 @@ impl std::fmt::Debug for Schema {
             subgraphs,
             implementers_map,
             api_schema: _, // skip
+            schema_id: _,
         } = self;
         f.debug_struct("Schema")
             .field("raw_sdl", raw_sdl)
@@ -385,9 +391,6 @@ impl std::fmt::Debug for Schema {
             .finish()
     }
 }
-
-#[derive(Debug)]
-pub(crate) struct InvalidObject;
 
 impl std::ops::Deref for ApiSchema {
     type Target = Valid<apollo_compiler::Schema>;
@@ -626,7 +629,6 @@ mod tests {
                 assert_eq!(
                     s,
                     r#"The supergraph schema failed to produce a valid API schema: The following errors occurred:
-
   - Input field `InputObject.privateField` is @inaccessible but is used in the default value of `@foo(someArg:)`, which is in the API schema."#
                 );
             }

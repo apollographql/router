@@ -111,13 +111,13 @@ mod test {
     use std::sync::Arc;
 
     use http::header::USER_AGENT;
-    use jsonpath_rust::JsonPathInst;
     use opentelemetry_semantic_conventions::trace::GRAPHQL_DOCUMENT;
     use opentelemetry_semantic_conventions::trace::HTTP_REQUEST_METHOD;
     use opentelemetry_semantic_conventions::trace::NETWORK_PROTOCOL_VERSION;
     use opentelemetry_semantic_conventions::trace::URL_PATH;
     use opentelemetry_semantic_conventions::trace::USER_AGENT_ORIGINAL;
     use parking_lot::Mutex;
+    use serde_json_bytes::path::JsonPathInst;
 
     use crate::context::CONTAINS_GRAPHQL_ERROR;
     use crate::graphql;
@@ -137,6 +137,7 @@ mod test {
     use crate::plugins::telemetry::config_new::DefaultForLevel;
     use crate::plugins::telemetry::config_new::Selectors;
     use crate::plugins::telemetry::otlp::TelemetryDataKind;
+    use crate::plugins::telemetry::OTEL_NAME;
     use crate::services::router;
     use crate::services::subgraph;
     use crate::services::supergraph;
@@ -547,6 +548,16 @@ mod test {
                 value: Arc::new(Default::default()),
             },
         );
+        spans.attributes.custom.insert(
+            OTEL_NAME.to_string(),
+            Conditional {
+                selector: RouterSelector::StaticField {
+                    r#static: String::from("new_name").into(),
+                },
+                condition: None,
+                value: Arc::new(Default::default()),
+            },
+        );
         let values = spans.attributes.on_response(
             &router::Response::fake_builder()
                 .header("my-header", "test_val")
@@ -556,6 +567,10 @@ mod test {
         assert!(values
             .iter()
             .any(|key_val| key_val.key == opentelemetry::Key::from_static_str("test")));
+
+        assert!(values.iter().any(|key_val| key_val.key
+            == opentelemetry::Key::from_static_str(OTEL_NAME)
+            && key_val.value == opentelemetry::Value::String(String::from("new_name").into())));
     }
 
     #[test]

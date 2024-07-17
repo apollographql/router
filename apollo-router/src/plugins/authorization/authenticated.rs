@@ -6,7 +6,7 @@ use apollo_compiler::ast;
 use apollo_compiler::executable;
 use apollo_compiler::schema;
 use apollo_compiler::schema::Implementers;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
 use tower::BoxError;
 
@@ -23,7 +23,7 @@ pub(crate) const AUTHENTICATED_SPEC_VERSION_RANGE: &str = ">=0.1.0, <=0.1.0";
 
 pub(crate) struct AuthenticatedCheckVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a Node<executable::Fragment>>,
+    fragments: HashMap<&'a Name, &'a Node<executable::Fragment>>,
     pub(crate) found: bool,
     authenticated_directive_name: String,
     entity_query: bool,
@@ -175,13 +175,13 @@ impl<'a> traverse::Visitor for AuthenticatedCheckVisitor<'a> {
 
 pub(crate) struct AuthenticatedVisitor<'a> {
     schema: &'a schema::Schema,
-    fragments: HashMap<&'a ast::Name, &'a ast::FragmentDefinition>,
+    fragments: HashMap<&'a Name, &'a ast::FragmentDefinition>,
     implementers_map: &'a HashMap<Name, Implementers>,
     pub(crate) query_requires_authentication: bool,
     pub(crate) unauthorized_paths: Vec<Path>,
     // store the error paths from fragments so we can  add them at
     // the point of application
-    fragments_unauthorized_paths: HashMap<&'a ast::Name, Vec<Path>>,
+    fragments_unauthorized_paths: HashMap<&'a Name, Vec<Path>>,
     current_path: Path,
     authenticated_directive_name: String,
     dry_run: bool,
@@ -1661,11 +1661,13 @@ mod tests {
         .unwrap();*/
         let mut headers: MultiMap<TryIntoHeaderName, TryIntoHeaderValue> = MultiMap::new();
         headers.insert("Accept".into(), "multipart/mixed;deferSpec=20220824".into());
-        context.extensions().lock().insert(ClientRequestAccepts {
-            multipart_defer: true,
-            multipart_subscription: true,
-            json: true,
-            wildcard: true,
+        context.extensions().with_lock(|mut lock| {
+            lock.insert(ClientRequestAccepts {
+                multipart_defer: true,
+                multipart_subscription: true,
+                json: true,
+                wildcard: true,
+            })
         });
         let request = supergraph::Request::fake_builder()
             .query("query { orga(id: 1) { id creatorUser { id } ... @defer { nonNullId } } }")

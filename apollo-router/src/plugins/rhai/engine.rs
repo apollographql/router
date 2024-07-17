@@ -53,6 +53,9 @@ use crate::Context;
 const CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE: &str =
     "cannot access headers on a deferred response";
 
+const CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE: &str =
+    "cannot access status_code on a deferred response";
+
 const CANNOT_GET_ENVIRONMENT_VARIABLE: &str = "environment variable not found";
 
 pub(super) trait OptionDance<T> {
@@ -487,6 +490,12 @@ mod router_context {
         obj.with_mut(|response| response.context = context);
         Ok(())
     }
+    #[rhai_fn(get = "status_code", pure)]
+    pub(crate) fn router_first_response_status_code_get(
+        obj: &mut SharedMut<router::FirstResponse>,
+    ) -> status_code::StatusCode {
+        obj.with_mut(|response| response.response.status())
+    }
 
     #[rhai_fn(get = "context", pure, return_raw)]
     pub(crate) fn supergraph_first_response_context_get(
@@ -698,6 +707,13 @@ mod router_plugin {
         _obj: &mut SharedMut<router::DeferredResponse>,
     ) -> Result<HeaderMap, Box<EvalAltResult>> {
         Err(CANNOT_ACCESS_HEADERS_ON_A_DEFERRED_RESPONSE.into())
+    }
+
+    #[rhai_fn(get = "status_code", pure, return_raw)]
+    pub(crate) fn get_status_code_router_deferred_response(
+        _obj: &mut SharedMut<router::DeferredResponse>,
+    ) -> Result<HeaderMap, Box<EvalAltResult>> {
+        Err(CANNOT_ACCESS_STATUS_CODE_ON_A_DEFERRED_RESPONSE.into())
     }
 
     #[rhai_fn(name = "is_primary", pure)]
@@ -1184,7 +1200,9 @@ mod router_plugin {
     // TraceId support
     #[rhai_fn(return_raw)]
     pub(crate) fn traceid() -> Result<TraceId, Box<EvalAltResult>> {
-        TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
+        TraceId::maybe_new()
+            .or_else(TraceId::current)
+            .ok_or_else(|| "trace unavailable".into())
     }
 
     #[rhai_fn(name = "to_string")]
@@ -1233,6 +1251,14 @@ mod router_plugin {
             .map(|x| x.as_secs() as i64)
     }
 
+    #[rhai_fn(return_raw)]
+    pub(crate) fn unix_ms_now() -> Result<i64, Box<EvalAltResult>> {
+        SystemTime::now()
+            .duration_since(SystemTime::UNIX_EPOCH)
+            .map_err(|e| e.to_string().into())
+            .map(|x| x.as_millis() as i64)
+    }
+
     // Add query plan getter to execution request
     #[rhai_fn(get = "query_plan")]
     pub(crate) fn execution_request_query_plan_get(
@@ -1242,7 +1268,8 @@ mod router_plugin {
             request
                 .query_plan
                 .formatted_query_plan
-                .clone()
+                .as_deref()
+                .cloned()
                 .unwrap_or_default()
         })
     }
@@ -1460,14 +1487,6 @@ macro_rules! register_rhai_router_interface {
                     Ok(obj.with_mut(|request| request.router_request.uri().clone()))
                 }
             );
-
-            $engine.register_get(
-                "status_code",
-                |obj: &mut SharedMut<$base::Response>| -> Result<StatusCode, Box<EvalAltResult>> {
-                    Ok(obj.with_mut(|response| response.response.status()))
-                }
-            );
-
             $engine.register_set(
                 "uri",
                 |obj: &mut SharedMut<$base::Request>, uri: Uri| {

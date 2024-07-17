@@ -24,13 +24,20 @@ impl ExtensionsMutex {
     /// It is CRITICAL to avoid holding on to the mutex guard for too long, particularly across async calls.
     /// Doing so may cause performance degradation or even deadlocks.
     ///
+    /// DEPRECATED: prefer with_lock()
+    ///
     /// See related clippy lint for examples: <https://rust-lang.github.io/rust-clippy/master/index.html#/await_holding_lock>
+    #[deprecated]
     pub fn lock(&self) -> ExtensionsGuard {
-        ExtensionsGuard {
-            #[cfg(debug_assertions)]
-            start: Instant::now(),
-            guard: self.extensions.lock(),
-        }
+        ExtensionsGuard::new(&self.extensions)
+    }
+
+    /// Locks the extensions for interaction.
+    ///
+    /// The lock will be dropped once the closure completes.
+    pub fn with_lock<'a, T, F: FnOnce(ExtensionsGuard<'a>) -> T>(&'a self, func: F) -> T {
+        let locked = ExtensionsGuard::new(&self.extensions);
+        func(locked)
     }
 }
 
@@ -38,6 +45,17 @@ pub struct ExtensionsGuard<'a> {
     #[cfg(debug_assertions)]
     start: Instant,
     guard: parking_lot::MutexGuard<'a, super::Extensions>,
+}
+impl<'a> ExtensionsGuard<'a> {
+    fn new(guard: &'a parking_lot::Mutex<super::Extensions>) -> Self {
+        // IMPORTANT: Rust fields are constructed in the order that in which you write the fields in the initializer
+        // The guard MUST be initialized first otherwise time waiting for a lock is included in this time.
+        Self {
+            guard: guard.lock(),
+            #[cfg(debug_assertions)]
+            start: Instant::now(),
+        }
+    }
 }
 
 impl<'a> Deref for ExtensionsGuard<'a> {
