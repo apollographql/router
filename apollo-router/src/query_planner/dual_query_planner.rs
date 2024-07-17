@@ -14,7 +14,6 @@ use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use apollo_federation::query_plan::query_planner::QueryPlanner;
 use apollo_federation::query_plan::QueryPlan;
-use apollo_federation::subgraph::spec::ENTITIES_QUERY;
 
 use super::fetch::FetchNode;
 use super::fetch::SubgraphOperation;
@@ -279,18 +278,6 @@ fn vec_matches_sorted_by<T: Eq + Clone>(
     vec_matches(&this_sorted, &other_sorted, T::eq)
 }
 
-fn vec_matches_sorted_by_key<T: Eq + Hash + Clone>(
-    this: &[T],
-    other: &[T],
-    key_fn: impl Fn(&T) -> u64,
-) -> bool {
-    let mut this_sorted = this.to_owned();
-    let mut other_sorted = other.to_owned();
-    this_sorted.sort_by_key(&key_fn);
-    other_sorted.sort_by_key(&key_fn);
-    vec_matches(&this_sorted, &other_sorted, T::eq)
-}
-
 // performs a set comparison, ignoring order
 fn vec_matches_as_set<T>(this: &[T], other: &[T], item_matches: impl Fn(&T, &T) -> bool) -> bool {
     // Set-inclusion test in both directions
@@ -397,14 +384,13 @@ fn same_ast_definition(x: &ast::Definition, y: &ast::Definition) -> bool {
             same_ast_operation_definition(x, y)
         }
         (ast::Definition::FragmentDefinition(x), ast::Definition::FragmentDefinition(y)) => x == y,
-        _ => false,
+        (ast::Definition::FragmentDefinition(_), _) => false,
+        (_, ast::Definition::FragmentDefinition(_)) => false,
+        _ => {
+            // false
+            panic!("Unexpected definition types");
+        }
     }
-}
-
-fn hash_value<T: Hash>(x: &T) -> u64 {
-    let mut hasher = DefaultHasher::new();
-    x.hash(&mut hasher);
-    hasher.finish()
 }
 
 fn same_ast_operation_definition(
@@ -415,26 +401,101 @@ fn same_ast_operation_definition(
     x.operation_type == y.operation_type
         && vec_matches_sorted_by(&x.variables, &y.variables, |x, y| x.name.cmp(&y.name))
         && x.directives == y.directives
-        && same_ast_top_level_selection_set(&x.selection_set, &y.selection_set)
+        && same_ast_selection_set_sorted(&x.selection_set, &y.selection_set)
 }
 
-fn same_ast_top_level_selection_set(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
-    match (x.split_first(), y.split_first()) {
-        (Some((ast::Selection::Field(x0), [])), Some((ast::Selection::Field(y0), [])))
-            if x0.name == ENTITIES_QUERY && y0.name == ENTITIES_QUERY =>
-        {
-            // Note: Entity-fetch query selection sets may be reordered.
-            same_ast_selection_set_sorted(&x0.selection_set, &y0.selection_set)
+// Copied and modified from `apollo_federation::operation::SelectionKey`
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub(crate) enum SelectionKey {
+    Field {
+        /// The field alias (if specified) or field name in the resulting selection set.
+        response_name: Name,
+        directives: ast::DirectiveList,
+    },
+    FragmentSpread {
+        /// The name of the fragment.
+        fragment_name: Name,
+        directives: ast::DirectiveList,
+    },
+    InlineFragment {
+        /// The optional type condition of the fragment.
+        type_condition: Option<Name>,
+        directives: ast::DirectiveList,
+    },
+}
+
+fn get_selection_key(selection: &ast::Selection) -> SelectionKey {
+    match selection {
+        ast::Selection::Field(field) => SelectionKey::Field {
+            response_name: field.response_name().clone(),
+            directives: field.directives.clone(),
+        },
+        ast::Selection::FragmentSpread(fragment) => SelectionKey::FragmentSpread {
+            fragment_name: fragment.fragment_name.clone(),
+            directives: fragment.directives.clone(),
+        },
+        ast::Selection::InlineFragment(fragment) => SelectionKey::InlineFragment {
+            type_condition: fragment.type_condition.clone(),
+            directives: fragment.directives.clone(),
         }
-        _ => x == y,
     }
 }
 
-// This comparison does not sort selection sets recursively. This is good enough to handle
-// reordered `_entities` selection sets.
-// TODO: Make this recursive.
+use std::ops::Not;
+
+/// Get the sub-selections of a selection.
+fn get_selection_set(selection: &ast::Selection) -> Option<&Vec<ast::Selection>> {
+    match selection {
+        ast::Selection::Field(field) => field.selection_set.is_empty().not().then(|| &field.selection_set),
+        ast::Selection::FragmentSpread(_) => None,
+        ast::Selection::InlineFragment(fragment) => Some(&fragment.selection_set),
+    }
+}
+
+fn same_ast_selection(x: &ast::Selection, y: &ast::Selection) -> bool {
+    let x_key = get_selection_key(x);
+    let y_key = get_selection_key(y);
+    if x_key != y_key {
+        return false;
+    }
+    let x_selections = get_selection_set(x);
+    let y_selections = get_selection_set(y);
+    match (x_selections, y_selections) {
+        (Some(x), Some(y)) => same_ast_selection_set_sorted(x, y),
+        (None, None) => true,
+        _ => false,
+    }
+}
+
+fn hash_value<T: Hash>(x: &T) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    x.hash(&mut hasher);
+    hasher.finish()
+}
+
+fn hash_selection_key(selection: &ast::Selection) -> u64 {
+    hash_value(&get_selection_key(selection))
+}
+
 fn same_ast_selection_set_sorted(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
-    vec_matches_sorted_by_key(x, y, hash_value)
+    fn sorted_by_selection_key(s: &[ast::Selection]) -> Vec<ast::Selection> {
+        let mut sorted = s.to_owned();
+        sorted.sort_by_key(hash_selection_key);
+        sorted
+    }
+
+    if x.len() != y.len() {
+        return false;
+    }
+
+    let x_sorted = sorted_by_selection_key(x);
+    let y_sorted = sorted_by_selection_key(y);
+    for (x, y) in x_sorted.iter().zip(y_sorted.iter()) {
+        if !same_ast_selection(x, y) {
+            return false;
+        }
+    }
+    true
 }
 
 #[cfg(test)]
@@ -468,11 +529,9 @@ mod ast_comparison_tests {
     }
 
     #[test]
-    #[should_panic(expected = "assertion failed")]
-    // Reordered selection sets are not supported yet.
     fn test_top_level_selection_order() {
-        let op_x = r#"{ x { w } y }"#;
-        let op_y = r#"{ y x { w } }"#;
+        let op_x = r#"{ x { w z } y }"#;
+        let op_y = r#"{ y x { z w } }"#;
         let ast_x = ast::Document::parse(op_x, "op_x").unwrap();
         let ast_y = ast::Document::parse(op_y, "op_y").unwrap();
         assert!(super::same_ast_document(&ast_x, &ast_y));
