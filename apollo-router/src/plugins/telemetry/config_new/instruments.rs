@@ -834,7 +834,7 @@ impl InstrumentsConfig {
                     inner: Mutex::new(CustomCounterInner {
                         increment: Increment::Custom(None),
                         condition: Condition::True,
-                        counter: Some(dbg!(&static_instruments)
+                        counter: Some(static_instruments
                                 .get(CACHE_METRIC)
                                 .expect(
                                     "cannot get static instrument for cache; this should not happen",
