@@ -31,7 +31,6 @@ pub(crate) struct Invalidation {
             broadcast::Sender<Result<u64, InvalidationError>>,
         ),
     >,
-    // storage: Option<RedisCacheStorage>,
 }
 
 #[derive(Error, Debug, Clone)]
@@ -57,7 +56,7 @@ impl std::fmt::Display for InvalidationErrors {
 
 impl std::error::Error for InvalidationErrors {}
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
 
 #[derive(Clone, Debug)]

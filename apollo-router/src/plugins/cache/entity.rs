@@ -925,23 +925,23 @@ pub(crate) fn hash_additional_data(
     let repr_key = ByteString::from(REPRESENTATIONS);
     // Removing the representations variable because it's already part of the cache key
     let representations = body.variables.remove(&repr_key);
-    digest.update(&serde_json::to_vec(&body.variables).unwrap());
+    digest.update(serde_json::to_vec(&body.variables).unwrap());
     if let Some(representations) = representations {
         body.variables.insert(repr_key, representations);
     }
 
-    digest.update(&serde_json::to_vec(cache_key).unwrap());
+    digest.update(serde_json::to_vec(cache_key).unwrap());
 
     if let Ok(Some(cache_data)) = context.get::<&str, Object>(CONTEXT_CACHE_KEY) {
         if let Some(v) = cache_data.get("all") {
-            digest.update(&serde_json::to_vec(v).unwrap())
+            digest.update(serde_json::to_vec(v).unwrap())
         }
         if let Some(v) = body
             .operation_name
             .as_ref()
             .and_then(|op| cache_data.get(op.as_str()))
         {
-            digest.update(&serde_json::to_vec(v).unwrap())
+            digest.update(serde_json::to_vec(v).unwrap())
         }
     }
 
@@ -1223,11 +1223,4 @@ async fn insert_entities_in_result(
     }
 
     Ok((new_entities, new_errors))
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Key {
-    #[serde(rename = "type")]
-    opt_type: Option<Value>,
-    id: Value,
 }

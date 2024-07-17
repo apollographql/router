@@ -347,7 +347,8 @@ fn transform_field_arguments(
 #[derive(Debug)]
 pub(crate) enum ContextBatchingError {
     NoSelectionSet,
-    InvalidDocumentGenerated(WithErrors<ExecutableDocument>),
+    // The only use of the field is in `Debug`, on purpose.
+    InvalidDocumentGenerated(#[allow(unused)] WithErrors<ExecutableDocument>),
     InvalidRelativePath,
     UnexpectedSelection,
 }

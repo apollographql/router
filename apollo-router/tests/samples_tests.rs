@@ -54,7 +54,7 @@ fn lookup_dir(
             );
 
             if path.join("plan.json").exists() {
-                let mut file = File::open(&path.join("plan.json")).map_err(|e| {
+                let mut file = File::open(path.join("plan.json")).map_err(|e| {
                     format!(
                         "could not open file at path '{:?}': {e}",
                         &path.join("plan.json")
