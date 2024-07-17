@@ -34,7 +34,7 @@ pub(crate) struct CSRFConfig {
     /// and make sure you either:
     /// - did not set any `allow_headers` list (so it defaults to `mirror_request`)
     /// - added your required headers to the allow_headers list, as shown in the
-    /// `examples/cors-and-csrf/custom-headers.router.yaml` files.
+    ///   `examples/cors-and-csrf/custom-headers.router.yaml` files.
     required_headers: Vec<String>,
 }
 
