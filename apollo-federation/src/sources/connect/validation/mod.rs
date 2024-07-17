@@ -83,13 +83,10 @@ use url::Url;
 
 use crate::link::Import;
 use crate::link::Link;
-use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
-use crate::sources::connect::spec::schema::SOURCE_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::SOURCE_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
 use crate::subgraph::database::federation_link_identity;
@@ -235,7 +232,7 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
     let mut errors = Vec::new();
 
     if let Some(http_arg) = directive
-        .argument_by_name(&SOURCE_HTTP_ARGUMENT_NAME)
+        .argument_by_name(&HTTP_ARGUMENT_NAME)
         .and_then(|arg| arg.as_object())
     {
         // Validate URL argument
@@ -255,28 +252,15 @@ fn validate_source(directive: &Component<Directive>, sources: &SourceMap) -> Sou
         }
 
         // Validate headers argument
-        if let Some(headers) = get_http_headers_arg(http_arg, &SOURCE_HEADERS_ARGUMENT_NAME) {
-            let header_errors = validate_headers_arg(
-                &directive.name,
-                &format!(
-                    "{}.{}",
-                    SOURCE_HTTP_ARGUMENT_NAME, SOURCE_HEADERS_ARGUMENT_NAME
-                ),
-                headers,
-                sources,
-                None,
-                None,
-            );
-
-            if !header_errors.is_empty() {
-                errors.extend(header_errors);
-            }
+        if let Some(headers) = get_http_headers_arg(http_arg) {
+            let header_errors = validate_headers_arg(&directive.name, headers, sources, None, None);
+            errors.extend(header_errors);
         }
     } else {
         errors.push(Message {
             code: Code::GraphQLError,
             message: format!(
-                "{coordinate} must have a `{SOURCE_HTTP_ARGUMENT_NAME}` argument.",
+                "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
                 coordinate = source_http_argument_coordinate(&directive.name),
             ),
             locations: Location::from_node(directive.location(), sources)
@@ -396,13 +380,13 @@ fn validate_field(
     ));
 
     let Some((http_arg, http_arg_location)) = connect_directive
-        .argument_by_name(&CONNECT_HTTP_ARGUMENT_NAME)
+        .argument_by_name(&HTTP_ARGUMENT_NAME)
         .and_then(|arg| Some((arg.as_object()?, arg.location())))
     else {
         errors.push(Message {
             code: Code::GraphQLError,
             message: format!(
-                "{coordinate} must have a `{CONNECT_HTTP_ARGUMENT_NAME}` argument.",
+                "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
                 coordinate =
                     connect_directive_coordinate(connect_directive_name, object, &field.name),
             ),
@@ -481,10 +465,9 @@ fn validate_field(
         }
     }
 
-    if let Some(headers) = get_http_headers_arg(http_arg, &CONNECT_HEADERS_ARGUMENT_NAME) {
+    if let Some(headers) = get_http_headers_arg(http_arg) {
         errors.extend(validate_headers_arg(
             connect_directive_name,
-            &format!("{CONNECT_HTTP_ARGUMENT_NAME}.{CONNECT_HEADERS_ARGUMENT_NAME}"),
             headers,
             source_map,
             Some(&object.name),
@@ -630,8 +613,6 @@ pub enum Code {
     InvalidHttpHeaderName,
     /// The `value` mapping should be either a valid HTTP header value or list of valid HTTP header values.
     InvalidHttpHeaderValue,
-    /// The `name` mapping must be unique for all headers.
-    HttpHeaderNameCollision,
     /// Header mappings cannot include both `as` and `value` properties.
     InvalidHttpHeaderMapping,
     /// Certain directives are not allowed when using connectors

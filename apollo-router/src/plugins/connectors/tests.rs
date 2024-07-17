@@ -311,7 +311,7 @@ async fn basic_errors() {
 }
 
 #[tokio::test]
-async fn test_header_propagation() {
+async fn test_headers() {
     let mock_server = MockServer::start().await;
     mock_api::users().mount(&mock_server).await;
 
@@ -323,8 +323,8 @@ async fn test_header_propagation() {
         None,
         |request| {
             let headers = request.router_request.headers_mut();
-            headers.insert("x-propagate", "propagated".parse().unwrap());
             headers.insert("x-rename", "renamed".parse().unwrap());
+            headers.append("x-rename", "also-renamed".parse().unwrap());
         },
     )
     .await;
@@ -334,12 +334,12 @@ async fn test_header_propagation() {
         vec![Matcher::new()
             .method("GET")
             .header(
-                HeaderName::from_str("x-propagate").unwrap(),
-                HeaderValue::from_str("propagated").unwrap(),
+                HeaderName::from_str("x-new-name").unwrap(),
+                HeaderValue::from_str("renamed").unwrap(),
             )
             .header(
                 HeaderName::from_str("x-new-name").unwrap(),
-                HeaderValue::from_str("renamed").unwrap(),
+                HeaderValue::from_str("also-renamed").unwrap(),
             )
             .header(
                 HeaderName::from_str("x-insert").unwrap(),

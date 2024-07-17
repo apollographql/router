@@ -8,17 +8,11 @@ type Query {
         GET: "http://127.0.0.1:8000/resources"
         headers: [
           { name: "x-name" }
-          { name: "x-name-collision", value: "text/html" }
-          { name: "x-name-collision", value: "text/html" }
           { name: "x-valid-name", value: "text/html" }
-          { name: "x-same-name-as", as: "x-same-name-as" }
           { name: "x-same-name-from", from: "x-same-name-from" }
-          { as: "x-missing-name-with-as", value: "text/html" }
           { from: "x-missing-name-with-from", value: "text/html" }
-          { name: "x-foo", as: "x-bar", value: ["baz"] }
-          { name: "x-bar", from: "x-foo", value: ["baz"] }
+          { name: "x-bar", from: "x-foo", value: ["baz", "bock"] }
           { name: "<Invalid-Header>", value: "invalid.header.name" }
-          { name: "x-invalid-as", as: "<Invalid-Header>" }
           { name: "x-invalid-from", from: "<Invalid-Header>" }
           {
             name: "x-invalid-value"

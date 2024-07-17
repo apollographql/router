@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/steelthread.yaml > apollo-router/src/plugins/connectors/testdata/steelthread.graphql
-federation_version: =2.9.0-connectors.8
+federation_version: =2.9.0-dylan
 subgraphs:
   connectors:
     routing_url: none
@@ -19,8 +19,7 @@ subgraphs:
             http: {
               baseURL: "https://jsonplaceholder.typicode.com/"
               headers: [
-                { name: "x-propagate" }
-                { name: "x-rename" as: "x-new-name" }
+                { name: "x-new-name" from: "x-rename" }
                 { name: "x-insert" value: "inserted" }
               ]
             }

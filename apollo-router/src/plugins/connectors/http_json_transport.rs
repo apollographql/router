@@ -234,35 +234,7 @@ fn add_headers<T>(
     let headers = request.headers_mut();
     for rule in config {
         match rule {
-            HTTPHeader::Propagate { name } => {
-                match HeaderName::from_str(name) {
-                    Ok(name) => {
-                        if RESERVED_HEADERS.contains(&name) {
-                            tracing::warn!(
-                                "Header '{}' is reserved and will not be propagated",
-                                name
-                            );
-                        } else {
-                            let values = incoming_supergraph_headers.get_all(&name);
-                            let mut propagated = false;
-                            for value in values {
-                                headers.append(name.clone(), value.clone());
-                                propagated = true;
-                            }
-                            if !propagated {
-                                tracing::warn!("Header '{}' not found in incoming request", name);
-                            }
-                        }
-                    }
-                    Err(err) => {
-                        tracing::error!("Invalid header name '{}': {:?}", name, err);
-                    }
-                };
-            }
-            HTTPHeader::Rename {
-                original_name,
-                new_name,
-            } => match HeaderName::from_str(new_name) {
+            HTTPHeader::Rename { from, to } => match HeaderName::from_str(to) {
                 Ok(new_name) => {
                     if RESERVED_HEADERS.contains(&new_name) {
                         tracing::warn!(
@@ -270,7 +242,7 @@ fn add_headers<T>(
                             new_name
                         );
                     } else {
-                        let values = incoming_supergraph_headers.get_all(original_name);
+                        let values = incoming_supergraph_headers.get_all(from);
                         let mut propagated = false;
                         for value in values {
                             headers.append(new_name.clone(), value.clone());
@@ -282,7 +254,7 @@ fn add_headers<T>(
                     }
                 }
                 Err(err) => {
-                    tracing::error!("Invalid header name '{}': {:?}", new_name, err);
+                    tracing::error!("Invalid header name '{}': {:?}", to, err);
                 }
             },
             HTTPHeader::Inject { name, value } => match HeaderName::from_str(name) {
@@ -396,11 +368,8 @@ mod tests {
     #[test]
     fn test_headers_to_add_no_directives() {
         let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![
-            (
-                "x-propagate".parse().unwrap(),
-                "propagated".parse().unwrap(),
-            ),
             ("x-rename".parse().unwrap(), "renamed".parse().unwrap()),
+            ("x-rename".parse().unwrap(), "also-renamed".parse().unwrap()),
             ("x-ignore".parse().unwrap(), "ignored".parse().unwrap()),
             (CONTENT_ENCODING, "gzip".parse().unwrap()),
         ]
@@ -415,11 +384,8 @@ mod tests {
     #[test]
     fn test_headers_to_add_with_config() {
         let incoming_supergraph_headers: HeaderMap<HeaderValue> = vec![
-            (
-                "x-propagate".parse().unwrap(),
-                "propagated".parse().unwrap(),
-            ),
             ("x-rename".parse().unwrap(), "renamed".parse().unwrap()),
+            ("x-rename".parse().unwrap(), "also-renamed".parse().unwrap()),
             ("x-ignore".parse().unwrap(), "ignored".parse().unwrap()),
             (CONTENT_ENCODING, "gzip".parse().unwrap()),
         ]
@@ -427,12 +393,9 @@ mod tests {
         .collect();
 
         let config = vec![
-            HTTPHeader::Propagate {
-                name: "x-propagate".parse().unwrap(),
-            },
             HTTPHeader::Rename {
-                original_name: "x-rename".parse().unwrap(),
-                new_name: "x-new-name".parse().unwrap(),
+                from: "x-rename".parse().unwrap(),
+                to: "x-new-name".parse().unwrap(),
             },
             HTTPHeader::Inject {
                 name: "x-insert".parse().unwrap(),
@@ -446,10 +409,6 @@ mod tests {
         assert_eq!(result.len(), 3);
         assert_eq!(result.get("x-new-name"), Some(&"renamed".parse().unwrap()));
         assert_eq!(result.get("x-insert"), Some(&"inserted".parse().unwrap()));
-        assert_eq!(
-            result.get("x-propagate"),
-            Some(&"propagated".parse().unwrap())
-        );
     }
 
     #[test]

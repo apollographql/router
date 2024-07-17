@@ -1,7 +1,6 @@
 use indexmap::IndexMap;
 
 use super::spec::ConnectHTTPArguments;
-use super::spec::HTTPHeaderOption;
 use super::spec::SourceHTTPArguments;
 use super::ConnectId;
 use super::JSONSelection;
@@ -168,9 +167,9 @@ impl HttpJsonTransport {
 
         let mut headers = source
             .as_ref()
-            .map(|source| source.headers.0.clone())
+            .map(|source| source.headers.clone())
             .unwrap_or_default();
-        headers.extend(http.headers.0.clone());
+        headers.extend(http.headers.clone());
 
         Ok(Self {
             // TODO: We'll need to eventually support @connect directives without
@@ -185,7 +184,7 @@ impl HttpJsonTransport {
                 FederationError::internal(format!("could not parse URL template: {e}"))
             })?,
             method,
-            headers: http_headers(headers),
+            headers,
             body: http.body.clone(),
         })
     }
@@ -220,39 +219,8 @@ impl HTTPMethod {
 
 #[derive(Clone, Debug)]
 pub enum HTTPHeader {
-    Propagate {
-        name: String,
-    },
-    Rename {
-        original_name: String,
-        new_name: String,
-    },
-    Inject {
-        name: String,
-        value: String,
-    },
-}
-
-fn http_headers(mappings: IndexMap<String, Option<HTTPHeaderOption>>) -> Vec<HTTPHeader> {
-    let mut headers = vec![];
-    for (name, value) in mappings {
-        match value {
-            Some(HTTPHeaderOption::As(new_name)) => headers.push(HTTPHeader::Rename {
-                original_name: name.clone(),
-                new_name,
-            }),
-            Some(HTTPHeaderOption::Value(values)) => {
-                for value in values {
-                    headers.push(HTTPHeader::Inject {
-                        name: name.clone(),
-                        value: value.clone(),
-                    });
-                }
-            }
-            None => headers.push(HTTPHeader::Propagate { name: name.clone() }),
-        };
-    }
-    headers
+    Rename { from: String, to: String },
+    Inject { name: String, value: String },
 }
 
 #[cfg(test)]
@@ -322,15 +290,12 @@ mod tests {
                         method: Get,
                         headers: [
                             Rename {
-                                original_name: "X-Auth-Token",
-                                new_name: "AuthToken",
+                                from: "X-Auth-Token",
+                                to: "AuthToken",
                             },
                             Inject {
                                 name: "user-agent",
                                 value: "Firefox",
-                            },
-                            Propagate {
-                                name: "X-From-Env",
                             },
                         ],
                         body: None,
@@ -397,15 +362,12 @@ mod tests {
                         method: Get,
                         headers: [
                             Rename {
-                                original_name: "X-Auth-Token",
-                                new_name: "AuthToken",
+                                from: "X-Auth-Token",
+                                to: "AuthToken",
                             },
                             Inject {
                                 name: "user-agent",
                                 value: "Firefox",
-                            },
-                            Propagate {
-                                name: "X-From-Env",
                             },
                         ],
                         body: None,
