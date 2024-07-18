@@ -136,18 +136,16 @@ pub fn validate(schema: Schema) -> Vec<Message> {
         }
     }
 
-    let mut connect_errors: Vec<Message> = vec![];
-    schema.types.values().for_each(|extended_type| {
-        connect_errors.extend(validate_extended_type(
+    let connect_errors = schema.types.values().flat_map(|extended_type| {
+        validate_extended_type(
             extended_type,
             &schema,
             &connect_directive_name,
             &source_directive_name,
             &all_source_names,
             source_map,
-        ))
+        )
     });
-
     messages.extend(connect_errors);
 
     if source_directive_name == DEFAULT_SOURCE_DIRECTIVE_NAME

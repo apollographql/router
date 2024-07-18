@@ -39,30 +39,26 @@ pub(super) fn validate_extended_type(
     all_source_names: &[SourceName],
     source_map: &Arc<IndexMap<FileId, Arc<SourceFile>>>,
 ) -> Vec<Message> {
-    let mut connect_errors: Vec<Message> = vec![];
-
     match extended_type {
-        ExtendedType::Object(object) => connect_errors.extend(validate_object_fields(
+        ExtendedType::Object(object) => validate_object_fields(
             object,
             schema,
             connect_directive_name,
             source_directive_name,
             all_source_names,
-        )),
-        ExtendedType::Union(union_type) => connect_errors.push(validate_abstract_type(
+        ),
+        ExtendedType::Union(union_type) => vec![validate_abstract_type(
             NodeLocation::recompose(union_type.location(), union_type.name.location()),
             source_map,
             "union",
-        )),
-        ExtendedType::Interface(interface) => connect_errors.push(validate_abstract_type(
+        )],
+        ExtendedType::Interface(interface) => vec![validate_abstract_type(
             NodeLocation::recompose(interface.location(), interface.name.location()),
             source_map,
             "interface",
-        )),
-        _ => (),
+        )],
+        _ => Vec::new(),
     }
-
-    connect_errors
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
