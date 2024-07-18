@@ -9,7 +9,6 @@ use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
 use serde::Serialize;
-use tracing::trace;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;

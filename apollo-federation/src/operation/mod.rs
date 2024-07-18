@@ -23,7 +23,6 @@ use std::sync::atomic;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
-use serde::Serialize;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
@@ -31,6 +30,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -1064,11 +1064,11 @@ mod field_selection {
     use std::ops::Deref;
     use std::sync::Arc;
 
-    use serde::Serialize;
     use apollo_compiler::ast;
     use apollo_compiler::executable;
     use apollo_compiler::Name;
     use apollo_compiler::Node;
+    use serde::Serialize;
 
     use crate::error::FederationError;
     use crate::operation::sort_arguments;

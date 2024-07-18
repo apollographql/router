@@ -27,7 +27,6 @@ use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
-use tracing::trace;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;

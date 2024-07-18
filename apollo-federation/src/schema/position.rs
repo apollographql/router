@@ -3,8 +3,6 @@ use std::fmt::Display;
 use std::fmt::Formatter;
 use std::ops::Deref;
 
-
-use serde::Serialize;
 use apollo_compiler::ast;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
@@ -27,6 +25,7 @@ use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use indexmap::IndexSet;
 use lazy_static::lazy_static;
+use serde::Serialize;
 use strum::IntoEnumIterator;
 
 use crate::error::FederationError;
