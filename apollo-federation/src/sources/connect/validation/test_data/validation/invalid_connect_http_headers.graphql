@@ -8,6 +8,8 @@ type Query {
         GET: "http://127.0.0.1:8000/resources"
         headers: [
           { name: "x-name" }
+          { name: "x-name-collision", value: "text/html" }
+          { name: "x-name-collision", from: "x-name-collision" }
           { name: "x-valid-name", value: "text/html" }
           { name: "x-same-name-from", from: "x-same-name-from" }
           { from: "x-missing-name-with-from", value: "text/html" }

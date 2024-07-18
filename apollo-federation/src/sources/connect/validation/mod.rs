@@ -613,6 +613,8 @@ pub enum Code {
     InvalidHttpHeaderName,
     /// The `value` mapping should be either a valid HTTP header value or list of valid HTTP header values.
     InvalidHttpHeaderValue,
+    /// The `name` mapping must be unique for all headers.
+    HttpHeaderNameCollision,
     /// Header mappings cannot include both `as` and `value` properties.
     InvalidHttpHeaderMapping,
     /// Certain directives are not allowed when using connectors

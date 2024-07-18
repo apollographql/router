@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use apollo_compiler::ast::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
@@ -21,6 +23,7 @@ pub(super) fn validate_headers_arg<'a>(
     object: Option<&'a Name>,
     field: Option<&'a Name>,
 ) -> impl Iterator<Item = Message> + 'a {
+    let mut names = HashMap::new();
     headers
         .as_list()
         .into_iter()
@@ -52,10 +55,32 @@ pub(super) fn validate_headers_arg<'a>(
                 return messages;
             };
 
-            if let Some(err) = validate_header_name(&NAME_ARG, name_value, pair_coordinate, source_map).err() {
-                messages.push(err);
-            }
+            let name_str = match validate_header_name(&NAME_ARG, name_value, pair_coordinate, source_map) {
+                Err(err) => {
+                    messages.push(err);
+                    None
+                },
+                Ok(value) => Some(value),
+            };
 
+            if let Some(name_str) = name_str {
+                if let Some(duplicate) = names.insert(name_str, name_value.location()) {
+                    messages.push(Message {
+                        code: Code::HttpHeaderNameCollision,
+                        message: format!(
+                            "Duplicate header names are not allowed. The header name '{}' at '{}' is already defined.",
+                            name_str,
+                            pair_coordinate
+                        ),
+                        locations: Location::from_node(name_value.location(), source_map)
+                            .into_iter()
+                            .chain(
+                                Location::from_node(duplicate, source_map)
+                            )
+                            .collect(),
+                    });
+                }
+            }
             // validate `from`
             if let Some(from_value) = from_arg {
                 if let Some(err) = validate_header_name(&FROM_ARG, from_value, pair_coordinate, source_map).err() {
