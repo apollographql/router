@@ -1010,7 +1010,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph_with_context.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with @context"
@@ -1041,7 +1041,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph_with_override_label.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with progressive overrides"
@@ -1071,7 +1071,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_err(),
             "experimental_query_planner_mode: both cannot be used with fed1 supergraph"
@@ -1101,7 +1101,7 @@ mod test {
             ..Default::default()
         };
         let schema = include_str!("testdata/minimal_fed2_supergraph.graphql");
-        let schema = Arc::new(Schema::parse_test(schema, &config).unwrap());
+        let schema = Arc::new(Schema::parse(schema, &config).unwrap());
         assert!(
             can_use_with_experimental_query_planner(Arc::new(config), schema.clone()).is_ok(),
             "experimental_query_planner_mode: both can be used"

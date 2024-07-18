@@ -113,32 +113,6 @@ expression: "&schema"
       ],
       "type": "string"
     },
-    "ApiSchemaMode": {
-      "description": "API schema generation modes.",
-      "oneOf": [
-        {
-          "description": "Use the new Rust-based implementation.",
-          "enum": [
-            "new"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use the old JavaScript-based implementation.",
-          "enum": [
-            "legacy"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "Use Rust-based and Javascript-based implementations side by side, logging warnings if the implementations disagree.",
-          "enum": [
-            "both"
-          ],
-          "type": "string"
-        }
-      ]
-    },
     "ApolloMetricsGenerationMode": {
       "description": "Apollo usage report signature and referenced field generation modes.",
       "oneOf": [
@@ -8244,10 +8218,6 @@ expression: "&schema"
     "csrf": {
       "$ref": "#/definitions/CSRFConfig",
       "description": "#/definitions/CSRFConfig"
-    },
-    "experimental_api_schema_generation_mode": {
-      "$ref": "#/definitions/ApiSchemaMode",
-      "description": "#/definitions/ApiSchemaMode"
     },
     "experimental_apollo_metrics_generation_mode": {
       "$ref": "#/definitions/ApolloMetricsGenerationMode",

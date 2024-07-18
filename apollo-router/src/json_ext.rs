@@ -1161,7 +1161,7 @@ mod tests {
     /// the path, and so we use the following simple schema for tests. Note however that tests that
     /// don't use fragments in the path essentially ignore this schema.
     fn test_schema() -> Schema {
-        Schema::parse_test(
+        Schema::parse(
             r#"
            schema
              @core(feature: "https://specs.apollo.dev/core/v0.1"),
