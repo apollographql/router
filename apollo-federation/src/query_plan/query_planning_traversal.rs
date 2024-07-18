@@ -602,7 +602,11 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
-        snapshot!(name = "ClosedBranches", self.closed_branches, "closed_branches");
+        snapshot!(
+            name = "ClosedBranches",
+            self.closed_branches,
+            "closed_branches"
+        );
 
         if self.closed_branches.is_empty() {
             return Ok(());

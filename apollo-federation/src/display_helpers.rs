@@ -1,5 +1,5 @@
-use std::fmt::{self, Debug};
 use std::fmt::Display;
+use std::fmt::{self, Debug};
 use std::ops::Deref;
 
 use serde::Serializer;
@@ -132,7 +132,10 @@ where
     serialize_as_string(&DisplaySlice(data), ser)
 }
 
-pub(crate) fn serialize_optional_vec_as_string<T, S>(data: &Option<Vec<T>>, ser: S) -> Result<S::Ok, S::Error>
+pub(crate) fn serialize_optional_vec_as_string<T, S>(
+    data: &Option<Vec<T>>,
+    ser: S,
+) -> Result<S::Ok, S::Error>
 where
     T: Display,
     S: Serializer,
