@@ -529,6 +529,7 @@ dependencies = [
  "indexmap 2.2.3",
  "insta",
  "itertools 0.12.1",
+ "json_value_merge",
  "jsonpath-rust",
  "jsonpath_lib",
  "jsonschema",
@@ -4080,6 +4081,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c5f195fe497f702db0f318b07fdd68edb16955aed830df8363d837542f8f935a"
 dependencies = [
  "wasm-bindgen",
+]
+
+[[package]]
+name = "json_value_merge"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b0a3aadd8aaadfe2be6fd22bbdb5dbc63494ce22b7c124211f684fd757b3215"
+dependencies = [
+ "serde_json",
 ]
 
 [[package]]

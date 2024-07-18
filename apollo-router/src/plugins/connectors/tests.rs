@@ -5,6 +5,7 @@ use apollo_compiler::execution::JsonMap;
 use http::header::CONTENT_TYPE;
 use itertools::EitherOrBoth;
 use itertools::Itertools;
+use json_value_merge::Merge;
 use mime::APPLICATION_JSON;
 use req_asserts::Matcher;
 use serde_json::json;
@@ -604,39 +605,23 @@ async fn execute(
     // we cannot use Testharness because the subgraph connectors are actually extracted in YamlRouterFactory
     let mut factory = YamlRouterFactory;
 
-    let mut config = config.unwrap_or(serde_json::json!({
+    let mut config = config.unwrap_or(json!({
       "include_subgraph_errors": { "all": true },
     }));
-
-    let config_object = config.as_object_mut().unwrap();
-    config_object
-        .entry("preview_connectors")
-        .or_insert(json!({}))
-        .as_object_mut()
-        .unwrap()
-        .entry("subgraphs")
-        .or_insert(json!({}))
-        .as_object_mut()
-        .unwrap()
-        .entry("connectors")
-        .or_insert(json!({}))
-        .as_object_mut()
-        .unwrap()
-        .insert(
-            "sources".to_string(),
-            json!({
+    config
+        .merge_in(
+            "/preview_connectors/subgraphs/connectors/sources",
+            &json!({
                 "json": {
                   "override_url": connector_uri
                 }
             }),
-        );
+        )
+        .unwrap();
 
-    config_object.insert(
-        "override_subgraph_url".to_string(),
-        json!({
-          "graphql": subgraph_uri
-        }),
-    );
+    config["override_subgraph_url"] = json!({
+      "graphql": subgraph_uri
+    });
 
     let router_creator = factory
         .create(

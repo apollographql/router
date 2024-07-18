@@ -293,6 +293,7 @@ ecdsa = { version = "0.16.9", features = ["signing", "pem", "pkcs8"] }
 fred = { version = "7.1.2", features = ["enable-rustls", "mocks"] }
 futures-test = "0.3.30"
 insta.workspace = true
+json_value_merge = "2.0.0"
 maplit = "1.0.2"
 memchr = { version = "2.7.1", default-features = false }
 mockall = "0.11.4"
