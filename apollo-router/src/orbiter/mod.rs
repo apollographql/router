@@ -110,7 +110,7 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                 extra_plugins,
             )
             .await
-            .map(|factory| {
+            .inspect(|factory| {
                 if !is_telemetry_disabled {
                     let schema = factory.supergraph_creator.schema();
 
@@ -122,7 +122,6 @@ impl RouterSuperServiceFactory for OrbiterRouterSuperServiceFactory {
                         }
                     });
                 }
-                factory
             })
     }
 }

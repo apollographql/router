@@ -347,9 +347,6 @@ impl std::fmt::Debug for Schema {
     }
 }
 
-#[derive(Debug)]
-pub(crate) struct InvalidObject;
-
 impl std::ops::Deref for ApiSchema {
     type Target = Valid<apollo_compiler::Schema>;
 

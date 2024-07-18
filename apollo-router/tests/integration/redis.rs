@@ -1,5 +1,4 @@
 use apollo_router::plugin::test::MockSubgraph;
-use apollo_router::services::execution::QueryPlan;
 use apollo_router::services::router;
 use apollo_router::services::supergraph;
 use apollo_router::Context;
@@ -12,8 +11,6 @@ use futures::StreamExt;
 use http::header::CACHE_CONTROL;
 use http::HeaderValue;
 use http::Method;
-use serde::Deserialize;
-use serde::Serialize;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
@@ -158,12 +155,6 @@ async fn query_planner_cache() -> Result<(), BoxError> {
     Ok(())
 }
 
-#[derive(Deserialize, Serialize)]
-
-struct QueryPlannerContent {
-    plan: QueryPlan,
-}
-
 #[tokio::test(flavor = "multi_thread")]
 async fn apq() -> Result<(), BoxError> {
     let config = RedisConfig::from_url("redis://127.0.0.1:6379").unwrap();
@@ -233,7 +224,7 @@ async fn apq() -> Result<(), BoxError> {
         res.errors.first().unwrap().message,
         "PersistedQueryNotFound"
     );
-    let r: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    let r: Option<String> = client.get(format!("apq:{query_hash}")).await.unwrap();
     assert!(r.is_none());
 
     // Now we register the query
@@ -261,7 +252,7 @@ async fn apq() -> Result<(), BoxError> {
     assert!(res.data.is_some());
     assert!(res.errors.is_empty());
 
-    let s: Option<String> = client.get(&format!("apq:{query_hash}")).await.unwrap();
+    let s: Option<String> = client.get(format!("apq:{query_hash}")).await.unwrap();
     insta::assert_snapshot!(s.unwrap());
 
     // we start a new router with the same config

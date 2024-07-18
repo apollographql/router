@@ -74,11 +74,13 @@ pub(crate) trait ValueExt {
     /// Returns `true` if the values are equal and the objects are ordered the same.
     ///
     /// **Note:** this is recursive.
+    #[cfg(test)]
     fn eq_and_ordered(&self, other: &Self) -> bool;
 
     /// Returns `true` if the set is a subset of another, i.e., `other` contains at least all the
     /// values in `self`.
     #[track_caller]
+    #[cfg(test)]
     fn is_subset(&self, superset: &Value) -> bool;
 
     /// Create a `Value` by inserting a value at a subpath.
@@ -181,6 +183,7 @@ impl ValueExt for Value {
         }
     }
 
+    #[cfg(test)]
     fn eq_and_ordered(&self, other: &Self) -> bool {
         match (self, other) {
             (Value::Object(a), Value::Object(b)) => {
@@ -221,6 +224,7 @@ impl ValueExt for Value {
         }
     }
 
+    #[cfg(test)]
     fn is_subset(&self, superset: &Value) -> bool {
         match (self, superset) {
             (Value::Object(subset), Value::Object(superset)) => {

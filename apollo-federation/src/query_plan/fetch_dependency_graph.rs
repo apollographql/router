@@ -1155,7 +1155,7 @@ impl FetchDependencyGraph {
         let get_subgraph_schema = |subgraph_name: &Arc<str>| {
             self.federated_query_graph
                 .schema_by_source(subgraph_name)
-                .map(|schema| schema.clone())
+                .cloned()
         };
 
         // For nodes that fetches from an @interfaceObject, we can sometimes have something like
