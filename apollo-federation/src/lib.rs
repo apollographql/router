@@ -20,9 +20,8 @@
 
 mod api_schema;
 mod compat;
-pub(crate) mod utils;
-pub mod error;
 mod display_helpers;
+pub mod error;
 pub mod link;
 pub mod merge;
 pub(crate) mod operation;
@@ -31,6 +30,7 @@ pub mod query_plan;
 pub mod schema;
 pub mod sources;
 pub mod subgraph;
+pub(crate) mod utils;
 
 use apollo_compiler::ast::NamedType;
 use apollo_compiler::validation::Valid;

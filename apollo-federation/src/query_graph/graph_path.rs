@@ -1396,7 +1396,10 @@ where
     // composition, but we'll need to port that code when we port composition.
     // PORT_NOTE: In the JS codebase, this was named
     // `advancePathWithNonCollectingAndTypePreservingTransitions`.
-    #[cfg_attr(feature = "snapshot_tracing", tracing::instrument(skip_all, level = "trace"))]
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(skip_all, level = "trace")
+    )]
     fn advance_with_non_collecting_and_type_preserving_transitions(
         self: &Arc<Self>,
         context: &OpGraphPathContext,
