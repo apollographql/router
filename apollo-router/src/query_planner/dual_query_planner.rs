@@ -511,24 +511,19 @@ fn hash_selection_key(selection: &ast::Selection) -> u64 {
 }
 
 fn same_ast_selection_set_sorted(x: &[ast::Selection], y: &[ast::Selection]) -> bool {
-    fn sorted_by_selection_key(s: &[ast::Selection]) -> Vec<ast::Selection> {
-        let mut sorted = s.to_owned();
-        sorted.sort_by_key(hash_selection_key);
+    fn sorted_by_selection_key(s: &[ast::Selection]) -> Vec<&ast::Selection> {
+        let mut sorted: Vec<&ast::Selection> = s.iter().collect();
+        sorted.sort_by_key(|x| hash_selection_key(x));
         sorted
     }
 
     if x.len() != y.len() {
         return false;
     }
-
-    let x_sorted = sorted_by_selection_key(x);
-    let y_sorted = sorted_by_selection_key(y);
-    for (x, y) in x_sorted.iter().zip(y_sorted.iter()) {
-        if !same_ast_selection(x, y) {
-            return false;
-        }
-    }
-    true
+    sorted_by_selection_key(x)
+        .into_iter()
+        .zip(sorted_by_selection_key(y))
+        .all(|(x, y)| same_ast_selection(x, y))
 }
 
 #[cfg(test)]
