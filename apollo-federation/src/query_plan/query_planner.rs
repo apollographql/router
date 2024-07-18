@@ -8,6 +8,7 @@ use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use serde::Serialize;
 use tracing::trace;
 
 use crate::error::FederationError;
@@ -167,7 +168,7 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Serialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
 }
@@ -220,12 +221,6 @@ impl QueryPlanner {
             Some(true),
             Some(true),
         )?;
-
-        snapshot!(
-            "QueryGraph",
-            query_graph.to_json().to_string(),
-            "query graph"
-        );
 
         let interface_types_with_interface_objects = supergraph
             .schema
@@ -528,7 +523,7 @@ impl QueryPlanner {
             statistics,
         };
 
-        snapshot!("QueryPlan", plan.to_json().to_string(), "query plan");
+        snapshot!(plan, "query plan");
 
         Ok(plan)
     }
@@ -660,11 +655,7 @@ pub(crate) fn compute_root_fetch_groups(
         };
         let fetch_dependency_node =
             dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
-        snapshot!(
-            "FetchDependencyGraph",
-            serde_json_bytes::json!(&dependency_graph.to_json()).to_string(),
-            "tree_with_root_node"
-        );
+        snapshot!(dependency_graph, "tree_with_root_node");
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -689,8 +680,7 @@ fn compute_root_parallel_dependency_graph(
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
     snapshot!(
-        "FetchDependencyGraph",
-        best_plan.fetch_dependency_graph.to_json().to_string(),
+        best_plan.fetch_dependency_graph,
         "Plan returned from compute_root_parallel_best_plan"
     );
     Ok(best_plan.fetch_dependency_graph)
@@ -753,8 +743,7 @@ fn compute_plan_internal(
 
         let (main, deferred) = dependency_graph.process(&mut parameters.processor, root_kind)?;
         snapshot!(
-            "FetchDependencyGraph",
-            dependency_graph.to_json().to_string(),
+            dependency_graph,
             "Plan after calling FetchDependencyGraph::process"
         );
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?

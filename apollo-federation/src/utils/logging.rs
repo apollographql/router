@@ -21,7 +21,7 @@
 /// // trace!(snapshot = "FetchDependencyGraph", data = dependency_graph.to_string(), "updated dependency graph");
 /// ```
 macro_rules! snapshot {
-    ($value:ident, $msg:literal) => {
+    ($value:expr, $msg:literal) => {
         #[cfg(feature = "snapshot_tracing")]
         trace!(
             snapshot = std::any::type_name_of_val(&$value),

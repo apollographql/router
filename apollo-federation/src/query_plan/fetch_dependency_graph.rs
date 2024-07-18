@@ -26,9 +26,7 @@ use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
-use serde_json::Number;
-use serde_json_bytes::json;
-use serde_json_bytes::Value;
+use serde::Serialize;
 use tracing::trace;
 
 use crate::error::FederationError;
@@ -91,7 +89,7 @@ type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
 //
 // The JS codebase additionally has a property named `subgraphAndMergeAtKey` that was used as a
 // precomputed map key, but this isn't necessary in Rust since we can use `PartialEq`/`Eq`/`Hash`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraphNode {
     /// The subgraph this fetch is queried against.
     pub(crate) subgraph_name: Arc<str>,
@@ -116,6 +114,7 @@ pub(crate) struct FetchDependencyGraphNode {
     /// The fetch ID generation, if one is necessary (used when handling `@defer`).
     ///
     /// This can be treated as an Option using `OnceLock::get()`.
+    #[serde(skip)]
     id: OnceLock<u64>,
     /// The label of the `@defer` block this fetch appears in, if any.
     defer_ref: Option<DeferRef>,
@@ -127,26 +126,6 @@ pub(crate) struct FetchDependencyGraphNode {
     /// If true, then we skip an expensive computation during `is_useless()`. (This partially
     /// caches that computation.)
     is_known_useful: bool,
-}
-
-impl FetchDependencyGraphNode {
-    pub(crate) fn to_json(&self) -> Value {
-        json!({
-            "subgraph_name": self.subgraph_name.to_string(),
-            "root_kind": self.root_kind.to_string(),
-            "parent_type": self.parent_type.to_string(),
-            "selection_set": self.selection_set.selection_set.to_string(),
-            "is_entity_fetch": self.is_entity_fetch,
-            "inputs": "TODO", //self.inputs.as_ref().map(|inputs| inputs.selection_sets_per_parent_type.iter().map(|(k, v)| (k.to_string(), v.to_json())).collect::<IndexMap<_, _>>()),
-            "input_rewrites": "TODO",// self.input_rewrites.iter().map(|rewrite| rewrite.to_json()).collect::<Vec<_>>(),
-            "merge_at": self.merge_at.as_ref().map(|merge_at| merge_at.iter().map(|element| element.to_string()).collect::<Vec<_>>()),
-            "id": self.id.get().map(|id| id.to_string()),
-            "defer_ref": self.defer_ref.as_ref().map(|defer_ref| defer_ref.to_string()),
-            "cached_cost": self.cached_cost.map(|n| Value::Number(Number::from_f64(n).unwrap())),
-            "must_preserve_selection_set": self.must_preserve_selection_set,
-            "is_known_useful": self.is_known_useful,
-        })
-    }
 }
 
 /// Safely generate IDs for fetch dependency nodes without mutable access.
@@ -176,7 +155,7 @@ impl Clone for FetchIdGenerator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
     pub(crate) selection_set: Arc<SelectionSet>,
@@ -188,17 +167,18 @@ pub(crate) struct FetchSelectionSet {
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
 // used to update `isKnownUseful` in `FetchGroup`, and it's easier to handle this there than try
 // to pass in a callback in Rust.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct FetchInputs {
     /// The selection sets to be used as input to `_entities`, separated per parent type.
     selection_sets_per_parent_type: IndexMap<CompositeTypeDefinitionPosition, Arc<SelectionSet>>,
     /// The supergraph schema (primarily used for validation of added selection sets).
+    #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
 }
 
 /// Represents a dependency between two subgraph fetches, namely that the tail/child depends on the
 /// head/parent executing first.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraphEdge {
     /// The operation path of the tail/child _relative_ to the head/parent. This information is
     /// maintained in case we want/need to merge nodes into each other. This can roughly be thought
@@ -212,15 +192,6 @@ pub(crate) struct FetchDependencyGraphEdge {
     path: Option<Arc<OpPath>>,
 }
 
-impl FetchDependencyGraphEdge {
-    pub(crate) fn to_json(&self) -> Value {
-        self.path
-            .as_ref()
-            .map(|path| json!(path.to_string()))
-            .unwrap_or(Value::Null)
-    }
-}
-
 type FetchDependencyGraphPetgraph =
     StableDiGraph<Arc<FetchDependencyGraphNode>, Arc<FetchDependencyGraphEdge>>;
 
@@ -228,12 +199,14 @@ type FetchDependencyGraphPetgraph =
 ///
 /// In the graph, two fetches are connected if one of them (the parent/head) must be performed
 /// strictly before the other one (the child/tail).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraph {
     /// The supergraph schema that generated the federated query graph.
+    #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
     /// The federated query graph that generated the fetches. (This also contains the subgraph
     /// schemas.)
+    #[serde(skip)]
     federated_query_graph: Arc<QueryGraph>,
     /// The nodes/edges of the fetch dependency graph. Note that this must be a stable graph since
     /// we remove nodes/edges during optimizations.
@@ -242,49 +215,20 @@ pub(crate) struct FetchDependencyGraph {
     /// the subgraphs.
     root_nodes_by_subgraph: IndexMap<Arc<str>, NodeIndex>,
     /// Tracks metadata about deferred blocks and their dependencies on one another.
+    // TODO(@TylerBloom): Since defer is not supported yet. Once it is, having this field in the
+    // serialized output will be needed.
+    #[serde(skip)]
     pub(crate) defer_tracking: DeferTracking,
     /// The initial fetch ID generation (used when handling `@defer`).
     starting_id_generation: u64,
     /// The current fetch ID generation (used when handling `@defer`).
+    #[serde(skip)]
     fetch_id_generation: FetchIdGenerator,
     /// Whether this fetch dependency graph has undergone a transitive reduction.
     is_reduced: bool,
     /// Whether this fetch dependency graph has undergone optimization (e.g. transitive reduction,
     /// removing empty/useless fetches, merging fetches with the same subgraph/path).
     is_optimized: bool,
-}
-
-impl FetchDependencyGraph {
-    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
-        let mut nodes = Vec::new();
-        let mut edges = Vec::new();
-
-        for i in self.graph.node_indices() {
-            let node = &self.graph[i];
-            nodes.push(json!({
-              "id": i.index(),
-              "data": node.to_json(),
-            }));
-        }
-
-        for i in self.graph.edge_indices() {
-            if let Some((n1, n2)) = self.graph.edge_endpoints(i) {
-                let edge = &self.graph[i];
-                edges.push(json!({
-                  "id": i.index(),
-                  "head": n1.index(),
-                  "tail": n2.index(),
-                  "data": edge.to_json(),
-                }));
-            }
-        }
-
-        json!({
-          "kind": "FetchDependencyGraph",
-          "nodes": nodes,
-          "edges": edges,
-        })
-    }
 }
 
 // TODO: Write docstrings
@@ -3124,11 +3068,7 @@ pub(crate) fn compute_nodes_for_tree(
             }
         }
     }
-    snapshot!(
-        "FetchDependencyGraph",
-        dependency_graph.to_json().to_string(),
-        "updated_dependency_graph"
-    );
+    snapshot!(dependency_graph, "updated_dependency_graph");
     Ok(created_nodes)
 }
 

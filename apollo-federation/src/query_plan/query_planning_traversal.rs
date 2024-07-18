@@ -1,11 +1,9 @@
 use std::sync::Arc;
 
 use indexmap::IndexSet;
-use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
-use serde_json_bytes::json;
-use serde_json_bytes::Value;
+use serde::Serialize;
 use tracing::trace;
 
 use crate::error::FederationError;
@@ -111,7 +109,7 @@ pub(crate) struct QueryPlanningTraversal<'a, 'b> {
     resolver_cache: ConditionResolverCache,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 struct OpenBranchAndSelections {
     /// The options for this open branch.
     open_branch: OpenBranch,
@@ -130,6 +128,7 @@ impl std::fmt::Debug for PlanInfo {
     }
 }
 
+#[derive(Serialize)]
 pub(crate) struct BestQueryPlanInfo {
     /// The fetch dependency graph for this query plan.
     pub fetch_dependency_graph: FetchDependencyGraph,
@@ -327,11 +326,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let mut new_options = vec![];
         let mut no_followups: bool = false;
 
-        snapshot!(
-            "Options",
-            json!(options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
-            "options"
-        );
+        snapshot!("Options", options, "options");
 
         snapshot!(
             "OperationElement",
@@ -368,11 +363,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             }
         }
 
-        snapshot!(
-            "Options",
-            json!(new_options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
-            "new_options"
-        );
+        snapshot!(new_options, "new_options");
 
         if no_followups {
             // This operation element is valid from this option, but is guarantee to yield no result
@@ -611,16 +602,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
-        snapshot!(
-            "ClosedBranches",
-            json!(self
-                .closed_branches
-                .iter()
-                .map(|cb| cb.to_json())
-                .collect_vec())
-            .to_string(),
-            "closed_branches"
-        );
+        snapshot!("ClosedBranches", self.closed_branches, "closed_branches");
 
         if self.closed_branches.is_empty() {
             return Ok(());
@@ -631,12 +613,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
         snapshot!(
             "ClosedBranches",
-            json!(self
-                .closed_branches
-                .iter()
-                .map(|cb| cb.to_json())
-                .collect_vec())
-            .to_string(),
+            self.closed_branches,
             "closed_branches_after_reduce"
         );
 
@@ -687,8 +664,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             )?;
             self.updated_dependency_graph(&mut initial_dependency_graph, &initial_tree)?;
             snapshot!(
-                "FetchDependencyGraph",
-                initial_dependency_graph.to_json().to_string(),
+                initial_dependency_graph,
                 "Updated dep graph with initial tree"
             );
             if first_group.is_empty() {
@@ -701,11 +677,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 }
                 .into();
 
-                snapshot!(
-                    "BestQueryPlanInfo",
-                    self.best_plan.as_ref().unwrap().to_json().to_string(),
-                    "best_plan"
-                );
+                snapshot!(self.best_plan, "best_plan");
 
                 return Ok(());
             }
@@ -744,11 +716,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         }
         .into();
 
-        snapshot!(
-            "BestQueryPlanInfo",
-            self.best_plan.as_ref().unwrap().to_json().to_string(),
-            "best_plan"
-        );
+        snapshot!(self.best_plan, "best_plan");
         Ok(())
     }
 
@@ -1027,11 +995,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             )?;
         }
 
-        snapshot!(
-            "FetchDependencyGraph",
-            dependency_graph.to_json().to_string(),
-            "updated_dependency_graph"
-        );
+        snapshot!(dependency_graph, "updated_dependency_graph");
         Ok(())
     }
 
@@ -1257,91 +1221,4 @@ fn test_prune_and_reorder_first_branch() {
     // The "run" can be a single branch:
     assert(&["abC", "lmn", "op"], &["lmn", "ab", "op"]);
     assert(&["abC", "lmn"], &["lmn", "ab"]);
-}
-
-////////////////////////////////////////////////////////////////////////////////
-/// Instrumentation
-
-impl OpenBranchAndSelections {
-    pub(crate) fn to_json(&self) -> Value {
-        let selections = self
-            .selections
-            .iter()
-            .map(|selection| selection.to_json())
-            .collect_vec();
-        json!({
-            "kind": "OpenBranchAndSelections",
-            "openBranch": self.open_branch.to_json(),
-            "selections": selections,
-        })
-    }
-}
-
-impl Selection {
-    pub(crate) fn to_json(&self) -> Value {
-        let conditions = match self.conditions() {
-            Ok(c) => c.to_json(),
-            _ => Value::Null,
-        };
-        let selection = match self.selection_set() {
-            Ok(Some(selection_set)) => json!(selection_set.to_string()),
-            _ => Value::Null,
-        };
-        json!({
-            "kind": "Selection",
-            "conditions": conditions,
-            "selection": selection
-        })
-    }
-}
-
-impl OpenBranch {
-    pub(crate) fn to_json(&self) -> Value {
-        let paths = self.0.iter().map(|path| path.to_json()).collect_vec();
-        json!({
-            "kind": "OpenBranch",
-            "branch": paths,
-        })
-    }
-}
-
-impl ClosedBranch {
-    pub(crate) fn to_json(&self) -> Value {
-        let paths = self.0.iter().map(|path| path.to_json()).collect_vec();
-        json!({
-            "kind": "ClosedBranch",
-            "branch": paths,
-        })
-    }
-}
-
-impl SimultaneousPathsWithLazyIndirectPaths {
-    pub(crate) fn to_json(&self) -> Value {
-        let paths = self
-            .paths
-            .0
-            .iter()
-            .map(|path| path.to_json())
-            .collect::<Vec<_>>();
-        json!({
-            "kind": "SimultaneousPathsWithLazyIndirectPaths",
-            "paths": paths,
-        })
-    }
-}
-
-impl BestQueryPlanInfo {
-    pub(crate) fn to_json(&self) -> Value {
-        // let path_tree = self
-        //     .path_tree
-        //     .as_ref()
-        //     .map(|path_tree| path_tree.to_json())
-        //     .unwrap_or(Value::Null);
-        json!({
-            "kind": "BestQueryPlanInfo",
-            "fetchDependencyGraph": self.fetch_dependency_graph.to_json(),
-            "pathTree": "TODO",
-            "cost": self.cost,
-        })
-    }
 }

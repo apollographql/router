@@ -99,7 +99,7 @@ use crate::schema::ValidFederationSchema;
 // in the Rust code we don't have a distinguished type for that case. We instead check this at
 // runtime (at the callsites that require root nodes). This means the `RootPath` type in the
 // JS codebase is replaced with this one.
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct GraphPath<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -108,6 +108,7 @@ where
     EdgeIndex: Into<TEdge>,
 {
     /// The query graph of which this is a path.
+    #[serde(skip)]
     graph: Arc<QueryGraph>,
     /// The node at which the path starts. This should be the head of the first non-`None` edge in
     /// the path if such edge exists, but if there are only `None` edges (or if there are zero
@@ -138,9 +139,13 @@ where
     /// to be confused with the `@override` directive, which is completely separate).
     ///
     /// This array stores the IDs associated with this path.
+    // TODO: There is a note of OverrideId to not add a (de)serialize derive. Once that is
+    // addressed, remove this skip
+    #[serde(skip)]
     own_path_ids: Arc<IndexSet<OverrideId>>,
     /// This array stores the IDs of paths that override this one. (See docs for `own_path_ids` for
     /// more info).
+    #[serde(skip)]
     overriding_path_ids: Arc<IndexSet<OverrideId>>,
     /// Names of all the possible runtime types the tail of the path can be.
     runtime_types_of_tail: Arc<IndexSet<ObjectTypeDefinitionPosition>>,
@@ -149,6 +154,8 @@ where
     runtime_types_before_tail_if_last_is_cast: Option<Arc<IndexSet<ObjectTypeDefinitionPosition>>>,
     /// If the trigger of the last edge in the `edges` array was an operation element with a
     /// `@defer` application, then the arguments of that application.
+    // TODO(@TylerBloom): Add in once defer is supported.
+    #[serde(skip)]
     defer_on_tail: Option<DeferDirectiveArguments>,
 }
 
@@ -206,7 +213,7 @@ pub(crate) enum GraphPathTrigger {
     Transition(Arc<QueryGraphEdgeTransition>),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SubgraphEnteringEdgeInfo {
     /// The index within the `edges` array.
     index: usize,
@@ -243,7 +250,7 @@ pub(crate) type GraphPathItem<'path, TTrigger, TEdge> =
 // codebase is replaced with this one.
 pub(crate) type OpGraphPath = GraphPath<OpGraphPathTrigger, Option<EdgeIndex>>;
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, serde::Serialize)]
 pub(crate) enum OpGraphPathTrigger {
     OpPathElement(OpPathElement),
     Context(OpGraphPathContext),
@@ -259,7 +266,7 @@ impl Display for OpGraphPathTrigger {
 }
 
 /// A path of operation elements within a GraphQL operation.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, serde::Serialize)]
 pub(crate) struct OpPath(pub(crate) Vec<Arc<OpPathElement>>);
 
 impl Deref for OpPath {
@@ -284,7 +291,7 @@ impl std::fmt::Display for OpPath {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, derive_more::From, serde::Serialize)]
 pub(crate) enum OpPathElement {
     Field(Field),
     InlineFragment(InlineFragment),
@@ -476,7 +483,7 @@ impl From<InlineFragment> for OpGraphPathTrigger {
 
 /// Records, as we walk a path within a GraphQL operation, important directives encountered
 /// (currently `@include` and `@skip` with their conditions).
-#[derive(Debug, Clone, PartialEq, Eq, Hash, Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Default, serde::Serialize)]
 pub(crate) struct OpGraphPathContext {
     /// A list of conditionals (e.g. `[{ kind: Include, value: true}, { kind: Skip, value: $foo }]`)
     /// in the reverse order in which they were applied (so the first element is the inner-most
@@ -528,7 +535,7 @@ impl Display for OpGraphPathContext {
 /// for this by splitting a path into multiple paths (one for each possible outcome). The common
 /// example is abstract types, where we may end up taking a different edge depending on the runtime
 /// type (e.g. during type explosion).
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct SimultaneousPaths(pub(crate) Vec<Arc<OpGraphPath>>);
 
 impl SimultaneousPaths {
@@ -567,7 +574,7 @@ impl std::fmt::Display for SimultaneousPaths {
 // PORT_NOTE: The JS codebase stored a `ConditionResolver` callback here, but it was the same for
 // a given traversal (and cached resolution across the traversal), so we accordingly store it in
 // `QueryPlanTraversal` and pass it down when needed instead.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
     pub(crate) paths: SimultaneousPaths,
     pub(crate) context: OpGraphPathContext,
@@ -581,7 +588,7 @@ pub(crate) struct SimultaneousPathsWithLazyIndirectPaths {
 /// basically always be tiny (it's bounded by the number of distinct key on a given type, so usually
 /// 2-3 max; even in completely unrealistic cases, it's hard bounded by the number of subgraphs), so
 /// a `Vec` is going to perform a lot better than `IndexSet` in practice.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct ExcludedDestinations(Arc<Vec<Arc<str>>>);
 
 impl ExcludedDestinations {
@@ -615,7 +622,7 @@ impl Default for ExcludedDestinations {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub(crate) struct ExcludedConditions(Arc<Vec<Arc<SelectionSet>>>);
 
 impl ExcludedConditions {
@@ -644,7 +651,7 @@ impl Default for ExcludedConditions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 pub(crate) struct IndirectPaths<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -719,7 +726,7 @@ impl OpIndirectPaths {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct Unadvanceables(Vec<Unadvanceable>);
 
 impl Display for Unadvanceables {
@@ -737,7 +744,7 @@ impl Display for Unadvanceables {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize)]
 struct Unadvanceable {
     reason: UnadvanceableReason,
     from_subgraph: Arc<str>,
@@ -755,7 +762,7 @@ impl Display for Unadvanceable {
     }
 }
 
-#[derive(Debug, Clone, strum_macros::Display)]
+#[derive(Debug, Clone, strum_macros::Display, serde::Serialize)]
 enum UnadvanceableReason {
     UnsatisfiableKeyCondition,
     UnsatisfiableRequiresCondition,
@@ -771,7 +778,7 @@ enum UnadvanceableReason {
 /// set, and the `SimultaneousPaths` ends at the node at which that query is made instead of a node
 /// for the leaf field. The selection set gets copied "as-is" into the `FetchNode`, and also avoids
 /// extra `GraphPath` creation and work during `PathTree` merging.
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub(crate) struct ClosedPath {
     pub(crate) paths: SimultaneousPaths,
     pub(crate) selection_set: Option<Arc<SelectionSet>>,
@@ -800,12 +807,12 @@ impl std::fmt::Display for ClosedPath {
 
 /// A list of the options generated during query planning for a specific "closed branch", which is a
 /// full/closed path in a GraphQL operation (i.e. one that ends in a leaf field).
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub(crate) struct ClosedBranch(pub(crate) Vec<Arc<ClosedPath>>);
 
 /// A list of the options generated during query planning for a specific "open branch", which is a
 /// partial/open path in a GraphQL operation (i.e. one that does not end in a leaf field).
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
 pub(crate) struct OpenBranch(pub(crate) Vec<SimultaneousPathsWithLazyIndirectPaths>);
 
 impl<TTrigger, TEdge> GraphPath<TTrigger, TEdge>
@@ -3145,32 +3152,6 @@ impl Display for OpGraphPath {
             write!(f, "])")?;
         }
         Ok(())
-    }
-}
-
-impl OpGraphPath {
-    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
-        use serde_json_bytes::json;
-        let head = &self.graph.graph()[self.head];
-        let mut parts = vec![json!({ "node": self.head.index(), "label": head.to_string() })];
-        self.edges
-            .iter()
-            .cloned()
-            .enumerate()
-            .for_each(|(i, edge)| {
-                match edge {
-                    Some(e) => {
-                        let tail = self.graph.graph().edge_endpoints(e).unwrap().1;
-                        let edge = &self.graph.graph()[e];
-                        parts.push(json!({ "edge": e.index(), "label": edge.transition.to_string() }));
-                        let node = &self.graph.graph()[tail];
-                        parts.push(json!({ "node": tail.index(), "label": node.to_string() }));
-                    }
-                    None => parts
-                        .push(json!({ "trigger": true, "label": self.edge_triggers[i].as_ref().to_string() })),
-                };
-            });
-        json!(parts)
     }
 }
 

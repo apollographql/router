@@ -7,6 +7,7 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::map::Entry;
 use indexmap::IndexMap;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::operation::Selection;
@@ -19,25 +20,10 @@ use crate::query_graph::graph_path::OpPathElement;
 /// Accordingly, there is much logic around merging and short-circuiting; `OperationConditional` is
 /// the more appropriate struct when trying to record the original structure/intent of those
 /// `@skip`/`@include` applications.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) enum Conditions {
     Variables(VariableConditions),
     Boolean(bool),
-}
-
-impl Conditions {
-    pub(crate) fn to_json(&self) -> serde_json_bytes::Value {
-        match self {
-            Conditions::Boolean(b) => serde_json_bytes::Value::Bool(*b),
-            Conditions::Variables(variables) => {
-                let mut map = serde_json_bytes::Map::new();
-                for (name, negated) in variables.iter() {
-                    map.insert(name.to_string(), serde_json_bytes::Value::Bool(negated));
-                }
-                serde_json_bytes::Value::Object(map)
-            }
-        }
-    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -49,7 +35,7 @@ pub(crate) enum Condition {
 /// A list of variable conditions, represented as a map from variable names to whether that variable
 /// is negated in the condition. We maintain the invariant that there's at least one condition (i.e.
 /// the map is non-empty), and that there's at most one condition per variable name.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct VariableConditions(Arc<IndexMap<Name, bool>>);
 
 impl VariableConditions {

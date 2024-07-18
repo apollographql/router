@@ -23,6 +23,7 @@ use std::sync::atomic;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use serde::Serialize;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
@@ -66,7 +67,7 @@ static NEXT_ID: atomic::AtomicUsize = atomic::AtomicUsize::new(1);
 ///
 /// Note that we shouldn't add `derive(Serialize, Deserialize)` to this without changing the types
 /// to be something like UUIDs.
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash, Serialize)]
 pub(crate) struct SelectionId(usize);
 
 impl SelectionId {
@@ -187,8 +188,9 @@ impl Operation {
 /// - For the type, stores the schema and the position in that schema instead of just the
 ///   `NamedType`.
 /// - Stores selections in a map so they can be normalized efficiently.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct SelectionSet {
+    #[serde(skip)]
     pub(crate) schema: ValidFederationSchema,
     pub(crate) type_position: CompositeTypeDefinitionPosition,
     pub(crate) selections: Arc<SelectionMap>,
@@ -210,6 +212,7 @@ mod selection_map {
 
     use apollo_compiler::executable;
     use indexmap::IndexMap;
+    use serde::Serialize;
 
     use crate::error::FederationError;
     use crate::error::SingleFederationError::Internal;
@@ -232,7 +235,7 @@ mod selection_map {
     /// `IndexSet` since key computation is expensive (it involves sorting). This type is in its own
     /// module to prevent code from accidentally mutating the underlying map outside the mutation
     /// API.
-    #[derive(Debug, Clone, PartialEq, Eq, Default)]
+    #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize)]
     pub(crate) struct SelectionMap(IndexMap<SelectionKey, Selection>);
 
     impl Deref for SelectionMap {
@@ -603,24 +606,33 @@ pub(crate) use selection_map::SelectionValue;
 /// * directives have to be applied in the same order
 /// * directive arguments order does not matter (they get automatically sorted by their names).
 /// * selection cannot specify @defer directive
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) enum SelectionKey {
     Field {
         /// The field alias (if specified) or field name in the resulting selection set.
         response_name: Name,
         /// directives applied on the field
+        // TODO(@TylerBloom): Add back in once apollo-compiler supports serde or a workaround is
+        // figured out.
+        #[serde(skip)]
         directives: Arc<executable::DirectiveList>,
     },
     FragmentSpread {
         /// The name of the fragment.
         fragment_name: Name,
         /// Directives applied on the fragment spread (does not contain @defer).
+        // TODO(@TylerBloom): Add back in once apollo-compiler supports serde or a workaround is
+        // figured out.
+        #[serde(skip)]
         directives: Arc<executable::DirectiveList>,
     },
     InlineFragment {
         /// The optional type condition of the fragment.
         type_condition: Option<Name>,
         /// Directives applied on the fragment spread (does not contain @defer).
+        // TODO(@TylerBloom): Add back in once apollo-compiler supports serde or a workaround is
+        // figured out.
+        #[serde(skip)]
         directives: Arc<executable::DirectiveList>,
     },
     Defer {
@@ -641,7 +653,7 @@ pub(crate) trait HasSelectionKey {
 
 /// An analogue of the apollo-compiler type `Selection` that stores our other selection analogues
 /// instead of the apollo-compiler types.
-#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant)]
+#[derive(Debug, Clone, PartialEq, Eq, derive_more::IsVariant, Serialize)]
 pub(crate) enum Selection {
     Field(Arc<FieldSelection>),
     FragmentSpread(Arc<FragmentSpreadSelection>),
@@ -1052,6 +1064,7 @@ mod field_selection {
     use std::ops::Deref;
     use std::sync::Arc;
 
+    use serde::Serialize;
     use apollo_compiler::ast;
     use apollo_compiler::executable;
     use apollo_compiler::Name;
@@ -1079,7 +1092,7 @@ mod field_selection {
     /// - For the field definition, stores the schema and the position in that schema instead of just
     ///   the `FieldDefinition` (which contains no references to the parent type or schema).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub(crate) struct FieldSelection {
         pub(crate) field: Field,
         pub(crate) selection_set: Option<SelectionSet>,
@@ -1136,10 +1149,13 @@ mod field_selection {
 
     /// The non-selection-set data of `FieldSelection`, used with operation paths and graph
     /// paths.
-    #[derive(Clone)]
+    #[derive(Clone, Serialize)]
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
+        // TODO(@TylerBloom): Add back in once apollo compile supports serde or a workaround is
+        // figured out.
+        #[serde(skip)]
         sorted_arguments: Arc<Vec<Node<executable::Argument>>>,
     }
 
@@ -1326,7 +1342,7 @@ mod field_selection {
     // SiblingTypename indicates how the sibling __typename field should be restored.
     // PORT_NOTE: The JS version used the empty string to indicate unaliased sibling typenames.
     // Here we use an enum to make the distinction explicit.
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize)]
     pub(crate) enum SiblingTypename {
         Unaliased,
         Aliased(Name), // the sibling __typename has been aliased
@@ -1341,12 +1357,15 @@ mod field_selection {
         }
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize)]
     pub(crate) struct FieldData {
+        #[serde(skip)]
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
         pub(crate) alias: Option<Name>,
+        #[serde(skip)]
         pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
+        #[serde(skip)]
         pub(crate) directives: Arc<executable::DirectiveList>,
         pub(crate) sibling_typename: Option<SiblingTypename>,
     }
@@ -1417,6 +1436,7 @@ mod fragment_spread_selection {
 
     use apollo_compiler::executable;
     use apollo_compiler::Name;
+    use serde::Serialize;
 
     use crate::operation::is_deferred_selection;
     use crate::operation::sort_directives;
@@ -1427,7 +1447,7 @@ mod fragment_spread_selection {
     use crate::schema::position::CompositeTypeDefinitionPosition;
     use crate::schema::ValidFederationSchema;
 
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub(crate) struct FragmentSpreadSelection {
         pub(crate) spread: FragmentSpread,
         pub(crate) selection_set: SelectionSet,
@@ -1442,7 +1462,7 @@ mod fragment_spread_selection {
     /// An analogue of the apollo-compiler type `FragmentSpread` with these changes:
     /// - Stores the schema (may be useful for directives).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Clone)]
+    #[derive(Clone, Serialize)]
     pub(crate) struct FragmentSpread {
         data: FragmentSpreadData,
         key: SelectionKey,
@@ -1493,18 +1513,21 @@ mod fragment_spread_selection {
         }
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize)]
     pub(crate) struct FragmentSpreadData {
+        #[serde(skip)]
         pub(crate) schema: ValidFederationSchema,
         pub(crate) fragment_name: Name,
         pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
         // directives applied on the fragment spread selection
+        #[serde(skip)]
         pub(crate) directives: Arc<executable::DirectiveList>,
         // directives applied within the fragment definition
         //
         // PORT_NOTE: The JS codebase combined the fragment spread's directives with the fragment
         // definition's directives. This was invalid GraphQL as those directives may not be applicable
         // on different locations. While we now keep track of those references, they are currently ignored.
+        #[serde(skip)]
         pub(crate) fragment_directives: Arc<executable::DirectiveList>,
         pub(crate) selection_id: SelectionId,
     }
@@ -1650,6 +1673,7 @@ mod inline_fragment_selection {
 
     use apollo_compiler::executable;
     use apollo_compiler::Name;
+    use serde::Serialize;
 
     use super::field_selection::collect_variables_from_directive;
     use crate::error::FederationError;
@@ -1673,7 +1697,7 @@ mod inline_fragment_selection {
     /// - Stores the parent type explicitly, which means storing the position (in apollo-compiler, this
     ///   is in the parent selection set).
     /// - Encloses collection types in `Arc`s to facilitate cheaper cloning.
-    #[derive(Debug, Clone, PartialEq, Eq)]
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
     pub(crate) struct InlineFragmentSelection {
         pub(crate) inline_fragment: InlineFragment,
         pub(crate) selection_set: SelectionSet,
@@ -1714,7 +1738,7 @@ mod inline_fragment_selection {
 
     /// The non-selection-set data of `InlineFragmentSelection`, used with operation paths and
     /// graph paths.
-    #[derive(Clone)]
+    #[derive(Clone, Serialize)]
     pub(crate) struct InlineFragment {
         data: InlineFragmentData,
         key: SelectionKey,
@@ -1809,11 +1833,14 @@ mod inline_fragment_selection {
         }
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Serialize)]
     pub(crate) struct InlineFragmentData {
+        #[serde(skip)]
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
         pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
+        // TODO(@TylerBloom): This is important data that will be useful.
+        #[serde(skip)]
         pub(crate) directives: Arc<executable::DirectiveList>,
         pub(crate) selection_id: SelectionId,
     }
