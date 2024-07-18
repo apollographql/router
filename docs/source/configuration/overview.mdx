@@ -1,12 +1,12 @@
 ---
-title: Configuring the GraphOS Router
-subtitle: Configure with environment variables, command-line options, and YAML
-description: Learn how to configure the Apollo GraphOS Router with environment variables, command-line options and commands, and YAML configuration files.
+title: Router Configuration
+subtitle: Configure a router via environment variables, command-line options, and YAML
+description: Learn how to configure the Apollo GraphOS Router or Apollo Router Core with environment variables, command-line options and commands, and YAML configuration files.
 ---
 
 import RedisTLS from '../../shared/redis-tls.mdx'
 
-Learn how to customize the behavior of your GraphOS Router with environment variables, command-line commands and options, and YAML file configuration.
+Learn how to customize the behavior of your GraphOS Router or Apollo Router Core with environment variables, command-line commands and options, and YAML file configuration.
 
 ## Environment variables
 
@@ -1116,7 +1116,7 @@ See [Demand Control](../executing-operations/demand-control) to learn how to ana
 ### Early cancel
 
 Up until [Apollo Router Core v1.43.1](https://github.com/apollographql/router/releases/tag/v1.43.1), when the client closed the connection without waiting for the response, the entire request was cancelled and did not go through the entire pipeline. Since this causes issues with request monitoring, the router introduced a new behavior in 1.43.1. Now, the entire pipeline is executed if the request is detected as cancelled, but subgraph requests are not actually done. The response will be reported with the `499` status code, but not actually sent to the client.
-To go back to the previous behaviour of immediately cancelling the request, the following configuration can be used:
+To go back to the previous behavior of immediately cancelling the request, the following configuration can be used:
 
 ```yaml
 supergraph:

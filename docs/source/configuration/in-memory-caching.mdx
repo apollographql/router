@@ -1,10 +1,10 @@
 ---
-title: In-Memory Caching in the GraphOS Router
-subtitle: Configure caching for query plans and automatic persisted queries
-description: Configure the GraphOS Router's in-memory caching for improved performance. Configure query plans and automatic persisted queries caching.
+title: In-Memory Caching
+subtitle: Configure router caching for query plans and automatic persisted queries
+description: Configure in-memory caching for improved performance in Apollo GraphOS Router or Apollo Router Core. Configure query plans and automatic persisted queries caching.
 ---
 
-The GraphOS Router uses an in-memory LRU cache to store the following data:
+Both GraphOS Router and Apollo Router Core use an in-memory LRU cache to store the following data:
 
 - [Generated query plans](#caching-query-plans)
 - [Automatic persisted queries (APQ)](#caching-automatic-persisted-queries-apq)
@@ -20,7 +20,7 @@ If you have a GraphOS Enterprise plan, you can also configure a Redis-backed _di
 
 ## Performance improvements vs stability
 
-The Router is a highly scalable and low-latency runtime. Even with all caching **disabled**, the time to process operations and query plans will be very minimal (nanoseconds to milliseconds) when compared to the overall supergraph request, except in the edge cases of extremely large operations and supergraphs. Caching offers stability to those running a large graph so that your overhead for given operations stays consistent, not that it dramatically improves. If you would like to validate the performance wins of operation caching, check out the [traces and metrics in the router](/router/configuration/telemetry/instrumentation/standard-instruments#performance) to take measurements before and after. In extremely large edge cases though, we have seen the cache save 2-10x time to create the query plan, which is still a small part of the overall request.
+The router is a highly scalable and low-latency runtime. Even with all caching **disabled**, the time to process operations and query plans will be very minimal (nanoseconds to milliseconds) when compared to the overall supergraph request, except in the edge cases of extremely large operations and supergraphs. Caching offers stability to those running a large graph so that your overhead for given operations stays consistent, not that it dramatically improves. If you would like to validate the performance wins of operation caching, check out the [traces and metrics in the router](/router/configuration/telemetry/instrumentation/standard-instruments#performance) to take measurements before and after. In extremely large edge cases though, we have seen the cache save 2-10x time to create the query plan, which is still a small part of the overall request.
 
 ## Caching query plans
 
@@ -106,7 +106,7 @@ supergraph:
 
 [Automatic Persisted Queries (**APQ**)](/apollo-server/performance/apq/) enable GraphQL clients to send a server the _hash_ of their query string, _instead of_ sending the query string itself. When query strings are very large, this can significantly reduce network usage.
 
-The GraphOS Router supports using APQ in its communications with both clients _and_ subgraphs:
+The router supports using APQ in its communications with both clients _and_ subgraphs:
 
 - **In its communications with clients,** the router acts as a GraphQL _server_, because it _receives_ queries from clients.
 - **In its communications with subgraphs,** the router acts as a GraphQL _client_, because it _sends_ queries to subgraphs.
@@ -115,7 +115,7 @@ Because the router's role differs between these two interactions, you configure 
 
 ### APQ with clients
 
-The GraphOS Router enables APQ caching for client operations by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
+The router enables APQ caching for client operations by default. In your router's [YAML config file](./overview/#yaml-config-file), you can configure the maximum number of APQ entries in the cache like so:
 
 ```yaml title="router.yaml"
 apq:
@@ -134,7 +134,7 @@ apq:
 
 ### APQ with subgraphs
 
-By default, the GraphOS Router does _not_ use APQ when sending queries to its subgraphs.
+By default, the router does _not_ use APQ when sending queries to its subgraphs.
 
 In your router's [YAML config file](./overview/#yaml-config-file), you can configure this APQ support with a combination of global and per-subgraph settings:
 
