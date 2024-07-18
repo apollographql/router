@@ -26,6 +26,7 @@ use petgraph::stable_graph::NodeIndex;
 use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -73,6 +74,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
+use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
 type DeferRef = String;
@@ -86,7 +88,7 @@ type DeferredNodes = multimap::MultiMap<DeferRef, NodeIndex<u32>>;
 //
 // The JS codebase additionally has a property named `subgraphAndMergeAtKey` that was used as a
 // precomputed map key, but this isn't necessary in Rust since we can use `PartialEq`/`Eq`/`Hash`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraphNode {
     /// The subgraph this fetch is queried against.
     pub(crate) subgraph_name: Arc<str>,
@@ -111,6 +113,7 @@ pub(crate) struct FetchDependencyGraphNode {
     /// The fetch ID generation, if one is necessary (used when handling `@defer`).
     ///
     /// This can be treated as an Option using `OnceLock::get()`.
+    #[serde(skip)]
     id: OnceLock<u64>,
     /// The label of the `@defer` block this fetch appears in, if any.
     defer_ref: Option<DeferRef>,
@@ -151,7 +154,7 @@ impl Clone for FetchIdGenerator {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchSelectionSet {
     /// The selection set to be fetched from the subgraph.
     pub(crate) selection_set: Arc<SelectionSet>,
@@ -163,17 +166,18 @@ pub(crate) struct FetchSelectionSet {
 // PORT_NOTE: The JS codebase additionally has a property `onUpdateCallback`. This was only ever
 // used to update `isKnownUseful` in `FetchGroup`, and it's easier to handle this there than try
 // to pass in a callback in Rust.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub(crate) struct FetchInputs {
     /// The selection sets to be used as input to `_entities`, separated per parent type.
     selection_sets_per_parent_type: IndexMap<CompositeTypeDefinitionPosition, Arc<SelectionSet>>,
     /// The supergraph schema (primarily used for validation of added selection sets).
+    #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
 }
 
 /// Represents a dependency between two subgraph fetches, namely that the tail/child depends on the
 /// head/parent executing first.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraphEdge {
     /// The operation path of the tail/child _relative_ to the head/parent. This information is
     /// maintained in case we want/need to merge nodes into each other. This can roughly be thought
@@ -194,12 +198,14 @@ type FetchDependencyGraphPetgraph =
 ///
 /// In the graph, two fetches are connected if one of them (the parent/head) must be performed
 /// strictly before the other one (the child/tail).
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub(crate) struct FetchDependencyGraph {
     /// The supergraph schema that generated the federated query graph.
+    #[serde(skip)]
     supergraph_schema: ValidFederationSchema,
     /// The federated query graph that generated the fetches. (This also contains the subgraph
     /// schemas.)
+    #[serde(skip)]
     federated_query_graph: Arc<QueryGraph>,
     /// The nodes/edges of the fetch dependency graph. Note that this must be a stable graph since
     /// we remove nodes/edges during optimizations.
@@ -208,10 +214,14 @@ pub(crate) struct FetchDependencyGraph {
     /// the subgraphs.
     root_nodes_by_subgraph: IndexMap<Arc<str>, NodeIndex>,
     /// Tracks metadata about deferred blocks and their dependencies on one another.
+    // TODO(@TylerBloom): Since defer is not supported yet. Once it is, having this field in the
+    // serialized output will be needed.
+    #[serde(skip)]
     pub(crate) defer_tracking: DeferTracking,
     /// The initial fetch ID generation (used when handling `@defer`).
     starting_id_generation: u64,
     /// The current fetch ID generation (used when handling `@defer`).
+    #[serde(skip)]
     fetch_id_generation: FetchIdGenerator,
     /// Whether this fetch dependency graph has undergone a transitive reduction.
     is_reduced: bool,
@@ -2954,6 +2964,10 @@ struct ComputeNodesStackItem<'a> {
     defer_context: DeferContext,
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 pub(crate) fn compute_nodes_for_tree(
     dependency_graph: &mut FetchDependencyGraph,
     initial_tree: &OpPathTree,
@@ -2962,6 +2976,11 @@ pub(crate) fn compute_nodes_for_tree(
     initial_defer_context: DeferContext,
     initial_conditions: &OpGraphPathContext,
 ) -> Result<IndexSet<NodeIndex>, FederationError> {
+    snapshot!(
+        "OpPathTree",
+        serde_json_bytes::json!(initial_tree.to_string()).to_string(),
+        "path_tree"
+    );
     let mut stack = vec![ComputeNodesStackItem {
         tree: initial_tree,
         node_id: initial_node_id,
@@ -3048,9 +3067,14 @@ pub(crate) fn compute_nodes_for_tree(
             }
         }
     }
+    snapshot!(dependency_graph, "updated_dependency_graph");
     Ok(created_nodes)
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 fn compute_nodes_for_key_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
@@ -3201,6 +3225,10 @@ fn compute_nodes_for_key_resolution<'a>(
     })
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 fn compute_nodes_for_root_type_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'_>,
@@ -3298,6 +3326,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
     })
 }
 
+#[cfg_attr(feature = "snapshot_tracing", tracing::instrument(skip_all, level = "trace", fields(label = operation.to_string())))]
 fn compute_nodes_for_op_path_element<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
