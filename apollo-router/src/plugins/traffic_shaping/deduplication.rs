@@ -142,6 +142,9 @@ where
                     };
 
                     // Let our waiters know
+
+                    // Clippy is wrong, the suggestion adds a useless clone of the error
+                    #[allow(clippy::useless_asref)]
                     let broadcast_value = res
                         .as_ref()
                         .map(|response| response.clone())
