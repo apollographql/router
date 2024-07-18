@@ -310,7 +310,7 @@ impl HasSelectionKey for OpPathElement {
 }
 
 impl OpPathElement {
-    pub(crate) fn directives(&self) -> &Arc<DirectiveList> {
+    pub(crate) fn directives(&self) -> &DirectiveList {
         match self {
             OpPathElement::Field(field) => &field.directives,
             OpPathElement::InlineFragment(inline_fragment) => &inline_fragment.directives,

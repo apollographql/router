@@ -55,7 +55,6 @@ use super::InlineFragmentSelection;
 use super::NamedFragments;
 use super::Operation;
 use super::Selection;
-use super::SelectionKey;
 use super::SelectionMapperReturn;
 use super::SelectionOrSet;
 use super::SelectionSet;
@@ -760,7 +759,7 @@ enum FullMatchingFragmentCondition<'a> {
     ForInlineFragmentSelection {
         // the type condition and directives on an inline fragment selection.
         type_condition_position: &'a CompositeTypeDefinitionPosition,
-        directives: &'a Arc<DirectiveList>,
+        directives: &'a DirectiveList,
     },
 }
 
@@ -3287,6 +3286,7 @@ mod tests {
     mod test_empty_branch_removal {
         use apollo_compiler::name;
 
+        use crate::operation::SelectionKey;
         use super::*;
 
         const TEST_SCHEMA_FOR_EMPTY_BRANCH_REMOVAL: &str = r#"

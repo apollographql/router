@@ -3,6 +3,7 @@ use std::hash::BuildHasher;
 use std::hash::Hash;
 use std::hash::Hasher;
 use std::ops::Deref;
+use std::sync::Arc;
 use std::sync::OnceLock;
 
 use apollo_compiler::executable;
@@ -11,31 +12,20 @@ use apollo_compiler::Node;
 use super::compare_sorted_arguments;
 use super::sort_arguments;
 
-#[derive(Debug, Clone, Default)]
-pub(crate) struct DirectiveList {
+static EMPTY_DIRECTIVE_LIST: executable::DirectiveList = executable::DirectiveList(vec![]);
+
+#[derive(Debug, Clone)]
+struct DirectiveListInner {
     // The hash is eagerly precomputed because we expect to, most of the time, hash a DirectiveList
     // at least once.
     // hash is 0 if the list is empty.
     hash: u64,
     // Mutable access should not be handed out because `sort_order` may get out of sync.
-    inner: executable::DirectiveList,
+    directives: executable::DirectiveList,
     sort_order: Vec<usize>,
 }
 
-impl Deref for DirectiveList {
-    type Target = executable::DirectiveList;
-    fn deref(&self) -> &Self::Target {
-        &self.inner
-    }
-}
-
-impl Hash for DirectiveList {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        state.write_u64(self.hash)
-    }
-}
-
-impl PartialEq for DirectiveList {
+impl PartialEq for DirectiveListInner {
     fn eq(&self, other: &Self) -> bool {
         self.hash == other.hash
             && self.iter().zip(other.iter()).all(|(left, right)| {
@@ -46,10 +36,63 @@ impl PartialEq for DirectiveList {
     }
 }
 
-impl Eq for DirectiveList {}
+impl Eq for DirectiveListInner {}
+
+impl DirectiveListInner {
+    fn rehash(&mut self) {
+        static SHARED_RANDOM: OnceLock<std::hash::RandomState> = OnceLock::new();
+
+        let mut state = SHARED_RANDOM.get_or_init(Default::default).build_hasher();
+        self.len().hash(&mut state);
+        // Hash in sorted order
+        for d in self.iter() {
+            d.hash(&mut state);
+        }
+        self.hash = state.finish();
+    }
+
+    fn len(&self) -> usize {
+        self.directives.len()
+    }
+
+    fn iter(&self) -> DirectiveIter<'_> {
+        DirectiveIter {
+            directives: &self.directives.0,
+            inner: self.sort_order.iter(),
+        }
+    }
+}
+
+/// A list of directives, with order-independent hashing and equality.
+///
+/// Original order is stored but is not part of hashing, so it may be lost by certain operations.
+///
+/// This list is cheaply cloneable, but not intended for frequent mutations.
+/// When the list is empty, it does not require an allocation.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub(crate) struct DirectiveList {
+    inner: Option<Arc<DirectiveListInner>>,
+}
+
+impl Deref for DirectiveList {
+    type Target = executable::DirectiveList;
+    fn deref(&self) -> &Self::Target {
+        self.inner.as_ref().map_or(&EMPTY_DIRECTIVE_LIST, |inner| &inner.directives)
+    }
+}
+
+impl Hash for DirectiveList {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        state.write_u64(self.inner.as_ref().map_or(0, |inner| inner.hash))
+    }
+}
 
 impl From<executable::DirectiveList> for DirectiveList {
     fn from(mut directives: executable::DirectiveList) -> Self {
+        if directives.is_empty() {
+            return Self::default();
+        }
+
         for directive in directives.iter_mut() {
             sort_arguments(&mut directive.make_mut().arguments);
         }
@@ -63,13 +106,19 @@ impl From<executable::DirectiveList> for DirectiveList {
                 .then_with(|| compare_sorted_arguments(&left.arguments, &right.arguments))
         });
 
-        let mut partially_initialized = Self {
+        if directives.is_empty() {
+            EMPTY_DIRECTIVE_LISTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        } else {
+            NONEMPTY_DIRECTIVE_LISTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        }
+
+        let mut partially_initialized = DirectiveListInner {
             hash: 0,
-            inner: directives,
+            directives,
             sort_order,
         };
         partially_initialized.rehash();
-        partially_initialized
+        Self { inner: Some(Arc::new(partially_initialized)) }
     }
 }
 
@@ -87,21 +136,9 @@ impl FromIterator<executable::Directive> for DirectiveList {
 
 impl DirectiveList {
     fn rehash(&mut self) {
-        static SHARED_RANDOM: OnceLock<std::hash::RandomState> = OnceLock::new();
-
-        // An empty directive list does not have a hash
-        if self.is_empty() {
-            self.hash = 0;
-            return;
+        if let Some(inner) = self.inner.as_mut().map(Arc::make_mut) {
+            inner.rehash();
         }
-
-        let mut state = SHARED_RANDOM.get_or_init(Default::default).build_hasher();
-        self.len().hash(&mut state);
-        // Hash in sorted order
-        for d in self.iter() {
-            d.hash(&mut state);
-        }
-        self.hash = state.finish();
     }
 
     pub(crate) fn new() -> Self {
@@ -109,38 +146,45 @@ impl DirectiveList {
     }
 
     pub(crate) fn iter(&self) -> DirectiveIter<'_> {
-        DirectiveIter {
-            directives: &self.inner.0,
-            inner: self.sort_order.iter(),
-        }
+        self.inner.as_ref().map_or_else(DirectiveIter::empty, |inner| DirectiveIter {
+            directives: &inner.directives,
+            inner: inner.sort_order.iter(),
+        })
     }
 
     pub(crate) fn iter_original_order(
         &self,
     ) -> impl ExactSizeIterator<Item = &Node<executable::Directive>> {
-        self.inner.iter()
+        self.inner.as_ref().map_or(&EMPTY_DIRECTIVE_LIST, |inner| &inner.directives).iter()
     }
 
     /// Remove one directive application by name.
     ///
     /// To remove a repeatable directive, you may need to call this multiple times.
     pub(crate) fn remove_one(&mut self, name: &str) -> Option<Node<executable::Directive>> {
-        let Some(index) = self.inner.iter().position(|dir| dir.name == name) else {
+        let Some(inner) = self.inner.as_mut() else {
+            // Nothing to do on an empty list
             return None;
         };
-        let sort_index = self
+        let Some(index) = inner.directives.iter().position(|dir| dir.name == name) else {
+            return None;
+        };
+
+        // The directive exists: clone if necessary.
+        let inner = Arc::make_mut(inner);
+        let sort_index = inner
             .sort_order
             .iter()
             .position(|sorted| *sorted == index)
             .expect("index must exist in sort order");
-        let item = self.inner.remove(index);
-        self.sort_order.remove(sort_index);
-        for order in &mut self.sort_order {
+        let item = inner.directives.remove(index);
+        inner.sort_order.remove(sort_index);
+        for order in &mut inner.sort_order {
             if *order > index {
                 *order -= 1;
             }
         }
-        self.rehash();
+        inner.rehash();
         Some(item)
     }
 }
@@ -169,6 +213,12 @@ impl<'a> IntoIterator for &'a DirectiveList {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+impl DirectiveIter<'_> {
+    fn empty() -> Self {
+        Self { directives: &[], inner: [].iter() }
     }
 }
 
