@@ -326,7 +326,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let mut new_options = vec![];
         let mut no_followups: bool = false;
 
-        snapshot!("Options", options, "options");
+        snapshot!(name = "Options", options, "options");
 
         snapshot!(
             "OperationElement",
@@ -602,7 +602,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
-        snapshot!("ClosedBranches", self.closed_branches, "closed_branches");
+        snapshot!(name = "ClosedBranches", self.closed_branches, "closed_branches");
 
         if self.closed_branches.is_empty() {
             return Ok(());
@@ -612,7 +612,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         self.reduce_options_if_needed();
 
         snapshot!(
-            "ClosedBranches",
+            name = "ClosedBranches",
             self.closed_branches,
             "closed_branches_after_reduce"
         );

@@ -1,5 +1,8 @@
-use std::fmt;
+use std::fmt::{self, Debug};
 use std::fmt::Display;
+use std::ops::Deref;
+
+use serde::Serializer;
 
 pub(crate) struct State<'fmt, 'fmt2> {
     indent_level: usize,
@@ -94,4 +97,45 @@ impl<T: Display> Display for DisplayOption<T> {
             None => write!(f, "None"),
         }
     }
+}
+
+pub(crate) fn serialize_as_debug_string<T, S>(data: &T, ser: S) -> Result<S::Ok, S::Error>
+where
+    T: Debug,
+    S: Serializer,
+{
+    ser.serialize_str(&format!("{data:?}"))
+}
+
+pub(crate) fn serialize_as_string<T, S>(data: &T, ser: S) -> Result<S::Ok, S::Error>
+where
+    T: ToString,
+    S: Serializer,
+{
+    ser.serialize_str(&data.to_string())
+}
+
+pub(crate) fn serialize_option_as_string<T, S>(data: &Option<T>, ser: S) -> Result<S::Ok, S::Error>
+where
+    T: Display,
+    S: Serializer,
+{
+    serialize_as_string(&DisplayOption(data.as_ref()), ser)
+}
+
+pub(crate) fn serialize_vec_as_string<P, T, S>(data: &P, ser: S) -> Result<S::Ok, S::Error>
+where
+    P: Deref<Target = Vec<T>>,
+    T: Display,
+    S: Serializer,
+{
+    serialize_as_string(&DisplaySlice(data), ser)
+}
+
+pub(crate) fn serialize_optional_vec_as_string<T, S>(data: &Option<Vec<T>>, ser: S) -> Result<S::Ok, S::Error>
+where
+    T: Display,
+    S: Serializer,
+{
+    serialize_as_string(&DisplayOption(data.as_deref().map(DisplaySlice)), ser)
 }

@@ -68,15 +68,15 @@ pub struct FetchNode {
     /// `FragmentSpread`.
     // PORT_NOTE: This was its own type in the JS codebase, but it's likely simpler to just have the
     // constraint be implicit for router instead of creating a new type.
-    #[serde(skip)]
+    #[serde(serialize_with  = "crate::display_helpers::serialize_optional_vec_as_string")]
     pub requires: Option<Vec<executable::Selection>>,
     // PORT_NOTE: We don't serialize the "operation" string in this struct, as these query plan
     // nodes are meant for direct consumption by router (without any serdes), so we leave the
     // question of whether it needs to be serialized to router.
-    #[serde(skip)]
+    #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
     pub operation_document: Valid<ExecutableDocument>,
     pub operation_name: Option<Name>,
-    #[serde(skip)]
+    #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
     pub operation_kind: executable::OperationType,
     /// Optionally describe a number of "rewrites" that query plan executors should apply to the
     /// data that is sent as the input of this fetch. Note that such rewrites should only impact the
@@ -162,11 +162,10 @@ pub struct DeferredDeferBlock {
     pub label: Option<String>,
     /// Path, in the query, to the `@defer` application this corresponds to. The `sub_selection`
     /// starts at this `query_path`.
-    #[serde(skip)]
     pub query_path: Vec<QueryPathElement>,
     /// The part of the original query that "selects" the data to send in the deferred response
     /// (once the plan in `node` completes). Will be set _unless_ `node` is a `DeferNode` itself.
-    #[serde(skip)]
+    #[serde(serialize_with  = "crate::display_helpers::serialize_as_debug_string")]
     pub sub_selection: Option<executable::SelectionSet>,
     /// The plan to get all the data for this deferred block. Usually set, but can be `None` for a
     /// `@defer` application where everything has been fetched in the "primary block" (i.e. when
@@ -243,9 +242,11 @@ pub enum FetchDataPathElement {
 
 /// Vectors of this element match a path in a query. Each element is (1) a field in a query, or (2)
 /// an inline fragment in a query.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub enum QueryPathElement {
+    #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
     Field(executable::Field),
+    #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
     InlineFragment(executable::InlineFragment),
 }
 

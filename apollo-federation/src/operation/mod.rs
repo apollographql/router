@@ -612,27 +612,21 @@ pub(crate) enum SelectionKey {
         /// The field alias (if specified) or field name in the resulting selection set.
         response_name: Name,
         /// directives applied on the field
-        // TODO(@TylerBloom): Add back in once apollo-compiler supports serde or a workaround is
-        // figured out.
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
         directives: Arc<executable::DirectiveList>,
     },
     FragmentSpread {
         /// The name of the fragment.
         fragment_name: Name,
         /// Directives applied on the fragment spread (does not contain @defer).
-        // TODO(@TylerBloom): Add back in once apollo-compiler supports serde or a workaround is
-        // figured out.
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
         directives: Arc<executable::DirectiveList>,
     },
     InlineFragment {
         /// The optional type condition of the fragment.
         type_condition: Option<Name>,
         /// Directives applied on the fragment spread (does not contain @defer).
-        // TODO(@TylerBloom): Add back in once apollo-compiler supports serde or a workaround is
-        // figured out.
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
         directives: Arc<executable::DirectiveList>,
     },
     Defer {
@@ -1153,9 +1147,7 @@ mod field_selection {
     pub(crate) struct Field {
         data: FieldData,
         key: SelectionKey,
-        // TODO(@TylerBloom): Add back in once apollo compile supports serde or a workaround is
-        // figured out.
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_debug_string")]
         sorted_arguments: Arc<Vec<Node<executable::Argument>>>,
     }
 
@@ -1363,9 +1355,9 @@ mod field_selection {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) field_position: FieldDefinitionPosition,
         pub(crate) alias: Option<Name>,
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_debug_string")]
         pub(crate) arguments: Arc<Vec<Node<executable::Argument>>>,
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: Arc<executable::DirectiveList>,
         pub(crate) sibling_typename: Option<SiblingTypename>,
     }
@@ -1520,14 +1512,14 @@ mod fragment_spread_selection {
         pub(crate) fragment_name: Name,
         pub(crate) type_condition_position: CompositeTypeDefinitionPosition,
         // directives applied on the fragment spread selection
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: Arc<executable::DirectiveList>,
         // directives applied within the fragment definition
         //
         // PORT_NOTE: The JS codebase combined the fragment spread's directives with the fragment
         // definition's directives. This was invalid GraphQL as those directives may not be applicable
         // on different locations. While we now keep track of those references, they are currently ignored.
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
         pub(crate) fragment_directives: Arc<executable::DirectiveList>,
         pub(crate) selection_id: SelectionId,
     }
@@ -1839,8 +1831,7 @@ mod inline_fragment_selection {
         pub(crate) schema: ValidFederationSchema,
         pub(crate) parent_type_position: CompositeTypeDefinitionPosition,
         pub(crate) type_condition_position: Option<CompositeTypeDefinitionPosition>,
-        // TODO(@TylerBloom): This is important data that will be useful.
-        #[serde(skip)]
+        #[serde(serialize_with  = "crate::display_helpers::serialize_as_string")]
         pub(crate) directives: Arc<executable::DirectiveList>,
         pub(crate) selection_id: SelectionId,
     }
