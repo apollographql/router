@@ -39,9 +39,7 @@ use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
 use crate::error::SingleFederationError;
 use crate::link::cost_spec_definition::CostSpecDefinition;
-use crate::link::cost_spec_definition::COST_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::cost_spec_definition::COST_VERSIONS;
-use crate::link::cost_spec_definition::LIST_SIZE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::get_federation_spec_definition_from_subgraph;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
 use crate::link::federation_spec_definition::FEDERATION_VERSIONS;
@@ -51,6 +49,7 @@ use crate::link::join_spec_definition::TypeDirectiveArguments;
 use crate::link::spec::Identity;
 use crate::link::spec::Version;
 use crate::link::spec_definition::SpecDefinition;
+use crate::link::Link;
 use crate::schema::field_set::parse_field_set_without_normalization;
 use crate::schema::position::is_graphql_reserved_name;
 use crate::schema::position::CompositeTypeDefinitionPosition;
@@ -235,7 +234,7 @@ pub(crate) fn new_empty_fed_2_subgraph_schema() -> Result<FederationSchema, Fede
         r#"
     extend schema
         @link(url: "https://specs.apollo.dev/link/v1.0")
-        @link(url: "https://specs.apollo.dev/federation/v2.5")
+        @link(url: "https://specs.apollo.dev/federation/v2.9")
 
     directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
 
@@ -309,17 +308,12 @@ struct TypeInfos {
 fn get_original_directive_names(
     supergraph_schema: &FederationSchema,
 ) -> Result<HashMap<Name, Name>, FederationError> {
-    let mut hm = HashMap::new();
+    let mut hm: HashMap<Name, Name> = HashMap::new();
     for directive in &supergraph_schema.schema().schema_definition.directives {
         if directive.name.as_str() == "link" {
-            if let (Some(url), Some(new_name)) = (
-                directive.argument_by_name("url").and_then(|s| s.as_str()),
-                directive.argument_by_name("as").and_then(|s| s.as_str()),
-            ) {
-                if url.starts_with("https://specs.apollo.dev/cost") {
-                    hm.insert(COST_DIRECTIVE_NAME_IN_SPEC, Name::new(new_name)?);
-                } else if url.starts_with("https://specs.apollo.dev/listSize") {
-                    hm.insert(LIST_SIZE_DIRECTIVE_NAME_IN_SPEC, Name::new(new_name)?);
+            if let Ok(link) = Link::from_directive_application(directive) {
+                for import in link.imports {
+                    hm.insert(import.element.clone(), import.imported_name().clone());
                 }
             }
         }

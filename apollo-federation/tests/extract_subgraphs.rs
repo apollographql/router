@@ -260,90 +260,91 @@ fn erase_empty_types_due_to_overridden_fields() {
 fn extracts_demand_control_directives() {
     let subgraphs = Supergraph::new(r#"
       schema
-          @link(url: "https://specs.apollo.dev/link/v1.0")
-          @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-          @link(url: "https://specs.apollo.dev/cost/v0.1")
-          @link(url: "https://specs.apollo.dev/listSize/v0.1")
-        {
-          query: Query
-        }
-        
-        directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-        
-        directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-        
-        directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-        
-        directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-        
-        directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-        
-        directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-        
-        directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-        
-        directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-        
-        directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-        
-        directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-        
-        enum AorB
-          @join__type(graph: SUBGRAPHWITHCOST)
-          @cost(weight: 15)
-        {
-          A @join__enumValue(graph: SUBGRAPHWITHCOST)
-          B @join__enumValue(graph: SUBGRAPHWITHCOST)
-        }
-        
-        input InputTypeWithCost
-          @join__type(graph: SUBGRAPHWITHCOST)
-        {
-          somethingWithCost: Int @cost(weight: 20)
-        }
-        
-        input join__ContextArgument {
-          name: String!
-          type: String!
-          context: String!
-          selection: join__FieldValue!
-        }
-        
-        scalar join__DirectiveArguments
-        
-        scalar join__FieldSet
-        
-        scalar join__FieldValue
-        
-        enum join__Graph {
-          SUBGRAPHWITHCOST @join__graph(name: "subgraphWithCost", url: "")
-          SUBGRAPHWITHLISTSIZE @join__graph(name: "subgraphWithListSize", url: "")
-        }
-        
-        scalar link__Import
-        
-        enum link__Purpose {
-          """
-          `SECURITY` features provide metadata necessary to securely resolve fields.
-          """
-          SECURITY
-        
-          """
-          `EXECUTION` features provide metadata necessary for operation execution.
-          """
-          EXECUTION
-        }
-        
-        type Query
-          @join__type(graph: SUBGRAPHWITHCOST)
-          @join__type(graph: SUBGRAPHWITHLISTSIZE)
-        {
-          fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @cost(weight: 5)
-          argWithCost(arg: Int @cost(weight: 10)): Int @join__field(graph: SUBGRAPHWITHCOST)
-          enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
-          inputWithCost(someInput: InputTypeWithCost): Int @join__field(graph: SUBGRAPHWITHCOST)
-          fieldWithListSize: [String!] @join__field(graph: SUBGRAPHWITHLISTSIZE) @listSize(assumedSize: 2000, requireOneSlicingArgument: false)
-        }
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/cost/v0.1", import: ["@cost", "@listSize"])
+      {
+        query: Query
+      }
+      
+      directive @cost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+      
+      directive @cost__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+      
+      directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+      
+      directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+      
+      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+      
+      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+      
+      directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+      
+      directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+      
+      directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+      
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      
+      directive @listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+      
+      enum AorB
+        @join__type(graph: SUBGRAPHWITHCOST)
+        @cost(weight: 15)
+      {
+        A @join__enumValue(graph: SUBGRAPHWITHCOST)
+        B @join__enumValue(graph: SUBGRAPHWITHCOST)
+      }
+      
+      input InputTypeWithCost
+        @join__type(graph: SUBGRAPHWITHCOST)
+      {
+        somethingWithCost: Int @cost(weight: 20)
+      }
+      
+      input join__ContextArgument {
+        name: String!
+        type: String!
+        context: String!
+        selection: join__FieldValue!
+      }
+      
+      scalar join__DirectiveArguments
+      
+      scalar join__FieldSet
+      
+      scalar join__FieldValue
+      
+      enum join__Graph {
+        SUBGRAPHWITHCOST @join__graph(name: "subgraphWithCost", url: "")
+        SUBGRAPHWITHLISTSIZE @join__graph(name: "subgraphWithListSize", url: "")
+      }
+      
+      scalar link__Import
+      
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+      
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+      
+      type Query
+        @join__type(graph: SUBGRAPHWITHCOST)
+        @join__type(graph: SUBGRAPHWITHLISTSIZE)
+      {
+        fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @cost(weight: 5)
+        argWithCost(arg: Int @cost(weight: 10)): Int @join__field(graph: SUBGRAPHWITHCOST)
+        enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
+        inputWithCost(someInput: InputTypeWithCost): Int @join__field(graph: SUBGRAPHWITHCOST)
+        fieldWithListSize: [String!] @join__field(graph: SUBGRAPHWITHLISTSIZE) @listSize(assumedSize: 2000, requireOneSlicingArgument: false)
+      }
     "#)
     .expect("is supergraph")
     .extract_subgraphs()
@@ -366,91 +367,92 @@ fn extracts_demand_control_directives() {
 #[test]
 fn extracts_renamed_demand_control_directives() {
     let subgraphs = Supergraph::new(r#"
-        schema
-      @link(url: "https://specs.apollo.dev/link/v1.0")
-      @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
-      @link(url: "https://specs.apollo.dev/cost/v0.1", as: "renamedCost")
-      @link(url: "https://specs.apollo.dev/listSize/v0.1", as: "renamedListSize")
-    {
-      query: Query
-    }
-    
-    directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
-    
-    directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
-    
-    directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
-    
-    directive @join__graph(name: String!, url: String!) on ENUM_VALUE
-    
-    directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
-    
-    directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
-    
-    directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
-    
-    directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
-    
-    directive @renamedCost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
-    
-    directive @renamedListSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
-    
-    enum AorB
-      @join__type(graph: SUBGRAPHWITHCOST)
-      @renamedCost(weight: 15)
-    {
-      A @join__enumValue(graph: SUBGRAPHWITHCOST)
-      B @join__enumValue(graph: SUBGRAPHWITHCOST)
-    }
-    
-    input InputTypeWithCost
-      @join__type(graph: SUBGRAPHWITHCOST)
-    {
-      somethingWithCost: Int @renamedCost(weight: 20)
-    }
-    
-    input join__ContextArgument {
-      name: String!
-      type: String!
-      context: String!
-      selection: join__FieldValue!
-    }
-    
-    scalar join__DirectiveArguments
-    
-    scalar join__FieldSet
-    
-    scalar join__FieldValue
-    
-    enum join__Graph {
-      SUBGRAPHWITHCOST @join__graph(name: "subgraphWithCost", url: "")
-      SUBGRAPHWITHLISTSIZE @join__graph(name: "subgraphWithListSize", url: "")
-    }
-    
-    scalar link__Import
-    
-    enum link__Purpose {
-      """
-      `SECURITY` features provide metadata necessary to securely resolve fields.
-      """
-      SECURITY
-    
-      """
-      `EXECUTION` features provide metadata necessary for operation execution.
-      """
-      EXECUTION
-    }
-    
-    type Query
-      @join__type(graph: SUBGRAPHWITHCOST)
-      @join__type(graph: SUBGRAPHWITHLISTSIZE)
-    {
-      fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @renamedCost(weight: 5)
-      argWithCost(arg: Int @renamedCost(weight: 10)): Int @join__field(graph: SUBGRAPHWITHCOST)
-      enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
-      inputWithCost(someInput: InputTypeWithCost): Int @join__field(graph: SUBGRAPHWITHCOST)
-      fieldWithListSize: [String!] @join__field(graph: SUBGRAPHWITHLISTSIZE) @renamedListSize(assumedSize: 2000, requireOneSlicingArgument: false)
-    }
+      schema
+        @link(url: "https://specs.apollo.dev/link/v1.0")
+        @link(url: "https://specs.apollo.dev/join/v0.5", for: EXECUTION)
+        @link(url: "https://specs.apollo.dev/cost/v0.1", import: [{name: "@cost", as: "@renamedCost"}, {name: "@listSize", as: "@renamedListSize"}])
+      {
+        query: Query
+      }
+      
+      directive @cost__listSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+      
+      directive @join__directive(graphs: [join__Graph!], name: String!, args: join__DirectiveArguments) repeatable on SCHEMA | OBJECT | INTERFACE | FIELD_DEFINITION
+      
+      directive @join__enumValue(graph: join__Graph!) repeatable on ENUM_VALUE
+      
+      directive @join__field(graph: join__Graph, requires: join__FieldSet, provides: join__FieldSet, type: String, external: Boolean, override: String, usedOverridden: Boolean, overrideLabel: String, contextArguments: [join__ContextArgument!]) repeatable on FIELD_DEFINITION | INPUT_FIELD_DEFINITION
+      
+      directive @join__graph(name: String!, url: String!) on ENUM_VALUE
+      
+      directive @join__implements(graph: join__Graph!, interface: String!) repeatable on OBJECT | INTERFACE
+      
+      directive @join__type(graph: join__Graph!, key: join__FieldSet, extension: Boolean! = false, resolvable: Boolean! = true, isInterfaceObject: Boolean! = false) repeatable on OBJECT | INTERFACE | UNION | ENUM | INPUT_OBJECT | SCALAR
+      
+      directive @join__unionMember(graph: join__Graph!, member: String!) repeatable on UNION
+      
+      directive @link(url: String, as: String, for: link__Purpose, import: [link__Import]) repeatable on SCHEMA
+      
+      directive @renamedCost(weight: Int!) on ARGUMENT_DEFINITION | ENUM | FIELD_DEFINITION | INPUT_FIELD_DEFINITION | OBJECT | SCALAR
+      
+      directive @renamedListSize(assumedSize: Int, slicingArguments: [String!], sizedFields: [String!], requireOneSlicingArgument: Boolean = true) on FIELD_DEFINITION
+      
+      enum AorB
+        @join__type(graph: SUBGRAPHWITHCOST)
+        @renamedCost(weight: 15)
+      {
+        A @join__enumValue(graph: SUBGRAPHWITHCOST)
+        B @join__enumValue(graph: SUBGRAPHWITHCOST)
+      }
+      
+      input InputTypeWithCost
+        @join__type(graph: SUBGRAPHWITHCOST)
+      {
+        somethingWithCost: Int @renamedCost(weight: 20)
+      }
+      
+      input join__ContextArgument {
+        name: String!
+        type: String!
+        context: String!
+        selection: join__FieldValue!
+      }
+      
+      scalar join__DirectiveArguments
+      
+      scalar join__FieldSet
+      
+      scalar join__FieldValue
+      
+      enum join__Graph {
+        SUBGRAPHWITHCOST @join__graph(name: "subgraphWithCost", url: "")
+        SUBGRAPHWITHLISTSIZE @join__graph(name: "subgraphWithListSize", url: "")
+      }
+      
+      scalar link__Import
+      
+      enum link__Purpose {
+        """
+        `SECURITY` features provide metadata necessary to securely resolve fields.
+        """
+        SECURITY
+      
+        """
+        `EXECUTION` features provide metadata necessary for operation execution.
+        """
+        EXECUTION
+      }
+      
+      type Query
+        @join__type(graph: SUBGRAPHWITHCOST)
+        @join__type(graph: SUBGRAPHWITHLISTSIZE)
+      {
+        fieldWithCost: Int @join__field(graph: SUBGRAPHWITHCOST) @renamedCost(weight: 5)
+        argWithCost(arg: Int @renamedCost(weight: 10)): Int @join__field(graph: SUBGRAPHWITHCOST)
+        enumWithCost: AorB @join__field(graph: SUBGRAPHWITHCOST)
+        inputWithCost(someInput: InputTypeWithCost): Int @join__field(graph: SUBGRAPHWITHCOST)
+        fieldWithListSize: [String!] @join__field(graph: SUBGRAPHWITHLISTSIZE) @renamedListSize(assumedSize: 2000, requireOneSlicingArgument: false)
+      }
   "#)
   .expect("parses")
   .extract_subgraphs()
