@@ -252,22 +252,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             excluded_conditions,
         )?;
 
-        // trace!(
-        //     data = json!(initial_options.iter().map(|ib| ib.to_json()).collect_vec()).to_string(),
-        //     "initial_options"
-        // );
-
         traversal.open_branches = map_options_to_selections(selection_set, initial_options);
-
-        // trace!(
-        //     data = json!(traversal
-        //         .open_branches
-        //         .iter()
-        //         .map(|ob| ob.to_json())
-        //         .collect_vec())
-        //     .to_string(),
-        //     "open_branches"
-        // );
 
         Ok(traversal)
     }
@@ -342,13 +327,15 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         let mut new_options = vec![];
         let mut no_followups: bool = false;
 
-        trace!(
-            data = json!(options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
+        snapshot!(
+            "Options",
+            json!(options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
             "options"
         );
 
-        trace!(
-            data = json!(operation_element.to_string()).to_string(),
+        snapshot!(
+            "OperationElement",
+            operation_element.to_string(),
             "operation_element"
         );
 
@@ -381,8 +368,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             }
         }
 
-        trace!(
-            data = json!(new_options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
+        snapshot!(
+            "Options",
+            json!(new_options.iter().map(|o| o.to_json()).collect_vec()).to_string(),
             "new_options"
         );
 
@@ -525,10 +513,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
 
     fn record_closed_branch(&mut self, closed_branch: ClosedBranch) -> Result<(), FederationError> {
         let maybe_trimmed = closed_branch.maybe_eliminate_strictly_more_costly_paths()?;
-        trace!(
-            data = json!(maybe_trimmed.to_json()).to_string(),
-            "closed_branch"
-        );
         self.closed_branches.push(maybe_trimmed);
         Ok(())
     }
@@ -627,8 +611,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         )
     )]
     fn compute_best_plan_from_closed_branches(&mut self) -> Result<(), FederationError> {
-        trace!(
-            data = json!(self
+        snapshot!(
+            "ClosedBranches",
+            json!(self
                 .closed_branches
                 .iter()
                 .map(|cb| cb.to_json())
@@ -644,8 +629,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         self.sort_options_in_closed_branches()?;
         self.reduce_options_if_needed();
 
-        trace!(
-            data = json!(self
+        snapshot!(
+            "ClosedBranches",
+            json!(self
                 .closed_branches
                 .iter()
                 .map(|cb| cb.to_json())
@@ -715,8 +701,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
                 }
                 .into();
 
-                trace!(
-                    data = json!(self.best_plan.as_ref().unwrap().to_json()).to_string(),
+                snapshot!(
+                    "BestQueryPlanInfo",
+                    self.best_plan.as_ref().unwrap().to_json().to_string(),
                     "best_plan"
                 );
 
@@ -757,8 +744,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
         }
         .into();
 
-        trace!(
-            data = json!(self.best_plan.as_ref().unwrap().to_json()).to_string(),
+        snapshot!(
+            "BestQueryPlanInfo",
+            self.best_plan.as_ref().unwrap().to_json().to_string(),
             "best_plan"
         );
         Ok(())
@@ -1039,8 +1027,9 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             )?;
         }
 
-        trace!(
-            data = json!(dependency_graph.to_json()).to_string(),
+        snapshot!(
+            "FetchDependencyGraph",
+            dependency_graph.to_json().to_string(),
             "updated_dependency_graph"
         );
         Ok(())

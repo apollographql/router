@@ -221,7 +221,11 @@ impl QueryPlanner {
             Some(true),
         )?;
 
-        trace!(data = &query_graph.to_json().to_string(), "query graph");
+        snapshot!(
+            "QueryGraph",
+            query_graph.to_json().to_string(),
+            "query graph"
+        );
 
         let interface_types_with_interface_objects = supergraph
             .schema
@@ -413,9 +417,9 @@ impl QueryPlanner {
             return Ok(QueryPlan::default());
         }
 
-        trace!(
-            data = serde_json_bytes::json!({
-                "kind": "Operation",
+        snapshot!(
+            "NormalizedOperation",
+            serde_json_bytes::json!({
                 "original": &operation.serialize().to_string(),
                 "normalized": &normalized_operation.to_string()
             })
@@ -524,7 +528,7 @@ impl QueryPlanner {
             statistics,
         };
 
-        trace!(data = &plan.to_json().to_string(), "query plan");
+        snapshot!("QueryPlan", plan.to_json().to_string(), "query plan");
 
         Ok(plan)
     }
@@ -656,8 +660,9 @@ pub(crate) fn compute_root_fetch_groups(
         };
         let fetch_dependency_node =
             dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
-        trace!(
-            data = serde_json_bytes::json!(&dependency_graph.to_json()).to_string(),
+        snapshot!(
+            "FetchDependencyGraph",
+            serde_json_bytes::json!(&dependency_graph.to_json()).to_string(),
             "tree_with_root_node"
         );
         compute_nodes_for_tree(
@@ -676,9 +681,9 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
-    trace!(
-        snapshot = "FetchDependencyGraph",
-        data = "Empty",
+    snapshot!(
+        "FetchDependencyGraph",
+        "Empty",
         "Starting process to construct a parallel fetch dependency graph"
     );
     let selection_set = parameters.operation.selection_set.clone();
