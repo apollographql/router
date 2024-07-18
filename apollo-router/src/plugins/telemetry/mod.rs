@@ -203,7 +203,7 @@ pub(crate) struct Telemetry {
     pub(crate) graphql_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     router_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     supergraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
-    subgraph_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
+    subgraph_custom_instruments: OnceCell<Arc<HashMap<String, StaticInstrument>>>,
     cache_custom_instruments: RwLock<Arc<HashMap<String, StaticInstrument>>>,
     activation: Mutex<TelemetryActivation>,
 }
@@ -312,14 +312,14 @@ impl Plugin for Telemetry {
             RwLock::default()
         };
         let subgraph_custom_instruments = if cfg!(test) {
-            RwLock::new(Arc::new(
+            OnceCell::with_value(Arc::new(
                 config
                     .instrumentation
                     .instruments
                     .new_static_subgraph_instruments(),
             ))
         } else {
-            RwLock::default()
+            OnceCell::new()
         };
         let cache_custom_instruments = if cfg!(test) {
             RwLock::new(Arc::new(
@@ -755,7 +755,11 @@ impl Plugin for Telemetry {
         let subgraph_metrics_conf_resp = subgraph_metrics_conf_req.clone();
         let subgraph_name = ByteString::from(name);
         let name = name.to_owned();
-        let static_subgraph_instruments = self.subgraph_custom_instruments.read().clone();
+        let static_subgraph_instruments = self
+            .subgraph_custom_instruments
+            .get()
+            .expect("must be set in validate method")
+            .clone();
         let static_cache_instruments = self.cache_custom_instruments.read().clone();
         ServiceBuilder::new()
             .instrument(move |req: &SubgraphRequest| span_mode.create_subgraph(name.as_str(), req))
@@ -930,12 +934,12 @@ impl Telemetry {
                 .instruments
                 .new_static_supergraph_instruments(),
         );
-        *self.subgraph_custom_instruments.write() = Arc::new(
+        let _ = self.subgraph_custom_instruments.set(Arc::new(
             self.config
                 .instrumentation
                 .instruments
                 .new_static_subgraph_instruments(),
-        );
+        ));
         *self.cache_custom_instruments.write() = Arc::new(
             self.config
                 .instrumentation
