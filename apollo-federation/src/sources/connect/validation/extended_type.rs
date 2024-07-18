@@ -1,20 +1,5 @@
-use super::coordinates::connect_directive_coordinate;
-use super::coordinates::connect_directive_http_coordinate;
-use super::coordinates::connect_directive_url_coordinate;
-use super::entity::validate_entity_arg;
-use super::http_headers::get_http_headers_arg;
-use super::http_headers::validate_headers_arg;
-use super::http_method::get_http_methods_arg;
-use super::http_method::validate_http_method_arg;
-use super::parse_url;
-use super::selection::validate_selection;
-use super::source_name::validate_source_name_arg;
-use super::Code;
-use super::Location;
-use super::Message;
-use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use std::sync::Arc;
+
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
@@ -27,9 +12,25 @@ use apollo_compiler::Schema;
 use apollo_compiler::SourceFile;
 use apollo_compiler::SourceMap;
 use indexmap::IndexMap;
-use std::sync::Arc;
 
+use super::coordinates::connect_directive_coordinate;
+use super::coordinates::connect_directive_http_coordinate;
+use super::coordinates::connect_directive_url_coordinate;
+use super::entity::validate_entity_arg;
+use super::http_headers::get_http_headers_arg;
+use super::http_headers::validate_headers_arg;
+use super::http_method::get_http_methods_arg;
+use super::http_method::validate_http_method_arg;
+use super::parse_url;
+use super::selection::validate_selection;
+use super::source_name::validate_source_name_arg;
 use super::source_name::SourceName;
+use super::Code;
+use super::Location;
+use super::Message;
+use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
 
 pub(super) fn validate_extended_type(
     extended_type: &ExtendedType,
