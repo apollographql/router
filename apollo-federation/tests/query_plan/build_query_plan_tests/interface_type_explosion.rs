@@ -1,5 +1,4 @@
-//#[test]
-#[test_log::test]
+#[test]
 fn handles_non_matching_value_types_under_interface_field() {
     let planner = planner!(
         Subgraph1: r#"

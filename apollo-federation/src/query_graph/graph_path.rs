@@ -18,7 +18,6 @@ use petgraph::graph::NodeIndex;
 use petgraph::visit::EdgeRef;
 use tracing::debug;
 use tracing::debug_span;
-use tracing::instrument;
 
 use crate::display_helpers::write_indented_lines;
 use crate::display_helpers::DisplayOption;
@@ -1316,7 +1315,10 @@ where
             == Some(self.edges.len() - 2))
     }
 
-    #[instrument(skip_all, level = "trace", name = "GraphPath::can_satisfy_conditions")]
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(skip_all, level = "trace", name = "GraphPath::can_satisfy_conditions")
+    )]
     fn can_satisfy_conditions(
         &self,
         edge: EdgeIndex,
@@ -1394,7 +1396,7 @@ where
     // composition, but we'll need to port that code when we port composition.
     // PORT_NOTE: In the JS codebase, this was named
     // `advancePathWithNonCollectingAndTypePreservingTransitions`.
-    #[instrument(skip_all, level = "trace")]
+    #[cfg_attr(feature = "snapshot_tracing", tracing::instrument(skip_all, level = "trace"))]
     fn advance_with_non_collecting_and_type_preserving_transitions(
         self: &Arc<Self>,
         context: &OpGraphPathContext,
@@ -2376,12 +2378,12 @@ impl OpGraphPath {
     /// have also created multiple options).
     ///
     /// For the second element, it is true if the result only has type-exploded results.
-    #[instrument(
+    #[cfg_attr(feature = "snapshot_tracing", tracing::instrument(
         skip_all,
         level = "trace",
         name = "GraphPath::advance_with_operation_element"
         fields(label = operation_element.to_string())
-    )]
+    ))]
     fn advance_with_operation_element(
         &self,
         supergraph_schema: ValidFederationSchema,

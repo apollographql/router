@@ -2,21 +2,17 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
-use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
-use tracing::instrument;
 use tracing::trace;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
-use crate::link::federation_spec_definition::FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
-use crate::link::spec::Identity;
 use crate::operation::normalize_operation;
 use crate::operation::NamedFragments;
 use crate::operation::RebasedFragments;
@@ -46,6 +42,7 @@ use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
@@ -202,7 +199,10 @@ pub struct QueryPlanner {
 }
 
 impl QueryPlanner {
-    #[instrument(level = "trace", skip_all, name = "QueryPlanner::new")]
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::new")
+    )]
     pub fn new(
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
@@ -222,17 +222,6 @@ impl QueryPlanner {
         )?;
 
         trace!(data = &query_graph.to_json().to_string(), "query graph");
-
-        let metadata = supergraph_schema.metadata().unwrap();
-
-        let federation_link = metadata.for_identity(&Identity::federation_identity());
-        let interface_object_directive =
-            federation_link.map_or(FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC, |link| {
-                link.directive_name_in_schema(&FEDERATION_INTERFACEOBJECT_DIRECTIVE_NAME_IN_SPEC)
-            });
-
-        let is_interface_object =
-            |ty: &ExtendedType| ty.is_object() && ty.directives().has(&interface_object_directive);
 
         let interface_types_with_interface_objects = supergraph
             .schema
@@ -328,7 +317,10 @@ impl QueryPlanner {
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
-    #[instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")]
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")
+    )]
     pub fn build_query_plan(
         &self,
         document: &Valid<ExecutableDocument>,
@@ -632,7 +624,10 @@ fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<Arc<str>, Federati
     Ok(name.clone())
 }
 
-#[instrument(level = "trace", skip_all, name = "compute_root_fetch_groups")]
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(level = "trace", skip_all, name = "compute_root_fetch_groups")
+)]
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
@@ -681,8 +676,18 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
+    trace!(
+        snapshot = "FetchDependencyGraph",
+        data = "Empty",
+        "Starting process to construct a parallel fetch dependency graph"
+    );
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    snapshot!(
+        "FetchDependencyGraph",
+        best_plan.fetch_dependency_graph.to_json().to_string(),
+        "Plan returned from compute_root_parallel_best_plan"
+    );
     Ok(best_plan.fetch_dependency_graph)
 }
 
@@ -742,6 +747,11 @@ fn compute_plan_internal(
         let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
 
         let (main, deferred) = dependency_graph.process(&mut parameters.processor, root_kind)?;
+        snapshot!(
+            "FetchDependencyGraph",
+            dependency_graph.to_json().to_string(),
+            "Plan after calling FetchDependencyGraph::process"
+        );
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
         let primary_selection = dependency_graph.defer_tracking.primary_selection;
 
@@ -773,25 +783,8 @@ fn compute_plan_for_defer_conditionals(
 
 #[cfg(test)]
 mod tests {
-    use std::fs::File;
-
-    use tracing_subscriber::fmt::format::FmtSpan;
-
     use super::*;
     use crate::subgraph::Subgraph;
-
-    fn setup_tracing_subscriber() {
-        let log_file = std::fs::File::create("my_cool_trace.log").expect("create log file");
-        tracing_subscriber::fmt()
-            // .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .json()
-            .flatten_event(true)
-            .with_span_events(FmtSpan::ACTIVE)
-            // .with_file(true)
-            // .with_line_number(true)
-            .with_writer(log_file)
-            .init();
-    }
 
     const TEST_SUPERGRAPH: &str = r#"
 schema
@@ -964,20 +957,8 @@ type User
         "###);
     }
 
-    // #[test_log::test]
     #[test]
     fn plan_simple_query_for_multiple_subgraphs() {
-        let log_file = File::create("my_cool_trace.log").expect("create log file");
-        tracing_subscriber::fmt()
-            .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-            .json()
-            .flatten_event(true)
-            .with_span_events(FmtSpan::ACTIVE)
-            .with_file(true)
-            .with_line_number(true)
-            .with_writer(log_file)
-            .init();
-
         let supergraph = Supergraph::new(TEST_SUPERGRAPH).unwrap();
         let planner = QueryPlanner::new(&supergraph, Default::default()).unwrap();
 

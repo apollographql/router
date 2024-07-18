@@ -9,6 +9,13 @@ repository = "https://github.com/apollographql/router"
 license = "Elastic-2.0"
 autotests = false                                      # Integration tests are modules of tests/main.rs
 
+[features]
+# This feature adds the `#[instrument]` macro to many function as well as
+# logging statements that capture serialized versions of key data structures.
+# This logging is gated behind a feature to avoid any unnecessary (even if
+# small) runtime costs where this data will not be desired.
+snapshot_tracing = []
+
 [dependencies]
 apollo-compiler.workspace = true
 time = { version = "0.3.34", default-features = false, features = [
@@ -35,10 +42,6 @@ hex.workspace = true
 insta.workspace = true
 sha1.workspace = true
 tempfile.workspace = true
-test-log = { version = "0.2.16", default-features = false, features = [
-    "trace",
-] }
-tracing-subscriber = { version = "0.3.18", features = ["json"] }
 
 [[test]]
 name = "main"

@@ -29,7 +29,6 @@ use petgraph::visit::IntoNodeReferences;
 use serde_json::Number;
 use serde_json_bytes::json;
 use serde_json_bytes::Value;
-use tracing::instrument;
 use tracing::trace;
 
 use crate::error::FederationError;
@@ -78,6 +77,7 @@ use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::spec::ANY_SCALAR_NAME;
 use crate::subgraph::spec::ENTITIES_QUERY;
+use crate::utils::logging::snapshot;
 
 /// Represents the value of a `@defer(label:)` argument.
 type DeferRef = String;
@@ -3021,7 +3021,10 @@ struct ComputeNodesStackItem<'a> {
     defer_context: DeferContext,
 }
 
-#[instrument(skip_all, level = "trace")]
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 pub(crate) fn compute_nodes_for_tree(
     dependency_graph: &mut FetchDependencyGraph,
     initial_tree: &OpPathTree,
@@ -3121,15 +3124,18 @@ pub(crate) fn compute_nodes_for_tree(
             }
         }
     }
-    trace!(
-        snapshot = "DependencyGraph",
-        data = json!(dependency_graph.to_json()).to_string(),
+    snapshot!(
+        "FetchDependencyGraph",
+        dependency_graph.to_json().to_string(),
         "updated_dependency_graph"
     );
     Ok(created_nodes)
 }
 
-#[instrument(skip_all, level = "trace")]
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 fn compute_nodes_for_key_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
@@ -3280,7 +3286,10 @@ fn compute_nodes_for_key_resolution<'a>(
     })
 }
 
-#[instrument(skip_all, level = "trace")]
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 fn compute_nodes_for_root_type_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'_>,
@@ -3378,7 +3387,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
     })
 }
 
-#[instrument(skip_all, level = "trace", fields(label = operation.to_string()))]
+#[cfg_attr(feature = "snapshot_tracing", tracing::instrument(skip_all, level = "trace", fields(label = operation.to_string())))]
 fn compute_nodes_for_op_path_element<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,

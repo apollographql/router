@@ -20,6 +20,7 @@
 
 mod api_schema;
 mod compat;
+pub(crate) mod utils;
 pub mod error;
 mod display_helpers;
 pub mod link;
