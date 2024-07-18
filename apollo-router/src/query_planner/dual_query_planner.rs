@@ -396,17 +396,18 @@ fn same_ast_document(x: &ast::Document, y: &ast::Document) -> bool {
     let (x_ops, x_frags, x_others) = split_definitions(x);
     let (y_ops, y_frags, y_others) = split_definitions(y);
 
-    assert!(x_others.is_empty(), "Unexpected definition types");
-    assert!(y_others.is_empty(), "Unexpected definition types");
-    assert!(
+    debug_assert!(x_others.is_empty(), "Unexpected definition types");
+    debug_assert!(y_others.is_empty(), "Unexpected definition types");
+    debug_assert!(
         x_ops.len() == y_ops.len(),
         "Different number of operation definitions"
     );
 
-    x_ops
-        .iter()
-        .zip(y_ops.iter())
-        .all(|(x_op, y_op)| same_ast_operation_definition(x_op, y_op))
+    x_ops.len() == y_ops.len()
+        && x_ops
+            .iter()
+            .zip(y_ops.iter())
+            .all(|(x_op, y_op)| same_ast_operation_definition(x_op, y_op))
         && x_frags.len() == y_frags.len()
         && x_frags
             .iter()
