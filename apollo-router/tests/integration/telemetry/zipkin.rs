@@ -1,10 +1,10 @@
-#![cfg(all(target_os = "linux", target_arch = "x86_64", test))]
 extern crate core;
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::anyhow;
+use opentelemetry_api::trace::TraceId;
 use serde_json::json;
 use serde_json::Value;
 use tower::BoxError;
@@ -48,7 +48,7 @@ async fn test_basic() -> Result<(), BoxError> {
 }
 
 async fn validate_trace(
-    id: String,
+    id: TraceId,
     query: &Value,
     operation_name: Option<&str>,
     services: &[&'static str],

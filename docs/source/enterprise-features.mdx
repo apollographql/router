@@ -82,7 +82,7 @@ With an offline license, a router can either be fully disconnected from GraphOS 
 
 <Note>
 
-A router using an offline license cannot use [safelisting with persisted queries](./configuration/persisted-queries). The feature relies on Apollo Uplink to fetch persisted query manifests, so it doesn't work as designed when the router is disconnected from Uplink.
+A router using an offline license requires [the use of local manifests](./configuration/persisted-queries/#experimental_local_manifests) when using [safelisting with persisted queries](./configuration/persisted-queries), otherwise it will not work as designed when the router is disconnected from Uplink.
 
 </Note>
 

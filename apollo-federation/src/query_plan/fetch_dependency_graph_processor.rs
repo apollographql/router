@@ -1,9 +1,8 @@
 use std::collections::HashSet;
 
-use apollo_compiler::ast::Name;
 use apollo_compiler::executable::VariableDefinition;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 
 use crate::error::FederationError;
 use crate::operation::RebasedFragments;
@@ -49,7 +48,7 @@ pub(crate) struct FetchDependencyGraphToQueryPlanProcessor {
     variable_definitions: Vec<Node<VariableDefinition>>,
     fragments: Option<RebasedFragments>,
     operation_name: Option<Name>,
-    assigned_defer_labels: Option<HashSet<NodeStr>>,
+    assigned_defer_labels: Option<HashSet<String>>,
     counter: u32,
 }
 
@@ -246,7 +245,7 @@ impl FetchDependencyGraphToQueryPlanProcessor {
         variable_definitions: Vec<Node<VariableDefinition>>,
         fragments: Option<RebasedFragments>,
         operation_name: Option<Name>,
-        assigned_defer_labels: Option<HashSet<NodeStr>>,
+        assigned_defer_labels: Option<HashSet<String>>,
     ) -> Self {
         Self {
             variable_definitions,
@@ -271,7 +270,8 @@ impl FetchDependencyGraphProcessor<Option<PlanNode>, DeferredDeferBlock>
             let counter = self.counter;
             self.counter += 1;
             let subgraph = to_valid_graphql_name(&node.subgraph_name).unwrap_or("".into());
-            format!("{name}__{subgraph}__{counter}").into()
+            // `name` was already a valid name so this concatenation should be too
+            Name::new(&format!("{name}__{subgraph}__{counter}")).unwrap()
         });
         node.to_plan_node(
             query_graph,

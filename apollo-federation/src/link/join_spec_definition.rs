@@ -3,16 +3,14 @@ use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::DirectiveDefinition;
 use apollo_compiler::schema::EnumType;
 use apollo_compiler::schema::ExtendedType;
-use apollo_compiler::schema::Name;
+use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeStr;
 use lazy_static::lazy_static;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::argument::directive_optional_boolean_argument;
 use crate::link::argument::directive_optional_enum_argument;
-use crate::link::argument::directive_optional_fieldset_argument;
 use crate::link::argument::directive_optional_string_argument;
 use crate::link::argument::directive_required_enum_argument;
 use crate::link::argument::directive_required_string_argument;
@@ -43,41 +41,43 @@ pub(crate) const JOIN_PROVIDES_ARGUMENT_NAME: Name = name!("provides");
 pub(crate) const JOIN_TYPE_ARGUMENT_NAME: Name = name!("type");
 pub(crate) const JOIN_EXTERNAL_ARGUMENT_NAME: Name = name!("external");
 pub(crate) const JOIN_OVERRIDE_ARGUMENT_NAME: Name = name!("override");
+pub(crate) const JOIN_OVERRIDE_LABEL_ARGUMENT_NAME: Name = name!("overrideLabel");
 pub(crate) const JOIN_USEROVERRIDDEN_ARGUMENT_NAME: Name = name!("usedOverridden");
 pub(crate) const JOIN_INTERFACE_ARGUMENT_NAME: Name = name!("interface");
 pub(crate) const JOIN_MEMBER_ARGUMENT_NAME: Name = name!("member");
 
-pub(crate) struct GraphDirectiveArguments {
-    pub(crate) name: NodeStr,
-    pub(crate) url: NodeStr,
+pub(crate) struct GraphDirectiveArguments<'doc> {
+    pub(crate) name: &'doc str,
+    pub(crate) url: &'doc str,
 }
 
-pub(crate) struct TypeDirectiveArguments {
+pub(crate) struct TypeDirectiveArguments<'doc> {
     pub(crate) graph: Name,
-    pub(crate) key: Option<NodeStr>,
+    pub(crate) key: Option<&'doc str>,
     pub(crate) extension: bool,
     pub(crate) resolvable: bool,
     pub(crate) is_interface_object: bool,
 }
 
-pub(crate) struct FieldDirectiveArguments {
+pub(crate) struct FieldDirectiveArguments<'doc> {
     pub(crate) graph: Option<Name>,
-    pub(crate) requires: Option<NodeStr>,
-    pub(crate) provides: Option<NodeStr>,
-    pub(crate) type_: Option<NodeStr>,
+    pub(crate) requires: Option<&'doc str>,
+    pub(crate) provides: Option<&'doc str>,
+    pub(crate) type_: Option<&'doc str>,
     pub(crate) external: Option<bool>,
-    pub(crate) override_: Option<NodeStr>,
+    pub(crate) override_: Option<&'doc str>,
+    pub(crate) override_label: Option<&'doc str>,
     pub(crate) user_overridden: Option<bool>,
 }
 
-pub(crate) struct ImplementsDirectiveArguments {
+pub(crate) struct ImplementsDirectiveArguments<'doc> {
     pub(crate) graph: Name,
-    pub(crate) interface: NodeStr,
+    pub(crate) interface: &'doc str,
 }
 
-pub(crate) struct UnionMemberDirectiveArguments {
+pub(crate) struct UnionMemberDirectiveArguments<'doc> {
     pub(crate) graph: Name,
-    pub(crate) member: NodeStr,
+    pub(crate) member: &'doc str,
 }
 
 pub(crate) struct EnumValueDirectiveArguments {
@@ -136,10 +136,10 @@ impl JoinSpecDefinition {
             })
     }
 
-    pub(crate) fn graph_directive_arguments(
+    pub(crate) fn graph_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<GraphDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<GraphDirectiveArguments<'doc>, FederationError> {
         Ok(GraphDirectiveArguments {
             name: directive_required_string_argument(application, &JOIN_NAME_ARGUMENT_NAME)?,
             url: directive_required_string_argument(application, &JOIN_URL_ARGUMENT_NAME)?,
@@ -159,13 +159,13 @@ impl JoinSpecDefinition {
             })
     }
 
-    pub(crate) fn type_directive_arguments(
+    pub(crate) fn type_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<TypeDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<TypeDirectiveArguments<'doc>, FederationError> {
         Ok(TypeDirectiveArguments {
             graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
-            key: directive_optional_fieldset_argument(application, &JOIN_KEY_ARGUMENT_NAME)?,
+            key: directive_optional_string_argument(application, &JOIN_KEY_ARGUMENT_NAME)?,
             extension: directive_optional_boolean_argument(
                 application,
                 &JOIN_EXTENSION_ARGUMENT_NAME,
@@ -197,17 +197,17 @@ impl JoinSpecDefinition {
             })
     }
 
-    pub(crate) fn field_directive_arguments(
+    pub(crate) fn field_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<FieldDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<FieldDirectiveArguments<'doc>, FederationError> {
         Ok(FieldDirectiveArguments {
             graph: directive_optional_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
-            requires: directive_optional_fieldset_argument(
+            requires: directive_optional_string_argument(
                 application,
                 &JOIN_REQUIRES_ARGUMENT_NAME,
             )?,
-            provides: directive_optional_fieldset_argument(
+            provides: directive_optional_string_argument(
                 application,
                 &JOIN_PROVIDES_ARGUMENT_NAME,
             )?,
@@ -219,6 +219,10 @@ impl JoinSpecDefinition {
             override_: directive_optional_string_argument(
                 application,
                 &JOIN_OVERRIDE_ARGUMENT_NAME,
+            )?,
+            override_label: directive_optional_string_argument(
+                application,
+                &JOIN_OVERRIDE_LABEL_ARGUMENT_NAME,
             )?,
             user_overridden: directive_optional_boolean_argument(
                 application,
@@ -244,10 +248,10 @@ impl JoinSpecDefinition {
             .map(Some)
     }
 
-    pub(crate) fn implements_directive_arguments(
+    pub(crate) fn implements_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<ImplementsDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<ImplementsDirectiveArguments<'doc>, FederationError> {
         Ok(ImplementsDirectiveArguments {
             graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
             interface: directive_required_string_argument(
@@ -274,10 +278,10 @@ impl JoinSpecDefinition {
             .map(Some)
     }
 
-    pub(crate) fn union_member_directive_arguments(
+    pub(crate) fn union_member_directive_arguments<'doc>(
         &self,
-        application: &Node<Directive>,
-    ) -> Result<UnionMemberDirectiveArguments, FederationError> {
+        application: &'doc Node<Directive>,
+    ) -> Result<UnionMemberDirectiveArguments<'doc>, FederationError> {
         Ok(UnionMemberDirectiveArguments {
             graph: directive_required_enum_argument(application, &JOIN_GRAPH_ARGUMENT_NAME)?,
             member: directive_required_string_argument(application, &JOIN_MEMBER_ARGUMENT_NAME)?,

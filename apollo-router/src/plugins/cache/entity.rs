@@ -10,6 +10,7 @@ use http::header::CACHE_CONTROL;
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde::Serialize;
+use serde_json_bytes::from_value;
 use serde_json_bytes::ByteString;
 use serde_json_bytes::Value;
 use sha2::Digest;
@@ -23,7 +24,9 @@ use tracing::Instrument;
 use tracing::Level;
 
 use super::cache_control::CacheControl;
+use super::invalidation::Invalidation;
 use super::metrics::CacheMetricsService;
+use crate::batching::BatchQuery;
 use crate::cache::redis::RedisCacheStorage;
 use crate::cache::redis::RedisKey;
 use crate::cache::redis::RedisValue;
@@ -55,9 +58,11 @@ register_plugin!("apollo", "preview_entity_cache", EntityCache);
 pub(crate) struct EntityCache {
     storage: Option<RedisCacheStorage>,
     subgraphs: Arc<SubgraphConfiguration<Subgraph>>,
+    entity_type: Option<String>,
     enabled: bool,
     metrics: Metrics,
     private_queries: Arc<RwLock<HashSet<String>>>,
+    pub(crate) invalidation: Invalidation,
 }
 
 /// Configuration for entity caching
@@ -121,6 +126,12 @@ impl Plugin for EntityCache {
     where
         Self: Sized,
     {
+        let entity_type = init
+            .supergraph_schema
+            .schema_definition
+            .query
+            .as_ref()
+            .map(|q| q.name.to_string());
         let required_to_start = init.config.redis.required_to_start;
         // we need to explicitely disable TTL reset because it is managed directly by this plugin
         let mut redis_config = init.config.redis.clone();
@@ -153,12 +164,16 @@ impl Plugin for EntityCache {
                 .into());
         }
 
+        let invalidation = Invalidation::new(storage.clone()).await?;
+
         Ok(Self {
             storage,
+            entity_type,
             enabled: init.config.enabled,
             subgraphs: Arc::new(init.config.subgraph),
             metrics: init.config.metrics,
             private_queries: Arc::new(RwLock::new(HashSet::new())),
+            invalidation,
         })
     }
 
@@ -245,11 +260,13 @@ impl Plugin for EntityCache {
                 })
                 .service(CacheService(Some(InnerCacheService {
                     service,
+                    entity_type: self.entity_type.clone(),
                     name: name.to_string(),
                     storage,
                     subgraph_ttl,
                     private_queries,
                     private_id,
+                    invalidation: self.invalidation.clone(),
                 })));
             tower::util::BoxService::new(inner)
         } else {
@@ -279,8 +296,10 @@ impl EntityCache {
     where
         Self: Sized,
     {
+        let invalidation = Invalidation::new(Some(storage.clone())).await?;
         Ok(Self {
             storage: Some(storage),
+            entity_type: None,
             enabled: true,
             subgraphs: Arc::new(SubgraphConfiguration {
                 all: Subgraph::default(),
@@ -288,6 +307,7 @@ impl EntityCache {
             }),
             metrics: Metrics::default(),
             private_queries: Default::default(),
+            invalidation,
         })
     }
 }
@@ -296,10 +316,12 @@ struct CacheService(Option<InnerCacheService>);
 struct InnerCacheService {
     service: subgraph::BoxService,
     name: String,
+    entity_type: Option<String>,
     storage: RedisCacheStorage,
     subgraph_ttl: Option<Duration>,
     private_queries: Arc<RwLock<HashSet<String>>>,
     private_id: Option<String>,
+    invalidation: Invalidation,
 }
 
 impl Service<subgraph::Request> for CacheService {
@@ -330,6 +352,17 @@ impl InnerCacheService {
         mut self,
         request: subgraph::Request,
     ) -> Result<subgraph::Response, BoxError> {
+        // Check if the request is part of a batch. If it is, completely bypass entity caching since it
+        // will break any request batches which this request is part of.
+        // This check is what enables Batching and entity caching to work together, so be very careful
+        // before making any changes to it.
+        if request
+            .context
+            .extensions()
+            .with_lock(|lock| lock.contains_key::<BatchQuery>())
+        {
+            return self.service.call(request).await;
+        }
         let query = request
             .subgraph_request
             .body()
@@ -353,7 +386,8 @@ impl InnerCacheService {
         {
             if request.operation_kind == OperationKind::Query {
                 match cache_lookup_root(
-                    self.name,
+                    self.name.clone(),
+                    self.entity_type.as_deref(),
                     self.storage.clone(),
                     is_known_private,
                     private_id.as_deref(),
@@ -364,7 +398,7 @@ impl InnerCacheService {
                 {
                     ControlFlow::Break(response) => Ok(response),
                     ControlFlow::Continue((request, mut root_cache_key)) => {
-                        let response = self.service.call(request).await?;
+                        let mut response = self.service.call(request).await?;
 
                         let cache_control =
                             if response.response.headers().contains_key(CACHE_CONTROL) {
@@ -389,6 +423,15 @@ impl InnerCacheService {
                             }
                         }
 
+                        if let Some(invalidation_extensions) = response
+                            .response
+                            .body_mut()
+                            .extensions
+                            .remove("invalidation")
+                        {
+                            self.handle_invalidation(invalidation_extensions).await;
+                        }
+
                         if cache_control.should_store() {
                             cache_store_root_from_response(
                                 self.storage,
@@ -404,11 +447,21 @@ impl InnerCacheService {
                     }
                 }
             } else {
-                self.service.call(request).await
+                let mut response = self.service.call(request).await?;
+                if let Some(invalidation_extensions) = response
+                    .response
+                    .body_mut()
+                    .extensions
+                    .remove("invalidation")
+                {
+                    self.handle_invalidation(invalidation_extensions).await;
+                }
+
+                Ok(response)
             }
         } else {
             match cache_lookup_entities(
-                self.name,
+                self.name.clone(),
                 self.storage.clone(),
                 is_known_private,
                 private_id.as_deref(),
@@ -434,6 +487,15 @@ impl InnerCacheService {
 
                     if !is_known_private && cache_control.private() {
                         self.private_queries.write().await.insert(query.to_string());
+                    }
+
+                    if let Some(invalidation_extensions) = response
+                        .response
+                        .body_mut()
+                        .extensions
+                        .remove("invalidation")
+                    {
+                        self.handle_invalidation(invalidation_extensions).await;
                     }
 
                     cache_store_entities_from_response(
@@ -466,10 +528,21 @@ impl InnerCacheService {
             })
         })
     }
+
+    async fn handle_invalidation(&mut self, invalidation_extensions: Value) {
+        if let Ok(requests) = from_value(invalidation_extensions) {
+            if let Err(e) = self.invalidation.invalidate(requests).await {
+                tracing::error!(error = %e,
+                   message = "could not invalidate entity cache entries",
+                );
+            }
+        }
+    }
 }
 
 async fn cache_lookup_root(
     name: String,
+    entity_type_opt: Option<&str>,
     cache: RedisCacheStorage,
     is_known_private: bool,
     private_id: Option<&str>,
@@ -479,6 +552,7 @@ async fn cache_lookup_root(
 
     let key = extract_cache_key_root(
         &name,
+        entity_type_opt,
         &request.query_hash,
         body,
         &request.context,
@@ -768,8 +842,10 @@ pub(crate) fn hash_additional_data(
 }
 
 // build a cache key for the root operation
+#[allow(clippy::too_many_arguments)]
 fn extract_cache_key_root(
     subgraph_name: &str,
+    entity_type_opt: Option<&str>,
     query_hash: &QueryHash,
     body: &mut graphql::Request,
     context: &Context,
@@ -782,14 +858,17 @@ fn extract_cache_key_root(
     // hash more data like variables and authorization status
     let additional_data_hash = hash_additional_data(body, context, cache_key);
 
+    let entity_type = entity_type_opt.unwrap_or("Query");
+
     // the cache key is written to easily find keys matching a prefix for deletion:
-    // - subgraph name: caching is done per subgraph
+    // - subgraph name: subgraph name
+    // - entity type: entity type
     // - query hash: invalidate the entry for a specific query and operation name
     // - additional data: separate cache entries depending on info like authorization status
     let mut key = String::new();
     let _ = write!(
         &mut key,
-        "subgraph:{subgraph_name}:Query:{query_hash}:{additional_data_hash}"
+        "subgraph:{subgraph_name}:type:{entity_type}:hash:{query_hash}:data:{additional_data_hash}"
     );
 
     if is_known_private {
