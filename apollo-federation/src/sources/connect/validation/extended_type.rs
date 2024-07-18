@@ -25,6 +25,7 @@ use apollo_compiler::Node;
 use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
 use apollo_compiler::SourceFile;
+use apollo_compiler::SourceMap;
 use indexmap::IndexMap;
 use std::sync::Arc;
 
@@ -48,20 +49,16 @@ pub(super) fn validate_extended_type(
             source_directive_name,
             all_source_names,
         )),
-        ExtendedType::Union(union_type) => connect_errors.push(Message {
-            code: Code::UnsupportedAbstractType,
-            message: "Abstract schema types, such as `union`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported.".to_string(),
-            locations: Location::from_node(NodeLocation::recompose(union_type.location(), union_type.name.location()), source_map)
-                .into_iter()
-                .collect(),
-        }),
-        ExtendedType::Interface(interface) => connect_errors.push(Message {
-            code: Code::UnsupportedAbstractType,
-            message: "Abstract schema types, such as `interface`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported.".to_string(),
-            locations: Location::from_node(NodeLocation::recompose(interface.location(), interface.name.location()), source_map)
-                .into_iter()
-                .collect(),
-        }),
+        ExtendedType::Union(union_type) => connect_errors.push(validate_abstract_type(
+            NodeLocation::recompose(union_type.location(), union_type.name.location()),
+            source_map,
+            "union",
+        )),
+        ExtendedType::Interface(interface) => connect_errors.push(validate_abstract_type(
+            NodeLocation::recompose(interface.location(), interface.name.location()),
+            source_map,
+            "interface",
+        )),
         _ => (),
     }
 
@@ -269,4 +266,18 @@ fn validate_field(
     }
 
     errors
+}
+
+fn validate_abstract_type(
+    node: Option<NodeLocation>,
+    source_map: &SourceMap,
+    keyword: &str,
+) -> Message {
+    Message {
+        code: Code::UnsupportedAbstractType,
+        message: format!("Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."),
+        locations: Location::from_node(node, source_map)
+            .into_iter()
+            .collect(),
+    }
 }
