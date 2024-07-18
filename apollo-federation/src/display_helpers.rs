@@ -1,4 +1,5 @@
-use std::fmt::{self, Display};
+use std::fmt;
+use std::fmt::Display;
 
 pub(crate) struct State<'fmt, 'fmt2> {
     indent_level: usize,
