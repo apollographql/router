@@ -163,14 +163,14 @@ pub fn validate(schema: Schema) -> Vec<Message> {
             ExtendedType::Union(union_type) => connect_errors.push(Message {
                 code: Code::UnsupportedAbstractType,
                 message: "Abstract schema types, such as `union`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported.".to_string(),
-                locations: Location::from_abstract_type_node(union_type, source_map, "union")
+                locations: Location::from_node(NodeLocation::recompose(union_type.location(), union_type.name.location()), source_map)
                     .into_iter()
                     .collect(),
             }),
             ExtendedType::Interface(interface) => connect_errors.push(Message {
                 code: Code::UnsupportedAbstractType,
                 message: "Abstract schema types, such as `interface`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported.".to_string(),
-                locations: Location::from_abstract_type_node(interface, source_map, "interface")
+                locations: Location::from_node(NodeLocation::recompose(interface.location(), interface.name.location()), source_map)
                     .into_iter()
                     .collect(),
             }),
@@ -595,23 +595,6 @@ impl Location {
         let end = source
             .get_line_column(node.end_offset())
             .map(|(line, column)| Location { line, column })?;
-        Some(Range { start, end })
-    }
-
-    fn from_abstract_type_node<T>(
-        node: &Node<T>,
-        sources: &SourceMap,
-        abstract_type: &str,
-    ) -> Option<Range<Self>> {
-        let node_location = node.location()?;
-        let source = sources.get(&node_location.file_id())?;
-        let start = source
-            .get_line_column(node_location.offset())
-            .map(|(line, column)| Location { line, column })?;
-        let end = source
-            .get_line_column(node_location.offset() + abstract_type.chars().count())
-            .map(|(line, column)| Location { line, column })?;
-
         Some(Range { start, end })
     }
 }
