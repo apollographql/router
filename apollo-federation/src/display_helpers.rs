@@ -1,5 +1,6 @@
+use std::fmt;
+use std::fmt::Debug;
 use std::fmt::Display;
-use std::fmt::{self, Debug};
 use std::ops::Deref;
 
 use serde::Serializer;
