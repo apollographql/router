@@ -1803,7 +1803,7 @@ impl FetchDependencyGraph {
         let node = self.node_weight(node_id)?;
         let child = self.node_weight(child_id)?;
         let parent_relation = self.parent_relation(child_id, node_id);
-        
+
         // we compare the subgraph names last because on average it improves performance
         Ok(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.defer_ref == child.defer_ref
