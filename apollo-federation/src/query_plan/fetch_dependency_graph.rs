@@ -658,8 +658,8 @@ impl FetchDependencyGraph {
         //    which is important for some case of @requires).
         for existing_id in self.children_of(parent.parent_node_id) {
             let existing = self.node_weight(existing_id)?;
-            if existing.subgraph_name == *subgraph_name
-                && existing.merge_at.as_deref() == Some(merge_at)
+            // we compare the subgraph names last because on average it improves performance
+            if existing.merge_at.as_deref() == Some(merge_at)
                 && existing
                     .selection_set
                     .selection_set
@@ -673,12 +673,13 @@ impl FetchDependencyGraph {
                         )
                     })
                 && !self.is_in_nodes_or_their_ancestors(existing_id, conditions_nodes)
-                && existing.defer_ref.as_ref() == defer_ref
                 && self
                     .parents_relations_of(existing_id)
                     .find(|rel| rel.parent_node_id == parent.parent_node_id)
                     .and_then(|rel| rel.path_in_parent)
                     == parent.path_in_parent
+                && existing.defer_ref.as_ref() == defer_ref
+                && existing.subgraph_name == *subgraph_name
             {
                 return Ok(existing_id);
             }
@@ -1803,9 +1804,10 @@ impl FetchDependencyGraph {
         let child = self.node_weight(child_id)?;
         let parent_relation = self.parent_relation(child_id, node_id);
 
-        Ok(node.subgraph_name == child.subgraph_name
+        // we compare the subgraph names last because on average it improves performance
+        Ok(parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.defer_ref == child.defer_ref
-            && parent_relation.is_some_and(|r| r.path_in_parent.is_some()))
+            && node.subgraph_name == child.subgraph_name)
     }
 
     /// We only allow merging sibling on the same subgraph, same "merge_at" and when the common parent is their only parent:
@@ -1841,10 +1843,11 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        Ok(node.defer_ref == sibling.defer_ref
-            && node.subgraph_name == sibling.subgraph_name
-            && node.merge_at == sibling.merge_at
-            && own_parent_id == sibling_parent_id)
+        // we compare the subgraph names last because on average it improves performance
+        Ok(node.merge_at == sibling.merge_at
+            && own_parent_id == sibling_parent_id
+            && node.defer_ref == sibling.defer_ref
+            && node.subgraph_name == sibling.subgraph_name)
     }
 
     fn can_merge_grand_child_in(
@@ -1868,12 +1871,13 @@ impl FetchDependencyGraph {
             return Ok(false);
         };
 
-        Ok(node.subgraph_name == grand_child.subgraph_name
-            && node.defer_ref == grand_child.defer_ref
-            && grand_child_parent_relations[0].path_in_parent.is_some()
+        // we compare the subgraph names last because on average it improves performance
+        Ok(grand_child_parent_relations[0].path_in_parent.is_some()
             && grand_child_parent_parent_relation.is_some_and(|r| r.path_in_parent.is_some())
             && node.merge_at == grand_child.merge_at
-            && node_inputs.contains(grand_child_inputs))
+            && node_inputs.contains(grand_child_inputs)
+            && node.defer_ref == grand_child.defer_ref
+            && node.subgraph_name == grand_child.subgraph_name)
     }
 
     /// Merges a child of parent node into it.
