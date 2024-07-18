@@ -13,6 +13,9 @@ use super::sort_arguments;
 
 #[derive(Debug, Clone, Default)]
 pub(crate) struct DirectiveList {
+    // The hash is eagerly precomputed because we expect to, most of the time, hash a DirectiveList
+    // at least once.
+    // hash is 0 if the list is empty.
     hash: u64,
     // Mutable access should not be handed out because `sort_order` may get out of sync.
     inner: executable::DirectiveList,
@@ -85,6 +88,13 @@ impl FromIterator<executable::Directive> for DirectiveList {
 impl DirectiveList {
     fn rehash(&mut self) {
         static SHARED_RANDOM: OnceLock<std::hash::RandomState> = OnceLock::new();
+
+        // An empty directive list does not have a hash
+        if self.is_empty() {
+            self.hash = 0;
+            return;
+        }
+
         let mut state = SHARED_RANDOM.get_or_init(Default::default).build_hasher();
         self.len().hash(&mut state);
         // Hash in sorted order
@@ -159,5 +169,84 @@ impl<'a> IntoIterator for &'a DirectiveList {
 
     fn into_iter(self) -> Self::IntoIter {
         self.iter()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    use apollo_compiler::name;
+    use apollo_compiler::Name;
+    use apollo_compiler::Node;
+
+    use super::*;
+
+    fn directive(
+        name: &str,
+        arguments: Vec<Node<executable::Argument>>,
+    ) -> Node<executable::Directive> {
+        executable::Directive {
+            name: Name::new_unchecked(name),
+            arguments,
+        }
+        .into()
+    }
+
+    #[test]
+    fn consistent_hash() {
+        let mut set = HashSet::new();
+
+        assert!(set.insert(DirectiveList::new()));
+        assert!(!set.insert(DirectiveList::new()));
+
+        assert!(set.insert(DirectiveList::from_iter([
+            directive("a", Default::default()),
+            directive("b", Default::default()),
+        ])));
+        assert!(!set.insert(DirectiveList::from_iter([
+            directive("b", Default::default()),
+            directive("a", Default::default()),
+        ])));
+    }
+
+    #[test]
+    fn order_independent_equality() {
+        assert_eq!(DirectiveList::new(), DirectiveList::new());
+        assert_eq!(
+            DirectiveList::from_iter([
+                directive("a", Default::default()),
+                directive("b", Default::default()),
+            ]),
+            DirectiveList::from_iter([
+                directive("b", Default::default()),
+                directive("a", Default::default()),
+            ]),
+            "should be order independent"
+        );
+
+        assert_eq!(
+            DirectiveList::from_iter([
+                directive(
+                    "a",
+                    vec![(name!("arg1"), true).into(), (name!("arg2"), false).into()]
+                ),
+                directive(
+                    "b",
+                    vec![(name!("arg2"), false).into(), (name!("arg1"), true).into()]
+                ),
+            ]),
+            DirectiveList::from_iter([
+                directive(
+                    "b",
+                    vec![(name!("arg1"), true).into(), (name!("arg2"), false).into()]
+                ),
+                directive(
+                    "a",
+                    vec![(name!("arg1"), true).into(), (name!("arg2"), false).into()]
+                ),
+            ]),
+            "arguments should be order independent"
+        );
     }
 }

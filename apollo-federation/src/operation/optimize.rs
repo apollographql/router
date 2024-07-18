@@ -746,10 +746,10 @@ impl Fragment {
             return false;
         }
 
-        self.selection_set.selections.iter().any(|(selection_key, _)| {
+        self.selection_set.selections.iter().any(|(_, selection)| {
             matches!(
-                selection_key,
-                SelectionKey::FragmentSpread {fragment_name, directives: _} if fragment_name == other_fragment_name,
+                selection,
+                Selection::FragmentSpread(fragment) if fragment.spread.fragment_name == *other_fragment_name
             )
         })
     }

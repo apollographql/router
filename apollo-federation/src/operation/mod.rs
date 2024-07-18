@@ -2498,6 +2498,8 @@ impl SelectionSet {
     ) -> Result<SelectionSet, FederationError> {
         let mut selection_map = SelectionMap::new();
         if let Some(parent) = parent_type_if_abstract {
+            // XXX(@goto-bus-stop): if the selection set has an *alias* named __typename for some
+            // other field, this doesn't work right. is that allowed?
             if !self.has_top_level_typename_field() {
                 let typename_selection = Selection::from_field(
                     Field::new_introspection_typename(&self.schema, &parent.into(), None),
@@ -2532,13 +2534,13 @@ impl SelectionSet {
     }
 
     fn has_top_level_typename_field(&self) -> bool {
-        // Needs to be behind a OnceLock because `Arc::new` is non-const.
+        // This needs to be behind a OnceLock because `Arc::new` is non-const.
         // XXX(@goto-bus-stop): Note this does *not* count `__typename @include(if: true)`.
         // This seems wrong? But it's what JS does, too.
         static TYPENAME_KEY: OnceLock<SelectionKey> = OnceLock::new();
         let key = TYPENAME_KEY.get_or_init(|| SelectionKey::Field {
             response_name: TYPENAME_FIELD,
-            directives: Arc::new(Default::default()),
+            directives: Default::default(),
         });
 
         self.selections.contains_key(key)
