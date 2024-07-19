@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::Iterator;
 use std::sync::Arc;
@@ -23,6 +22,7 @@ use http::header::UPGRADE;
 use http::HeaderMap;
 use http::HeaderName;
 use http::HeaderValue;
+use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use percent_encoding::percent_decode_str;
 use serde_json_bytes::json;
@@ -230,7 +230,7 @@ fn flatten_keys_recursive(
 fn add_headers<T>(
     request: &mut http::Request<T>,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
-    config: &HashMap<HeaderName, HeaderSource>,
+    config: &IndexMap<HeaderName, HeaderSource>,
 ) {
     let headers = request.headers_mut();
     for (header_name, header_source) in config {
@@ -282,13 +282,12 @@ pub(crate) enum HttpJsonTransportError {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-
     use apollo_federation::sources::connect::HeaderSource;
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
-    use maplit::hashmap;
+    use indexmap::indexmap;
+    use indexmap::IndexMap;
 
     use crate::plugins::connectors::http_json_transport::add_headers;
 
@@ -371,7 +370,7 @@ mod tests {
         .collect();
 
         let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
-        add_headers(&mut request, &incoming_supergraph_headers, &HashMap::new());
+        add_headers(&mut request, &incoming_supergraph_headers, &IndexMap::new());
         assert!(request.headers().is_empty());
     }
 
@@ -387,7 +386,7 @@ mod tests {
         .collect();
 
         #[allow(clippy::mutable_key_type)]
-        let config = hashmap! {
+        let config = indexmap! {
             "x-new-name".parse().unwrap() => HeaderSource::From("x-rename".parse().unwrap()),
             "x-insert".parse().unwrap() => HeaderSource::Value("inserted".to_string()),
         };

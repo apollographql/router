@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::iter::once;
 
 use apollo_compiler::ast::Directive;
@@ -7,6 +6,7 @@ use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use http::HeaderName;
+use indexmap::IndexMap;
 use itertools::Itertools;
 
 use super::schema::ConnectDirectiveArguments;
@@ -189,7 +189,7 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
 /// Converts a list of (name, value) pairs into a list of HTTP headers.
 fn nodes_to_headers(
     values: &[Node<Value>],
-) -> Result<HashMap<HeaderName, HeaderSource>, FederationError> {
+) -> Result<IndexMap<HeaderName, HeaderSource>, FederationError> {
     values.iter().map(node_to_header).try_collect()
 }
 

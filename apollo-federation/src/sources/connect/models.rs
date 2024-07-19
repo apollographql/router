@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use http::HeaderName;
 use indexmap::IndexMap;
 
@@ -145,7 +143,7 @@ pub struct HttpJsonTransport {
     pub base_url: String,
     pub path_template: URLPathTemplate,
     pub method: HTTPMethod,
-    pub headers: HashMap<HeaderName, HeaderSource>,
+    pub headers: IndexMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
 }
 
@@ -367,11 +365,11 @@ mod tests {
                         },
                         method: Get,
                         headers: {
-                            "user-agent": Value(
-                                "Firefox",
-                            ),
                             "authtoken": From(
                                 "X-Auth-Token",
+                            ),
+                            "user-agent": Value(
+                                "Firefox",
                             ),
                         },
                         body: None,
