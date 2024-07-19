@@ -32,7 +32,6 @@ use crate::query_plan::fetch_dependency_graph::compute_nodes_for_tree;
 use crate::query_plan::fetch_dependency_graph::FetchDependencyGraph;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphProcessor;
 use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToCostProcessor;
-use crate::query_plan::fetch_dependency_graph_processor::FetchDependencyGraphToQueryPlanProcessor;
 use crate::query_plan::generate::generate_all_plans_and_find_best;
 use crate::query_plan::generate::PlanBuilder;
 use crate::query_plan::query_planner::compute_root_fetch_groups;
@@ -59,8 +58,6 @@ pub(crate) struct QueryPlanningParameters<'a> {
     pub(crate) federated_query_graph: Arc<QueryGraph>,
     /// The operation to be query planned.
     pub(crate) operation: Arc<Operation>,
-    /// A processor for converting fetch dependency graphs to query plans.
-    pub(crate) processor: FetchDependencyGraphToQueryPlanProcessor,
     /// The query graph node at which query planning begins.
     pub(crate) head: NodeIndex,
     /// Whether the head must be a root node for query planning.
@@ -1036,7 +1033,6 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             supergraph_schema: self.parameters.supergraph_schema.clone(),
             federated_query_graph: graph.clone(),
             operation: self.parameters.operation.clone(),
-            processor: self.parameters.processor.clone(),
             abstract_types_with_inconsistent_runtime_types: self
                 .parameters
                 .abstract_types_with_inconsistent_runtime_types
