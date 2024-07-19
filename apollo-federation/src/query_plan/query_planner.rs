@@ -8,6 +8,7 @@ use apollo_compiler::Name;
 use indexmap::IndexMap;
 use indexmap::IndexSet;
 use itertools::Itertools;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
@@ -41,6 +42,7 @@ use crate::schema::position::OutputTypeDefinitionPosition;
 use crate::schema::position::SchemaRootDefinitionKind;
 use crate::schema::position::TypeDefinitionPosition;
 use crate::schema::ValidFederationSchema;
+use crate::utils::logging::snapshot;
 use crate::ApiSchemaOptions;
 use crate::Supergraph;
 
@@ -165,7 +167,7 @@ impl Default for QueryPlannerDebugConfig {
 }
 
 // PORT_NOTE: renamed from PlanningStatistics in the JS codebase.
-#[derive(Debug, PartialEq, Default)]
+#[derive(Debug, PartialEq, Default, Serialize)]
 pub struct QueryPlanningStatistics {
     pub evaluated_plan_count: Cell<usize>,
 }
@@ -197,6 +199,10 @@ pub struct QueryPlanner {
 }
 
 impl QueryPlanner {
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::new")
+    )]
     pub fn new(
         supergraph: &Supergraph,
         config: QueryPlannerConfig,
@@ -309,6 +315,10 @@ impl QueryPlanner {
     }
 
     // PORT_NOTE: this receives an `Operation` object in JS which is a concept that doesn't exist in apollo-rs.
+    #[cfg_attr(
+        feature = "snapshot_tracing",
+        tracing::instrument(level = "trace", skip_all, name = "QueryPlanner::build_query_plan")
+    )]
     pub fn build_query_plan(
         &self,
         document: &Valid<ExecutableDocument>,
@@ -321,10 +331,10 @@ impl QueryPlanner {
 
         if operation.selection_set.selections.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            return Err(SingleFederationError::InvalidGraphQL {
-                message: "Invalid operation: empty selection set".to_string(),
-            }
-            .into());
+            // TODO(@goto-bus-stop) it's probably fair to panic here :)
+            return Err(FederationError::internal(
+                "Invalid operation: empty selection set",
+            ));
         }
 
         let is_subscription = operation.is_subscription();
@@ -400,6 +410,16 @@ impl QueryPlanner {
         if normalized_operation.selection_set.selections.is_empty() {
             return Ok(QueryPlan::default());
         }
+
+        snapshot!(
+            "NormalizedOperation",
+            serde_json_bytes::json!({
+                "original": &operation.serialize().to_string(),
+                "normalized": &normalized_operation.to_string()
+            })
+            .to_string(),
+            "normalized operation"
+        );
 
         let Some(root) = self
             .federated_query_graph
@@ -497,10 +517,14 @@ impl QueryPlanner {
             None => None,
         };
 
-        Ok(QueryPlan {
+        let plan = QueryPlan {
             node: root_node,
             statistics,
-        })
+        };
+
+        snapshot!(plan, "query plan");
+
+        Ok(plan)
     }
 
     /// Get Query Planner's API Schema.
@@ -598,6 +622,10 @@ fn only_root_subgraph(graph: &FetchDependencyGraph) -> Result<Arc<str>, Federati
     Ok(name.clone())
 }
 
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(level = "trace", skip_all, name = "compute_root_fetch_groups")
+)]
 pub(crate) fn compute_root_fetch_groups(
     root_kind: SchemaRootDefinitionKind,
     dependency_graph: &mut FetchDependencyGraph,
@@ -626,6 +654,7 @@ pub(crate) fn compute_root_fetch_groups(
         };
         let fetch_dependency_node =
             dependency_graph.get_or_create_root_node(subgraph_name, root_kind, root_type)?;
+        snapshot!(dependency_graph, "tree_with_root_node");
         compute_nodes_for_tree(
             dependency_graph,
             &child.tree,
@@ -642,8 +671,17 @@ fn compute_root_parallel_dependency_graph(
     parameters: &QueryPlanningParameters,
     has_defers: bool,
 ) -> Result<FetchDependencyGraph, FederationError> {
+    snapshot!(
+        "FetchDependencyGraph",
+        "Empty",
+        "Starting process to construct a parallel fetch dependency graph"
+    );
     let selection_set = parameters.operation.selection_set.clone();
     let best_plan = compute_root_parallel_best_plan(parameters, selection_set, has_defers)?;
+    snapshot!(
+        best_plan.fetch_dependency_graph,
+        "Plan returned from compute_root_parallel_best_plan"
+    );
     Ok(best_plan.fetch_dependency_graph)
 }
 
@@ -703,6 +741,10 @@ fn compute_plan_internal(
         let mut dependency_graph = compute_root_parallel_dependency_graph(parameters, has_defers)?;
 
         let (main, deferred) = dependency_graph.process(&mut parameters.processor, root_kind)?;
+        snapshot!(
+            dependency_graph,
+            "Plan after calling FetchDependencyGraph::process"
+        );
         // XXX(@goto-bus-stop) Maybe `.defer_tracking` should be on the return value of `process()`..?
         let primary_selection = dependency_graph.defer_tracking.primary_selection;
 

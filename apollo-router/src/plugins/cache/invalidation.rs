@@ -21,7 +21,7 @@ pub(crate) struct Invalidation {
     handle: Handle<InvalidationTopic, (InvalidationOrigin, Vec<InvalidationRequest>)>,
 }
 
-#[derive(Copy, Clone, Hash, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
 pub(crate) struct InvalidationTopic;
 
 #[derive(Clone, Debug)]

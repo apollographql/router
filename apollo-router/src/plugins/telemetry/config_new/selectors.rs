@@ -229,12 +229,6 @@ pub(crate) enum SupergraphValue {
     Custom(SupergraphSelector),
 }
 
-#[derive(Deserialize, JsonSchema, Clone, Debug)]
-#[serde(deny_unknown_fields, rename_all = "snake_case")]
-pub(crate) enum EventHolder {
-    EventCustom(SupergraphSelector),
-}
-
 impl From<&SupergraphValue> for InstrumentValue<SupergraphSelector> {
     fn from(value: &SupergraphValue) -> Self {
         match value {

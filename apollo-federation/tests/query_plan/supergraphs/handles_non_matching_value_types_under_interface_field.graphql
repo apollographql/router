@@ -1,4 +1,4 @@
-# Composed from subgraphs with hash: ea9d061045c5d69c7ac50bff2b63f8b35e9494a5
+# Composed from subgraphs with hash: 688f2dad6c47c75df28f6cdd47bb6cc242311192
 schema
   @link(url: "https://specs.apollo.dev/link/v1.0")
   @link(url: "https://specs.apollo.dev/join/v0.3", for: EXECUTION)
