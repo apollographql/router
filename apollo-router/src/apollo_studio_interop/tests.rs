@@ -126,17 +126,14 @@ fn enums_from_response(
     response_body_str: &str,
 ) -> ReferencedEnums {
     let config = Configuration::default();
-    let compiler_schema = Schema::parse_and_validate(schema_str, "schema.graphql").unwrap();
-    let spec_schema = crate::spec::Schema::parse(schema_str, &config)
-        .unwrap()
-        .with_api_schema(compiler_schema.clone());
-    let query = Query::parse(query_str, operation_name, &spec_schema, &config).unwrap();
+    let schema = crate::spec::Schema::parse(schema_str, &config).unwrap();
+    let query = Query::parse(query_str, operation_name, &schema, &config).unwrap();
     let response_body: Object = serde_json::from_str(response_body_str).unwrap();
 
     extract_enums_from_response(
         Arc::new(query),
         operation_name,
-        &compiler_schema,
+        schema.supergraph_schema(),
         &response_body,
     )
 }

@@ -7,6 +7,7 @@ use indexmap::map::Entry;
 use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
+use serde::Serialize;
 
 use crate::error::FederationError;
 use crate::operation::SelectionSet;
@@ -23,13 +24,16 @@ use crate::query_graph::QueryGraphNode;
 // Typescript doesn't have a native way of associating equality/hash functions with types, so they
 // were passed around manually. This isn't the case with Rust, where we instead implement trigger
 // equality via `PartialEq` and `Hash`.
-#[derive(Clone)]
+#[derive(Serialize)]
 pub(crate) struct PathTree<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
     TEdge: Copy + Into<Option<EdgeIndex>>,
 {
     /// The query graph of which this is a path tree.
+    // TODO: This is probably useful information for snapshot logging, but it can probably be
+    // inferred by the visualizer
+    #[serde(skip)]
     pub(crate) graph: Arc<QueryGraph>,
     /// The query graph node at which the path tree starts.
     pub(crate) node: NodeIndex,
@@ -45,7 +49,35 @@ where
     pub(crate) childs: Vec<Arc<PathTreeChild<TTrigger, TEdge>>>,
 }
 
-#[derive(Debug)]
+impl<TTrigger, TEdge> Clone for PathTree<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Copy + Into<Option<EdgeIndex>>,
+{
+    fn clone(&self) -> Self {
+        Self {
+            graph: self.graph.clone(),
+            node: self.node,
+            local_selection_sets: self.local_selection_sets.clone(),
+            childs: self.childs.clone(),
+        }
+    }
+}
+
+impl<TTrigger, TEdge> PartialEq for PathTree<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Copy + PartialEq + Into<Option<EdgeIndex>>,
+{
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.graph, &other.graph)
+            && self.node == other.node
+            && self.local_selection_sets == other.local_selection_sets
+            && self.childs == other.childs
+    }
+}
+
+#[derive(Debug, Serialize)]
 pub(crate) struct PathTreeChild<TTrigger, TEdge>
 where
     TTrigger: Eq + Hash,
@@ -59,6 +91,19 @@ where
     pub(crate) conditions: Option<Arc<OpPathTree>>,
     /// The child `PathTree` reached by taking the edge.
     pub(crate) tree: Arc<PathTree<TTrigger, TEdge>>,
+}
+
+impl<TTrigger, TEdge> PartialEq for PathTreeChild<TTrigger, TEdge>
+where
+    TTrigger: Eq + Hash,
+    TEdge: Copy + PartialEq + Into<Option<EdgeIndex>>,
+{
+    fn eq(&self, other: &Self) -> bool {
+        self.edge == other.edge
+            && self.trigger == other.trigger
+            && self.conditions == other.conditions
+            && self.tree == other.tree
+    }
 }
 
 /// A `PathTree` whose triggers are operation elements (essentially meaning that the constituent
@@ -283,6 +328,39 @@ where
             })
     }
 
+    /// Appends the children of the other `OpTree` onto the children of this tree.
+    ///
+    /// ## Panics
+    /// Like `Self::merge`, this method will panic if the graphs of the two `OpTree`s below to
+    /// different allocations (i.e. they don't below to the same graph) or if they below to
+    /// different root nodes.
+    pub(crate) fn extend(&mut self, other: &Self) {
+        assert!(
+            Arc::ptr_eq(&self.graph, &other.graph),
+            "Cannot merge path tree build on another graph"
+        );
+        assert_eq!(
+            self.node, other.node,
+            "Cannot merge path trees rooted different nodes"
+        );
+        if self == other {
+            return;
+        }
+        if other.childs.is_empty() {
+            return;
+        }
+        if self.childs.is_empty() {
+            self.clone_from(other);
+            return;
+        }
+        self.childs.extend_from_slice(&other.childs);
+        self.local_selection_sets
+            .extend_from_slice(&other.local_selection_sets);
+    }
+
+    /// ## Panics
+    /// This method will panic if the graphs of the two `OpTree`s below to different allocations
+    /// (i.e. they don't below to the same graph) or if they below to different root nodes.
     pub(crate) fn merge(self: &Arc<Self>, other: &Arc<Self>) -> Arc<Self> {
         if Arc::ptr_eq(self, other) {
             return self.clone();

@@ -8,6 +8,7 @@ mod docs;
 mod file_upload;
 mod lifecycle;
 mod operation_limits;
+mod subgraph_response;
 mod traffic_shaping;
 
 #[cfg(any(not(feature = "ci"), all(target_arch = "x86_64", target_os = "linux")))]
@@ -16,3 +17,21 @@ mod rhai;
 mod subscription;
 mod telemetry;
 mod validation;
+
+use jsonpath_lib::Selector;
+use serde_json::Value;
+use tower::BoxError;
+
+pub trait ValueExt {
+    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError>;
+    fn as_string(&self) -> Option<String>;
+}
+
+impl ValueExt for Value {
+    fn select_path<'a>(&'a self, path: &str) -> Result<Vec<&'a Value>, BoxError> {
+        Ok(Selector::new().str_path(path)?.value(self).select()?)
+    }
+    fn as_string(&self) -> Option<String> {
+        self.as_str().map(|s| s.to_string())
+    }
+}

@@ -98,6 +98,10 @@ struct Extracted<Element> {
 ///   The `Option`s in side `type Choices<T> = Vec<Option<T>>` are for internal use
 ///   and should all be `Some` when calling this function.
 /// * `plan_builder`: a struct that implements the `PlanBuilder` trait.
+#[cfg_attr(
+    feature = "snapshot_tracing",
+    tracing::instrument(skip_all, level = "trace")
+)]
 pub fn generate_all_plans_and_find_best<Plan, Element>(
     mut initial: Plan,
     to_add: Vec<Choices<Element>>,

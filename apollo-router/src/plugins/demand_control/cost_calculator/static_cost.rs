@@ -431,7 +431,7 @@ mod tests {
         query_str: &str,
         config: &Configuration,
     ) -> (spec::Schema, ParsedDocument) {
-        let schema = spec::Schema::parse_test(schema_str, config).unwrap();
+        let schema = spec::Schema::parse(schema_str, config).unwrap();
         let query = Query::parse_document(query_str, None, &schema, config).unwrap();
         (schema, query)
     }
