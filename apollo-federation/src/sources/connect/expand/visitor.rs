@@ -117,7 +117,15 @@ impl JSONSelectionVisitor for ToSchemaVisitor<'_> {
         let mut extract_sub_type = |type_: &TypeDefinitionPosition| {
             match type_ {
                 TypeDefinitionPosition::Object(object) => {
-                    object.pre_insert(self.to_schema)?;
+                    // this is really an upsert — pre_insert/insert will error if the object already exists
+                    if !self
+                        .to_schema
+                        .schema()
+                        .types
+                        .contains_key(&object.type_name)
+                    {
+                        object.pre_insert(self.to_schema)?;
+                    }
                     let def = object.get(self.original_schema.schema())?;
 
                     Ok(ExtendedType::Object(Node::new(ObjectType {
@@ -180,7 +188,17 @@ impl JSONSelectionVisitor for ToSchemaVisitor<'_> {
         // Now actually consolidate the object into our schema
         match (definition, type_) {
             (TypeDefinitionPosition::Object(object), ExtendedType::Object(object_type)) => {
-                object.insert(self.to_schema, object_type)
+                // this is really an upsert — pre_insert/insert will error if the object already exists
+                if !self
+                    .to_schema
+                    .schema()
+                    .types
+                    .contains_key(&object.type_name)
+                {
+                    object.insert(self.to_schema, object_type)
+                } else {
+                    Ok(())
+                }
             }
             (TypeDefinitionPosition::Interface(_), ExtendedType::Interface(_)) => todo!(),
             (TypeDefinitionPosition::Union(_), ExtendedType::Union(_)) => todo!(),
