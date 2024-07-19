@@ -1,3 +1,6 @@
+use std::collections::HashMap;
+
+use http::HeaderName;
 use indexmap::IndexMap;
 
 use super::spec::ConnectHTTPArguments;
@@ -85,7 +88,7 @@ impl Connector {
                 let source_http = source.map(|s| &s.http);
 
                 let transport = Transport::HttpJson(HttpJsonTransport::from_directive(
-                    &connect_http,
+                    connect_http,
                     source_http,
                 )?);
 
@@ -142,13 +145,13 @@ pub struct HttpJsonTransport {
     pub base_url: String,
     pub path_template: URLPathTemplate,
     pub method: HTTPMethod,
-    pub headers: Vec<HTTPHeader>,
+    pub headers: HashMap<HeaderName, HeaderSource>,
     pub body: Option<JSONSelection>,
 }
 
 impl HttpJsonTransport {
     fn from_directive(
-        http: &ConnectHTTPArguments,
+        http: ConnectHTTPArguments,
         source: Option<&SourceHTTPArguments>,
     ) -> Result<Self, FederationError> {
         let (method, path) = if let Some(path) = &http.get {
@@ -165,11 +168,16 @@ impl HttpJsonTransport {
             return Err(FederationError::internal("missing http method"));
         };
 
-        let mut headers = source
-            .as_ref()
-            .map(|source| source.headers.clone())
-            .unwrap_or_default();
-        headers.extend(http.headers.clone());
+        #[allow(clippy::mutable_key_type)]
+        // HeaderName is internally mutable, but we don't mutate it
+        let mut headers = http.headers;
+        for (header_name, header_source) in
+            source.map(|source| &source.headers).into_iter().flatten()
+        {
+            if !headers.contains_key(header_name) {
+                headers.insert(header_name.clone(), header_source.clone());
+            }
+        }
 
         Ok(Self {
             // TODO: We'll need to eventually support @connect directives without
@@ -218,9 +226,9 @@ impl HTTPMethod {
 }
 
 #[derive(Clone, Debug)]
-pub enum HTTPHeader {
-    Rename { from: String, to: String },
-    Inject { name: String, value: String },
+pub enum HeaderSource {
+    From(String),
+    Value(String),
 }
 
 #[cfg(test)]

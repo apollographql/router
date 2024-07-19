@@ -323,8 +323,10 @@ async fn test_headers() {
         None,
         |request| {
             let headers = request.router_request.headers_mut();
-            headers.insert("x-rename", "renamed".parse().unwrap());
-            headers.append("x-rename", "also-renamed".parse().unwrap());
+            headers.insert("x-rename-source", "renamed-by-source".parse().unwrap());
+            headers.insert("x-rename-connect", "renamed-by-connect".parse().unwrap());
+            headers.insert("x-forward", "forwarded".parse().unwrap());
+            headers.append("x-forward", "forwarded-again".parse().unwrap());
         },
     )
     .await;
@@ -334,12 +336,16 @@ async fn test_headers() {
         vec![Matcher::new()
             .method("GET")
             .header(
-                HeaderName::from_str("x-new-name").unwrap(),
-                HeaderValue::from_str("renamed").unwrap(),
+                HeaderName::from_str("x-forward").unwrap(),
+                HeaderValue::from_str("forwarded").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-forward").unwrap(),
+                HeaderValue::from_str("forwarded-again").unwrap(),
             )
             .header(
                 HeaderName::from_str("x-new-name").unwrap(),
-                HeaderValue::from_str("also-renamed").unwrap(),
+                HeaderValue::from_str("renamed-by-connect").unwrap(),
             )
             .header(
                 HeaderName::from_str("x-insert").unwrap(),

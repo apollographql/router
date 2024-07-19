@@ -1,10 +1,10 @@
+use std::collections::HashMap;
 use std::collections::HashSet;
 use std::iter::Iterator;
-use std::str::FromStr;
 use std::sync::Arc;
 
 use apollo_federation::sources::connect::ApplyTo;
-use apollo_federation::sources::connect::HTTPHeader;
+use apollo_federation::sources::connect::HeaderSource;
 use apollo_federation::sources::connect::HttpJsonTransport;
 use displaydoc::Display;
 use http::header::ACCEPT;
@@ -226,48 +226,39 @@ fn flatten_keys_recursive(
     }
 }
 
+#[allow(clippy::mutable_key_type)] // HeaderName is internally mutable, but safe to use in maps
 fn add_headers<T>(
     request: &mut http::Request<T>,
     incoming_supergraph_headers: &HeaderMap<HeaderValue>,
-    config: &[HTTPHeader],
+    config: &HashMap<HeaderName, HeaderSource>,
 ) {
     let headers = request.headers_mut();
-    for rule in config {
-        match rule {
-            HTTPHeader::Rename { from, to } => match HeaderName::from_str(to) {
-                Ok(new_name) => {
-                    if RESERVED_HEADERS.contains(&new_name) {
-                        tracing::warn!(
-                            "Header '{}' is reserved and will not be propagated",
-                            new_name
-                        );
-                    } else {
-                        let values = incoming_supergraph_headers.get_all(from);
-                        let mut propagated = false;
-                        for value in values {
-                            headers.append(new_name.clone(), value.clone());
-                            propagated = true;
-                        }
-                        if !propagated {
-                            tracing::warn!("Header '{}' not found in incoming request", new_name);
-                        }
+    for (header_name, header_source) in config {
+        match header_source {
+            HeaderSource::From(from) => {
+                if RESERVED_HEADERS.contains(&header_name) {
+                    tracing::warn!(
+                        "Header '{}' is reserved and will not be propagated",
+                        header_name
+                    );
+                } else {
+                    let values = incoming_supergraph_headers.get_all(from);
+                    let mut propagated = false;
+                    for value in values {
+                        headers.append(header_name.clone(), value.clone());
+                        propagated = true;
+                    }
+                    if !propagated {
+                        tracing::warn!("Header '{}' not found in incoming request", header_name);
                     }
                 }
-                Err(err) => {
-                    tracing::error!("Invalid header name '{}': {:?}", to, err);
+            }
+            HeaderSource::Value(value) => match HeaderValue::from_str(value) {
+                Ok(value) => {
+                    headers.append(header_name, value);
                 }
-            },
-            HTTPHeader::Inject { name, value } => match HeaderName::from_str(name) {
-                Ok(name) => match HeaderValue::from_str(value) {
-                    Ok(value) => {
-                        headers.append(name, value);
-                    }
-                    Err(err) => {
-                        tracing::error!("Invalid header value '{}': {:?}", value, err);
-                    }
-                },
                 Err(err) => {
-                    tracing::error!("Invalid header value '{}': {:?}", name, err);
+                    tracing::error!("Invalid header value '{}': {:?}", value, err);
                 }
             },
         }
@@ -291,10 +282,13 @@ pub(crate) enum HttpJsonTransportError {
 
 #[cfg(test)]
 mod tests {
-    use apollo_federation::sources::connect::HTTPHeader;
+    use std::collections::HashMap;
+
+    use apollo_federation::sources::connect::HeaderSource;
     use http::header::CONTENT_ENCODING;
     use http::HeaderMap;
     use http::HeaderValue;
+    use maplit::hashmap;
 
     use crate::plugins::connectors::http_json_transport::add_headers;
 
@@ -377,7 +371,7 @@ mod tests {
         .collect();
 
         let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
-        add_headers(&mut request, &incoming_supergraph_headers, &[]);
+        add_headers(&mut request, &incoming_supergraph_headers, &HashMap::new());
         assert!(request.headers().is_empty());
     }
 
@@ -392,16 +386,10 @@ mod tests {
         .into_iter()
         .collect();
 
-        let config = vec![
-            HTTPHeader::Rename {
-                from: "x-rename".parse().unwrap(),
-                to: "x-new-name".parse().unwrap(),
-            },
-            HTTPHeader::Inject {
-                name: "x-insert".parse().unwrap(),
-                value: "inserted".parse().unwrap(),
-            },
-        ];
+        let config = hashmap! {
+            "x-new-name".parse().unwrap() => HeaderSource::From("x-rename".parse().unwrap()),
+            "x-insert".parse().unwrap() => HeaderSource::Value("inserted".to_string()),
+        };
 
         let mut request = http::Request::builder().body(hyper::Body::empty()).unwrap();
         add_headers(&mut request, &incoming_supergraph_headers, &config);

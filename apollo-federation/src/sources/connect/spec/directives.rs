@@ -1,8 +1,12 @@
+use std::collections::HashMap;
+use std::iter::once;
+
 use apollo_compiler::ast::Directive;
 use apollo_compiler::ast::Value;
 use apollo_compiler::schema::Component;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
+use http::HeaderName;
 use itertools::Itertools;
 
 use super::schema::ConnectDirectiveArguments;
@@ -25,7 +29,7 @@ use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::schema::FederationSchema;
 use crate::sources::connect::json_selection::JSONSelection;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
-use crate::sources::connect::HTTPHeader;
+use crate::sources::connect::HeaderSource;
 
 macro_rules! internal {
     ($s:expr) => {
@@ -158,7 +162,7 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
                 headers = if let Some(values) = value.as_list() {
                     Some(nodes_to_headers(values)?)
                 } else if value.as_object().is_some() {
-                    Some(node_to_headers(value)?)
+                    Some(once(node_to_header(value)?).collect())
                 } else {
                     return Err(internal!(
                         "`headers` field in `@source` directive's `http` field is not an object or list of objects"
@@ -183,79 +187,67 @@ impl TryFrom<&ObjectNode> for SourceHTTPArguments {
 }
 
 /// Converts a list of (name, value) pairs into a list of HTTP headers.
-fn nodes_to_headers(values: &[Node<Value>]) -> Result<Vec<HTTPHeader>, FederationError> {
-    values
-        .iter()
-        .map(node_to_headers)
-        .flatten_ok()
-        .try_collect()
+fn nodes_to_headers(
+    values: &[Node<Value>],
+) -> Result<HashMap<HeaderName, HeaderSource>, FederationError> {
+    values.iter().map(node_to_header).try_collect()
 }
 
-fn node_to_headers(value: &Node<Value>) -> Result<Vec<HTTPHeader>, FederationError> {
+fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), FederationError> {
     let mappings = value
         .as_object()
         .ok_or(internal!("HTTP header mapping is not an object"))?;
-
-    let mut name = None;
-    let mut from = None;
-    let mut value = None;
-    for (field, mapping) in mappings {
-        let field = field.as_str();
-
-        if field == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME.as_str() {
-            let name_value = mapping.as_str().ok_or(internal!(
+    let name = mappings
+        .iter()
+        .find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_NAME_ARGUMENT_NAME).then_some(value)
+        })
+        .ok_or(internal!("missing `name` field in HTTP header mapping"))
+        .and_then(|value| {
+            value.as_str().ok_or(internal!(
                 "`name` field in HTTP header mapping is not a string"
-            ))?;
+            ))
+        })
+        .and_then(|name_str| {
+            HeaderName::try_from(name_str)
+                .map_err(|err| internal!(format!("Invalid header name: {}", err.to_string())))
+        })?;
 
-            name = Some(name_value.to_string());
-        } else if field == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME.as_str() {
-            let from_value = mapping.as_str().ok_or(internal!(
+    let from = mappings
+        .iter()
+        .find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_FROM_ARGUMENT_NAME).then_some(value)
+        })
+        .map(|value| {
+            value.as_str().ok_or(internal!(
                 "`from` field in HTTP header mapping is not a string"
-            ))?;
-
-            from = Some(from_value.to_string());
-        } else if field == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME.as_str() {
-            let value_values = if let Some(list) = mapping.as_list() {
-                list.iter()
-                    .map(|item| {
-                        item.as_str().ok_or(internal!(
-                            "`value` field in HTTP header mapping is not a string"
-                        ))
-                    })
-                    .try_collect()?
-            } else if let Some(item) = mapping.as_str() {
-                vec![item]
-            } else {
-                return Err(internal!(
-                    "`value` field in HTTP header mapping is not a string or list of strings"
-                ));
-            };
-
-            value = Some(value_values);
-        } else {
-            return Err(internal!(format!(
-                "unknown argument for HTTP header mapping: {field}"
-            )));
-        }
+            ))
+        })
+        .transpose()?;
+    if let Some(from) = from {
+        return Ok((name, HeaderSource::From(from.to_string())));
     }
 
-    let name = name.ok_or(internal!("missing `name` field in HTTP header mapping"))?;
-    match (from, value) {
-        (Some(_), Some(_)) => Err(internal!(
-            "cannot have both `from` and `value` fields in HTTP header mapping"
-        )),
-        (None, None) => Err(internal!(
+    let value = mappings
+        .iter()
+        .find_map(|(name, value)| {
+            (*name == HTTP_HEADER_MAPPING_VALUE_ARGUMENT_NAME).then_some(value)
+        })
+        .ok_or(internal!(
             "missing `from` or `value` field in HTTP header mapping"
-        )),
-        (Some(from), None) => Ok(vec![HTTPHeader::Rename { from, to: name }]),
-        (None, Some(value)) => Ok(value
-            .into_iter()
-            .map(|v| HTTPHeader::Inject {
-                name: name.clone(),
-                value: v.to_string(),
-            })
-            .collect()),
-    }
+        ))?;
+
+    let value = if let Some(list) = value.as_list() {
+        list.iter().filter_map(|item| item.as_str()).join(",")
+    } else if let Some(item) = value.as_str() {
+        item.to_string()
+    } else {
+        return Err(internal!(
+            "`value` field in HTTP header mapping is not a string or list of strings"
+        ));
+    };
+
+    Ok((name, HeaderSource::Value(value)))
 }
 
 impl ConnectDirectiveArguments {

@@ -1,5 +1,5 @@
 # rover supergraph compose --config apollo-router/src/plugins/connectors/testdata/steelthread.yaml > apollo-router/src/plugins/connectors/testdata/steelthread.graphql
-federation_version: =2.9.0-dylan
+federation_version: =2.9.0-connectors.9
 subgraphs:
   connectors:
     routing_url: none
@@ -19,7 +19,8 @@ subgraphs:
             http: {
               baseURL: "https://jsonplaceholder.typicode.com/"
               headers: [
-                { name: "x-new-name" from: "x-rename" }
+                { name: "x-new-name" from: "x-rename-source" }
+                { name: "x-forward" from: "x-forward" }
                 { name: "x-insert" value: "inserted" }
               ]
             }
@@ -27,7 +28,11 @@ subgraphs:
 
         type Query {
           users: [User]
-            @connect(source: "json", http: { GET: "/users" }, selection: "id name")
+            @connect(
+              source: "json"
+              http: { GET: "/users", headers: [{name: "x-new-name", from: "x-rename-connect"}]} 
+              selection: "id name"
+            )
 
           user(id: ID!): User
             @connect(

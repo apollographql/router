@@ -1,9 +1,12 @@
+use std::collections::HashMap;
+
 use apollo_compiler::name;
 use apollo_compiler::Name;
+use http::HeaderName;
 
 use crate::schema::position::ObjectOrInterfaceFieldDirectivePosition;
 use crate::sources::connect::json_selection::JSONSelection;
-use crate::sources::connect::HTTPHeader;
+use crate::sources::connect::HeaderSource;
 
 pub(crate) const CONNECT_DIRECTIVE_NAME_IN_SPEC: Name = name!("connect");
 pub(crate) const CONNECT_SOURCE_ARGUMENT_NAME: Name = name!("source");
@@ -54,7 +57,7 @@ pub(crate) struct SourceHTTPArguments {
 
     /// HTTP headers used when requesting resources from the upstream source.
     /// Can be overridden by name with headers in a @connect directive.
-    pub(crate) headers: Vec<HTTPHeader>,
+    pub(crate) headers: HashMap<HeaderName, HeaderSource>,
 }
 
 /// Arguments to the `@connect` directive
@@ -108,5 +111,5 @@ pub(crate) struct ConnectHTTPArguments {
     /// Configuration for headers to attach to the request.
     ///
     /// Overrides headers from the associated @source by name.
-    pub(crate) headers: Vec<HTTPHeader>,
+    pub(crate) headers: HashMap<HeaderName, HeaderSource>,
 }
