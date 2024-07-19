@@ -8,6 +8,7 @@ use apollo_federation::sources::connect::Connector;
 use apollo_federation::sources::connect::Transport;
 use futures::future::BoxFuture;
 use indexmap::IndexMap;
+use opentelemetry::Key;
 use tower::BoxError;
 use tower::ServiceExt;
 use tracing::Instrument;
@@ -25,6 +26,21 @@ use crate::plugins::subscription::SubscriptionConfig;
 use crate::services::ConnectRequest;
 use crate::services::ConnectResponse;
 use crate::spec::Schema;
+
+pub(crate) const APOLLO_CONNECTOR_TYPE: Key = Key::from_static_str("apollo.connector.type");
+pub(crate) const APOLLO_CONNECTOR_DETAIL: Key = Key::from_static_str("apollo.connector.detail");
+pub(crate) const APOLLO_CONNECTOR_SELECTION: Key =
+    Key::from_static_str("apollo.connector.selection");
+pub(crate) const APOLLO_CONNECTOR_FIELD_NAME: Key =
+    Key::from_static_str("apollo.connector.field.name");
+pub(crate) const APOLLO_CONNECTOR_FIELD_ALIAS: Key =
+    Key::from_static_str("apollo.connector.field.alias");
+pub(crate) const APOLLO_CONNECTOR_FIELD_RETURN_TYPE: Key =
+    Key::from_static_str("apollo.connector.field.return_type");
+pub(crate) const APOLLO_CONNECTOR_SOURCE_NAME: Key =
+    Key::from_static_str("apollo.connector.source.name");
+pub(crate) const APOLLO_CONNECTOR_SOURCE_DETAIL: Key =
+    Key::from_static_str("apollo.connector.source.detail");
 
 #[derive(Clone)]
 pub(crate) struct ConnectorService {
