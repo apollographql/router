@@ -214,7 +214,7 @@ impl Link {
         if let Some(purpose) = &self.purpose {
             arguments.push(
                 Argument {
-                    name: name!(purpose),
+                    name: name!(for),
                     value: Value::Enum(purpose.into()).into(),
                 }
                 .into(),
