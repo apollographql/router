@@ -1,5 +1,9 @@
 //! Configuration for datadog tracing.
 
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::time::Duration;
+
 use ahash::HashMap;
 use ahash::HashMapExt;
 use futures::future::BoxFuture;
@@ -19,9 +23,6 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
 use serde::Deserialize;
-use std::fmt::Debug;
-use std::fmt::Formatter;
-use std::time::Duration;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
