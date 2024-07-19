@@ -210,14 +210,6 @@ pub(crate) enum Enabled {
     Enabled,
 }
 
-/// Using websocket to directly connect to subgraph
-#[derive(Debug, Clone, PartialEq, Eq, Default, Deserialize, Serialize, JsonSchema)]
-#[serde(deny_unknown_fields, default)]
-pub(crate) struct PassthroughMode {
-    /// WebSocket configuration for specific subgraphs
-    subgraph: SubgraphPassthroughMode,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields)]
 /// WebSocket configuration for a specific subgraph

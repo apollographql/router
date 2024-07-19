@@ -11,6 +11,7 @@ use http::StatusCode;
 use lru::LruCache;
 use router_bridge::planner::UsageReporting;
 use tokio::sync::Mutex;
+use tokio::task;
 
 use crate::apollo_studio_interop::generate_extended_references;
 use crate::apollo_studio_interop::ExtendedReferenceStats;
@@ -22,6 +23,7 @@ use crate::graphql::IntoGraphQLErrors;
 use crate::plugins::authorization::AuthorizationPlugin;
 use crate::plugins::telemetry::config::ApolloMetricsReferenceMode;
 use crate::plugins::telemetry::config::Conf as TelemetryConfig;
+use crate::plugins::telemetry::consts::QUERY_PARSING_SPAN_NAME;
 use crate::query_planner::fetch::QueryHash;
 use crate::query_planner::OperationKind;
 use crate::services::SupergraphRequest;
@@ -31,8 +33,6 @@ use crate::spec::Schema;
 use crate::spec::SpecError;
 use crate::Configuration;
 use crate::Context;
-
-pub(crate) const QUERY_PARSING_SPAN_NAME: &str = "parse_query";
 
 /// [`Layer`] for QueryAnalysis implementation.
 #[derive(Clone)]
@@ -73,12 +73,32 @@ impl QueryAnalysisLayer {
         }
     }
 
-    pub(crate) fn parse_document(
+    pub(crate) async fn parse_document(
         &self,
         query: &str,
         operation_name: Option<&str>,
     ) -> Result<ParsedDocument, SpecError> {
-        Query::parse_document(query, operation_name, &self.schema, &self.configuration)
+        let query = query.to_string();
+        let operation_name = operation_name.map(|o| o.to_string());
+        let schema = self.schema.clone();
+        let conf = self.configuration.clone();
+
+        // Must be created *outside* of the spawn_blocking or the span is not connected to the
+        // parent
+        let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
+
+        task::spawn_blocking(move || {
+            span.in_scope(|| {
+                Query::parse_document(
+                    &query,
+                    operation_name.as_deref(),
+                    schema.as_ref(),
+                    conf.as_ref(),
+                )
+            })
+        })
+        .await
+        .expect("parse_document task panicked")
     }
 
     pub(crate) async fn supergraph_request(
@@ -127,8 +147,7 @@ impl QueryAnalysisLayer {
 
         let res = match entry {
             None => {
-                let span = tracing::info_span!(QUERY_PARSING_SPAN_NAME, "otel.kind" = "INTERNAL");
-                match span.in_scope(|| self.parse_document(&query, op_name.as_deref())) {
+                match self.parse_document(&query, op_name.as_deref()).await {
                     Err(errors) => {
                         (*self.cache.lock().await).put(
                             QueryAnalysisKey {
@@ -155,7 +174,7 @@ impl QueryAnalysisLayer {
                     Ok(doc) => {
                         let context = Context::new();
 
-                        let operation = doc.executable.get_operation(op_name.as_deref()).ok();
+                        let operation = doc.executable.operations.get(op_name.as_deref()).ok();
                         let operation_name = operation.as_ref().and_then(|operation| {
                             operation.name.as_ref().map(|s| s.as_str().to_owned())
                         });

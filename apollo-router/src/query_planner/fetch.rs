@@ -294,7 +294,7 @@ impl Variables {
             }));
 
             let mut inverted_paths: Vec<Vec<Path>> = Vec::new();
-            let mut values: IndexSet<Value> = IndexSet::new();
+            let mut values: IndexSet<Value> = IndexSet::default();
             data.select_values_and_paths(schema, current_dir, |path, value| {
                 // first get contextual values that are required
                 if let Some(context) = subgraph_context.as_mut() {
