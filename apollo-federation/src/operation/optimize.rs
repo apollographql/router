@@ -1536,6 +1536,8 @@ impl Operation {
 
 #[cfg(test)]
 mod tests {
+    use apollo_compiler::ExecutableDocument;
+
     use super::*;
     use crate::operation::tests::*;
 
@@ -3089,6 +3091,60 @@ mod tests {
                       }
                     }
                   }
+        "###);
+    }
+
+    #[test]
+    fn reuse_fragments_with_directive_on_typename() {
+        let schema = r#"
+            type Query {
+              t1: T
+              t2: T
+              t3: T
+            }
+
+            type T {
+              a: Int
+              b: Int
+              c: Int
+              d: Int
+            }
+        "#;
+        let query = r#"
+            query A ($if: Boolean!) {
+              t1 { b a ...x }
+              t2 { ...x }
+            }
+            query B {
+              # Because this inline fragment is exactly the same shape as `x`,
+              # except for a `__typename` field, it may be tempting to reuse it.
+              # But `x.__typename` has a directive with a variable, and this query
+              # does not have that variable declared, so it can't be used.
+              t3 { ... on T { a c } }
+            }
+            fragment x on T {
+                __typename @include(if: $if)
+                a
+                c
+            }
+        "#;
+        let schema = parse_schema(schema);
+        let query = ExecutableDocument::parse_and_validate(schema.schema(), query, "query.graphql")
+            .unwrap();
+
+        let operation_a =
+            Operation::from_operation_document(schema.clone(), &query, Some("A")).unwrap();
+        let operation_b =
+            Operation::from_operation_document(schema.clone(), &query, Some("B")).unwrap();
+        let expanded_b = operation_b.expand_all_fragments_and_normalize().unwrap();
+
+        assert_optimized!(expanded_b, operation_a.named_fragments, @r###"
+        query B {
+          t3 {
+            a
+            c
+          }
+        }
         "###);
     }
 
