@@ -191,8 +191,7 @@ impl InvalidationRequest {
                 key,
             } => {
                 let entity_key = hash_entity_key(&key);
-                let ty = r#type;
-                format!("subgraph:{subgraph}:type:{ty}:entity:{entity_key}*")
+                format!("subgraph:{subgraph}:type:{type}:entity:{entity_key}*")
             }
         }
     }
