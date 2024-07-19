@@ -386,6 +386,7 @@ mod tests {
         .into_iter()
         .collect();
 
+        #[allow(clippy::mutable_key_type)]
         let config = hashmap! {
             "x-new-name".parse().unwrap() => HeaderSource::From("x-rename".parse().unwrap()),
             "x-insert".parse().unwrap() => HeaderSource::Value("inserted".to_string()),
