@@ -7,10 +7,10 @@ use apollo_compiler::Schema;
 use apollo_compiler::SourceMap;
 
 use super::coordinates::connect_directive_entity_argument_coordinate;
+use super::extended_type::ObjectCategory;
 use super::Code;
 use super::Location;
 use super::Message;
-use super::ObjectCategory;
 use crate::sources::connect::spec::schema::CONNECT_ENTITY_ARGUMENT_NAME;
 
 pub(super) fn validate_entity_arg(
