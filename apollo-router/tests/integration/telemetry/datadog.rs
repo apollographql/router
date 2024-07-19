@@ -521,7 +521,7 @@ impl TraceSpec {
             .collect();
         let mut span_names: HashSet<&str> = self.span_names.clone();
         if self.services.contains("client") {
-            span_names.insert("client_request".into());
+            span_names.insert("client_request");
         }
         tracing::debug!("found spans {:?}", operation_names);
         let missing_operation_names: Vec<_> = span_names
