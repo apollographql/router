@@ -3,8 +3,8 @@ use std::fmt::Formatter;
 use std::hash::Hash;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
 use indexmap::map::Entry;
-use indexmap::IndexMap;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
 use serde::Serialize;
@@ -223,7 +223,8 @@ where
         TEdge: 'inputs,
     {
         // Group by and order by unique edge ID, and among those by unique trigger
-        let mut merged = IndexMap::<TEdge, ByUniqueEdge<TTrigger, /* impl Iterator */ _>>::new();
+        let mut merged =
+            IndexMap::<TEdge, ByUniqueEdge<TTrigger, /* impl Iterator */ _>>::default();
 
         struct ByUniqueEdge<'inputs, TTrigger, GraphPathIter> {
             target_node: NodeIndex,
@@ -257,7 +258,7 @@ where
                             // For a "None" edge, stay on the same node
                             node
                         },
-                        by_unique_trigger: IndexMap::new(),
+                        by_unique_trigger: IndexMap::default(),
                     })
                 }
             };
@@ -581,7 +582,7 @@ mod tests {
         "#;
 
         let (schema, mut executable_document) = parse_schema_and_operation(src);
-        let (op_name, operation) = executable_document.named_operations.first_mut().unwrap();
+        let (op_name, operation) = executable_document.operations.named.first_mut().unwrap();
 
         let query_graph =
             Arc::new(build_query_graph(op_name.to_string().into(), schema.clone()).unwrap());

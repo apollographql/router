@@ -200,7 +200,8 @@ impl PersistedQueryLayer {
         if self.introspection_enabled
             && doc
                 .executable
-                .all_operations()
+                .operations
+                .iter()
                 .all(|op| op.is_introspection(&doc.executable))
         {
             return Ok(request);

@@ -2,11 +2,11 @@ use std::cell::Cell;
 use std::num::NonZeroU32;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::ExecutableDocument;
 use apollo_compiler::Name;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use itertools::Itertools;
 use serde::Serialize;
 
@@ -325,7 +325,8 @@ impl QueryPlanner {
         operation_name: Option<Name>,
     ) -> Result<QueryPlan, FederationError> {
         let operation = document
-            .get_operation(operation_name.as_ref().map(|name| name.as_str()))
+            .operations
+            .get(operation_name.as_ref().map(|name| name.as_str()))
             // TODO(@goto-bus-stop) this is not an internal error, but a user error
             .map_err(|_| FederationError::internal("requested operation does not exist"))?;
 

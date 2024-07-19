@@ -28,7 +28,7 @@ members = [
     "examples/coprocessor-subgraph/rust",
     "examples/throw-error/rhai",
     "fuzz",
-    "fuzz/subgraph"
+    "fuzz/subgraph",
     # Note that xtask is not in the workspace member because it relies on dependencies that are incompatible with the router. Notably hyperx but there are others.
 ]
 
@@ -49,7 +49,7 @@ debug = 1
 # Dependencies used in more than one place are specified here in order to keep versions in sync:
 # https://doc.rust-lang.org/cargo/reference/workspaces.html#the-dependencies-table
 [workspace.dependencies]
-apollo-compiler = "=1.0.0-beta.18"
+apollo-compiler = "=1.0.0-beta.19"
 apollo-parser = "0.7.6"
 apollo-smith = { version = "0.5.0", features = ["parser-impl"] }
 async-trait = "0.1.77"

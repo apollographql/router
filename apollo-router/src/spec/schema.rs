@@ -28,7 +28,7 @@ pub(crate) struct Schema {
     pub(crate) raw_sdl: Arc<String>,
     supergraph: Supergraph,
     subgraphs: HashMap<String, Uri>,
-    pub(crate) implementers_map: HashMap<Name, Implementers>,
+    pub(crate) implementers_map: apollo_compiler::collections::HashMap<Name, Implementers>,
     api_schema: ApiSchema,
     pub(crate) schema_id: Arc<String>,
 }
@@ -39,7 +39,7 @@ pub(crate) struct ApiSchema(pub(crate) ValidFederationSchema);
 
 impl Schema {
     pub(crate) fn parse_ast(sdl: &str) -> Result<ast::Document, SchemaError> {
-        let mut parser = apollo_compiler::Parser::new();
+        let mut parser = apollo_compiler::parser::Parser::new();
         let result = parser.parse_ast(sdl, "schema.graphql");
 
         // Trace log recursion limit data

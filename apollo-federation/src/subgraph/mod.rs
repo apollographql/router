@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::fmt::Formatter;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::ComponentName;
 use apollo_compiler::schema::ExtendedType;
@@ -10,8 +12,6 @@ use apollo_compiler::validation::Valid;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
 use indexmap::map::Entry;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::link::spec::Identity;
@@ -235,8 +235,8 @@ impl Subgraph {
                 description: None,
                 name: query_type_name.name.clone(),
                 directives: Default::default(),
-                fields: IndexMap::new(),
-                implements_interfaces: IndexSet::new(),
+                fields: IndexMap::default(),
+                implements_interfaces: IndexSet::default(),
             })))
         {
             let query_type = query_type.make_mut();

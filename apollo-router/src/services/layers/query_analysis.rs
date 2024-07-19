@@ -174,7 +174,7 @@ impl QueryAnalysisLayer {
                     Ok(doc) => {
                         let context = Context::new();
 
-                        let operation = doc.executable.get_operation(op_name.as_deref()).ok();
+                        let operation = doc.executable.operations.get(op_name.as_deref()).ok();
                         let operation_name = operation.as_ref().and_then(|operation| {
                             operation.name.as_ref().map(|s| s.as_str().to_owned())
                         });

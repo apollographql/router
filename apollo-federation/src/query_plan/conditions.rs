@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast::Directive;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable::DirectiveList;
 use apollo_compiler::executable::Value;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use indexmap::map::Entry;
-use indexmap::IndexMap;
 use serde::Serialize;
 
 use crate::error::FederationError;
@@ -92,7 +92,7 @@ impl Conditions {
     }
 
     pub(crate) fn from_directives(directives: &DirectiveList) -> Result<Self, FederationError> {
-        let mut variables = IndexMap::new();
+        let mut variables = IndexMap::default();
         for directive in directives {
             let negated = match directive.name.as_str() {
                 "include" => false,
@@ -134,7 +134,7 @@ impl Conditions {
         match (new_conditions, self) {
             (Conditions::Boolean(_), _) | (_, Conditions::Boolean(_)) => new_conditions.clone(),
             (Conditions::Variables(new_conditions), Conditions::Variables(handled_conditions)) => {
-                let mut filtered = IndexMap::new();
+                let mut filtered = IndexMap::default();
                 for (cond_name, &cond_negated) in new_conditions.0.iter() {
                     match handled_conditions.is_negated(cond_name) {
                         Some(handled_cond) if cond_negated != handled_cond => {

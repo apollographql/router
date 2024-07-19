@@ -1,6 +1,6 @@
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
-use indexmap::IndexSet;
 
 use crate::error::FederationError;
 use crate::link::federation_spec_definition::FederationSpecDefinition;
@@ -120,7 +120,7 @@ impl ExternalMetadata {
             .referencers
             .get_directive(&external_directive_definition.name)?;
 
-        let mut external_fields = IndexSet::new();
+        let mut external_fields = IndexSet::default();
 
         external_fields.extend(
             external_directive_referencers
@@ -143,7 +143,7 @@ impl ExternalMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let mut fake_external_fields = IndexSet::new();
+        let mut fake_external_fields = IndexSet::default();
         let extends_directive_definition =
             federation_spec_definition.extends_directive_definition(schema)?;
         let key_directive_definition =
@@ -192,7 +192,7 @@ impl ExternalMetadata {
         federation_spec_definition: &'static FederationSpecDefinition,
         schema: &Valid<FederationSchema>,
     ) -> Result<IndexSet<FieldDefinitionPosition>, FederationError> {
-        let mut provided_fields = IndexSet::new();
+        let mut provided_fields = IndexSet::default();
         let provides_directive_definition =
             federation_spec_definition.provides_directive_definition(schema)?;
         let provides_directive_referencers = schema
@@ -241,7 +241,7 @@ impl ExternalMetadata {
             .referencers
             .get_directive(&external_directive_definition.name)?;
 
-        let mut fields_on_external_types = IndexSet::new();
+        let mut fields_on_external_types = IndexSet::default();
         for object_type_position in &external_directive_referencers.object_types {
             let object_type = object_type_position.get(schema.schema())?;
             // PORT_NOTE: The JS codebase does not differentiate fields at a definition/extension

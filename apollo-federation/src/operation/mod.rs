@@ -23,13 +23,13 @@ use std::sync::atomic;
 use std::sync::Arc;
 use std::sync::OnceLock;
 
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable;
 use apollo_compiler::name;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use serde::Serialize;
 
 use crate::error::FederationError;
@@ -123,7 +123,7 @@ impl Operation {
         document: &Valid<apollo_compiler::ExecutableDocument>,
         operation_name: Option<&str>,
     ) -> Result<Self, FederationError> {
-        let operation = document.get_operation(operation_name).map_err(|_| {
+        let operation = document.operations.get(operation_name).map_err(|_| {
             FederationError::internal(format!("No operation named {operation_name:?}"))
         })?;
         let named_fragments = NamedFragments::new(&document.fragments, &schema);
@@ -147,7 +147,7 @@ impl Operation {
             operation: self,
             has_defers: false,
             assigned_defer_labels: HashSet::new(),
-            defer_conditions: IndexMap::new(),
+            defer_conditions: IndexMap::default(),
         }
         // TODO(@TylerBloom): Once defer is implement, the above statement needs to be replaced
         // with the commented-out one below. This is part of FED-95
@@ -159,7 +159,7 @@ impl Operation {
                 operation: self,
                 has_defers: false,
                 assigned_defer_labels: HashSet::new(),
-                defer_conditions: IndexMap::new(),
+                defer_conditions: IndexMap::default(),
             }
         }
         */
@@ -210,8 +210,8 @@ mod selection_map {
     use std::ops::Deref;
     use std::sync::Arc;
 
+    use apollo_compiler::collections::IndexMap;
     use apollo_compiler::executable;
-    use indexmap::IndexMap;
     use serde::Serialize;
 
     use crate::error::FederationError;
@@ -248,7 +248,7 @@ mod selection_map {
 
     impl SelectionMap {
         pub(crate) fn new() -> Self {
-            SelectionMap(IndexMap::new())
+            SelectionMap(IndexMap::default())
         }
 
         pub(crate) fn clear(&mut self) {
@@ -1822,7 +1822,7 @@ where
     K: Eq + Hash,
 {
     fn new() -> Self {
-        Self(IndexMap::new())
+        Self(IndexMap::default())
     }
 
     fn insert(&mut self, key: K, value: V) {
@@ -1955,7 +1955,7 @@ impl SelectionSet {
             type_position.type_name().clone(),
             source_text,
         )?;
-        let named_fragments = NamedFragments::new(&IndexMap::new(), &schema);
+        let named_fragments = NamedFragments::new(&IndexMap::default(), &schema);
         SelectionSet::from_selection_set(&selection_set, &named_fragments, &schema)
     }
 
@@ -2134,9 +2134,9 @@ impl SelectionSet {
         &mut self,
         others: impl Iterator<Item = &'op Selection>,
     ) -> Result<(), FederationError> {
-        let mut fields = IndexMap::new();
-        let mut fragment_spreads = IndexMap::new();
-        let mut inline_fragments = IndexMap::new();
+        let mut fields = IndexMap::default();
+        let mut fragment_spreads = IndexMap::default();
+        let mut inline_fragments = IndexMap::default();
         let target = Arc::make_mut(&mut self.selections);
         for other_selection in others {
             let other_key = other_selection.key();
@@ -3858,7 +3858,7 @@ impl NamedFragments {
 
         // Note: We use IndexMap to stabilize the ordering of the result, which influences
         //       the outcome of `map_to_expanded_selection_sets`.
-        let mut fragments_map: IndexMap<Name, FragmentDependencies> = IndexMap::new();
+        let mut fragments_map: IndexMap<Name, FragmentDependencies> = IndexMap::default();
         for fragment in fragments.values() {
             let mut fragment_usages: HashMap<Name, i32> = HashMap::new();
             NamedFragments::collect_fragment_usages(&fragment.selection_set, &mut fragment_usages);
@@ -4285,7 +4285,7 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
 
         let mut document = executable::ExecutableDocument::new();
         document.fragments = fragments;
-        document.insert_operation(operation);
+        document.operations.insert(operation);
         Ok(document.validate(value.schema.schema())?)
     }
 }

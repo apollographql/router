@@ -9,9 +9,9 @@ use std::sync::atomic;
 use std::sync::Arc;
 
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::executable::DirectiveList;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use itertools::Itertools;
 use petgraph::graph::EdgeIndex;
 use petgraph::graph::NodeIndex;
@@ -831,9 +831,9 @@ where
             edge_triggers: vec![],
             edge_conditions: vec![],
             last_subgraph_entering_edge_info: None,
-            own_path_ids: Arc::new(IndexSet::new()),
-            overriding_path_ids: Arc::new(IndexSet::new()),
-            runtime_types_of_tail: Arc::new(IndexSet::new()),
+            own_path_ids: Arc::new(IndexSet::default()),
+            overriding_path_ids: Arc::new(IndexSet::default()),
+            runtime_types_of_tail: Arc::new(IndexSet::default()),
             runtime_types_before_tail_if_last_is_cast: None,
             defer_on_tail: None,
         };
@@ -853,7 +853,7 @@ where
                     .schema_by_source(&head_weight.source)?
                     .possible_runtime_types(head_type_pos)?
             }
-            QueryGraphNodeType::FederatedRootType(_) => IndexSet::new(),
+            QueryGraphNodeType::FederatedRootType(_) => IndexSet::default(),
         })
     }
 
@@ -1448,7 +1448,7 @@ where
         type BestPathInfo<TTrigger, TEdge> =
             Option<(Arc<GraphPath<TTrigger, TEdge>>, QueryPlanCost)>;
         let mut best_path_by_source: IndexMap<Arc<str>, BestPathInfo<TTrigger, TEdge>> =
-            IndexMap::new();
+            IndexMap::default();
         let dead_ends = vec![];
         // Note that through `excluded` we avoid taking the same edge from multiple options. But
         // that means it's important we try the smallest paths first. That is, if we could in theory
@@ -2626,7 +2626,7 @@ impl OpGraphPath {
                                 ));
                             }
                             debug!("Casting into requested type {field_parent_pos}");
-                            Arc::new(IndexSet::from([field_parent_pos.clone()]))
+                            Arc::new(IndexSet::from_iter([field_parent_pos.clone()]))
                         } else {
                             if interface_path.is_some() {
                                 debug!("No direct edge: type exploding interface {tail_weight} into possible runtime types {:?}", self.runtime_types_of_tail);
