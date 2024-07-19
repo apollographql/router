@@ -45,9 +45,12 @@ use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_DIRECTIVE_NAME_
 use crate::link::federation_spec_definition::FEDERATION_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::federation_spec_definition::FEDERATION_PROVIDES_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::federation_spec_definition::FEDERATION_REQUIRES_DIRECTIVE_NAME_IN_SPEC;
+use crate::link::inaccessible_spec_definition::InaccessibleSpecDefinition;
 use crate::link::inaccessible_spec_definition::INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC;
 use crate::link::join_spec_definition::JOIN_OVERRIDE_LABEL_ARGUMENT_NAME;
 use crate::link::spec::Identity;
+use crate::link::spec::Version;
+use crate::link::spec_definition::SpecDefinition;
 use crate::link::LinksMetadata;
 use crate::schema::ValidFederationSchema;
 use crate::subgraph::ValidSubgraph;
@@ -330,7 +333,7 @@ impl Merger {
                     }));
                 self.merge_descriptions(&mut ev.make_mut().description, &enum_value.description);
 
-                self.add_inaccessible_ast(
+                self.add_inaccessible(
                     metadata,
                     &mut ev.make_mut().directives,
                     &enum_value.directives,
@@ -383,7 +386,7 @@ impl Merger {
                         // TODO warning - mismatch on input fields
                     }
                     Occupied(mut i) => {
-                        self.add_inaccessible_ast(
+                        self.add_inaccessible(
                             directive_names,
                             &mut i.get_mut().make_mut().directives,
                             &field.directives,
@@ -439,7 +442,7 @@ impl Merger {
                             directives: Default::default(),
                         }));
 
-                        self.add_inaccessible_ast(
+                        self.add_inaccessible(
                             directive_names,
                             &mut f.make_mut().directives,
                             &field.directives,
@@ -524,7 +527,7 @@ impl Merger {
                     &field.description,
                 );
 
-                self.add_inaccessible_ast(
+                self.add_inaccessible(
                     directive_names,
                     &mut supergraph_field.make_mut().directives,
                     &field.directives,
@@ -536,7 +539,7 @@ impl Merger {
                         if let Some(existing_arg) = arguments.get_mut(index) {
                             // TODO add args
                             let mutable_arg = existing_arg.make_mut();
-                            self.add_inaccessible_ast(
+                            self.add_inaccessible(
                                 directive_names,
                                 &mut mutable_arg.directives,
                                 &arg.directives,
@@ -656,7 +659,7 @@ impl Merger {
     ) {
         let existing_type = types
             .entry(scalar_name.clone())
-            .or_insert(copy_scalar_type(scalar_name.clone(), ty));
+            .or_insert(copy_scalar_type(scalar_name, ty));
 
         if let ExtendedType::Scalar(s) = existing_type {
             let join_type_directives =
@@ -672,34 +675,18 @@ impl Merger {
         }
     }
 
-    fn add_inaccessible(
+    // generic so it handles ast::DirectiveList and schema::DirectiveList
+    fn add_inaccessible<I>(
         &mut self,
         directive_names: &DirectiveNames,
-        new_directives: &mut apollo_compiler::schema::DirectiveList,
-        original_directives: &apollo_compiler::schema::DirectiveList,
-    ) {
+        new_directives: &mut Vec<I>,
+        original_directives: &[I],
+    ) where
+        I: AsRef<Directive> + From<Directive> + Clone,
+    {
         if original_directives
             .iter()
-            .any(|d| d.name == directive_names.inaccessible)
-        {
-            self.needs_inaccessible = true;
-
-            new_directives.push(Component::new(Directive {
-                name: INACCESSIBLE_DIRECTIVE_NAME_IN_SPEC,
-                arguments: vec![],
-            }));
-        }
-    }
-
-    fn add_inaccessible_ast(
-        &mut self,
-        directive_names: &DirectiveNames,
-        new_directives: &mut DirectiveList,
-        original_directives: &DirectiveList,
-    ) {
-        if original_directives
-            .iter()
-            .any(|d| d.name == directive_names.inaccessible)
+            .any(|d| d.as_ref().name == directive_names.inaccessible)
         {
             self.needs_inaccessible = true;
 
@@ -712,6 +699,19 @@ impl Merger {
             );
         }
     }
+}
+
+fn filter_directives<'a, D, I, O>(deny_list: &IndexSet<Name>, directives: D) -> O
+where
+    D: IntoIterator<Item = &'a I>,
+    I: 'a + AsRef<Directive> + Clone,
+    O: FromIterator<I>,
+{
+    directives
+        .into_iter()
+        .filter(|d| !deny_list.contains(&d.as_ref().name))
+        .cloned()
+        .collect()
 }
 
 struct DirectiveNames {
@@ -1532,6 +1532,8 @@ fn join_graph_enum_type(
 
 fn add_core_feature_inaccessible(supergraph: &mut Schema) {
     // @link(url: "https://specs.apollo.dev/inaccessible/v0.2")
+    let spec = InaccessibleSpecDefinition::new(Version { major: 0, minor: 2 }, None);
+
     supergraph
         .schema_definition
         .make_mut()
@@ -1541,7 +1543,7 @@ fn add_core_feature_inaccessible(supergraph: &mut Schema) {
             arguments: vec![
                 Node::new(Argument {
                     name: name!("url"),
-                    value: "https://specs.apollo.dev/inaccessible/v0.2".into(),
+                    value: spec.to_string().into(),
                 }),
                 Node::new(Argument {
                     name: name!("for"),
