@@ -207,7 +207,8 @@ impl SingleFederationError {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
-            SingleFederationError::InvalidGraphQL{..} | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
+            SingleFederationError::InvalidGraphQL { .. }
+            | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
             SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
@@ -402,9 +403,7 @@ impl From<FederationSpecError> for FederationError {
             FederationSpecError::UnsupportedFederationDirective { .. } => {
                 SingleFederationError::UnsupportedFederationDirective { message }.into()
             }
-            FederationSpecError::InvalidGraphQLName(message) => {
-                message.into()
-            }
+            FederationSpecError::InvalidGraphQLName(message) => message.into(),
         }
     }
 }

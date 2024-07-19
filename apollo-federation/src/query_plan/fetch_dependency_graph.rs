@@ -2345,7 +2345,14 @@ impl FetchDependencyGraphNode {
             })
             .transpose()?;
         let subgraph_schema = query_graph.schema_by_source(&self.subgraph_name)?;
-        let variable_usages = selection.used_variables()?;
+
+        let variable_usages = {
+            let set = selection.used_variables()?;
+            let mut list = set.into_iter().cloned().collect::<Vec<_>>();
+            list.sort();
+            list
+        };
+
         let mut operation = if self.is_entity_fetch {
             operation_for_entities_fetch(
                 subgraph_schema,
@@ -2534,8 +2541,7 @@ fn operation_for_entities_fetch(
     let mut variable_definitions: Vec<Node<VariableDefinition>> =
         Vec::with_capacity(all_variable_definitions.len() + 1);
     variable_definitions.push(representations_variable_definition(subgraph_schema)?);
-    let mut used_variables = HashSet::new();
-    selection_set.collect_variables(&mut used_variables)?;
+    let used_variables = selection_set.used_variables()?;
     variable_definitions.extend(
         all_variable_definitions
             .iter()
@@ -2618,8 +2624,7 @@ fn operation_for_query_fetch(
     variable_definitions: &[Node<VariableDefinition>],
     operation_name: &Option<Name>,
 ) -> Result<Operation, FederationError> {
-    let mut used_variables = HashSet::new();
-    selection_set.collect_variables(&mut used_variables)?;
+    let used_variables = selection_set.used_variables()?;
     let variable_definitions = variable_definitions
         .iter()
         .filter(|definition| used_variables.contains(&definition.name))

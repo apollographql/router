@@ -4019,10 +4019,7 @@ fn collect_variables_from_directive<'selection>(
 }
 
 impl Field {
-    fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for arg in self.arguments.iter() {
             collect_variables_from_argument(arg, variables)
         }
@@ -4048,10 +4045,7 @@ impl FieldSelection {
 }
 
 impl InlineFragment {
-    fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
         for dir in self.directives.iter() {
             collect_variables_from_directive(dir, variables)
         }
@@ -4082,29 +4076,27 @@ impl Selection {
             Selection::InlineFragment(inline_fragment) => {
                 inline_fragment.collect_variables(variables)
             }
-            Selection::FragmentSpread(_) => {
-                Err(FederationError::internal("collect_variables(): unexpected fragment spread"))
-            }
+            Selection::FragmentSpread(_) => Err(FederationError::internal(
+                "collect_variables(): unexpected fragment spread",
+            )),
         }
     }
 }
 
 impl SelectionSet {
-    /// erm
+    /// Returns the variable names that are used by this selection set.
     ///
     /// # Errors
     /// Returns an error if the selection set contains a named fragment spread.
-    pub(crate) fn used_variables(&self) -> Result<Vec<Name>, FederationError> {
+    pub(crate) fn used_variables(&self) -> Result<HashSet<&'_ Name>, FederationError> {
         let mut variables = HashSet::new();
         self.collect_variables(&mut variables)?;
-        let mut res: Vec<Name> = variables.into_iter().cloned().collect();
-        res.sort();
-        Ok(res)
+        Ok(variables)
     }
 
     /// # Errors
     /// Returns an error if the selection set contains a named fragment spread.
-    pub(crate) fn collect_variables<'selection>(
+    fn collect_variables<'selection>(
         &'selection self,
         variables: &mut HashSet<&'selection Name>,
     ) -> Result<(), FederationError> {
