@@ -1888,22 +1888,10 @@ impl FederatedQueryGraphBuilder {
                             followup_edge_weight.transition,
                             QueryGraphEdgeTransition::KeyResolution
                         ) {
-                            let Some(conditions) = &edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
+                            if let (Some(conditions), Some(followup_conditions)) = (&edge_weight.conditions, &followup_edge_weight.conditions) {
+                                if conditions == followup_conditions {
+                                    continue;
                                 }
-                                .into());
-                            };
-                            let Some(followup_conditions) = &followup_edge_weight.conditions else {
-                                return Err(SingleFederationError::Internal {
-                                    message: "Key resolution edge unexpectedly missing conditions"
-                                        .to_owned(),
-                                }
-                                .into());
-                            };
-                            if conditions.selections == followup_conditions.selections {
-                                continue;
                             }
                         }
                     }
@@ -1926,7 +1914,7 @@ impl FederatedQueryGraphBuilder {
                         // since we can do "start of query" -> C and that's always better.
                         if matches!(
                             followup_edge_weight.transition,
-                            QueryGraphEdgeTransition::SubgraphEnteringTransition
+                            QueryGraphEdgeTransition::RootTypeResolution { .. }
                         ) {
                             continue;
                         }

@@ -28,7 +28,6 @@ use petgraph::stable_graph::StableDiGraph;
 use petgraph::visit::EdgeRef;
 use petgraph::visit::IntoNodeReferences;
 use serde::Serialize;
-
 use crate::error::FederationError;
 use crate::error::SingleFederationError;
 use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -668,8 +667,12 @@ impl FetchDependencyGraph {
         //    keeping nodes separated when they have a different path in their parent
         //    allows to keep that "path in parent" more precisely,
         //    which is important for some case of @requires).
-        for existing_id in self.children_of(parent.parent_node_id) {
-            let existing = self.node_weight(existing_id)?;
+        // for existing_id in self.children_of(parent.parent_node_id) {
+        //     let existing = self.node_weight(existing_id)?;
+        // // TODO: REVERSING ORDER OF CHILDREN DOES FIX THE ISSUE BUT SEEMS WRONG
+        let children: Vec<NodeIndex> = self.children_of(parent.parent_node_id).collect();
+        for existing_id in children.iter().rev() {
+            let existing = self.node_weight(*existing_id)?;
             // we compare the subgraph names last because on average it improves performance
             if existing.merge_at.as_deref() == Some(merge_at)
                 && existing
@@ -684,16 +687,16 @@ impl FetchDependencyGraph {
                             if fragment.casted_type() == type_
                         )
                     })
-                && !self.is_in_nodes_or_their_ancestors(existing_id, conditions_nodes)
+                && !self.is_in_nodes_or_their_ancestors(*existing_id, conditions_nodes)
                 && self
-                    .parents_relations_of(existing_id)
+                    .parents_relations_of(*existing_id)
                     .find(|rel| rel.parent_node_id == parent.parent_node_id)
                     .and_then(|rel| rel.path_in_parent)
                     == parent.path_in_parent
                 && existing.defer_ref.as_ref() == defer_ref
                 && existing.subgraph_name == *subgraph_name
             {
-                return Ok(existing_id);
+                return Ok(*existing_id);
             }
         }
         let new_node = self.new_key_node(subgraph_name, merge_at.to_vec(), defer_ref.cloned())?;
@@ -901,14 +904,24 @@ impl FetchDependencyGraph {
     /// Find redundant edges coming out of a node. See `remove_redundant_edges`.
     fn collect_redundant_edges(&self, node_index: NodeIndex, acc: &mut HashSet<EdgeIndex>) {
         let mut stack = vec![];
+        // JS PORT NOTE: JS was doing removal of edges in place which eliminates potential cycles,
+        // since in RS we remove AFTER we process all nodes, we need to be able to break out of cycles
+        let mut processed_items = HashSet::new();
         for start_index in self.children_of(node_index) {
-            stack.extend(self.children_of(start_index));
+            for child in self.children_of(start_index) {
+                if processed_items.insert(child) {
+                    stack.push(child);
+                }
+            }
             while let Some(v) = stack.pop() {
                 for edge in self.graph.edges_connecting(node_index, v) {
                     acc.insert(edge.id());
                 }
-
-                stack.extend(self.children_of(v));
+                for descendant in self.children_of(v) {
+                    if processed_items.insert(descendant) {
+                        stack.push(descendant);
+                    }
+                }
             }
         }
     }
@@ -921,6 +934,7 @@ impl FetchDependencyGraph {
         let mut redundant_edges = HashSet::new();
         self.collect_redundant_edges(node_index, &mut redundant_edges);
 
+        self.on_modification();
         for edge in redundant_edges {
             self.graph.remove_edge(edge);
         }
@@ -972,17 +986,9 @@ impl FetchDependencyGraph {
             return;
         }
 
-        // Two phases for mutability reasons: first all redundant edges coming out of all nodes are
-        // collected and then they are all removed.
-        let mut redundant_edges = HashSet::new();
-        for node_index in self.graph.node_indices() {
-            self.collect_redundant_edges(node_index, &mut redundant_edges);
-        }
-
-        for edge in redundant_edges {
-            // PORT_NOTE: JS version calls `FetchGroup.removeChild`, which calls onModification.
-            self.on_modification();
-            self.graph.remove_edge(edge);
+        let indices: Vec<NodeIndex> = self.graph.node_indices().collect();
+        for node_index in indices {
+            self.remove_redundant_edges(node_index);
         }
 
         self.is_reduced = true;
@@ -2123,18 +2129,17 @@ impl FetchDependencyGraph {
         let node = self.node_weight(node_id)?;
         let parent = self.node_weight(parent_relation.parent_node_id)?;
         let Some(parent_op_path) = &parent_relation.path_in_parent else {
-            return Err(FederationError::internal("Parent operation path is empty"));
+            return Ok(false);
         };
         let type_at_path = self.type_at_path(
             &parent.selection_set.selection_set.type_position,
             &parent.selection_set.selection_set.schema,
             parent_op_path,
         )?;
-        let new_node_is_unneeded = parent_relation.path_in_parent.is_some()
-            && node
-                .selection_set
-                .selection_set
-                .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
+        let new_node_is_unneeded = node
+            .selection_set
+            .selection_set
+            .can_rebase_on(&type_at_path, &parent.selection_set.selection_set.schema)?;
         Ok(new_node_is_unneeded)
     }
 
@@ -2532,7 +2537,9 @@ impl FetchDependencyGraphNode {
         // hasInputs ? `${toValidGraphQLName(subgraphName)}-${mergeAt?.join('::') ?? ''}` : undefined,
         // ```
         // TODO: We could use a numeric hash key in Rust, instead of a string key as done in JS.
-        self.inputs.as_ref()?;
+        if self.inputs.is_none() {
+            return None;
+        }
         let subgraph_name = &self.subgraph_name;
         let merge_at_str = match self.merge_at {
             Some(ref merge_at) => merge_at
