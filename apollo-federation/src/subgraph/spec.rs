@@ -135,13 +135,13 @@ pub enum FederationSpecError {
     },
     #[error("Unsupported federation directive import {0}")]
     UnsupportedFederationDirective(String),
-    #[error("Invalid GraphQL name {0}")]
-    InvalidGraphQLName(String),
+    #[error(transparent)]
+    InvalidGraphQLName(InvalidNameError),
 }
 
 impl From<InvalidNameError> for FederationSpecError {
     fn from(err: InvalidNameError) -> Self {
-        FederationSpecError::InvalidGraphQLName(format!("Invalid GraphQL name \"{}\"", err.name))
+        FederationSpecError::InvalidGraphQLName(err)
     }
 }
 

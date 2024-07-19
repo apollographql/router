@@ -331,10 +331,10 @@ impl QueryPlanner {
 
         if operation.selection_set.selections.is_empty() {
             // This should never happen because `operation` comes from a known-valid document.
-            return Err(SingleFederationError::InvalidGraphQL {
-                message: "Invalid operation: empty selection set".to_string(),
-            }
-            .into());
+            // TODO(@goto-bus-stop) it's probably fair to panic here :)
+            return Err(FederationError::internal(
+                "Invalid operation: empty selection set",
+            ));
         }
 
         let is_subscription = operation.is_subscription();

@@ -1416,12 +1416,7 @@ fn add_subgraph_input_field(
 
 /// Parse a string encoding a type reference.
 fn decode_type(type_: &str) -> Result<Type, FederationError> {
-    Type::parse(type_, "").map_err(|_| {
-        SingleFederationError::InvalidGraphQL {
-            message: format!("Cannot parse type \"{}\"", type_),
-        }
-        .into()
-    })
+    Ok(Type::parse(type_, "")?)
 }
 
 fn get_subgraph<'subgraph>(

@@ -636,8 +636,9 @@ pub(crate) enum SelectionKey {
 }
 
 impl SelectionKey {
+    /// Returns true if the selection key is `__typename` *without directives*.
     pub(crate) fn is_typename_field(&self) -> bool {
-        matches!(self, SelectionKey::Field { response_name, .. } if *response_name == TYPENAME_FIELD)
+        matches!(self, SelectionKey::Field { response_name, directives } if *response_name == TYPENAME_FIELD && directives.is_empty())
     }
 }
 
@@ -816,21 +817,6 @@ impl Selection {
                 Selection::FragmentSpread(_x) => Err(FederationError::internal(
                     "Unexpected fragment spread in Selection::conditions()",
                 )),
-            }
-        }
-    }
-
-    pub(crate) fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) -> Result<(), FederationError> {
-        match self {
-            Selection::Field(field) => field.collect_variables(variables),
-            Selection::InlineFragment(inline_fragment) => {
-                inline_fragment.collect_variables(variables)
-            }
-            Selection::FragmentSpread(_) => {
-                Err(FederationError::internal("unexpected fragment spread"))
             }
         }
     }
@@ -1052,7 +1038,6 @@ impl Fragment {
 }
 
 mod field_selection {
-    use std::collections::HashSet;
     use std::hash::Hash;
     use std::hash::Hasher;
     use std::ops::Deref;
@@ -1127,17 +1112,6 @@ mod field_selection {
             let mut data = self.field.data().clone();
             data.alias = Some(alias);
             Field::new(data)
-        }
-
-        pub(crate) fn collect_variables<'selection>(
-            &'selection self,
-            variables: &mut HashSet<&'selection Name>,
-        ) -> Result<(), FederationError> {
-            self.field.collect_variables(variables);
-            if let Some(set) = &self.selection_set {
-                set.collect_variables(variables)?
-            }
-            Ok(())
         }
     }
 
@@ -1292,36 +1266,6 @@ mod field_selection {
 
         pub(crate) fn as_path_element(&self) -> FetchDataPathElement {
             FetchDataPathElement::Key(self.response_name())
-        }
-
-        pub(crate) fn collect_variables<'selection>(
-            &'selection self,
-            variables: &mut HashSet<&'selection Name>,
-        ) {
-            for arg in self.arguments.iter() {
-                collect_variables_from_argument(arg, variables)
-            }
-            for dir in self.directives.iter() {
-                collect_variables_from_directive(dir, variables)
-            }
-        }
-    }
-
-    pub(crate) fn collect_variables_from_argument<'selection>(
-        argument: &'selection executable::Argument,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
-        if let Some(v) = argument.value.as_variable() {
-            variables.insert(v);
-        }
-    }
-
-    pub(crate) fn collect_variables_from_directive<'selection>(
-        directive: &'selection executable::Directive,
-        variables: &mut HashSet<&'selection Name>,
-    ) {
-        for arg in directive.arguments.iter() {
-            collect_variables_from_argument(arg, variables)
         }
     }
 
@@ -1657,17 +1601,14 @@ impl FragmentSpreadData {
 }
 
 mod inline_fragment_selection {
-    use std::collections::HashSet;
     use std::hash::Hash;
     use std::hash::Hasher;
     use std::ops::Deref;
     use std::sync::Arc;
 
     use apollo_compiler::executable;
-    use apollo_compiler::Name;
     use serde::Serialize;
 
-    use super::field_selection::collect_variables_from_directive;
     use crate::error::FederationError;
     use crate::link::graphql_definition::defer_directive_arguments;
     use crate::link::graphql_definition::DeferDirectiveArguments;
@@ -1711,14 +1652,6 @@ mod inline_fragment_selection {
                 inline_fragment: self.inline_fragment.with_updated_directives(directives),
                 selection_set: self.selection_set.clone(),
             }
-        }
-
-        pub(crate) fn collect_variables<'selection>(
-            &'selection self,
-            variables: &mut HashSet<&'selection Name>,
-        ) -> Result<(), FederationError> {
-            self.inline_fragment.collect_variables(variables);
-            self.selection_set.collect_variables(variables)
         }
     }
 
@@ -1807,15 +1740,6 @@ mod inline_fragment_selection {
             Some(FetchDataPathElement::TypenameEquals(
                 condition.type_name().clone(),
             ))
-        }
-
-        pub(crate) fn collect_variables<'selection>(
-            &'selection self,
-            variables: &mut HashSet<&'selection Name>,
-        ) {
-            for dir in self.data.directives.iter() {
-                collect_variables_from_directive(dir, variables)
-            }
         }
     }
 
@@ -3118,24 +3042,6 @@ impl SelectionSet {
         fields
     }
 
-    pub(crate) fn used_variables(&self) -> Result<Vec<Name>, FederationError> {
-        let mut variables = HashSet::new();
-        self.collect_variables(&mut variables)?;
-        let mut res: Vec<Name> = variables.into_iter().cloned().collect();
-        res.sort();
-        Ok(res)
-    }
-
-    pub(crate) fn collect_variables<'selection>(
-        &'selection self,
-        variables: &mut HashSet<&'selection Name>,
-    ) -> Result<(), FederationError> {
-        for selection in self.selections.values() {
-            selection.collect_variables(variables)?
-        }
-        Ok(())
-    }
-
     pub(crate) fn validate(
         &self,
         _variable_definitions: &[Node<executable::VariableDefinition>],
@@ -4093,6 +3999,117 @@ impl RebasedFragments {
     }
 }
 
+// Collect used variables from operation types.
+
+fn collect_variables_from_argument<'selection>(
+    argument: &'selection executable::Argument,
+    variables: &mut HashSet<&'selection Name>,
+) {
+    if let Some(v) = argument.value.as_variable() {
+        variables.insert(v);
+    }
+}
+
+fn collect_variables_from_directive<'selection>(
+    directive: &'selection executable::Directive,
+    variables: &mut HashSet<&'selection Name>,
+) {
+    for arg in directive.arguments.iter() {
+        collect_variables_from_argument(arg, variables)
+    }
+}
+
+impl Field {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
+        for arg in self.arguments.iter() {
+            collect_variables_from_argument(arg, variables)
+        }
+        for dir in self.directives.iter() {
+            collect_variables_from_directive(dir, variables)
+        }
+    }
+}
+
+impl FieldSelection {
+    /// # Errors
+    /// Returns an error if the selection contains a named fragment spread.
+    fn collect_variables<'selection>(
+        &'selection self,
+        variables: &mut HashSet<&'selection Name>,
+    ) -> Result<(), FederationError> {
+        self.field.collect_variables(variables);
+        if let Some(set) = &self.selection_set {
+            set.collect_variables(variables)?
+        }
+        Ok(())
+    }
+}
+
+impl InlineFragment {
+    fn collect_variables<'selection>(&'selection self, variables: &mut HashSet<&'selection Name>) {
+        for dir in self.directives.iter() {
+            collect_variables_from_directive(dir, variables)
+        }
+    }
+}
+
+impl InlineFragmentSelection {
+    /// # Errors
+    /// Returns an error if the selection contains a named fragment spread.
+    fn collect_variables<'selection>(
+        &'selection self,
+        variables: &mut HashSet<&'selection Name>,
+    ) -> Result<(), FederationError> {
+        self.inline_fragment.collect_variables(variables);
+        self.selection_set.collect_variables(variables)
+    }
+}
+
+impl Selection {
+    /// # Errors
+    /// Returns an error if the selection contains a named fragment spread.
+    fn collect_variables<'selection>(
+        &'selection self,
+        variables: &mut HashSet<&'selection Name>,
+    ) -> Result<(), FederationError> {
+        match self {
+            Selection::Field(field) => field.collect_variables(variables),
+            Selection::InlineFragment(inline_fragment) => {
+                inline_fragment.collect_variables(variables)
+            }
+            Selection::FragmentSpread(_) => Err(FederationError::internal(
+                "collect_variables(): unexpected fragment spread",
+            )),
+        }
+    }
+}
+
+impl SelectionSet {
+    /// Returns the variable names that are used by this selection set.
+    ///
+    /// # Errors
+    /// Returns an error if the selection set contains a named fragment spread.
+    pub(crate) fn used_variables(&self) -> Result<HashSet<&'_ Name>, FederationError> {
+        let mut variables = HashSet::new();
+        self.collect_variables(&mut variables)?;
+        Ok(variables)
+    }
+
+    /// # Errors
+    /// Returns an error if the selection set contains a named fragment spread.
+    fn collect_variables<'selection>(
+        &'selection self,
+        variables: &mut HashSet<&'selection Name>,
+    ) -> Result<(), FederationError> {
+        for selection in self.selections.values() {
+            selection.collect_variables(variables)?
+        }
+        Ok(())
+    }
+}
+
+// Conversion between apollo-rs and apollo-federation types.
+
 impl TryFrom<&Operation> for executable::Operation {
     type Error = FederationError;
 
@@ -4272,6 +4289,8 @@ impl TryFrom<Operation> for Valid<executable::ExecutableDocument> {
         Ok(document.validate(value.schema.schema())?)
     }
 }
+
+// Display implementations for the operation types.
 
 impl Display for Operation {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
