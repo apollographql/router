@@ -296,16 +296,14 @@ mod tests {
                             query: {},
                         },
                         method: Get,
-                        headers: [
-                            Rename {
-                                from: "X-Auth-Token",
-                                to: "AuthToken",
-                            },
-                            Inject {
-                                name: "user-agent",
-                                value: "Firefox",
-                            },
-                        ],
+                        headers: {
+                            "authtoken": From(
+                                "X-Auth-Token",
+                            ),
+                            "user-agent": Value(
+                                "Firefox",
+                            ),
+                        },
                         body: None,
                     },
                 ),
@@ -368,16 +366,14 @@ mod tests {
                             query: {},
                         },
                         method: Get,
-                        headers: [
-                            Rename {
-                                from: "X-Auth-Token",
-                                to: "AuthToken",
-                            },
-                            Inject {
-                                name: "user-agent",
-                                value: "Firefox",
-                            },
-                        ],
+                        headers: {
+                            "user-agent": Value(
+                                "Firefox",
+                            ),
+                            "authtoken": From(
+                                "X-Auth-Token",
+                            ),
+                        },
                         body: None,
                     },
                 ),

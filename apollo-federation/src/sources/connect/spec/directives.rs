@@ -503,16 +503,14 @@ mod tests {
                 name: "json",
                 http: SourceHTTPArguments {
                     base_url: "https://jsonplaceholder.typicode.com/",
-                    headers: [
-                        Rename {
-                            from: "X-Auth-Token",
-                            to: "AuthToken",
-                        },
-                        Inject {
-                            name: "user-agent",
-                            value: "Firefox",
-                        },
-                    ],
+                    headers: {
+                        "authtoken": From(
+                            "X-Auth-Token",
+                        ),
+                        "user-agent": Value(
+                            "Firefox",
+                        ),
+                    },
                 },
             },
         ]
@@ -552,7 +550,7 @@ mod tests {
                         put: None,
                         delete: None,
                         body: None,
-                        headers: [],
+                        headers: {},
                     },
                 ),
                 selection: Named(
@@ -593,7 +591,7 @@ mod tests {
                         put: None,
                         delete: None,
                         body: None,
-                        headers: [],
+                        headers: {},
                     },
                 ),
                 selection: Named(
