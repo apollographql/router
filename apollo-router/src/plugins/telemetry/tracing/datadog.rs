@@ -196,6 +196,7 @@ impl TracingConfigurator for Config {
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
+            .with_http_client(reqwest::Client::builder().build()?)
             .with_trace_config(common)
             .build_exporter()?;
 
