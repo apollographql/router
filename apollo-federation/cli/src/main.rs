@@ -170,7 +170,7 @@ fn plan(query_path: &Path, schema_paths: &[PathBuf]) -> Result<(), FederationErr
     // TODO: add CLI parameters for config as needed
     let config = QueryPlannerConfig::default();
     let planner = QueryPlanner::new(&supergraph, config)?;
-    print!("{}", planner.build_query_plan(&query_doc, None).unwrap());
+    print!("{}", planner.build_query_plan(&query_doc, None)?);
     Ok(())
 }
 
