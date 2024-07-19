@@ -31,7 +31,7 @@ pub(super) fn validate_headers_arg<'a>(
         .flat_map(|l| l.iter().filter_map(|o| o.as_object()))
         .chain(headers.as_object())
         .flat_map(move |arg_pairs| {
-            let pair_coordinate = &http_header_argument_coordinate(
+            let headers_coordinate = &http_header_argument_coordinate(
                 directive_name,
                 object,
                 field,
@@ -47,7 +47,7 @@ pub(super) fn validate_headers_arg<'a>(
                 // `name` must be provided
                 messages.push(Message {
                     code: Code::GraphQLError,
-                    message: format!("{pair_coordinate} must include a `name` value."),
+                    message: format!("{headers_coordinate} must include a `name` value."),
                     // TODO: get this closer to the pair
                     locations: Location::from_node(headers.location(), source_map)
                         .into_iter()
@@ -56,7 +56,7 @@ pub(super) fn validate_headers_arg<'a>(
                 return messages;
             };
 
-            let header_name = match validate_header_name(&NAME_ARG, name_value, pair_coordinate, source_map) {
+            let header_name = match validate_header_name(&NAME_ARG, name_value, headers_coordinate, source_map) {
                 Err(err) => {
                     messages.push(err);
                     None
@@ -69,9 +69,9 @@ pub(super) fn validate_headers_arg<'a>(
                     messages.push(Message {
                         code: Code::HttpHeaderNameCollision,
                         message: format!(
-                            "Duplicate header names are not allowed. The header name '{}' at '{}' is already defined.",
+                            "Duplicate header names are not allowed. The header name '{}' at {} is already defined.",
                             header_name,
-                            pair_coordinate
+                            headers_coordinate
                         ),
                         locations: Location::from_node(name_value.location(), source_map)
                             .into_iter()
@@ -82,31 +82,37 @@ pub(super) fn validate_headers_arg<'a>(
                     });
                 }
             }
-            // validate `from`
-            if let Some(from_value) = from_arg {
-                if let Some(err) = validate_header_name(&FROM_ARG, from_value, pair_coordinate, source_map).err() {
-                    messages.push(err);
-                }
-            }
 
-            // validate `value`
-            if let Some(value_arg) = value_arg {
-                messages.extend(validate_header_value(value_arg, pair_coordinate, source_map));
-            }
+            messages.extend(match (from_arg, value_arg)  {
+                (Some(from_value), None) => {
+                    validate_header_name(&FROM_ARG, from_value, headers_coordinate, source_map).err()
+                },
+                (None, Some(value_arg)) => {
+                    validate_header_value(value_arg, headers_coordinate, source_map)
+                },
+                (Some(from_arg), Some(value_arg)) => Some(
+                    Message {
+                        code: Code::InvalidHttpHeaderMapping,
+                        message: format!("{headers_coordinate} uses both `from` and `value` keys together. Please choose only one."),
+                        locations: Location::from_node(from_arg.location(), source_map)
+                            .into_iter()
+                            .chain(
+                                Location::from_node(value_arg.location(), source_map)
+                            )
+                            .collect(),
+                    }
+                ),
+                (None, None) => Some(
+                    Message {
+                        code: Code::MissingHeaderSource,
+                        message: format!("{headers_coordinate} must include either a `from` or `value` argument."),
+                        locations: Location::from_node(headers.location(), source_map)
+                            .into_iter()
+                            .collect(),
+                    }
+                )
+            });
 
-            // `from` and `value` cannot be used together
-            if let (Some(from_arg), Some(value_arg)) = (from_arg, value_arg) {
-                messages.push(Message {
-                    code: Code::InvalidHttpHeaderMapping,
-                    message: format!("{pair_coordinate} uses both `from` and `value` keys together. Please choose only one."),
-                    locations: Location::from_node(from_arg.location(), source_map)
-                        .into_iter()
-                        .chain(
-                            Location::from_node(value_arg.location(), source_map)
-                        )
-                        .collect(),
-                });
-            }
             messages
         })
 }
@@ -122,11 +128,9 @@ pub(super) fn validate_header_value(
     };
 
     http::HeaderValue::try_from(str_value)
-        .map_err(|err| Message {
+        .map_err(|_| Message {
             code: Code::InvalidHttpHeaderValue,
-            message: format!(
-                "The value `{value}` at `{coordinate}` is an invalid HTTP header: {err}",
-            ),
+            message: format!("The value `{value}` at {coordinate} is an invalid HTTP header",),
             locations: Location::from_node(value.location(), source_map)
                 .into_iter()
                 .collect(),
@@ -151,7 +155,7 @@ fn validate_header_name(
     HeaderName::try_from(s).map_err(|_| Message {
         code: Code::InvalidHttpHeaderName,
         message: format!(
-            "The value '{}' for '{}' at '{}' must be a valid HTTP header name.",
+            "The value `{}` for `{}` at {} must be a valid HTTP header name.",
             s, key, coordinate
         ),
         locations: Location::from_node(value.location(), source_map)

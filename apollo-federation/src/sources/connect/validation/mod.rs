@@ -406,6 +406,8 @@ pub enum Code {
     UnsupportedFederationDirective,
     /// Abstract types are not allowed when using connectors
     UnsupportedAbstractType,
+    /// Header does not define `from` or `value`
+    MissingHeaderSource,
 }
 
 impl Code {
