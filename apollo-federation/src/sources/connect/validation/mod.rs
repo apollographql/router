@@ -377,7 +377,10 @@ pub enum Code {
     SourceScheme,
     SourceNameMismatch,
     SubscriptionInConnectors,
+    /// Query field is missing the `@connect` directive
     QueryFieldMissingConnect,
+    /// Mutation field is missing the `@connect` directive
+    MutationFieldMissingConnect,
     /// The `@connect` is using a `source`, but the URL is absolute. This is trouble because
     /// the `@source` URL will be joined with the `@connect` URL, so the `@connect` URL should
     /// actually be a path only.

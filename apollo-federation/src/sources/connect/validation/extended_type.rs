@@ -65,6 +65,7 @@ pub(super) fn validate_extended_type(
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ObjectCategory {
     Query,
+    Mutation,
     Other,
 }
 
@@ -102,6 +103,13 @@ fn validate_object_fields(
         .is_some_and(|query| query.name == object.name)
     {
         ObjectCategory::Query
+    } else if schema
+        .schema_definition
+        .mutation
+        .as_ref()
+        .is_some_and(|mutation| mutation.name == object.name)
+    {
+        ObjectCategory::Mutation
     } else {
         ObjectCategory::Other
     };
@@ -138,19 +146,24 @@ fn validate_field(
         .iter()
         .find(|directive| directive.name == *connect_directive_name)
     else {
-        if category == ObjectCategory::Query {
-            errors.push(Message {
-                code: Code::QueryFieldMissingConnect,
-                message: format!(
-                    "The field `{object_name}.{field}` has no `@{connect_directive_name}` directive.",
-                    field = field.name,
-                    object_name = object.name,
-                ),
-                locations: Location::from_node(field.location(), source_map)
-                    .into_iter()
-                    .collect(),
-            });
+        match category {
+            ObjectCategory::Query => errors.push(get_missing_connect_directive_message(
+                Code::QueryFieldMissingConnect,
+                field,
+                object,
+                source_map,
+                connect_directive_name,
+            )),
+            ObjectCategory::Mutation => errors.push(get_missing_connect_directive_message(
+                Code::MutationFieldMissingConnect,
+                field,
+                object,
+                source_map,
+                connect_directive_name,
+            )),
+            _ => (),
         }
+
         return errors;
     };
 
@@ -274,6 +287,26 @@ fn validate_abstract_type(
         code: Code::UnsupportedAbstractType,
         message: format!("Abstract schema types, such as `{keyword}`, are not supported when using connectors. You can check out our documentation at https://go.apollo.dev/connectors/best-practices#abstract-schema-types-are-unsupported."),
         locations: Location::from_node(node, source_map)
+            .into_iter()
+            .collect(),
+    }
+}
+
+fn get_missing_connect_directive_message(
+    code: Code,
+    field: &Component<FieldDefinition>,
+    object: &Node<ObjectType>,
+    source_map: &SourceMap,
+    connect_directive_name: &Name,
+) -> Message {
+    Message {
+        code,
+        message: format!(
+            "The field `{object_name}.{field}` has no `@{connect_directive_name}` directive.",
+            field = field.name,
+            object_name = object.name,
+        ),
+        locations: Location::from_node(field.location(), source_map)
             .into_iter()
             .collect(),
     }
