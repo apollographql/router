@@ -11,7 +11,8 @@ use tower::BoxError;
 
 use crate::integration::common::graph_os_enabled;
 use crate::integration::common::Telemetry;
-use crate::integration::{IntegrationTest, ValueExt};
+use crate::integration::IntegrationTest;
+use crate::integration::ValueExt;
 
 #[derive(buildstructor::Builder)]
 struct TraceSpec {
