@@ -351,6 +351,14 @@ async fn test_headers() {
                 HeaderName::from_str("x-insert").unwrap(),
                 HeaderValue::from_str("inserted").unwrap(),
             )
+            .header(
+                HeaderName::from_str("x-insert-multi-value").unwrap(),
+                HeaderValue::from_str("first").unwrap(),
+            )
+            .header(
+                HeaderName::from_str("x-insert-multi-value").unwrap(),
+                HeaderValue::from_str("second").unwrap(),
+            )
             .path("/users")
             .build()],
     );

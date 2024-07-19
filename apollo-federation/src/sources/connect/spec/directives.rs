@@ -237,17 +237,13 @@ fn node_to_header(value: &Node<Value>) -> Result<(HeaderName, HeaderSource), Fed
             "missing `from` or `value` field in HTTP header mapping"
         ))?;
 
-    let value = if let Some(list) = value.as_list() {
-        list.iter().filter_map(|item| item.as_str()).join(",")
-    } else if let Some(item) = value.as_str() {
-        item.to_string()
+    if let Some(value) = value.as_str() {
+        Ok((name, HeaderSource::Value(value.to_string())))
     } else {
-        return Err(internal!(
-            "`value` field in HTTP header mapping is not a string or list of strings"
-        ));
-    };
-
-    Ok((name, HeaderSource::Value(value)))
+        Err(internal!(
+            "`value` field in HTTP header mapping is not a string"
+        ))
+    }
 }
 
 impl ConnectDirectiveArguments {

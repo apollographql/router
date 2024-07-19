@@ -5,9 +5,9 @@ use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::SourceMap;
 use http::HeaderName;
-use itertools::Itertools;
 
 use super::coordinates::http_header_argument_coordinate;
+use super::require_value_is_str;
 use super::Code;
 use super::Location;
 use super::Message;
@@ -91,10 +91,7 @@ pub(super) fn validate_headers_arg<'a>(
 
             // validate `value`
             if let Some(value_arg) = value_arg {
-                let header_value_errors = validate_header_value(value_arg, pair_coordinate, source_map);
-                if !header_value_errors.is_empty() {
-                    messages.extend(header_value_errors);
-                }
+                messages.extend(validate_header_value(value_arg, pair_coordinate, source_map));
             }
 
             // `from` and `value` cannot be used together
@@ -118,33 +115,23 @@ pub(super) fn validate_header_value(
     value: &Node<Value>,
     coordinate: &String,
     source_map: &SourceMap,
-) -> Vec<Message> {
-    let mut messages = Vec::new();
-
-    // Extract values from the node
-    let values: Vec<&str> = if let Some(list) = value.as_list() {
-        list.iter().filter_map(|v| v.as_str()).collect_vec()
-    } else {
-        value.as_str().map(|s| vec![s]).unwrap_or_default()
+) -> Option<Message> {
+    let str_value = match require_value_is_str(value, coordinate, source_map) {
+        Ok(str_value) => str_value,
+        Err(err) => return Some(err),
     };
 
-    // Validate each value
-    for v in &values {
-        if http::HeaderValue::try_from(*v).is_err() {
-            messages.push(Message {
-                code: Code::InvalidHttpHeaderValue,
-                message: format!(
-                    "The value '{}' at '{}' must be a valid HTTP header value.",
-                    v, coordinate
-                ),
-                locations: Location::from_node(value.location(), source_map)
-                    .into_iter()
-                    .collect(),
-            });
-        }
-    }
-
-    messages
+    http::HeaderValue::try_from(str_value)
+        .map_err(|err| Message {
+            code: Code::InvalidHttpHeaderValue,
+            message: format!(
+                "The value `{value}` at `{coordinate}` is an invalid HTTP header: {err}",
+            ),
+            locations: Location::from_node(value.location(), source_map)
+                .into_iter()
+                .collect(),
+        })
+        .err()
 }
 
 fn validate_header_name(
