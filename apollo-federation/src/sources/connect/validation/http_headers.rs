@@ -23,6 +23,7 @@ pub(super) fn validate_headers_arg<'a>(
     object: Option<&'a Name>,
     field: Option<&'a Name>,
 ) -> impl Iterator<Item = Message> + 'a {
+    #[allow(clippy::mutable_key_type)]
     let mut names = HashMap::new();
     headers
         .as_list()
@@ -55,7 +56,7 @@ pub(super) fn validate_headers_arg<'a>(
                 return messages;
             };
 
-            let name_str = match validate_header_name(&NAME_ARG, name_value, pair_coordinate, source_map) {
+            let header_name = match validate_header_name(&NAME_ARG, name_value, pair_coordinate, source_map) {
                 Err(err) => {
                     messages.push(err);
                     None
@@ -63,13 +64,13 @@ pub(super) fn validate_headers_arg<'a>(
                 Ok(value) => Some(value),
             };
 
-            if let Some(name_str) = name_str {
-                if let Some(duplicate) = names.insert(name_str, name_value.location()) {
+            if let Some(header_name) = header_name {
+                if let Some(duplicate) = names.insert(header_name.clone(), name_value.location()) {
                     messages.push(Message {
                         code: Code::HttpHeaderNameCollision,
                         message: format!(
                             "Duplicate header names are not allowed. The header name '{}' at '{}' is already defined.",
-                            name_str,
+                            header_name,
                             pair_coordinate
                         ),
                         locations: Location::from_node(name_value.location(), source_map)
@@ -146,12 +147,12 @@ pub(super) fn validate_header_value(
     messages
 }
 
-fn validate_header_name<'a>(
+fn validate_header_name(
     key: &Name,
-    value: &'a Node<Value>,
+    value: &Node<Value>,
     coordinate: &String,
     source_map: &SourceMap,
-) -> Result<&'a str, Message> {
+) -> Result<HeaderName, Message> {
     let s = value.as_str().ok_or_else(|| Message {
         code: Code::GraphQLError,
         message: format!("{coordinate} contains an invalid header name type."),
@@ -169,9 +170,7 @@ fn validate_header_name<'a>(
         locations: Location::from_node(value.location(), source_map)
             .into_iter()
             .collect(),
-    })?;
-
-    Ok(s)
+    })
 }
 
 pub(super) fn get_http_headers_arg(http_arg: &[(Name, Node<Value>)]) -> Option<&Node<Value>> {

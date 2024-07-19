@@ -10,7 +10,7 @@ extend schema
       headers: [
         { name: "x-name" }
         { name: "x-name-collision", value: "text/html" }
-        { name: "x-name-collision", value: "text/html" }
+        { name: "X-NAME-COLLISION", from: "x-name-collision" }
         { name: "x-valid-name", value: "text/html" }
         { name: "x-same-name-as", as: "x-same-name-as" }
         { name: "x-same-name-from", from: "x-same-name-from" }
