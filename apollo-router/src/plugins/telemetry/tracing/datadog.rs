@@ -196,12 +196,6 @@ impl TracingConfigurator for Config {
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
-            // This prevents spurious errors in the log when talking to the agent
-            .with_http_client(
-                reqwest::Client::builder()
-                    .pool_idle_timeout(std::time::Duration::from_millis(1))
-                    .build()?,
-            )
             .with_trace_config(common)
             .build_exporter()?;
 
