@@ -960,7 +960,7 @@ fn extract_cache_keys(
 
         let typename = opt_type.as_str().unwrap_or("-");
 
-        let hashed_entity_key = hash_entity_key(&representation);
+        let hashed_entity_key = hash_entity_key(representation);
 
         // the cache key is written to easily find keys matching a prefix for deletion:
         // - subgraph name: caching is done per subgraph
