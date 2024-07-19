@@ -2544,14 +2544,14 @@ fn operation_for_entities_fetch(
     );
 
     let query_type_name = subgraph_schema.schema().root_operation(OperationType::Query).ok_or_else(||
-    SingleFederationError::InvalidGraphQL {
+    SingleFederationError::InvalidSubgraph {
         message: "Subgraphs should always have a query root (they should at least provides _entities)".to_string()
     })?;
 
     let query_type = match subgraph_schema.get_type(query_type_name.clone())? {
         crate::schema::position::TypeDefinitionPosition::Object(o) => o,
         _ => {
-            return Err(SingleFederationError::InvalidGraphQL {
+            return Err(SingleFederationError::InvalidSubgraph {
                 message: "the root query type must be an object".to_string(),
             }
             .into())
@@ -2563,7 +2563,7 @@ fn operation_for_entities_fetch(
         .fields
         .contains_key(&ENTITIES_QUERY)
     {
-        return Err(SingleFederationError::InvalidGraphQL {
+        return Err(SingleFederationError::InvalidSubgraph {
             message: "Subgraphs should always have the _entities field".to_string(),
         }
         .into());

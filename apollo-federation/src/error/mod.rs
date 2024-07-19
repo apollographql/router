@@ -38,8 +38,12 @@ pub enum SingleFederationError {
     #[error("An internal error has occurred, please report this bug to Apollo. Details: {0}")]
     #[allow(private_interfaces)] // users should not inspect this.
     InternalRebaseError(#[from] crate::operation::RebaseError),
-    #[error("{message}")]
-    InvalidGraphQL { message: String },
+    #[error("{diagnostics}")]
+    InvalidGraphQL { diagnostics: DiagnosticList },
+    #[error(transparent)]
+    InvalidGraphQLName(#[from] InvalidNameError),
+    #[error("Subgraph invalid: {message}")]
+    InvalidSubgraph { message: String },
     #[error("{message}")]
     DirectiveDefinitionInvalid { message: String },
     #[error("{message}")]
@@ -203,7 +207,8 @@ impl SingleFederationError {
         match self {
             SingleFederationError::Internal { .. } => ErrorCode::Internal,
             SingleFederationError::InternalRebaseError { .. } => ErrorCode::Internal,
-            SingleFederationError::InvalidGraphQL { .. } => ErrorCode::InvalidGraphQL,
+            SingleFederationError::InvalidGraphQL{..} | SingleFederationError::InvalidGraphQLName(_) => ErrorCode::InvalidGraphQL,
+            SingleFederationError::InvalidSubgraph { .. } => ErrorCode::InvalidGraphQL,
             SingleFederationError::DirectiveDefinitionInvalid { .. } => {
                 ErrorCode::DirectiveDefinitionInvalid
             }
@@ -379,14 +384,6 @@ impl SingleFederationError {
     }
 }
 
-impl From<InvalidNameError> for SingleFederationError {
-    fn from(err: InvalidNameError) -> Self {
-        SingleFederationError::InvalidGraphQL {
-            message: format!("Invalid GraphQL name \"{}\"", err.name),
-        }
-    }
-}
-
 impl From<InvalidNameError> for FederationError {
     fn from(err: InvalidNameError) -> Self {
         SingleFederationError::from(err).into()
@@ -406,7 +403,7 @@ impl From<FederationSpecError> for FederationError {
                 SingleFederationError::UnsupportedFederationDirective { message }.into()
             }
             FederationSpecError::InvalidGraphQLName(message) => {
-                SingleFederationError::InvalidGraphQL { message }.into()
+                message.into()
             }
         }
     }
@@ -450,16 +447,9 @@ impl Display for MultipleFederationErrors {
     }
 }
 
-impl From<DiagnosticList> for MultipleFederationErrors {
-    fn from(value: DiagnosticList) -> Self {
-        Self {
-            errors: value
-                .iter()
-                .map(|e| SingleFederationError::InvalidGraphQL {
-                    message: e.error.to_string(),
-                })
-                .collect(),
-        }
+impl From<DiagnosticList> for SingleFederationError {
+    fn from(diagnostics: DiagnosticList) -> Self {
+        SingleFederationError::InvalidGraphQL { diagnostics }
     }
 }
 
@@ -538,8 +528,7 @@ impl From<SingleFederationError> for FederationError {
 
 impl From<DiagnosticList> for FederationError {
     fn from(value: DiagnosticList) -> Self {
-        let value: MultipleFederationErrors = value.into();
-        value.into()
+        SingleFederationError::from(value).into()
     }
 }
 
