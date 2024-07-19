@@ -1,8 +1,5 @@
 //! Configuration for datadog tracing.
 
-use std::fmt::Debug;
-use std::fmt::Formatter;
-
 use ahash::HashMap;
 use ahash::HashMapExt;
 use futures::future::BoxFuture;
@@ -22,6 +19,9 @@ use opentelemetry_semantic_conventions::resource::SERVICE_NAME;
 use opentelemetry_semantic_conventions::resource::SERVICE_VERSION;
 use schemars::JsonSchema;
 use serde::Deserialize;
+use std::fmt::Debug;
+use std::fmt::Formatter;
+use std::time::Duration;
 use tower::BoxError;
 
 use crate::plugins::telemetry::config::GenericWith;
@@ -196,7 +196,11 @@ impl TracingConfigurator for Config {
                     .expect("cargo version is set as a resource default;qed")
                     .to_string(),
             )
-            .with_http_client(reqwest::Client::builder().build()?)
+            .with_http_client(
+                reqwest::Client::builder()
+                    .pool_idle_timeout(Duration::from_millis(1))
+                    .build()?,
+            )
             .with_trace_config(common)
             .build_exporter()?;
 
