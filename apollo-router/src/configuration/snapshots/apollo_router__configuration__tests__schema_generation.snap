@@ -1468,6 +1468,24 @@ expression: "&schema"
           "default": {},
           "description": "Custom mapping to be used as the resource field in spans, defaults to: router -> http.route supergraph -> graphql.operation.name query_planning -> graphql.operation.name subgraph -> subgraph.name subgraph_request -> subgraph.name http_request -> http.route",
           "type": "object"
+        },
+        "span_metrics": {
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "default": {
+            "execution": true,
+            "http_request": true,
+            "parse_query": true,
+            "query_planning": true,
+            "request": true,
+            "router": true,
+            "subgraph": true,
+            "subgraph_request": true,
+            "supergraph": true
+          },
+          "description": "Which spans will be eligible for span stats to be collected for viewing in the APM view. Defaults to true for `request`, `router`, `query_parsing`, `supergraph`, `execution`, `query_planning`, `subgraph`, `subgraph_request` and `http_request`.",
+          "type": "object"
         }
       },
       "required": [
