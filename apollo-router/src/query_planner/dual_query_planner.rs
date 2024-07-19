@@ -242,6 +242,31 @@ pub fn plan_matches(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> bool {
     opt_plan_node_matches(js_root_node, &rust_root_node)
 }
 
+pub fn diff_plan(js_plan: &QueryPlanResult, rust_plan: &QueryPlan) -> String {
+    let js_root_node = &js_plan.query_plan.node;
+    let rust_root_node = convert_root_query_plan_node(rust_plan);
+
+    match (js_root_node, rust_root_node) {
+        (None, None) => String::from(""),
+        (None, Some(rust)) => {
+            let rust = &format!("{rust:?}");
+            let differences = diff::lines("", rust);
+            render_diff(&differences)
+        }
+        (Some(js), None) => {
+            let js = &format!("{js:?}");
+            let differences = diff::lines(js, "");
+            render_diff(&differences)
+        }
+        (Some(js), Some(rust)) => {
+            let rust = &format!("{rust:?}");
+            let js = &format!("{js:?}");
+            let differences = diff::lines(js, rust);
+            render_diff(&differences)
+        }
+    }
+}
+
 fn opt_plan_node_matches(
     this: &Option<impl Borrow<PlanNode>>,
     other: &Option<impl Borrow<PlanNode>>,

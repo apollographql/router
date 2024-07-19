@@ -882,7 +882,7 @@ impl BridgeQueryPlanner {
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueryPlanResult {
-    pub(super) formatted_query_plan: Option<Arc<String>>,
+    pub formatted_query_plan: Option<Arc<String>>,
     pub(super) query_plan: QueryPlan,
 }
 
@@ -894,7 +894,7 @@ pub(super) struct QueryPlan {
     pub(super) node: Option<Arc<PlanNode>>,
 }
 
-pub(crate) fn render_diff(differences: &[diff::Result<&str>]) -> String {
+pub fn render_diff(differences: &[diff::Result<&str>]) -> String {
     let mut output = String::new();
     for diff_line in differences {
         match diff_line {
