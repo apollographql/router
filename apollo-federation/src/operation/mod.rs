@@ -636,8 +636,9 @@ pub(crate) enum SelectionKey {
 }
 
 impl SelectionKey {
+    /// Returns true if the selection key is `__typename` *without directives*.
     pub(crate) fn is_typename_field(&self) -> bool {
-        matches!(self, SelectionKey::Field { response_name, .. } if *response_name == TYPENAME_FIELD)
+        matches!(self, SelectionKey::Field { response_name, directives } if *response_name == TYPENAME_FIELD && directives.is_empty())
     }
 }
 
