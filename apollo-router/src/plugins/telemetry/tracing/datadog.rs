@@ -198,6 +198,8 @@ impl TracingConfigurator for Config {
             )
             .with_http_client(
                 reqwest::Client::builder()
+                    // https://github.com/open-telemetry/opentelemetry-rust-contrib/issues/7
+                    // Set the idle timeout to something low to prevent termination of connections.
                     .pool_idle_timeout(Duration::from_millis(1))
                     .build()?,
             )
