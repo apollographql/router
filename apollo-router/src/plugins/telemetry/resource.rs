@@ -11,8 +11,10 @@ use crate::plugins::telemetry::config::AttributeValue;
 const UNKNOWN_SERVICE: &str = "unknown_service";
 const OTEL_SERVICE_NAME: &str = "OTEL_SERVICE_NAME";
 
-struct StaticServiceNameDetector;
-impl ResourceDetector for StaticServiceNameDetector {
+/// This resource detector fills out things like the default service version and executable name.
+/// Users can always override them via config.
+struct StaticResourceDetector;
+impl ResourceDetector for StaticResourceDetector {
     fn detect(&self, _timeout: Duration) -> Resource {
         let mut config_resources = vec![];
         config_resources.push(KeyValue::new(
@@ -62,7 +64,7 @@ pub(crate) trait ConfigResource {
         let resource = Resource::from_detectors(
             Duration::from_secs(0),
             vec![
-                Box::new(StaticServiceNameDetector),
+                Box::new(StaticResourceDetector),
                 Box::new(config_resource_detector),
                 Box::new(EnvResourceDetector::new()),
                 Box::new(EnvServiceNameDetector),
