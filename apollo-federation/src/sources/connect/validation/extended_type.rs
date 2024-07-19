@@ -28,9 +28,8 @@ use super::source_name::SourceName;
 use super::Code;
 use super::Location;
 use super::Message;
-use crate::sources::connect::spec::schema::CONNECT_HEADERS_ARGUMENT_NAME;
-use crate::sources::connect::spec::schema::CONNECT_HTTP_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::CONNECT_SOURCE_ARGUMENT_NAME;
+use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
 
 pub(super) fn validate_extended_type(
     extended_type: &ExtendedType,
@@ -179,13 +178,13 @@ fn validate_field(
     ));
 
     let Some((http_arg, http_arg_location)) = connect_directive
-        .argument_by_name(&CONNECT_HTTP_ARGUMENT_NAME)
+        .argument_by_name(&HTTP_ARGUMENT_NAME)
         .and_then(|arg| Some((arg.as_object()?, arg.location())))
     else {
         errors.push(Message {
             code: Code::GraphQLError,
             message: format!(
-                "{coordinate} must have a `{CONNECT_HTTP_ARGUMENT_NAME}` argument.",
+                "{coordinate} must have a `{HTTP_ARGUMENT_NAME}` argument.",
                 coordinate =
                     connect_directive_coordinate(connect_directive_name, object, &field.name),
             ),
@@ -264,10 +263,9 @@ fn validate_field(
         }
     }
 
-    if let Some(headers) = get_http_headers_arg(http_arg, &CONNECT_HEADERS_ARGUMENT_NAME) {
+    if let Some(headers) = get_http_headers_arg(http_arg) {
         errors.extend(validate_headers_arg(
             connect_directive_name,
-            &format!("{CONNECT_HTTP_ARGUMENT_NAME}.{CONNECT_HEADERS_ARGUMENT_NAME}"),
             headers,
             source_map,
             Some(&object.name),
