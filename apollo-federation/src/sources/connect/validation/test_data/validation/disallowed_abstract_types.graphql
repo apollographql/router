@@ -1,0 +1,48 @@
+extend schema
+  @link(url: "https://specs.apollo.dev/connect/v0.1", import: ["@connect"])
+
+type Query {
+  products: [Product]
+    @connect(
+      http: { GET: "http://127.0.0.1:8000/products" }
+      selection: """
+      .results {
+        id
+        title
+        author { name }
+        director { name }
+      }
+      """
+    )
+  search(title: String): [Media]
+    @connect(http: { GET: "http://127.0.0.1:8000/media" }, selection: "")
+}
+
+interface Product {
+  id: ID!
+}
+
+union Media = Book | Film | Music
+
+type Book implements Product {
+  id: ID
+  title: String
+  author: Person
+}
+
+type Film implements Product {
+  id: ID
+  title: String
+  director: Person
+}
+
+type Music {
+  id: ID
+  title: String
+  singer: Person
+}
+
+type Person {
+  id: ID
+  name: String
+}
