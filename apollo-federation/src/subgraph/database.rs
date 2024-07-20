@@ -19,6 +19,7 @@ use apollo_compiler::name;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
 
+use crate::link::database::links_metadata;
 use crate::link::spec::Identity;
 use crate::link::spec::APOLLO_SPEC_DOMAIN;
 use crate::link::Link;
@@ -65,10 +66,13 @@ impl Key {
     }
 }
 
-pub fn federation_link(schema: &Schema) -> Link {
-    Link::for_identity(schema, &federation_link_identity())
+pub fn federation_link(schema: &Schema) -> Arc<Link> {
+    links_metadata(schema)
+        // TODO: error handling?
+        .unwrap_or_default()
+        .unwrap_or_default()
+        .for_identity(&federation_link_identity())
         .expect("The presence of the federation link should have been validated on construction")
-        .0
 }
 
 /// The name of the @key directive in this subgraph.

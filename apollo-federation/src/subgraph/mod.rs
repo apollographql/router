@@ -30,7 +30,7 @@ use crate::subgraph::spec::SERVICE_SDL_QUERY;
 use crate::subgraph::spec::SERVICE_TYPE;
 use crate::ValidFederationSubgraph;
 
-pub(crate) mod database;
+mod database;
 pub mod spec;
 
 pub struct Subgraph {

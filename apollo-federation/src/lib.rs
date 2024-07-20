@@ -32,7 +32,7 @@ pub mod sources;
 pub mod subgraph;
 pub(crate) mod utils;
 
-use apollo_compiler::schema::NamedType;
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
 use link::join_spec_definition::JOIN_VERSIONS;

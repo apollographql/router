@@ -3237,7 +3237,7 @@ fn compute_nodes_for_key_resolution<'a>(
 fn compute_nodes_for_root_type_resolution<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'_>,
-    child: &'a PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>,
+    child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
     edge_id: EdgeIndex,
     edge: &crate::query_graph::QueryGraphEdge,
     root_kind: SchemaRootDefinitionKind,
@@ -3335,7 +3335,7 @@ fn compute_nodes_for_root_type_resolution<'a>(
 fn compute_nodes_for_op_path_element<'a>(
     dependency_graph: &mut FetchDependencyGraph,
     stack_item: &ComputeNodesStackItem<'a>,
-    child: &'a PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>,
+    child: &'a Arc<PathTreeChild<OpGraphPathTrigger, Option<EdgeIndex>>>,
     operation: &OpPathElement,
     created_nodes: &mut IndexSet<NodeIndex>,
 ) -> Result<ComputeNodesStackItem<'a>, FederationError> {

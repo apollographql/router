@@ -174,7 +174,7 @@ pub struct QueryPlanningStatistics {
 
 impl QueryPlannerConfig {
     /// Panics if options are used together in unsupported ways.
-    pub(crate) fn assert_valid(&self) {
+    fn assert_valid(&self) {
         if self.incremental_delivery.enable_defer {
             assert!(!self.debug.bypass_planner_for_single_subgraph, "Cannot use the `debug.bypass_planner_for_single_subgraph` query planner option when @defer support is enabled");
         }
