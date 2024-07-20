@@ -36,22 +36,41 @@ scalar link__Import
 scalar join__FieldSet
 
 enum join__Graph {
-  CONNECTOR_QUERY_USER_0 @join__graph(name: "connector_Query_user_0", url: "")
-  CONNECTOR_QUERY_USERS_0 @join__graph(name: "connector_Query_users_0", url: "")
-  CONNECTOR_USER_D_1 @join__graph(name: "connector_User_d_1", url: "")
-  GRAPHQL @join__graph(name: "graphql", url: "")
+  BASIC_1 @join__graph(name: "basic_1", url: "")
 }
 
-type User @join__type(graph: CONNECTOR_QUERY_USER_0, key: "id") @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1, key: "__typename") @join__type(graph: GRAPHQL, key: "id") {
-  id: ID! @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0) @join__field(graph: GRAPHQL)
-  a: String @join__field(graph: CONNECTOR_QUERY_USER_0) @join__field(graph: CONNECTOR_QUERY_USERS_0)
-  b: String @join__field(graph: CONNECTOR_QUERY_USER_0)
-  c: String @join__field(graph: CONNECTOR_USER_D_1, external: true) @join__field(graph: GRAPHQL)
-  d: String @join__field(graph: CONNECTOR_USER_D_1, requires: "c")
+type Query @join__type(graph: BASIC_1) {
+  a(
+    input: Input @inaccessible,
+  ): A @join__field(graph: BASIC_1)
+  b: B @inaccessible @join__field(graph: BASIC_1)
 }
 
-type Query @join__type(graph: CONNECTOR_QUERY_USER_0) @join__type(graph: CONNECTOR_QUERY_USERS_0) @join__type(graph: CONNECTOR_USER_D_1) @join__type(graph: GRAPHQL) {
-  user(id: ID!): User @join__field(graph: CONNECTOR_QUERY_USER_0)
-  users: [User] @join__field(graph: CONNECTOR_QUERY_USERS_0)
-  _: ID @inaccessible @join__field(graph: CONNECTOR_USER_D_1)
+type A @join__type(graph: BASIC_1, key: "id") {
+  id: ID! @join__field(graph: BASIC_1)
+  c: Int @inaccessible @join__field(graph: BASIC_1)
+  d: Enum @inaccessible @join__field(graph: BASIC_1)
 }
+
+type B implements Interface @join__type(graph: BASIC_1) @inaccessible @join__implements(graph: BASIC_1, interface: "Interface") {
+  b: Scalar @join__field(graph: BASIC_1)
+}
+
+enum Enum @join__type(graph: BASIC_1) @inaccessible {
+  A @join__enumValue(graph: BASIC_1)
+  B @join__enumValue(graph: BASIC_1)
+  C @inaccessible @join__enumValue(graph: BASIC_1)
+}
+
+input Input @join__type(graph: BASIC_1) @inaccessible {
+  a: Int @inaccessible
+  b: String
+}
+
+scalar Scalar @join__type(graph: BASIC_1) @inaccessible
+
+interface Interface @join__type(graph: BASIC_1) @inaccessible {
+  b: Scalar
+}
+
+union Union @join__type(graph: BASIC_1) @inaccessible @join__unionMember(graph: BASIC_1, member: "A") @join__unionMember(graph: BASIC_1, member: "B") = A | B
