@@ -1,14 +1,14 @@
 ---
 title: GraphOS reporting
-subtitle: Send GraphOS Router operation metrics to GraphOS
-description: Report GraphQL operation usage metrics from the GraphOS Router to GraphOS to enable schema checks and metrics visualization in GraphOS Studio.
+subtitle: Send router operation metrics to GraphOS
+description: Report GraphQL operation usage metrics from the Apollo GraphOS Router to GraphOS to enable schema checks and metrics visualization in GraphOS Studio.
 ---
 
-The GraphOS Router can report operation usage metrics to [GraphOS](/graphos/) that you can then visualize in GraphOS Studio. These metrics also enable powerful GraphOS features like [schema checks](/graphos/delivery/schema-checks/).
+The GraphOS Router and Apollo Router Core can report operation usage metrics to [GraphOS](/graphos/) that you can then visualize in GraphOS Studio. These metrics also enable powerful GraphOS features like [schema checks](/graphos/delivery/schema-checks/).
 
 ## Enabling usage reporting
 
-You enable usage reporting in the GraphOS Router by setting the following environment variables:
+You enable usage reporting in the router by setting the following environment variables:
 
 ```bash
 export APOLLO_KEY=<YOUR_GRAPH_API_KEY>
@@ -36,7 +36,7 @@ Your subgraph libraries must support federated tracing (also known as FTV1 traci
 
 ### Subgraph trace sampling
 
-By default, the GraphOS Router requests subgraph trace data from operations with a 1% sampling probability per operation. In most cases, this provides a sufficient sample size while minimizing latency for most operations (traces can affect latency because they increase the size of subgraph response payloads).
+By default, the router requests subgraph trace data from operations with a 1% sampling probability per operation. In most cases, this provides a sufficient sample size while minimizing latency for most operations (traces can affect latency because they increase the size of subgraph response payloads).
 
 You can customize your router's trace sampling probability by setting the following options in your [YAML config file](./overview/#yaml-config-file):
 
@@ -313,7 +313,7 @@ telemetry:
 
 ### `errors`
 
-You can configure whether the GraphOS Router reports GraphQL error information to GraphOS, and whether the details of those errors are redacted. You can customize this behavior globally and override that global behavior on a per-subgraph basis.
+You can configure whether the router reports GraphQL error information to GraphOS, and whether the details of those errors are redacted. You can customize this behavior globally and override that global behavior on a per-subgraph basis.
 
 By default, your router _does_ report error information, and it _does_ redact the details of those errors.
 
