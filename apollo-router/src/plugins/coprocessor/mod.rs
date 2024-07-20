@@ -36,6 +36,9 @@ use crate::layers::async_checkpoint::OneShotAsyncCheckpointLayer;
 use crate::layers::ServiceBuilderExt;
 use crate::plugin::Plugin;
 use crate::plugin::PluginInit;
+use crate::plugins::telemetry::config_new::conditions::Condition;
+use crate::plugins::telemetry::config_new::selectors::RouterSelector;
+use crate::plugins::telemetry::config_new::selectors::SubgraphSelector;
 use crate::plugins::traffic_shaping::Http2Config;
 use crate::register_plugin;
 use crate::services;
@@ -234,6 +237,9 @@ where
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -252,6 +258,9 @@ pub(super) struct RouterRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct RouterResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<RouterSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -267,6 +276,9 @@ pub(super) struct RouterResponseConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphRequestConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SubgraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -285,6 +297,9 @@ pub(super) struct SubgraphRequestConf {
 #[derive(Clone, Debug, Default, Deserialize, PartialEq, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields)]
 pub(super) struct SubgraphResponseConf {
+    /// Condition to trigger this stage
+    #[serde(skip_serializing)]
+    pub(super) condition: Option<Condition<SubgraphSelector>>,
     /// Send the headers
     pub(super) headers: bool,
     /// Send the context
@@ -598,7 +613,7 @@ async fn process_router_request_stage<C>(
     coprocessor_url: String,
     sdl: Arc<String>,
     mut request: router::Request,
-    request_config: RouterRequestConf,
+    mut request_config: RouterRequestConf,
 ) -> Result<ControlFlow<router::Response, router::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -608,6 +623,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -761,6 +784,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // split the response into parts + body
     let (parts, body) = response.response.into_parts();
 
@@ -945,7 +976,7 @@ async fn process_subgraph_request_stage<C>(
     coprocessor_url: String,
     service_name: String,
     mut request: subgraph::Request,
-    request_config: SubgraphRequestConf,
+    mut request_config: SubgraphRequestConf,
 ) -> Result<ControlFlow<subgraph::Response, subgraph::Request>, BoxError>
 where
     C: Service<http::Request<RouterBody>, Response = http::Response<RouterBody>, Error = BoxError>
@@ -955,6 +986,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = request_config
+        .condition
+        .as_mut()
+        .map(|c| c.evaluate_request(&request) == Some(true))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(ControlFlow::Continue(request));
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our request and prepare our
     // external call. Use our configuration to figure out which data to send.
@@ -971,6 +1010,7 @@ where
         .transpose()?;
     let context_to_send = request_config.context.then(|| request.context.clone());
     let uri = request_config.uri.then(|| parts.uri.to_string());
+    let subgraph_name = service_name.clone();
     let service_name = request_config.service_name.then_some(service_name);
 
     let payload = Externalizable::subgraph_builder()
@@ -1040,6 +1080,7 @@ where
             let subgraph_response = subgraph::Response {
                 response: http_response,
                 context: request.context,
+                subgraph_name: Some(subgraph_name),
             };
 
             if let Some(context) = co_processor_output.context {
@@ -1100,6 +1141,14 @@ where
         + 'static,
     <C as tower::Service<http::Request<RouterBody>>>::Future: Send + 'static,
 {
+    let should_be_executed = response_config
+        .condition
+        .as_ref()
+        .map(|c| c.evaluate_response(&response))
+        .unwrap_or(true);
+    if !should_be_executed {
+        return Ok(response);
+    }
     // Call into our out of process processor with a body of our body
     // First, extract the data we need from our response and prepare our
     // external call. Use our configuration to figure out which data to send.

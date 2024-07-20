@@ -1,10 +1,10 @@
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::executable;
 use apollo_compiler::executable::FieldSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::NamedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Schema;
-use indexmap::IndexMap;
 
 use crate::error::FederationError;
 use crate::error::MultipleFederationErrors;
@@ -64,7 +64,7 @@ pub(crate) fn parse_field_set(
     )?;
 
     // field set should not contain any named fragments
-    let named_fragments = NamedFragments::new(&IndexMap::new(), schema);
+    let named_fragments = NamedFragments::new(&IndexMap::default(), schema);
     let selection_set =
         SelectionSet::from_selection_set(&field_set.selection_set, &named_fragments, schema)?;
 

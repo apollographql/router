@@ -3,7 +3,7 @@
 //            trait directly using `ConditionResolverCache`.
 use std::sync::Arc;
 
-use indexmap::IndexMap;
+use apollo_compiler::collections::IndexMap;
 use petgraph::graph::EdgeIndex;
 
 use crate::error::FederationError;
