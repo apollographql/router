@@ -151,7 +151,7 @@ impl Schema {
 
         let schema_id = Arc::new(Schema::schema_id(sdl));
 
-        let api_schema = api_schema.map(|api| Ok(api)).unwrap_or_else(|| {
+        let api_schema = api_schema.map(Ok).unwrap_or_else(|| {
             supergraph
                 .to_api_schema(ApiSchemaOptions {
                     include_defer: config.supergraph.defer_support,

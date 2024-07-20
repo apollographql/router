@@ -28,6 +28,7 @@ pub(crate) mod operation;
 pub mod query_graph;
 pub mod query_plan;
 pub mod schema;
+pub mod sources;
 pub mod subgraph;
 pub(crate) mod utils;
 

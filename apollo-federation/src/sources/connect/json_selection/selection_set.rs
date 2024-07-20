@@ -217,7 +217,8 @@ mod tests {
     fn selection_set(schema: &Valid<Schema>, s: &str) -> SelectionSet {
         apollo_compiler::ExecutableDocument::parse_and_validate(schema, s, "./")
             .unwrap()
-            .anonymous_operation
+            .operations
+            .anonymous
             .as_ref()
             .unwrap()
             .selection_set

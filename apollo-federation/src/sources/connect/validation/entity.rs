@@ -1,10 +1,10 @@
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::parser::SourceMap;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::schema::ObjectType;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use apollo_compiler::SourceMap;
 
 use super::coordinates::connect_directive_entity_argument_coordinate;
 use super::extended_type::ObjectCategory;

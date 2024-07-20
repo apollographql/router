@@ -106,7 +106,7 @@ async fn mock_subgraph_service_withf_panics_should_be_reported_as_service_closed
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
     let schema_str = test_schema!();
-    let parsed_schema = Arc::new(Schema::parse_test(schema_str, &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse(schema_str, &Default::default()).unwrap());
 
     let sf = Arc::new(FetchServiceFactory::new(
         parsed_schema.clone(),
@@ -177,7 +177,7 @@ async fn fetch_includes_operation_name() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
-    let parsed_schema = Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
 
     let sf = Arc::new(FetchServiceFactory::new(
         parsed_schema.clone(),
@@ -245,7 +245,7 @@ async fn fetch_makes_post_requests() {
 
     let (sender, _) = tokio::sync::mpsc::channel(10);
 
-    let parsed_schema = Arc::new(Schema::parse_test(test_schema!(), &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse(test_schema!(), &Default::default()).unwrap());
     let sf = Arc::new(FetchServiceFactory::new(
         parsed_schema.clone(),
         Default::default(),
@@ -399,7 +399,7 @@ async fn defer() {
     let (sender, receiver) = tokio::sync::mpsc::channel(10);
 
     let schema = include_str!("testdata/defer_schema.graphql");
-    let parsed_schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
     let sf = Arc::new(FetchServiceFactory::new(
         parsed_schema.clone(),
@@ -701,7 +701,7 @@ async fn dependent_mutations() {
     let mut mock_b_service = plugin::test::MockSubgraphService::new();
     mock_b_service.expect_call().never();
 
-    let parsed_schema = Arc::new(Schema::parse_test(schema, &Default::default()).unwrap());
+    let parsed_schema = Arc::new(Schema::parse(schema, &Default::default()).unwrap());
 
     let sf = Arc::new(FetchServiceFactory::new(
         parsed_schema.clone(),

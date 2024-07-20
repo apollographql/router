@@ -1,5 +1,5 @@
+use apollo_compiler::parser::SourceMap;
 use apollo_compiler::Node;
-use apollo_compiler::SourceMap;
 
 use super::parse_url;
 use super::Code;

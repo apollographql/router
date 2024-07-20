@@ -802,7 +802,7 @@ impl AbstractFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         match self {
             AbstractFieldDefinitionPosition::Interface(field) => field.get(schema),
             AbstractFieldDefinitionPosition::Union(field) => field.get(schema),
@@ -1688,19 +1688,6 @@ impl ObjectTypeDefinitionPosition {
 
     pub(crate) fn introspection_type_field(&self) -> ObjectFieldDefinitionPosition {
         self.field(name!("__type"))
-    }
-
-    /// Attempts to construct an iterator that yields the field definition positions for this
-    /// objects's fields.
-    // TODO: The lifetime capturing rules for RTIPs will change in Rust edition 2024. When they do,
-    // the bounds on this function can be changed to have 'a be the only lifetime (and still be
-    // correct).
-    pub(crate) fn field_positions<'b, 'a: 'b>(
-        &'a self,
-        schema: &'a Schema,
-    ) -> Result<impl 'b + Iterator<Item = ObjectFieldDefinitionPosition>, FederationError> {
-        self.get(schema)
-            .map(|node| node.fields.keys().map(|name| self.field(name.clone())))
     }
 
     // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in

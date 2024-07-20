@@ -472,7 +472,6 @@ pub(crate) async fn create_http_services(
         .expect("traffic shaping should always be part of the plugin list");
 
     let mut http_services = IndexMap::new();
-    let mut subgraph_services = IndexMap::default();
     for (name, _) in schema.subgraphs() {
         let http_service = crate::services::http::HttpClientService::from_config(
             name,

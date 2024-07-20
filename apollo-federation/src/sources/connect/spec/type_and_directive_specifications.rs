@@ -2,11 +2,11 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::InputValueDefinition;
 use apollo_compiler::ast::Type;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::InputObjectType;
 use apollo_compiler::ty;
-use indexmap::IndexMap;
 
 use super::schema::CONNECT_DIRECTIVE_NAME_IN_SPEC;
 use super::schema::CONNECT_ENTITY_ARGUMENT_NAME;
@@ -89,7 +89,7 @@ pub(super) fn check_or_add(
         },
     ];
 
-    let mut http_header_mapping_fields = IndexMap::new();
+    let mut http_header_mapping_fields = IndexMap::with_hasher(Default::default());
     for field in http_header_mapping_field_list {
         http_header_mapping_fields.insert(field.name.clone(), Component::new(field));
     }
@@ -167,7 +167,7 @@ pub(super) fn check_or_add(
         },
     ];
 
-    let mut connect_http_fields = IndexMap::new();
+    let mut connect_http_fields = IndexMap::with_hasher(Default::default());
     for field in connect_http_field_list {
         connect_http_fields.insert(field.name.clone(), Component::new(field));
     }
@@ -271,7 +271,7 @@ pub(super) fn check_or_add(
         },
     ];
 
-    let mut source_http_fields = IndexMap::new();
+    let mut source_http_fields = IndexMap::with_hasher(Default::default());
     for field in source_http_field_list {
         source_http_fields.insert(field.name.clone(), Component::new(field));
     }
