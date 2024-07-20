@@ -1200,7 +1200,9 @@ mod router_plugin {
     // TraceId support
     #[rhai_fn(return_raw)]
     pub(crate) fn traceid() -> Result<TraceId, Box<EvalAltResult>> {
-        TraceId::maybe_new().ok_or_else(|| "trace unavailable".into())
+        TraceId::maybe_new()
+            .or_else(TraceId::current)
+            .ok_or_else(|| "trace unavailable".into())
     }
 
     #[rhai_fn(name = "to_string")]

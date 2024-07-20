@@ -52,7 +52,7 @@ impl<'a> ToSchemaVisitor<'a> {
                 name: object.name.clone(),
                 implements_interfaces: object.implements_interfaces.clone(),
                 directives: filter_directives(directive_deny_list, &object.directives),
-                fields: IndexMap::new(), // Will be filled in by subsequent visits
+                fields: IndexMap::with_hasher(Default::default()), // Will be filled in by subsequent visits
             })),
             ExtendedType::Scalar(_) => todo!(),
             ExtendedType::Interface(_) => todo!(),
@@ -133,7 +133,7 @@ impl JSONSelectionVisitor for ToSchemaVisitor<'_> {
                         name: def.name.clone(),
                         implements_interfaces: def.implements_interfaces.clone(),
                         directives: DirectiveList::new(), // TODO: Whitelist
-                        fields: IndexMap::new(), // Will be filled in by the `visit` method for each field
+                        fields: IndexMap::with_hasher(Default::default()), // Will be filled in by the `visit` method for each field
                     })))
                 }
                 TypeDefinitionPosition::Interface(_) => todo!(),

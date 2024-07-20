@@ -38,7 +38,7 @@ pub(super) fn rearrange_query_plan(
         );
     }
 
-    let root = rearrange_plan_node(root, &mut IndexMap::new(), &variable_ranges)?;
+    let root = rearrange_plan_node(root, &mut IndexMap::default(), &variable_ranges)?;
     Ok(QueryPlan {
         root: Arc::new(root),
         usage_reporting: query_plan.usage_reporting.clone(),
@@ -97,7 +97,7 @@ fn rearrange_plan_node<'a>(
 
             // Error if 'rest' contains file variables
             if let Some(rest) = rest {
-                let mut rest_variables = IndexMap::new();
+                let mut rest_variables = IndexMap::default();
                 // ignore result use it just to collect variables
                 drop(rearrange_plan_node(
                     rest,
@@ -130,7 +130,7 @@ fn rearrange_plan_node<'a>(
                 .transpose();
 
             // Error if 'deferred' contains file variables
-            let mut deferred_variables = IndexMap::new();
+            let mut deferred_variables = IndexMap::default();
             for DeferredNode { node, .. } in deferred.iter() {
                 if let Some(node) = node {
                     // ignore result use it just to collect variables

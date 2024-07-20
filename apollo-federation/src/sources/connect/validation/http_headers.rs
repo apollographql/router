@@ -1,9 +1,9 @@
 use std::collections::HashMap;
 
 use apollo_compiler::ast::Value;
+use apollo_compiler::parser::SourceMap;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::SourceMap;
 use http::HeaderName;
 
 use super::coordinates::http_header_argument_coordinate;

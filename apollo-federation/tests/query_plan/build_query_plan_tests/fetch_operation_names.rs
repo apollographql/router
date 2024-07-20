@@ -265,7 +265,7 @@ fn correctly_handle_case_where_there_is_too_many_plans_to_consider() {
     assert_eq!(fetch.subgraph_name.as_ref(), "S1");
     assert!(fetch.requires.is_none());
     assert!(fetch.operation_document.fragments.is_empty());
-    let mut operations = fetch.operation_document.all_operations();
+    let mut operations = fetch.operation_document.operations.iter();
     let operation = operations.next().unwrap();
     assert!(operations.next().is_none());
     // operation is essentially:

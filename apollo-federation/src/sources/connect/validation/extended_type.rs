@@ -1,17 +1,17 @@
 use std::sync::Arc;
 
 use apollo_compiler::ast::FieldDefinition;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::parser::FileId;
+use apollo_compiler::parser::SourceFile;
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan as NodeLocation;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::schema::ObjectType;
-use apollo_compiler::FileId;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
-use apollo_compiler::SourceFile;
-use apollo_compiler::SourceMap;
-use indexmap::IndexMap;
 
 use super::coordinates::connect_directive_coordinate;
 use super::coordinates::connect_directive_http_coordinate;

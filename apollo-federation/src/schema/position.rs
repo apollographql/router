@@ -4,6 +4,7 @@ use std::fmt::Formatter;
 use std::ops::Deref;
 
 use apollo_compiler::ast;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::ComponentName;
@@ -23,8 +24,8 @@ use apollo_compiler::schema::UnionType;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
 use apollo_compiler::Schema;
-use indexmap::IndexSet;
 use lazy_static::lazy_static;
+use serde::Serialize;
 use strum::IntoEnumIterator;
 
 use crate::error::FederationError;
@@ -45,6 +46,114 @@ use crate::schema::FederationSchema;
 // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html#the-captures-trick
 pub(crate) trait Captures<U> {}
 impl<T: ?Sized, U> Captures<U> for T {}
+
+/// A zero-allocation error representation for position lookups,
+/// because many of these errors are actually immediately discarded.
+///
+/// This type does still incur a few atomic refcount increments/decrements.
+/// Maybe that could be improved in the future by borrowing from the position values,
+/// if necessary.
+#[derive(Debug, thiserror::Error)]
+pub(crate) enum PositionLookupError {
+    #[error("Schema has no directive `{0}`")]
+    DirectiveMissing(DirectiveDefinitionPosition),
+    #[error("Schema has no type `{0}`")]
+    TypeMissing(Name),
+    #[error("Schema type `{0}` is not {1}")]
+    TypeWrongKind(Name, &'static str),
+    #[error("{0} type `{1}` has no field `{2}`")]
+    MissingField(&'static str, Name, Name),
+    #[error("Directive `{}` has no argument `{}`", .0.directive_name, .0.argument_name)]
+    MissingDirectiveArgument(DirectiveArgumentDefinitionPosition),
+    #[error("{0} `{1}.{2}` has no argument `{3}`")]
+    MissingFieldArgument(&'static str, Name, Name, Name),
+    #[error("Enum type `{}` has no value `{}`", .0.type_name, .0.value_name)]
+    MissingValue(EnumValueDefinitionPosition),
+    #[error("Cannot mutate reserved {0} `{1}.{2}`")]
+    MutateReservedField(&'static str, Name, Name),
+}
+
+impl From<PositionLookupError> for FederationError {
+    fn from(value: PositionLookupError) -> Self {
+        FederationError::internal(value.to_string())
+    }
+}
+
+/// The error type returned when a position conversion fails.
+#[derive(Debug, thiserror::Error)]
+#[error("Type `{actual}` was unexpectedly not {expected}")]
+pub(crate) struct PositionConvertError<T: Debug + Display> {
+    actual: T,
+    expected: &'static str,
+}
+
+impl<T: Debug + Display> From<PositionConvertError<T>> for FederationError {
+    fn from(value: PositionConvertError<T>) -> Self {
+        FederationError::internal(value.to_string())
+    }
+}
+
+/// To declare a conversion for a `Position::Branch(T) -> T`:
+/// ```no_compile
+/// fallible_conversions!(TypeDefinition::Scalar -> ScalarTypeDefinition);
+/// ```
+///
+/// To declare a conversion from one enum to another, with a different set of branches:
+/// ```no_compile
+/// fallible_conversions!(TypeDefinition::{Scalar, Enum, InputObject} -> InputObjectTypeDefinition)
+/// ```
+macro_rules! fallible_conversions {
+    ( $from:ident :: $branch:ident -> $to:ident ) => {
+        impl TryFrom<$from> for $to {
+            type Error = PositionConvertError<$from>;
+
+            fn try_from(value: $from) -> Result<Self, Self::Error> {
+                match value {
+                    $from::$branch(value) => Ok(value),
+                    _ => Err(PositionConvertError {
+                        actual: value,
+                        expected: $to::EXPECTED,
+                    }),
+                }
+            }
+        }
+    };
+    ( $from:ident :: { $($branch:ident),+ } -> $to:ident ) => {
+        impl TryFrom<$from> for $to {
+            type Error = PositionConvertError<$from>;
+
+            fn try_from(value: $from) -> Result<Self, Self::Error> {
+                match value {
+                    $(
+                        $from::$branch(value) => Ok($to::$branch(value)),
+                    )+
+                    _ => Err(PositionConvertError {
+                        actual: value,
+                        expected: $to::EXPECTED,
+                    }),
+                }
+            }
+        }
+    }
+}
+
+/// To declare a conversion from a type to a superset type:
+/// ```no_compile
+/// infallible_conversions!(InputObjectTypeDefinition::{Scalar, Enum, InputObject} -> TypeDefinition)
+/// ```
+macro_rules! infallible_conversions {
+    ( $from:ident :: { $($branch:ident),+ } -> $to:ident ) => {
+        impl From<$from> for $to {
+            fn from(value: $from) -> Self {
+                match value {
+                    $(
+                        $from::$branch(value) => $to::$branch(value)
+                    ),+
+                }
+            }
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum TypeDefinitionPosition {
@@ -70,6 +179,15 @@ impl Debug for TypeDefinitionPosition {
 }
 
 impl TypeDefinitionPosition {
+    pub(crate) fn is_composite_type(&self) -> bool {
+        matches!(
+            self,
+            TypeDefinitionPosition::Object(_)
+                | TypeDefinitionPosition::Interface(_)
+                | TypeDefinitionPosition::Union(_)
+        )
+    }
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             TypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -81,14 +199,26 @@ impl TypeDefinitionPosition {
         }
     }
 
+    fn describe(&self) -> &'static str {
+        match self {
+            TypeDefinitionPosition::Scalar(_) => ScalarTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Object(_) => ObjectTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Interface(_) => InterfaceTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::Enum(_) => EnumTypeDefinitionPosition::EXPECTED,
+            TypeDefinitionPosition::InputObject(_) => InputObjectTypeDefinitionPosition::EXPECTED,
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Scalar(_), TypeDefinitionPosition::Scalar(_))
             | (ExtendedType::Object(_), TypeDefinitionPosition::Object(_))
@@ -96,9 +226,10 @@ impl TypeDefinitionPosition {
             | (ExtendedType::Union(_), TypeDefinitionPosition::Union(_))
             | (ExtendedType::Enum(_), TypeDefinitionPosition::Enum(_))
             | (ExtendedType::InputObject(_), TypeDefinitionPosition::InputObject(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -110,123 +241,17 @@ impl TypeDefinitionPosition {
     }
 }
 
-impl TryFrom<TypeDefinitionPosition> for ScalarTypeDefinitionPosition {
-    type Error = FederationError;
+fallible_conversions!(TypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::Enum -> EnumTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::InputObject -> InputObjectTypeDefinitionPosition);
 
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Scalar(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a scalar type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for EnumTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Enum(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an enum type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for InputObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::InputObject(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an input object type"#
-            ))),
-        }
-    }
-}
-
-impl From<OutputTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: OutputTypeDefinitionPosition) -> Self {
-        match value {
-            OutputTypeDefinitionPosition::Scalar(value) => value.into(),
-            OutputTypeDefinitionPosition::Object(value) => value.into(),
-            OutputTypeDefinitionPosition::Interface(value) => value.into(),
-            OutputTypeDefinitionPosition::Union(value) => value.into(),
-            OutputTypeDefinitionPosition::Enum(value) => value.into(),
-        }
-    }
-}
-
-impl From<CompositeTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: CompositeTypeDefinitionPosition) -> Self {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => value.into(),
-            CompositeTypeDefinitionPosition::Interface(value) => value.into(),
-            CompositeTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<AbstractTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: AbstractTypeDefinitionPosition) -> Self {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
-            AbstractTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<ObjectOrInterfaceTypeDefinitionPosition> for TypeDefinitionPosition {
-    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
+infallible_conversions!(OutputTypeDefinitionPosition::{Scalar, Object, Interface, Union, Enum} -> TypeDefinitionPosition);
+infallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface, Union} -> TypeDefinitionPosition);
+infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> TypeDefinitionPosition);
+infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> TypeDefinitionPosition);
 
 #[derive(
     Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, derive_more::IsVariant,
@@ -252,6 +277,8 @@ impl Debug for OutputTypeDefinitionPosition {
 }
 
 impl OutputTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an output type";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             OutputTypeDefinitionPosition::Scalar(type_) => &type_.type_name,
@@ -266,23 +293,35 @@ impl OutputTypeDefinitionPosition {
         matches!(self, Self::Union(_) | Self::Interface(_))
     }
 
+    fn describe(&self) -> &'static str {
+        match self {
+            OutputTypeDefinitionPosition::Scalar(_) => ScalarTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Object(_) => ObjectTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Interface(_) => InterfaceTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
+            OutputTypeDefinitionPosition::Enum(_) => EnumTypeDefinitionPosition::EXPECTED,
+        }
+    }
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Scalar(_), OutputTypeDefinitionPosition::Scalar(_))
             | (ExtendedType::Object(_), OutputTypeDefinitionPosition::Object(_))
             | (ExtendedType::Interface(_), OutputTypeDefinitionPosition::Interface(_))
             | (ExtendedType::Union(_), OutputTypeDefinitionPosition::Union(_))
             | (ExtendedType::Enum(_), OutputTypeDefinitionPosition::Enum(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -294,117 +333,18 @@ impl OutputTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<OutputTypeDefinitionPosition> for ScalarTypeDefinitionPosition {
-    type Error = FederationError;
+fallible_conversions!(OutputTypeDefinitionPosition::Scalar -> ScalarTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::Enum -> EnumTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::{Scalar, Object, Interface, Enum, Union} -> OutputTypeDefinitionPosition);
 
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Scalar(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a scalar type"#
-            ))),
-        }
-    }
-}
+infallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface, Union} -> OutputTypeDefinitionPosition);
+infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> OutputTypeDefinitionPosition);
+infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> OutputTypeDefinitionPosition);
 
-impl TryFrom<OutputTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for EnumTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Enum(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an enum type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Scalar(value) => Ok(value.into()),
-            TypeDefinitionPosition::Object(value) => Ok(value.into()),
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            TypeDefinitionPosition::Enum(value) => Ok(value.into()),
-            TypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an output type"#
-            ))),
-        }
-    }
-}
-
-impl From<CompositeTypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    fn from(value: CompositeTypeDefinitionPosition) -> Self {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => value.into(),
-            CompositeTypeDefinitionPosition::Interface(value) => value.into(),
-            CompositeTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<AbstractTypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    fn from(value: AbstractTypeDefinitionPosition) -> Self {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
-            AbstractTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<ObjectOrInterfaceTypeDefinitionPosition> for OutputTypeDefinitionPosition {
-    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, Serialize)]
 pub(crate) enum CompositeTypeDefinitionPosition {
     Object(ObjectTypeDefinitionPosition),
     Interface(InterfaceTypeDefinitionPosition),
@@ -422,6 +362,8 @@ impl Debug for CompositeTypeDefinitionPosition {
 }
 
 impl CompositeTypeDefinitionPosition {
+    const EXPECTED: &'static str = "a composite type";
+
     pub(crate) fn is_object_type(&self) -> bool {
         matches!(self, CompositeTypeDefinitionPosition::Object(_))
     }
@@ -443,6 +385,16 @@ impl CompositeTypeDefinitionPosition {
             CompositeTypeDefinitionPosition::Object(type_) => &type_.type_name,
             CompositeTypeDefinitionPosition::Interface(type_) => &type_.type_name,
             CompositeTypeDefinitionPosition::Union(type_) => &type_.type_name,
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            CompositeTypeDefinitionPosition::Object(_) => ObjectTypeDefinitionPosition::EXPECTED,
+            CompositeTypeDefinitionPosition::Interface(_) => {
+                InterfaceTypeDefinitionPosition::EXPECTED
+            }
+            CompositeTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
         }
     }
 
@@ -485,18 +437,20 @@ impl CompositeTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Object(_), CompositeTypeDefinitionPosition::Object(_))
             | (ExtendedType::Interface(_), CompositeTypeDefinitionPosition::Interface(_))
             | (ExtendedType::Union(_), CompositeTypeDefinitionPosition::Union(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -508,92 +462,14 @@ impl CompositeTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<CompositeTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
+fallible_conversions!(CompositeTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
 
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Object(value) => Ok(value.into()),
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            TypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a composite type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Object(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a composite type"#
-            ))),
-        }
-    }
-}
-
-impl From<AbstractTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    fn from(value: AbstractTypeDefinitionPosition) -> Self {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => value.into(),
-            AbstractTypeDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
-impl From<ObjectOrInterfaceTypeDefinitionPosition> for CompositeTypeDefinitionPosition {
-    fn from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
+fallible_conversions!(TypeDefinitionPosition::{Object, Interface, Union} -> CompositeTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::{Object, Interface, Union} -> CompositeTypeDefinitionPosition);
+infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> CompositeTypeDefinitionPosition);
+infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> CompositeTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum AbstractTypeDefinitionPosition {
@@ -611,10 +487,21 @@ impl Debug for AbstractTypeDefinitionPosition {
 }
 
 impl AbstractTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an abstract type";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             AbstractTypeDefinitionPosition::Interface(type_) => &type_.type_name,
             AbstractTypeDefinitionPosition::Union(type_) => &type_.type_name,
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            AbstractTypeDefinitionPosition::Interface(_) => {
+                InterfaceTypeDefinitionPosition::EXPECTED
+            }
+            AbstractTypeDefinitionPosition::Union(_) => UnionTypeDefinitionPosition::EXPECTED,
         }
     }
 
@@ -653,17 +540,19 @@ impl AbstractTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Interface(_), AbstractTypeDefinitionPosition::Interface(_))
             | (ExtendedType::Union(_), AbstractTypeDefinitionPosition::Union(_)) => Ok(ty),
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -675,86 +564,12 @@ impl AbstractTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<AbstractTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<AbstractTypeDefinitionPosition> for UnionTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            AbstractTypeDefinitionPosition::Union(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not a union type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            TypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            CompositeTypeDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for AbstractTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract type"#
-            ))),
-        }
-    }
-}
+fallible_conversions!(AbstractTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(AbstractTypeDefinitionPosition::Union -> UnionTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::{Interface, Union} -> AbstractTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::{Interface, Union} -> AbstractTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::{Interface, Union} -> AbstractTypeDefinitionPosition);
+fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Interface} -> AbstractTypeDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum ObjectOrInterfaceTypeDefinitionPosition {
@@ -772,10 +587,23 @@ impl Debug for ObjectOrInterfaceTypeDefinitionPosition {
 }
 
 impl ObjectOrInterfaceTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an object/interface type";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             ObjectOrInterfaceTypeDefinitionPosition::Object(type_) => &type_.type_name,
             ObjectOrInterfaceTypeDefinitionPosition::Interface(type_) => &type_.type_name,
+        }
+    }
+
+    fn describe(&self) -> &'static str {
+        match self {
+            ObjectOrInterfaceTypeDefinitionPosition::Object(_) => {
+                ObjectTypeDefinitionPosition::EXPECTED
+            }
+            ObjectOrInterfaceTypeDefinitionPosition::Interface(_) => {
+                InterfaceTypeDefinitionPosition::EXPECTED
+            }
         }
     }
 
@@ -821,19 +649,21 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema ExtendedType, FederationError> {
+    ) -> Result<&'schema ExtendedType, PositionLookupError> {
+        let name = self.type_name();
         let ty = schema
             .types
-            .get(self.type_name())
-            .ok_or_else(|| FederationError::internal(format!(r#"Schema has no type "{self}""#)))?;
+            .get(name)
+            .ok_or_else(|| PositionLookupError::TypeMissing(name.clone()))?;
         match (ty, self) {
             (ExtendedType::Object(_), ObjectOrInterfaceTypeDefinitionPosition::Object(_))
             | (ExtendedType::Interface(_), ObjectOrInterfaceTypeDefinitionPosition::Interface(_)) => {
                 Ok(ty)
             }
-            _ => Err(FederationError::internal(format!(
-                r#"Schema type "{self}" is the wrong kind"#
-            ))),
+            _ => Err(PositionLookupError::TypeWrongKind(
+                name.clone(),
+                self.describe(),
+            )),
         }
     }
 
@@ -845,88 +675,14 @@ impl ObjectOrInterfaceTypeDefinitionPosition {
     }
 }
 
-impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for ObjectTypeDefinitionPosition {
-    type Error = FederationError;
+fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Object -> ObjectTypeDefinitionPosition);
+fallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::Interface -> InterfaceTypeDefinitionPosition);
+fallible_conversions!(TypeDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
+fallible_conversions!(OutputTypeDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
+fallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
+fallible_conversions!(AbstractTypeDefinitionPosition::{Interface} -> ObjectOrInterfaceTypeDefinitionPosition);
 
-    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Object(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<ObjectOrInterfaceTypeDefinitionPosition> for InterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: ObjectOrInterfaceTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            ObjectOrInterfaceTypeDefinitionPosition::Interface(value) => Ok(value),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<TypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: TypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            TypeDefinitionPosition::Object(value) => Ok(value.into()),
-            TypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<OutputTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: OutputTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            OutputTypeDefinitionPosition::Object(value) => Ok(value.into()),
-            OutputTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<CompositeTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: CompositeTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            CompositeTypeDefinitionPosition::Object(value) => Ok(value.into()),
-            CompositeTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<AbstractTypeDefinitionPosition> for ObjectOrInterfaceTypeDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: AbstractTypeDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            AbstractTypeDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface type"#
-            ))),
-        }
-    }
-}
-
-#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, Serialize)]
 pub(crate) enum FieldDefinitionPosition {
     Object(ObjectFieldDefinitionPosition),
     Interface(InterfaceFieldDefinitionPosition),
@@ -975,7 +731,7 @@ impl FieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         match self {
             FieldDefinitionPosition::Object(field) => field.get(schema),
             FieldDefinitionPosition::Interface(field) => field.get(schema),
@@ -1000,14 +756,7 @@ impl From<AbstractFieldDefinitionPosition> for FieldDefinitionPosition {
     }
 }
 
-impl From<ObjectOrInterfaceFieldDefinitionPosition> for FieldDefinitionPosition {
-    fn from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Self {
-        match value {
-            ObjectOrInterfaceFieldDefinitionPosition::Object(value) => value.into(),
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(value) => value.into(),
-        }
-    }
-}
+infallible_conversions!(ObjectOrInterfaceFieldDefinitionPosition::{Object, Interface} -> FieldDefinitionPosition);
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum AbstractFieldDefinitionPosition {
@@ -1053,7 +802,7 @@ impl AbstractFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         match self {
             AbstractFieldDefinitionPosition::Interface(field) => field.get(schema),
             AbstractFieldDefinitionPosition::Union(field) => field.get(schema),
@@ -1104,6 +853,8 @@ impl Debug for ObjectOrInterfaceFieldDefinitionPosition {
 }
 
 impl ObjectOrInterfaceFieldDefinitionPosition {
+    const EXPECTED: &'static str = "an object/interface field";
+
     pub(crate) fn type_name(&self) -> &Name {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => &field.type_name,
@@ -1132,7 +883,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         match self {
             ObjectOrInterfaceFieldDefinitionPosition::Object(field) => field.get(schema),
             ObjectOrInterfaceFieldDefinitionPosition::Interface(field) => field.get(schema),
@@ -1178,19 +929,7 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
     }
 }
 
-impl TryFrom<FieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            FieldDefinitionPosition::Object(value) => Ok(value.into()),
-            FieldDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface field"#
-            ))),
-        }
-    }
-}
+fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
 
 impl TryFrom<AbstractFieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
     type Error = FederationError;
@@ -1368,7 +1107,15 @@ impl SchemaDefinitionPosition {
 }
 
 #[derive(
-    Debug, Copy, Clone, PartialEq, Eq, Hash, strum_macros::Display, strum_macros::EnumIter,
+    Debug,
+    Copy,
+    Clone,
+    PartialEq,
+    Eq,
+    Hash,
+    strum_macros::Display,
+    strum_macros::EnumIter,
+    Serialize,
 )]
 pub(crate) enum SchemaRootDefinitionKind {
     #[strum(to_string = "query")]
@@ -1605,27 +1352,24 @@ pub(crate) struct ScalarTypeDefinitionPosition {
 }
 
 impl ScalarTypeDefinitionPosition {
+    const EXPECTED: &'static str = "a scalar type";
+
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<ScalarType>, FederationError> {
+    ) -> Result<&'schema Node<ScalarType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Scalar(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not a scalar", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -1640,24 +1384,19 @@ impl ScalarTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<ScalarType>, FederationError> {
+    ) -> Result<&'schema mut Node<ScalarType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Scalar(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not a scalar", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -1920,12 +1659,14 @@ impl Display for ScalarTypeDefinitionPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct ObjectTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
 impl ObjectTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an object type";
+
     pub(crate) fn new(type_name: Name) -> Self {
         Self { type_name }
     }
@@ -1949,19 +1690,6 @@ impl ObjectTypeDefinitionPosition {
         self.field(name!("__type"))
     }
 
-    /// Attempts to construct an iterator that yields the field definition positions for this
-    /// objects's fields.
-    // TODO: The lifetime capturing rules for RTIPs will change in Rust edition 2024. When they do,
-    // the bounds on this function can be changed to have 'a be the only lifetime (and still be
-    // correct).
-    pub(crate) fn field_positions<'b, 'a: 'b>(
-        &'a self,
-        schema: &'a Schema,
-    ) -> Result<impl 'b + Iterator<Item = ObjectFieldDefinitionPosition>, FederationError> {
-        self.get(schema)
-            .map(|node| node.fields.keys().map(|name| self.field(name.clone())))
-    }
-
     // TODO: Once the new lifetime capturing rules for return position impl trait (RPIT) land in
     // Rust edition 2024, we will no longer need the "captures" trick here, as noted in
     // https://rust-lang.github.io/rfcs/3498-lifetime-capture-rules-2024.html
@@ -1982,24 +1710,19 @@ impl ObjectTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<ObjectType>, FederationError> {
+    ) -> Result<&'schema Node<ObjectType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Object(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -2014,24 +1737,19 @@ impl ObjectTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<ObjectType>, FederationError> {
+    ) -> Result<&'schema mut Node<ObjectType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Object(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -2444,7 +2162,7 @@ impl Debug for ObjectTypeDefinitionPosition {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct ObjectFieldDefinitionPosition {
     pub type_name: Name,
     pub field_name: Name,
@@ -2472,20 +2190,18 @@ impl ObjectFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
         schema
             .type_field(&self.type_name, &self.field_name)
             .map_err(|_| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object type \"{}\" has no field \"{}\"",
-                        parent, self.field_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingField(
+                    "Object",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                )
             })
     }
 
@@ -2499,24 +2215,23 @@ impl ObjectFieldDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
         if is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot mutate reserved object field \"{}\"", self),
-            }
-            .into());
+            return Err(PositionLookupError::MutateReservedField(
+                "object field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            ));
         }
         type_.fields.get_mut(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Object type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Object",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -2826,23 +2541,17 @@ impl ObjectFieldArgumentDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
-        let parent = self.parent();
-        let type_ = parent.get(schema)?;
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
+        let field = self.parent().get(schema)?;
 
-        type_
-            .arguments
-            .iter()
-            .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
+        field.argument_by_name(&self.argument_name).ok_or_else(|| {
+            PositionLookupError::MissingFieldArgument(
+                "Object field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+                self.argument_name.clone(),
+            )
+        })
     }
 
     pub(crate) fn try_get<'schema>(
@@ -2855,7 +2564,7 @@ impl ObjectFieldArgumentDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -2864,13 +2573,12 @@ impl ObjectFieldArgumentDefinitionPosition {
             .iter_mut()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Object field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingFieldArgument(
+                    "Object field",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                    self.argument_name.clone(),
+                )
             })
     }
 
@@ -3132,12 +2840,14 @@ impl Debug for ObjectFieldArgumentDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct InterfaceTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
 impl InterfaceTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an interface type";
+
     pub(crate) fn new(type_name: Name) -> Self {
         Self { type_name }
     }
@@ -3173,24 +2883,19 @@ impl InterfaceTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InterfaceType>, FederationError> {
+    ) -> Result<&'schema Node<InterfaceType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Interface(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an interface", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -3205,24 +2910,19 @@ impl InterfaceTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InterfaceType>, FederationError> {
+    ) -> Result<&'schema mut Node<InterfaceType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Interface(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an interface", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -3565,7 +3265,7 @@ impl Display for InterfaceTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub struct InterfaceFieldDefinitionPosition {
     pub type_name: Name,
     pub field_name: Name,
@@ -3593,20 +3293,18 @@ impl InterfaceFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
         schema
             .type_field(&self.type_name, &self.field_name)
             .map_err(|_| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface type \"{}\" has no field \"{}\"",
-                        parent, self.field_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingField(
+                    "Interface",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                )
             })
     }
 
@@ -3620,24 +3318,23 @@ impl InterfaceFieldDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
         if is_graphql_reserved_name(&self.field_name) {
-            return Err(SingleFederationError::Internal {
-                message: format!("Cannot mutate reserved interface field \"{}\"", self),
-            }
-            .into());
+            return Err(PositionLookupError::MutateReservedField(
+                "interface field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            ));
         }
         type_.fields.get_mut(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Interface type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Interface",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -3945,23 +3642,17 @@ impl InterfaceFieldArgumentDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
-        let parent = self.parent();
-        let type_ = parent.get(schema)?;
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
+        let field = self.parent().get(schema)?;
 
-        type_
-            .arguments
-            .iter()
-            .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
+        field.argument_by_name(&self.argument_name).ok_or_else(|| {
+            PositionLookupError::MissingFieldArgument(
+                "Interface field",
+                self.type_name.clone(),
+                self.field_name.clone(),
+                self.argument_name.clone(),
+            )
+        })
     }
 
     pub(crate) fn try_get<'schema>(
@@ -3974,7 +3665,7 @@ impl InterfaceFieldArgumentDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -3983,13 +3674,12 @@ impl InterfaceFieldArgumentDefinitionPosition {
             .iter_mut()
             .find(|a| a.name == self.argument_name)
             .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Interface field \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingFieldArgument(
+                    "Interface field",
+                    self.type_name.clone(),
+                    self.field_name.clone(),
+                    self.argument_name.clone(),
+                )
             })
     }
 
@@ -4256,12 +3946,14 @@ impl Display for InterfaceFieldArgumentDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct UnionTypeDefinitionPosition {
     pub(crate) type_name: Name,
 }
 
 impl UnionTypeDefinitionPosition {
+    const EXPECTED: &'static str = "a union type";
+
     pub(crate) fn new(type_name: Name) -> Self {
         Self { type_name }
     }
@@ -4275,24 +3967,19 @@ impl UnionTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<UnionType>, FederationError> {
+    ) -> Result<&'schema Node<UnionType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Union(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an union", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -4307,24 +3994,19 @@ impl UnionTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<UnionType>, FederationError> {
+    ) -> Result<&'schema mut Node<UnionType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Union(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an union", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -4627,7 +4309,7 @@ impl Display for UnionTypeDefinitionPosition {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
 pub(crate) struct UnionTypenameFieldDefinitionPosition {
     pub(crate) type_name: Name,
 }
@@ -4646,21 +4328,18 @@ impl UnionTypenameFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, FederationError> {
+    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
         let parent = self.parent();
         parent.get(schema)?;
 
         schema
             .type_field(&self.type_name, self.field_name())
             .map_err(|_| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Union type \"{}\" has no field \"{}\"",
-                        parent,
-                        self.field_name()
-                    ),
-                }
-                .into()
+                PositionLookupError::MissingField(
+                    "Union",
+                    self.type_name.clone(),
+                    name!("__typename"),
+                )
             })
     }
 
@@ -4717,6 +4396,8 @@ pub(crate) struct EnumTypeDefinitionPosition {
 }
 
 impl EnumTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an enum type";
+
     pub(crate) fn value(&self, value_name: Name) -> EnumValueDefinitionPosition {
         EnumValueDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -4727,24 +4408,19 @@ impl EnumTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<EnumType>, FederationError> {
+    ) -> Result<&'schema Node<EnumType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Enum(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an enum", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -4759,24 +4435,19 @@ impl EnumTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<EnumType>, FederationError> {
+    ) -> Result<&'schema mut Node<EnumType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::Enum(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an enum", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -5060,19 +4731,14 @@ impl EnumValueDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<EnumValueDefinition>, FederationError> {
+    ) -> Result<&'schema Component<EnumValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
-        type_.values.get(&self.value_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Enum type \"{}\" has no value \"{}\"",
-                    parent, self.value_name
-                ),
-            }
-            .into()
-        })
+        type_
+            .values
+            .get(&self.value_name)
+            .ok_or_else(|| PositionLookupError::MissingValue(self.clone()))
     }
 
     pub(crate) fn try_get<'schema>(
@@ -5085,19 +4751,14 @@ impl EnumValueDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<EnumValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<EnumValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
-        type_.values.get_mut(&self.value_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Enum type \"{}\" has no value \"{}\"",
-                    parent, self.value_name
-                ),
-            }
-            .into()
-        })
+        type_
+            .values
+            .get_mut(&self.value_name)
+            .ok_or_else(|| PositionLookupError::MissingValue(self.clone()))
     }
 
     fn try_make_mut<'schema>(
@@ -5302,6 +4963,8 @@ pub(crate) struct InputObjectTypeDefinitionPosition {
 }
 
 impl InputObjectTypeDefinitionPosition {
+    const EXPECTED: &'static str = "an input object type";
+
     pub(crate) fn field(&self, field_name: Name) -> InputObjectFieldDefinitionPosition {
         InputObjectFieldDefinitionPosition {
             type_name: self.type_name.clone(),
@@ -5312,24 +4975,19 @@ impl InputObjectTypeDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputObjectType>, FederationError> {
+    ) -> Result<&'schema Node<InputObjectType>, PositionLookupError> {
         schema
             .types
             .get(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::InputObject(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an input object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -5344,24 +5002,19 @@ impl InputObjectTypeDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputObjectType>, FederationError> {
+    ) -> Result<&'schema mut Node<InputObjectType>, PositionLookupError> {
         schema
             .types
             .get_mut(&self.type_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no type \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::TypeMissing(self.type_name.clone()))
             .and_then(|type_| {
                 if let ExtendedType::InputObject(type_) = type_ {
                     Ok(type_)
                 } else {
-                    Err(SingleFederationError::Internal {
-                        message: format!("Schema type \"{}\" was not an input object", self),
-                    }
-                    .into())
+                    Err(PositionLookupError::TypeWrongKind(
+                        self.type_name.clone(),
+                        Self::EXPECTED,
+                    ))
                 }
             })
     }
@@ -5643,18 +5296,16 @@ impl InputObjectFieldDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Component<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema Component<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
         type_.fields.get(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Input object type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Input object",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -5668,18 +5319,16 @@ impl InputObjectFieldDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Component<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Component<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
         type_.fields.get_mut(&self.field_name).ok_or_else(|| {
-            SingleFederationError::Internal {
-                message: format!(
-                    "Input object type \"{}\" has no field \"{}\"",
-                    parent, self.field_name
-                ),
-            }
-            .into()
+            PositionLookupError::MissingField(
+                "Input object",
+                self.type_name.clone(),
+                self.field_name.clone(),
+            )
         })
     }
 
@@ -5959,16 +5608,11 @@ impl DirectiveDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<DirectiveDefinition>, FederationError> {
+    ) -> Result<&'schema Node<DirectiveDefinition>, PositionLookupError> {
         schema
             .directive_definitions
             .get(&self.directive_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no directive \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::DirectiveMissing(self.clone()))
     }
 
     pub(crate) fn try_get<'schema>(
@@ -5981,16 +5625,11 @@ impl DirectiveDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<DirectiveDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<DirectiveDefinition>, PositionLookupError> {
         schema
             .directive_definitions
             .get_mut(&self.directive_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!("Schema has no directive \"{}\"", self),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::DirectiveMissing(self.clone()))
     }
 
     fn try_make_mut<'schema>(
@@ -6189,7 +5828,7 @@ impl DirectiveArgumentDefinitionPosition {
     pub(crate) fn get<'schema>(
         &self,
         schema: &'schema Schema,
-    ) -> Result<&'schema Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.get(schema)?;
 
@@ -6197,15 +5836,7 @@ impl DirectiveArgumentDefinitionPosition {
             .arguments
             .iter()
             .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Directive \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::MissingDirectiveArgument(self.clone()))
     }
 
     pub(crate) fn try_get<'schema>(
@@ -6218,7 +5849,7 @@ impl DirectiveArgumentDefinitionPosition {
     fn make_mut<'schema>(
         &self,
         schema: &'schema mut Schema,
-    ) -> Result<&'schema mut Node<InputValueDefinition>, FederationError> {
+    ) -> Result<&'schema mut Node<InputValueDefinition>, PositionLookupError> {
         let parent = self.parent();
         let type_ = parent.make_mut(schema)?.make_mut();
 
@@ -6226,15 +5857,7 @@ impl DirectiveArgumentDefinitionPosition {
             .arguments
             .iter_mut()
             .find(|a| a.name == self.argument_name)
-            .ok_or_else(|| {
-                SingleFederationError::Internal {
-                    message: format!(
-                        "Directive \"{}\" has no argument \"{}\"",
-                        parent, self.argument_name
-                    ),
-                }
-                .into()
-            })
+            .ok_or_else(|| PositionLookupError::MissingDirectiveArgument(self.clone()))
     }
 
     fn try_make_mut<'schema>(
@@ -6485,7 +6108,7 @@ pub(crate) fn is_graphql_reserved_name(name: &str) -> bool {
 
 lazy_static! {
     static ref GRAPHQL_BUILTIN_SCALAR_NAMES: IndexSet<Name> = {
-        IndexSet::from([
+        IndexSet::from_iter([
             name!("Int"),
             name!("Float"),
             name!("String"),
@@ -6494,7 +6117,7 @@ lazy_static! {
         ])
     };
     static ref GRAPHQL_BUILTIN_DIRECTIVE_NAMES: IndexSet<Name> = {
-        IndexSet::from([
+        IndexSet::from_iter([
             name!("include"),
             name!("skip"),
             name!("deprecated"),
@@ -6571,10 +6194,12 @@ fn validate_arguments(arguments: &[Node<InputValueDefinition>]) -> Result<(), Fe
 
 impl FederationSchema {
     /// Note that the input schema must be partially valid, in that:
+    ///
     /// 1. All schema element references must point to an existing schema element of the appropriate
     ///    kind (e.g. object type fields must return an existing output type).
     /// 2. If the schema uses the core/link spec, then usages of the @core/@link directive must be
     ///    valid.
+    ///
     /// The input schema may be otherwise invalid GraphQL (e.g. it may not contain a Query type). If
     /// you want a ValidFederationSchema, use ValidFederationSchema::new() instead.
     pub(crate) fn new(schema: Schema) -> Result<FederationSchema, FederationError> {

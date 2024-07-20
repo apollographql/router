@@ -1,8 +1,8 @@
+use apollo_compiler::ast::NamedType;
 use apollo_compiler::executable::Field;
 use apollo_compiler::executable::SelectionSet;
-use apollo_compiler::schema::NamedType;
+use apollo_compiler::parser::Parser;
 use apollo_compiler::validation::Valid;
-use apollo_compiler::Parser;
 use apollo_compiler::Schema;
 use tower::BoxError;
 

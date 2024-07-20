@@ -24,7 +24,7 @@ expression: connectors.by_service_name
                     query: {},
                 },
                 method: Get,
-                headers: [],
+                headers: {},
                 body: None,
             },
         ),

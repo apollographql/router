@@ -12,6 +12,8 @@ use apollo_compiler::ast::DirectiveLocation;
 use apollo_compiler::ast::EnumValueDefinition;
 use apollo_compiler::ast::FieldDefinition;
 use apollo_compiler::ast::Value;
+use apollo_compiler::collections::IndexMap;
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::name;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::EnumType;
@@ -31,8 +33,6 @@ use apollo_compiler::Schema;
 use indexmap::map::Entry::Occupied;
 use indexmap::map::Entry::Vacant;
 use indexmap::map::Iter;
-use indexmap::IndexMap;
-use indexmap::IndexSet;
 use itertools::Itertools;
 
 use crate::error::FederationError;
@@ -659,7 +659,7 @@ fn copy_enum_type(enum_name: Name, enum_type: &Node<EnumType>) -> ExtendedType {
         description: enum_type.description.clone(),
         name: enum_name,
         directives: Default::default(),
-        values: IndexMap::new(),
+        values: IndexMap::default(),
     }))
 }
 
@@ -671,7 +671,7 @@ fn copy_input_object_type(
         description: input_object.description.clone(),
         name: input_object_name,
         directives: Default::default(),
-        fields: IndexMap::new(),
+        fields: IndexMap::default(),
     };
 
     for (field_name, input_field) in input_object.fields.iter() {
@@ -730,7 +730,7 @@ fn copy_object_type_stub(
 fn copy_fields(
     fields_to_copy: Iter<Name, Component<FieldDefinition>>,
 ) -> IndexMap<Name, Component<FieldDefinition>> {
-    let mut new_fields: IndexMap<Name, Component<FieldDefinition>> = IndexMap::new();
+    let mut new_fields: IndexMap<Name, Component<FieldDefinition>> = IndexMap::default();
     for (field_name, field) in fields_to_copy {
         // skip federation built-in queries
         if field_name == "_service" || field_name == "_entities" {
@@ -767,7 +767,7 @@ fn copy_union_type(union_name: Name, description: Option<Node<str>>) -> Extended
         description,
         name: union_name,
         directives: Default::default(),
-        members: IndexSet::new(),
+        members: IndexSet::default(),
     }))
 }
 
@@ -955,7 +955,7 @@ fn link_purpose_enum_type() -> (Name, EnumType) {
         description: None,
         name: link_purpose_name.clone(),
         directives: Default::default(),
-        values: IndexMap::new(),
+        values: IndexMap::default(),
     };
     let link_purpose_security_value = EnumValueDefinition {
         description: Some(
@@ -1350,7 +1350,7 @@ fn join_graph_enum_type(
         description: None,
         name: join_graph_enum_name.clone(),
         directives: Default::default(),
-        values: IndexMap::new(),
+        values: IndexMap::default(),
     };
     for (s, subgraph_name) in subgraphs_and_enum_values {
         let join_graph_applied_directive = Directive {

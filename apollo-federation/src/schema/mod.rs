@@ -3,11 +3,11 @@ use std::hash::Hasher;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use apollo_compiler::collections::IndexSet;
 use apollo_compiler::schema::ExtendedType;
 use apollo_compiler::validation::Valid;
 use apollo_compiler::Name;
 use apollo_compiler::Schema;
-use indexmap::IndexSet;
 use referencer::Referencers;
 
 use crate::error::FederationError;
@@ -149,7 +149,7 @@ impl FederationSchema {
         composite_type_definition_position: CompositeTypeDefinitionPosition,
     ) -> Result<IndexSet<ObjectTypeDefinitionPosition>, FederationError> {
         Ok(match composite_type_definition_position {
-            CompositeTypeDefinitionPosition::Object(pos) => IndexSet::from([pos]),
+            CompositeTypeDefinitionPosition::Object(pos) => IndexSet::from_iter([pos]),
             CompositeTypeDefinitionPosition::Interface(pos) => self
                 .referencers()
                 .get_interface_type(&pos.type_name)?

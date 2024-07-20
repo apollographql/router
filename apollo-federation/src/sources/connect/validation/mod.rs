@@ -56,13 +56,13 @@ use std::ops::Range;
 
 use apollo_compiler::ast::Value;
 use apollo_compiler::name;
+use apollo_compiler::parser::SourceMap;
+use apollo_compiler::parser::SourceSpan as NodeLocation;
 use apollo_compiler::schema::Component;
 use apollo_compiler::schema::Directive;
 use apollo_compiler::Name;
 use apollo_compiler::Node;
-use apollo_compiler::NodeLocation;
 use apollo_compiler::Schema;
-use apollo_compiler::SourceMap;
 use coordinates::source_base_url_argument_coordinate;
 use coordinates::source_http_argument_coordinate;
 use extended_type::validate_extended_type;
@@ -339,15 +339,16 @@ pub struct Location {
 impl Location {
     // TODO: This is a ripoff of GraphQLLocation::from_node in apollo_compiler, contribute it back
     fn from_node(node: Option<NodeLocation>, sources: &SourceMap) -> Option<Range<Self>> {
-        let node = node?;
-        let source = sources.get(&node.file_id())?;
-        let start = source
-            .get_line_column(node.offset())
-            .map(|(line, column)| Location { line, column })?;
-        let end = source
-            .get_line_column(node.end_offset())
-            .map(|(line, column)| Location { line, column })?;
-        Some(Range { start, end })
+        node?.line_column_range(sources).map(|range| Range {
+            start: Self {
+                line: range.start.line - 1,
+                column: range.start.column - 1,
+            },
+            end: Self {
+                line: range.end.line - 1,
+                column: range.end.column - 1,
+            },
+        })
     }
 }
 
