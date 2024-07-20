@@ -72,6 +72,7 @@ use itertools::Itertools;
 use source_name::SourceName;
 use url::Url;
 
+use crate::link::spec::Identity;
 use crate::link::Import;
 use crate::link::Link;
 use crate::sources::connect::spec::schema::HTTP_ARGUMENT_NAME;
@@ -79,7 +80,6 @@ use crate::sources::connect::spec::schema::SOURCE_BASE_URL_ARGUMENT_NAME;
 use crate::sources::connect::spec::schema::SOURCE_DIRECTIVE_NAME_IN_SPEC;
 use crate::sources::connect::spec::schema::SOURCE_NAME_ARGUMENT_NAME;
 use crate::sources::connect::ConnectSpecDefinition;
-use crate::subgraph::database::federation_link_identity;
 use crate::subgraph::spec::CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::FROM_CONTEXT_DIRECTIVE_NAME;
 use crate::subgraph::spec::INTF_OBJECT_DIRECTIVE_NAME;
@@ -165,7 +165,7 @@ pub fn validate(schema: Schema) -> Vec<Message> {
 
 fn check_conflicting_directives(schema: &Schema) -> Vec<Message> {
     let Some((fed_link, fed_link_directive)) =
-        Link::for_identity(schema, &federation_link_identity())
+        Link::for_identity(schema, &Identity::federation_identity())
     else {
         return Vec::new();
     };

@@ -253,9 +253,7 @@ infallible_conversions!(CompositeTypeDefinitionPosition::{Object, Interface, Uni
 infallible_conversions!(AbstractTypeDefinitionPosition::{Interface, Union} -> TypeDefinitionPosition);
 infallible_conversions!(ObjectOrInterfaceTypeDefinitionPosition::{Object, Interface} -> TypeDefinitionPosition);
 
-#[derive(
-    Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display, derive_more::IsVariant,
-)]
+#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub(crate) enum OutputTypeDefinitionPosition {
     Scalar(ScalarTypeDefinitionPosition),
     Object(ObjectTypeDefinitionPosition),
@@ -287,10 +285,6 @@ impl OutputTypeDefinitionPosition {
             OutputTypeDefinitionPosition::Union(type_) => &type_.type_name,
             OutputTypeDefinitionPosition::Enum(type_) => &type_.type_name,
         }
-    }
-
-    pub(crate) fn is_abstract(&self) -> bool {
-        matches!(self, Self::Union(_) | Self::Interface(_))
     }
 
     fn describe(&self) -> &'static str {
@@ -508,7 +502,7 @@ impl AbstractTypeDefinitionPosition {
     pub(crate) fn field(
         &self,
         field_name: Name,
-    ) -> Result<AbstractFieldDefinitionPosition, FederationError> {
+    ) -> Result<FieldDefinitionPosition, FederationError> {
         match self {
             AbstractTypeDefinitionPosition::Interface(type_) => Ok(type_.field(field_name).into()),
             AbstractTypeDefinitionPosition::Union(type_) => {
@@ -747,95 +741,7 @@ impl FieldDefinitionPosition {
     }
 }
 
-impl From<AbstractFieldDefinitionPosition> for FieldDefinitionPosition {
-    fn from(value: AbstractFieldDefinitionPosition) -> Self {
-        match value {
-            AbstractFieldDefinitionPosition::Interface(value) => value.into(),
-            AbstractFieldDefinitionPosition::Union(value) => value.into(),
-        }
-    }
-}
-
 infallible_conversions!(ObjectOrInterfaceFieldDefinitionPosition::{Object, Interface} -> FieldDefinitionPosition);
-
-#[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
-pub(crate) enum AbstractFieldDefinitionPosition {
-    Interface(InterfaceFieldDefinitionPosition),
-    Union(UnionTypenameFieldDefinitionPosition),
-}
-
-impl Debug for AbstractFieldDefinitionPosition {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Interface(p) => write!(f, "Interface({p})"),
-            Self::Union(p) => write!(f, "Union({p})"),
-        }
-    }
-}
-
-impl AbstractFieldDefinitionPosition {
-    pub(crate) fn type_name(&self) -> &Name {
-        match self {
-            AbstractFieldDefinitionPosition::Interface(field) => &field.type_name,
-            AbstractFieldDefinitionPosition::Union(field) => &field.type_name,
-        }
-    }
-
-    pub(crate) fn field_name(&self) -> &Name {
-        match self {
-            AbstractFieldDefinitionPosition::Interface(field) => &field.field_name,
-            AbstractFieldDefinitionPosition::Union(field) => field.field_name(),
-        }
-    }
-
-    pub(crate) fn is_introspection_typename_field(&self) -> bool {
-        *self.field_name() == *INTROSPECTION_TYPENAME_FIELD_NAME
-    }
-
-    pub(crate) fn parent(&self) -> CompositeTypeDefinitionPosition {
-        match self {
-            AbstractFieldDefinitionPosition::Interface(field) => field.parent().into(),
-            AbstractFieldDefinitionPosition::Union(field) => field.parent().into(),
-        }
-    }
-
-    pub(crate) fn get<'schema>(
-        &self,
-        schema: &'schema Schema,
-    ) -> Result<&'schema Component<FieldDefinition>, PositionLookupError> {
-        match self {
-            AbstractFieldDefinitionPosition::Interface(field) => field.get(schema),
-            AbstractFieldDefinitionPosition::Union(field) => field.get(schema),
-        }
-    }
-}
-
-impl TryFrom<FieldDefinitionPosition> for AbstractFieldDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: FieldDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            FieldDefinitionPosition::Interface(value) => Ok(value.into()),
-            FieldDefinitionPosition::Union(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract field"#
-            ))),
-        }
-    }
-}
-
-impl TryFrom<ObjectOrInterfaceFieldDefinitionPosition> for AbstractFieldDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: ObjectOrInterfaceFieldDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            ObjectOrInterfaceFieldDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an abstract field"#
-            ))),
-        }
-    }
-}
 
 #[derive(Clone, PartialEq, Eq, Hash, derive_more::From, derive_more::Display)]
 pub enum ObjectOrInterfaceFieldDefinitionPosition {
@@ -930,26 +836,6 @@ impl ObjectOrInterfaceFieldDefinitionPosition {
 }
 
 fallible_conversions!(FieldDefinitionPosition::{Object, Interface} -> ObjectOrInterfaceFieldDefinitionPosition);
-
-impl TryFrom<AbstractFieldDefinitionPosition> for ObjectOrInterfaceFieldDefinitionPosition {
-    type Error = FederationError;
-
-    fn try_from(value: AbstractFieldDefinitionPosition) -> Result<Self, Self::Error> {
-        match value {
-            AbstractFieldDefinitionPosition::Interface(value) => Ok(value.into()),
-            _ => Err(FederationError::internal(format!(
-                r#"Type "{value}" was unexpectedly not an object/interface field"#
-            ))),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub struct ObjectOrInterfaceFieldDirectivePosition {
-    pub field: ObjectOrInterfaceFieldDefinitionPosition,
-    pub directive_name: Name,
-    pub directive_index: usize,
-}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct SchemaDefinitionPosition;
@@ -1152,10 +1038,6 @@ pub(crate) struct SchemaRootDefinitionPosition {
 }
 
 impl SchemaRootDefinitionPosition {
-    fn new(root_kind: SchemaRootDefinitionKind) -> Self {
-        Self { root_kind }
-    }
-
     pub(crate) fn parent(&self) -> SchemaDefinitionPosition {
         SchemaDefinitionPosition
     }
@@ -2838,6 +2720,13 @@ impl Debug for ObjectFieldArgumentDefinitionPosition {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "ObjectFieldArgument({self})")
     }
+}
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ObjectOrInterfaceFieldDirectivePosition {
+    pub field: ObjectOrInterfaceFieldDefinitionPosition,
+    pub directive_name: Name,
+    pub directive_index: usize,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]

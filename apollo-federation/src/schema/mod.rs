@@ -32,9 +32,6 @@ pub(crate) mod field_set;
 pub(crate) mod position;
 pub(crate) mod referencer;
 pub(crate) mod subgraph_metadata;
-pub use position::ObjectFieldDefinitionPosition;
-pub use position::ObjectOrInterfaceFieldDefinitionPosition;
-pub use position::ObjectOrInterfaceFieldDirectivePosition;
 
 fn compute_subgraph_metadata(
     schema: &Valid<FederationSchema>,

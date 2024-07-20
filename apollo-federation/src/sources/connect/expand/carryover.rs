@@ -20,13 +20,13 @@ use crate::schema::position::InterfaceFieldArgumentDefinitionPosition;
 use crate::schema::position::InterfaceFieldDefinitionPosition;
 use crate::schema::position::InterfaceTypeDefinitionPosition;
 use crate::schema::position::ObjectFieldArgumentDefinitionPosition;
+use crate::schema::position::ObjectFieldDefinitionPosition;
 use crate::schema::position::ObjectTypeDefinitionPosition;
 use crate::schema::position::ScalarTypeDefinitionPosition;
 use crate::schema::position::SchemaDefinitionPosition;
 use crate::schema::position::UnionTypeDefinitionPosition;
 use crate::schema::referencer::DirectiveReferencers;
 use crate::schema::FederationSchema;
-use crate::schema::ObjectFieldDefinitionPosition;
 
 const TAG_DIRECTIVE_NAME_IN_SPEC: Name = name!("tag");
 const AUTHENTICATED_DIRECTIVE_NAME_IN_SPEC: Name = name!("authenticated");

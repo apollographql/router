@@ -30,7 +30,7 @@ use crate::query_plan::SequenceNode;
 /// (see `selectionCost` method),
 /// this can be though of as saying that resolving a single field is in general
 /// a tiny fraction of the actual cost of doing a subgraph fetch.
-pub(crate) const FETCH_COST: QueryPlanCost = 1000.0;
+const FETCH_COST: QueryPlanCost = 1000.0;
 
 /// Constant used during query plan cost computation
 /// as a multiplier to the cost of fetches made in sequences.
