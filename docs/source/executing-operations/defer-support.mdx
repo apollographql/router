@@ -1,13 +1,13 @@
 ---
-title: GraphOS Router Support for @defer
+title: Router Support for @defer
 subtitle: Improve performance by delivering fields incrementally
-description: Improve your GraphQL query performance with GraphOS Router's support for the @defer directive. Incrementally deliver response data by deferring certain fields.
+description: Improve your GraphQL query performance with GraphOS Router and Apollo Router Core's support for the @defer directive. Incrementally deliver response data by deferring certain fields.
 minVersion: 1.8.0
 ---
 
-Queries sent to the GraphOS Router can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
+Queries sent to GraphOS Router or Apollo Router Core can use the `@defer` directive to enable the incremental delivery of response data. By deferring data for some fields, the router can resolve and return data for the query's _other_ fields more quickly, improving responsiveness.
 
-The GraphOS Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
+The router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/). That's because the router takes advantage of your supergraph's existing [entities](/federation/entities/) to fetch any deferred field data via followup queries to your subgraphs.
 
 ## What is `@defer`?
 
@@ -31,19 +31,19 @@ query GetTopProducts {
 }
 ```
 
-To respond incrementally, the GraphOS Router uses a multipart-encoded HTTP response. To use `@defer` successfully with the GraphOS Router, a client's GraphQL library must _also_ support the directive by handling multipart HTTP responses correctly.
+To respond incrementally, the router uses a multipart-encoded HTTP response. To use `@defer` successfully with the router, a client's GraphQL library must _also_ support the directive by handling multipart HTTP responses correctly.
 
-The GraphOS Router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/), because the deferring logic exists entirely within the router itself.
+The router's `@defer` support is compatible with all [federation-compatible subgraph libraries](/federation/building-supergraphs/supported-subgraphs/), because the deferring logic exists entirely within the router itself.
 
 ### Basics of `@defer`
 
 To learn the basics of the `@defer` directive and how you can use it with your supergraph, first read [Deferring query response data with GraphOS](/graphos/operations/defer).
 
-The remainder of this article covers the GraphOS Router's defer implementation in greater depth.
+The remainder of this article covers the router's defer implementation in greater depth.
 
 ## Executing a `@defer` query
 
-To execute a deferred query on the GraphOS Router, a GraphQL client sends an HTTP request with _almost_ the exact same format that it uses for usual query and mutation requests.
+To execute a deferred query on the router, a GraphQL client sends an HTTP request with _almost_ the exact same format that it uses for usual query and mutation requests.
 
 The only difference is that the request must include the following `Accept` header:
 
@@ -54,9 +54,9 @@ Accept: multipart/mixed;deferSpec=20220824, application/json
 > Note: because the parts are always JSON, it is never possible for `\r\n--graphql` to appear in the contents of a part. For convenience, servers MAY use `graphql` as a boundary.
 > Clients MUST accomodate any boundary returned by the server in `Content-Type`.
 
-## How does the GraphOS Router defer fields?
+## How does the router defer fields?
 
-As discussed in [this article](/graphos/operations/defer/#which-fields-can-my-router-defer), the GraphOS Router can defer the following fields in your schema:
+As discussed in [this article](/graphos/operations/defer/#which-fields-can-my-router-defer), the router can defer the following fields in your schema:
 
 - Root fields of the `Query` type (along with their subfields)
 - Fields of any entity type (along with their subfields)
@@ -210,7 +210,7 @@ Now, the router queries _the same subgraph twice_, first to fetch non-deferred f
 
 ## Non-deferrable fields
 
-A query's `@defer` fragment might include fields that the GraphOS Router _can't_ defer. The router handles this case gracefully with the following logic:
+A query's `@defer` fragment might include fields that the router _can't_ defer. The router handles this case gracefully with the following logic:
 
 - The router defers every field in the fragment that it _can_ defer.
 - The router resolves any non-deferrable fields in the fragment _before_ sending its initial response to the client.
@@ -270,11 +270,11 @@ In this case, the router must internally resolve each author's list of associate
 
 The `@defer` directive is currently part of a draft-stage RFC for the GraphQL specification ([learn about RFC contribution stages](https://github.com/graphql/graphql-spec/blob/main/CONTRIBUTING.md#rfc-contribution-stages)).
 
-The GraphOS Router supports the `@defer` directive as it's documented in [these edits to the RFC](https://github.com/graphql/graphql-spec/pull/742), according to the state of those edits on 2022-08-24.
+The router supports the `@defer` directive as it's documented in [these edits to the RFC](https://github.com/graphql/graphql-spec/pull/742), according to the state of those edits on 2022-08-24.
 
 ## Disabling `@defer`
 
-Defer support is enabled in the GraphOS Router by default. To _disable_ support, add `defer_support: false` to your router's [YAML config file](../configuration/overview/#yaml-config-file) under the `supergraph` key:
+Defer support is enabled in the router by default. To _disable_ support, add `defer_support: false` to your router's [YAML config file](../configuration/overview/#yaml-config-file) under the `supergraph` key:
 
 ```yaml title="router.yaml"
 supergraph:

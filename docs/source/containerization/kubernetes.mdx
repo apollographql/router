@@ -1,23 +1,23 @@
 ---
 title: Deploy in Kubernetes
-subtitle: Self-hosted deployment of GraphOS Router in Kubernetes
-description: Deploy the Apollo GraphOS Router in Kubernetes using Helm charts. Customize configurations, enable metrics, and choose values for migration.
+subtitle: Self-hosted deployment of the router in Kubernetes
+description: Deploy the Apollo GraphOS Router or Apollo Router Core in Kubernetes using Helm charts. Customize configurations, enable metrics, and choose values for migration.
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 import HelmShowOutput from '../../shared/helm-show-router-output.mdx';
 import CoprocTypicalConfig from '../../shared/coproc-typical-config.mdx';
 
-Learn how to deploy a self-hosted GraphOS Router in Kubernetes using Helm charts.
+Learn how to deploy a self-hosted router (GraphOS Router or Apollo Router Core) in Kubernetes using Helm charts.
 
 ```mermaid
 flowchart LR;
   clients(Clients);
   subgraph "Kubernetes cluster";
   lb(["<b>Load Balancer</b>"])
-  router_a(["<b>GraphOS Router</b>"]);
+  router_a(["<b>Router</b>"]);
   coproc_a(["<b>Coprocessor</b>"]);
-  router_b(["<b>GraphOS Router</b>"]);
+  router_b(["<b>Router</b>"]);
   coproc_b(["<b>Coprocessor</b>"]);
   router_a <-.-> coproc_a;
   router_b <-.-> coproc_b;
@@ -106,7 +106,7 @@ For an example, see the [Setup from Apollo's Reference Architecture](https://git
 
 To manage the system resources you need to deploy the router on Kubernetes:
 
-* Read [Managing GraphOS Router resources in Kubernetes](/technotes/TN0016-router-resource-management/).
+* Read [Managing router resources in Kubernetes](/technotes/TN0016-router-resource-management/).
 * Use the [router resource estimator](/technotes/TN0045-router_resource_estimator/).
 
 </Tip>
@@ -248,7 +248,7 @@ This is not specifically a router issue and Istio has instructions on how to man
 
 ## Configure for migration from gateway
 
-When [migrating from `@apollo/gateway` to the GraphOS Router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
+When [migrating from `@apollo/gateway` to the router](../migrating-from-gateway), consider the following tips to maximize the compatibility of your router deployment.
 
 ### Increase maximum request bytes
 

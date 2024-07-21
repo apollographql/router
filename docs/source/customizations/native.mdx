@@ -1,19 +1,19 @@
 ---
-title: Writing Native Rust Plugins for the GraphOS Router
-subtitle: Extend the GraphOS Router with custom Rust code
-description: Extend the Apollo GraphOS Router with custom Rust code. Plan, build, and register plugins. Define plugin configuration and implement lifecycle hooks.
+title: Writing Native Rust Plugins 
+subtitle: Extend the router with custom Rust code
+description: Extend the Apollo GraphOS Router or Apollo Router Core with custom Rust code. Plan, build, and register plugins. Define plugin configuration and implement lifecycle hooks.
 ---
 
 import ElasticNotice from '../../shared/elastic-notice.mdx';
 import NativePluginNotice from '../../shared/native-plugin-notice.mdx';
 
-Your federated graph might have specific requirements that aren't supported by the GraphOS Router's built-in [configuration options](../configuration/overview/). For example, you might need to further customize the behavior of:
+Your federated graph might have specific requirements that aren't supported by the built-in [configuration options](../configuration/overview/) of the GraphOS Router or Apollo Router Core. For example, you might need to further customize the behavior of:
 
 * Authentication/authorization
 * Logging
 * Operation tracing
 
-In these cases, you can create custom plugins for the GraphOS Router.
+In these cases, you can create custom plugins for the router.
 
 <NativePluginNotice />
 
@@ -219,7 +219,7 @@ The Router measures how much time it spends working on a request, by subtracting
 
 ### 6. Register your plugin
 
-To enable the GraphOS Router to discover your plugin, you need to **register** the plugin.
+To enable the router to discover your plugin, you need to **register** the plugin.
 
 To do so, use the `register_plugin!()` macro provided by `apollo-router`. This takes 3 arguments:
 
@@ -310,7 +310,7 @@ info_span!("my_span");
 
 ## Plugin Lifecycle
 
-Like individual requests, plugins follow their own strict lifecycle that helps provide structure to the GraphOS Router's execution.
+Like individual requests, plugins follow their own strict lifecycle that helps provide structure to the router's execution.
 
 ### Creation
 

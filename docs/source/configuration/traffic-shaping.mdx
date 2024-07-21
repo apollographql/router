@@ -1,11 +1,10 @@
 ---
-title: Traffic Shaping in the GraphOS Router
+title: Traffic Shaping
 subtitle: Tune the performance and reliability of traffic to and from the router
-description: Fine-tune traffic performance and reliability in GraphOS Router with YAML configuration for client and subgraph traffic shaping. 
+description: Fine-tune traffic performance and reliability in GraphOS Router and Apollo Router Core with YAML configuration for client and subgraph traffic shaping. 
 ---
 
-The GraphOS Router provides various features to improve the performance and reliability of
-the traffic between the client and router and between the router and subgraphs.
+The GraphOS Router and Apollo Router Core provide various features to improve the performance and reliability of the traffic between the client and router and between the router and subgraphs.
 
 ## Configuration
 
@@ -48,7 +47,7 @@ The preset values of `traffic_shaping` that's enabled by default:
 
 ### Rate limiting
 
-The GraphOS Router can apply rate limiting on client requests, as follows:
+The router can apply rate limiting on client requests, as follows:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -62,7 +61,7 @@ This rate limiting applies to all requests, there is no filtering per IP or othe
 
 ### Timeouts
 
-The GraphOS Router applies a default timeout of 30 seconds for all requests, including the following:
+The router applies a default timeout of 30 seconds for all requests, including the following:
 
 - Requests the client makes to the router
 - Requests the router makes to subgraphs
@@ -97,7 +96,7 @@ Compression is automatically supported on the client side, depending on the `Acc
 
 ### Query batching
 
-The GraphOS Router has _experimental_ support for receiving client query batches:
+The router has support for receiving client query batches:
 
 ```yaml title="router.yaml"
 batching:
@@ -109,7 +108,7 @@ For details, see [query batching for the router](../executing-operations/query-b
 
 ## Subgraph traffic shaping
 
-The GraphOS Router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs, or overriden per subgraph:
+The router supports various options affecting traffic destined for subgraphs, that can either be defined for all subgraphs, or overriden per subgraph:
 
 ```yaml title="router.yaml"
 traffic_shaping:
@@ -122,7 +121,7 @@ traffic_shaping:
 
 ### Compression
 
-The GraphOS Router can compress request bodies to subgraphs (along with response bodies to clients).
+The router can compress request bodies to subgraphs (along with response bodies to clients).
 It currently supports these algorithms: `gzip`, `br`, and `deflate`.
 
 ```yaml title="router.yaml"
