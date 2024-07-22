@@ -432,7 +432,7 @@ impl<'a: 'b, 'b> QueryPlanningTraversal<'a, 'b> {
             };
         }
 
-        if let Some(selection_set) = selection.selection_set()? {
+        if let Some(selection_set) = selection.selection_set() {
             let mut all_tail_nodes = IndexSet::default();
             for option in &new_options {
                 for path in &option.paths.0 {

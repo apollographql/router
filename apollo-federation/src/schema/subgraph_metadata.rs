@@ -256,15 +256,12 @@ impl ExternalMetadata {
         Ok(fields_on_external_types)
     }
 
-    pub(crate) fn is_external(
-        &self,
-        field_definition_position: &FieldDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        Ok((self.external_fields.contains(field_definition_position)
+    pub(crate) fn is_external(&self, field_definition_position: &FieldDefinitionPosition) -> bool {
+        (self.external_fields.contains(field_definition_position)
             || self
                 .fields_on_external_types
                 .contains(field_definition_position))
-            && !self.is_fake_external(field_definition_position))
+            && !self.is_fake_external(field_definition_position)
     }
 
     pub(crate) fn is_fake_external(
@@ -275,38 +272,35 @@ impl ExternalMetadata {
             .contains(field_definition_position)
     }
 
-    pub(crate) fn selects_any_external_field(
-        &self,
-        selection_set: &SelectionSet,
-    ) -> Result<bool, FederationError> {
+    pub(crate) fn selects_any_external_field(&self, selection_set: &SelectionSet) -> bool {
         for selection in selection_set.selections.values() {
             if let Selection::Field(field_selection) = selection {
-                if self.is_external(&field_selection.field.field_position)? {
-                    return Ok(true);
+                if self.is_external(&field_selection.field.field_position) {
+                    return true;
                 }
             }
-            if let Some(selection_set) = selection.selection_set()? {
-                if self.selects_any_external_field(selection_set)? {
-                    return Ok(true);
+            if let Some(selection_set) = selection.selection_set() {
+                if self.selects_any_external_field(selection_set) {
+                    return true;
                 }
             }
         }
-        Ok(false)
+        false
     }
 
     pub(crate) fn is_partially_external(
         &self,
         field_definition_position: &FieldDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        Ok(self.is_external(field_definition_position)?
-            && self.provided_fields.contains(field_definition_position))
+    ) -> bool {
+        self.is_external(field_definition_position)
+            && self.provided_fields.contains(field_definition_position)
     }
 
     pub(crate) fn is_fully_external(
         &self,
         field_definition_position: &FieldDefinitionPosition,
-    ) -> Result<bool, FederationError> {
-        Ok(self.is_external(field_definition_position)?
-            && !self.provided_fields.contains(field_definition_position))
+    ) -> bool {
+        self.is_external(field_definition_position)
+            && !self.provided_fields.contains(field_definition_position)
     }
 }

@@ -1149,7 +1149,7 @@ fn get_value_at_path<'a>(ss: &'a SelectionSet, path: &[Name]) -> Option<&'a Sele
         Some(value)
     } else {
         // Recursive case
-        match value.selection_set().unwrap() {
+        match value.selection_set() {
             None => None, // Error: Sub-selection expected, but not found.
             Some(ss) => get_value_at_path(ss, rest),
         }
@@ -1199,7 +1199,7 @@ mod make_selection_tests {
 
         // Create a new foo with a different selection order using `make_selection`.
         let clone_selection_at_path = |base: &Selection, path: &[Name]| {
-            let base_selection_set = base.selection_set().unwrap().unwrap();
+            let base_selection_set = base.selection_set().unwrap();
             let selection = get_value_at_path(base_selection_set, path).expect("path should exist");
             let subselections = SelectionSet::from_selection(
                 base_selection_set.type_position.clone(),
@@ -1237,7 +1237,7 @@ mod lazy_map_tests {
             if !pred(s) {
                 return Ok(SelectionMapperReturn::None);
             }
-            match s.selection_set()? {
+            match s.selection_set() {
                 // Base case: leaf field
                 None => Ok(s.clone().into()),
 
